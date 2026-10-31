@@ -55,7 +55,7 @@ import cjcj::utils.{AST_PACKAGE_NAME, CORE_PACKAGE_NAME, DynamicCast, EraseIf, J
     CJ_D_FILE_EXTENSION, SERIALIZED_FILE_EXTENSION, SYNC_PACKAGE_NAME, CJC_ASSERT, IncrementalCompilationLogger,
     InternalError}
 import cjcj::utils.FileUtil
-import cjcj::utils.ProfileRecorder
+import cjcj::utils.{ProfileRecorder, TaskQueue, TaskResult}
 import cjcj::utils.STANDARD_LIBS
 import std.collection.*
 import std.sort.*
@@ -6553,6 +6553,8 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     private let exportIdDeclMaps: HashMap<String, HashMap<String, Decl>> =
         HashMap<String, HashMap<String, Decl>>()
     private let cjoFilePaths: HashMap<String, String> = HashMap<String, String>()
+    // Only the import owner mutates this map. Workers return independent immutable file buffers.
+    private let prefetchedCjoData = HashMap<String, (Bool, Array<UInt8>, String)>()
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
     private let stdDepsMap: HashMap<String, StdDepEntry> = HashMap<String, StdDepEntry>()
     private let packageNameMap: FaithfulUnorderedMap<CjoPackageInfo> = FaithfulUnorderedMap<CjoPackageInfo>()
@@ -6878,6 +6880,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         packageDecls.clear()
         exportIdDeclMaps.clear()
         cjoFilePaths.clear()
+        prefetchedCjoData.clear()
         depPkgCjdPaths.clear()
         stdDepsMap.clear()
         packageNameMap.clear()
@@ -7150,6 +7153,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         typeManager.Clear()
         typeManager.ClearMapCache()
         cjoFilePaths.clear()
+        prefetchedCjoData.clear()
         depPkgCjdPaths.clear()
         stdDepsMap.clear()
         dependencyGraph.getOrThrow().Clear()
@@ -8467,6 +8471,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                 }
             }
         }
+        prefetchedCjoData.clear()
         LoadPackageDeclsOnDemand(packages)
         for (pkg2 in packages) {
             AddPackageDeclMap(pkg2.fullPackageName)
@@ -8660,6 +8665,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 
     private func ResolveImportedPackageHeaders(pkg: Package, isRecursive!: Bool = false): Bool {
+        PrefetchImportedCjoBytes(pkg)
         var success = true
         for (file in pkg.files) {
             if (!ResolveImportedPackageForFile(file, isRecursive: isRecursive)) {
@@ -8762,12 +8768,60 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
     }
 
+    private func PrefetchImportedCjoBytes(pkg: Package): Unit {
+        let width = Int64(globalOptions.GetJobs())
+        if (width <= 1) { return }
+        let paths = ArrayList<String>()
+        let seen = HashSet<String>()
+        // Name binding and dependency discovery remain ordered: speculation only reads bytes,
+        // never registers a package, updates an alias, or reports an error.
+        for (file in pkg.files) {
+            for (spec in file.imports) {
+                if (spec.IsImportMulti() || !spec.withImplicitExport) { continue }
+                for (name in spec.content.GetPossiblePackageNames()) {
+                    if (GetPackage(name).isSome()) { break }
+                    let path = FileUtil.FindSerializationFile(name, ".cjo", searchPath.toArray())
+                    if (path.isEmpty()) { continue }
+                    if (!prefetchedCjoData.contains(path) && !seen.contains(path)) {
+                        seen.add(path)
+                        paths.add(path)
+                    }
+                    break
+                }
+            }
+        }
+        if (paths.size <= 1) { return }
+        let queue = TaskQueue(width)
+        let results = ArrayList<TaskResult<(Bool, Array<UInt8>, String)>>()
+        for (path in paths) {
+            results.add(queue.AddTask<(Bool, Array<UInt8>, String)>({ => FileUtil.ReadBinaryFileToBuffer(path) }))
+        }
+        queue.RunAndWaitForAllTasksCompleted()
+        var firstFailure: Option<Exception> = None
+        for (idx in 0..results.size) {
+            try {
+                prefetchedCjoData[paths[idx]] = results[idx].get()
+            } catch (e: Exception) {
+                if (firstFailure.isNone()) { firstFailure = Some(e) }
+            }
+        }
+        if (let Some(e) <- firstFailure) { throw e }
+    }
+
+    private func ConsumeImportedCjoBytes(path: String): (Bool, Array<UInt8>, String) {
+        if (let Some(data) <- prefetchedCjoData.get(path)) {
+            prefetchedCjoData.remove(path)
+            return data
+        }
+        return FileUtil.ReadBinaryFileToBuffer(path)
+    }
+
     private func LoadImportedPackageFromCjo(fullPackageName: String, cjoPath: String): Bool {
         if ((let Some(_) <- GetPackage(fullPackageName)) || loadingPackages.contains(fullPackageName)) {
             return true
         }
         loadingPackages.add(fullPackageName)
-        let (ok, data, reason) = FileUtil.ReadBinaryFileToBuffer(cjoPath)
+        let (ok, data, reason) = ConsumeImportedCjoBytes(cjoPath)
         if (!ok) {
             loadingPackages.remove(fullPackageName)
             diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
