@@ -3690,7 +3690,10 @@ public class IRBuilder2 <: Resource {
             parameters.add(GetInt32(SEQ_CST_AS_INT32))
         }
         if (kind == IntrinsicKind.ATOMIC_STORE || kind == IntrinsicKind.ATOMIC_SWAP) {
-            let valueType = args[1].GetCGType().getOrThrow().GetOriginal()
+            // Function parameters can carry RefType(Option<T>) as their ABI
+            // representation. Classify the intrinsic's logical value type:
+            // testing the mapped pointer size would publish the box itself.
+            let valueType = typeArgs[1]
             let valueCGType = CGType.GetOrCreate(cgMod, valueType)
             if (valueCGType.GetSize().isNone() && !valueType.IsGeneric()) {
                 let payloadPtr = GetPayloadFromObject(args[1].GetRawValue())

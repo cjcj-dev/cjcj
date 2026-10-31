@@ -914,5 +914,10 @@
     "file": "packages/parse/src/InteropAnnotation_test.cj",
     "executor": "cjpm",
     "member": "packages/parse"
+  },
+  {
+    "file": "ci/test-atomic-option-reference.mjs",
+    "executor": "manual",
+    "reason": "Real CLI with candidate compiler and normally rebuilt paired std.sync; requires isolated work and separate host/target loader paths. Runs three cases with ten reached assertions; no skip path."
   }
 ]
