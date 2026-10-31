@@ -355,36 +355,41 @@ public class UnreachableBlockAnalysis {
         this.diag = diag
         this.pkg = pkg
     }
-    private func RunOnFunc(fn: Function): Unit {
+    private func AnalyzeFunction(fn: Function): ArrayList<UnreachableBlockRegion> {
         let regions = ArrayList<UnreachableBlockRegion>()
         Visitor.Visit(fn, { body: BlockGroup =>
             for (region in AnalyzeBody(body)) { regions.add(region) }
             VisitResult.CONTINUE
         })
+        return regions
+    }
+    private func ReportFunction(regions: ArrayList<UnreachableBlockRegion>): Unit {
         for (region in regions) { ReportRegion(diag, pkg.GetName(), region) }
     }
     public func RunOnPackage(threadsNum: Int64): Unit {
         if (threadsNum == 1) {
             for (fn in pkg.GetGlobalFuncsWithBody()) {
-                if (!fn.TestAttr(Attribute.SKIP_ANALYSIS)) { RunOnFunc(fn) }
+                if (!fn.TestAttr(Attribute.SKIP_ANALYSIS)) { ReportFunction(AnalyzeFunction(fn)) }
             }
             return
         }
         let queue = TaskQueue(threadsNum)
-        let results = ArrayList<TaskResult<Unit>>()
+        let results = ArrayList<TaskResult<ArrayList<UnreachableBlockRegion>>>()
         for (fn in pkg.GetGlobalFuncsWithBody()) {
             if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) { continue }
-            results.add(queue.AddTask<Unit>({ => RunOnFunc(fn) }))
+            results.add(queue.AddTask<ArrayList<UnreachableBlockRegion>>({ => AnalyzeFunction(fn) }))
         }
         queue.RunAndWaitForAllTasksCompleted()
         var firstFailure: Option<Exception> = None
+        let completed = ArrayList<ArrayList<UnreachableBlockRegion>>()
         for (result in results) {
             try {
-                result.get()
+                completed.add(result.get())
             } catch (e: Exception) {
                 if (firstFailure.isNone()) { firstFailure = Some(e) }
             }
         }
         if (let Some(e) <- firstFailure) { throw e }
+        for (regions in completed) { ReportFunction(regions) }
     }
 }
