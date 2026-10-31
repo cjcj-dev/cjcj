@@ -1117,7 +1117,8 @@ public class FaithfulAST2CHIR {
             SetAnnotationTargets(def, decl)
         }
         TranslateOtherTopLevelDecls(node)
-        FlatForInExpr(builder).RunOnPackage(CurrentPackage())
+        FlatForInExpr(builder).RunOnPackage(CurrentPackage(),
+            threadNum: if (opts.disableLoweringConcurrency || opts.codegenDebugMode) { 1 } else { Int64(opts.GetJobs()) })
         if (chirWFC) {
             AST2CHIRCheck()
         }
