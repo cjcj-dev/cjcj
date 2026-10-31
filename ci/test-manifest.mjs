@@ -124,6 +124,7 @@ export const GATING = Object.freeze([
   'ci/official-runtime-isolation.test.mjs',
   'ci/pin-sweep.test.mjs',
   'ci/release-pair-pin.test.mjs',
+  'ci/release-g11.test.mjs',
   'ci/release-gates.test.mjs',
   'ci/smoke/smoke-runtime-isolation.test.mjs',
   'ci/release-run-evidence.test.mjs',
