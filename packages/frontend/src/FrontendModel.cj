@@ -59,6 +59,7 @@ import cjcj::utils.{ProfileRecorder, TaskQueue, TaskResult}
 import cjcj::utils.STANDARD_LIBS
 import std.collection.*
 import std.sort.*
+import std.process.Process
 
 foreign {
     func CJOFVerifyPackageBuffer(data: CPointer<UInt8>, size: UIntNative): Int32
@@ -1192,13 +1193,14 @@ public class CjoSignatureMaterializer {
     private let canInline: Bool
     private var isLoadCache: Bool
     private var isChirNow: Bool = false
+    private let recordDecodeJobs: Int64
 
     public init(packageName: String, pkg: Package, filesByIndex: HashMap<UInt32, File>,
         idToFileMap: HashMap<UInt64, File>, importedPackages: ArrayList<Package>,
         packageDecls: HashMap<String, PackageDecl>, exportIdDeclMaps: HashMap<String, HashMap<String, Decl>>,
         diag: DiagnosticEngine, typeManager: FaithfulSemaTypeManager,
         importSrcCode!: Bool = true, deserializingCommon!: Bool = false, canInline!: Bool = false,
-        isLoadCache!: Bool = false, data!: Option<Array<UInt8>> = None) {
+        isLoadCache!: Bool = false, data!: Option<Array<UInt8>> = None, recordDecodeJobs!: Int64 = 1) {
         this.packageName = packageName
         this.pkg = pkg
         this.filesByIndex = filesByIndex
@@ -1213,6 +1215,7 @@ public class CjoSignatureMaterializer {
         this.canInline = canInline
         this.isLoadCache = isLoadCache
         this.data = data
+        this.recordDecodeJobs = recordDecodeJobs
         if (!this.exportIdDeclMaps.contains(packageName)) {
             this.exportIdDeclMaps[packageName] = HashMap<String, Decl>()
         }
@@ -3199,18 +3202,57 @@ public class CjoSignatureMaterializer {
         let declCount = reader.VectorLength(flatAllDecls)
         // ASTLoaderImpl.h:186-188: FormattedIndex is vector offset plus 1; slot 0 unused.
         flatDecls = Array<Option<CjoFlatDecl>>(declCount + 1, repeat: None)
-        var idx: Int64 = 0
-        while (idx < declCount) {
-            let declTable = reader.VectorOffsetElement(flatAllDecls, idx)
-            if (declTable >= 0) {
-                let record = CreateFlatDeclRecord(reader, declTable, UInt32(idx + 1))
+        let batches = ArrayList<ArrayList<CjoFlatDecl>>()
+        if (recordDecodeJobs <= 1 || declCount <= 1) {
+            batches.add(DecodeDeclRecords(reader, 0, declCount))
+        } else {
+            // Decode immutable bytes into worker-owned records. AST identities, nominal-name
+            // registration and recursive cross-package type materialization stay after this join.
+            let queue = TaskQueue(recordDecodeJobs)
+            let results = ArrayList<TaskResult<ArrayList<CjoFlatDecl>>>()
+            let chunk = (declCount + recordDecodeJobs - 1) / recordDecodeJobs
+            let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+            var begin: Int64 = 0
+            while (begin < declCount) {
+                let start = begin
+                let end = if (start + chunk < declCount) { start + chunk } else { declCount }
+                results.add(queue.AddTask<ArrayList<CjoFlatDecl>>({ =>
+                    let worker = Thread.currentThread.id
+                    if (trace) { eprintln("import-record-worker begin ${packageName} start=${start} thread=${worker}") }
+                    try { return DecodeDeclRecords(reader, start, end) } finally {
+                        if (trace) { eprintln("import-record-worker end ${packageName} start=${start} thread=${worker}") }
+                    }
+                }))
+                begin = end
+            }
+            queue.RunAndWaitForAllTasksCompleted()
+            var firstFailure: Option<Exception> = None
+            for (result in results) {
+                try { batches.add(result.get()) } catch (e: Exception) {
+                    if (firstFailure.isNone()) { firstFailure = Some(e) }
+                }
+            }
+            if (let Some(e) <- firstFailure) { throw e }
+        }
+        for (batch in batches) {
+            for (record in batch) {
                 flatDecls[Int64(record.index)] = Some(record)
                 if (let Some(nominalKind) <- FlatNominalKind(record.kind)) {
                     flatNominalKinds[record.identifier] = nominalKind
                 }
             }
-            idx++
         }
+    }
+
+    private func DecodeDeclRecords(reader: CjoFlatBuffer, begin: Int64, end: Int64): ArrayList<CjoFlatDecl> {
+        let records = ArrayList<CjoFlatDecl>()
+        for (idx in begin..end) {
+            let declTable = reader.VectorOffsetElement(flatAllDecls, idx)
+            if (declTable >= 0) {
+                records.add(CreateFlatDeclRecord(reader, declTable, UInt32(idx + 1)))
+            }
+        }
+        return records
     }
 
     private func MaterializeSerializedInheritedTypes(): Unit {
@@ -8629,7 +8671,8 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
         let materializer = CjoSignatureMaterializer(fullPackageName, pkg, filesByIndex, idToFileMap, importedPackages,
             packageDecls, exportIdDeclMaps, diag, typeManager, importSrcCode: importSrcCode,
-            deserializingCommon: sourcePackage.isNone(), canInline: canInlineImportedSource, data: Some(data))
+            deserializingCommon: sourcePackage.isNone(), canInline: canInlineImportedSource, data: Some(data),
+            recordDecodeJobs: Int64(globalOptions.GetJobs()))
         materializer.SetCjoPath(cjoPath)
         return Some(materializer)
     }
@@ -8834,7 +8877,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         let idToFileMap = HashMap<UInt64, File>()
         let materializer = CjoSignatureMaterializer(fullPackageName, pkg, filesByIndex, idToFileMap, importedPackages,
             packageDecls, exportIdDeclMaps, diag, typeManager, importSrcCode: importSrcCode,
-            canInline: canInlineImportedSource)
+            canInline: canInlineImportedSource, recordDecodeJobs: Int64(globalOptions.GetJobs()))
         materializer.SetCjoPath(cjoPath)
         if (!materializer.LoadPackageDependencies(data)) {
             loadingPackages.remove(fullPackageName)
