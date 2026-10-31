@@ -97,8 +97,8 @@ func BorrowedBinding(): Int64 {
 }
 
 main(args: Array<String>): Int64 {
-    if (args.size != 2) { return 64 }
-    return match (args[1]) {
+    if (args.size != 1) { return 64 }
+    return match (args[0]) {
         case "macro" => LinkPaths(true)
         case "ordinary" => LinkPaths(false)
         case "borrowed" => BorrowedBinding()
