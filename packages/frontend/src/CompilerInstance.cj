@@ -39,7 +39,6 @@ import cjcj::chir.CHIRPrinter as ChirPrinter
 import cjcj::chir.ToCHIRPhase as ChirToCHIRPhase
 import std.collection.*
 import std.core.Box as CoreBox
-import std.math.min
 import std.runtime.gc
 
 // Faithful port of C++ RegisterMacroCallDiagInfos (Frontend/CompilerInstance.cpp:935-947).
@@ -1506,7 +1505,8 @@ public class CompilerInstance {
         let taskResults = ArrayList<TaskResult<ArrayList<PendingMangledDecl>>>()
         for (_ in 0..tasksNum) {
             let taskStart = start
-            let taskEnd = min(start + batchSize, topDecls.size)
+            let batchEnd = start + batchSize
+            let taskEnd = if (batchEnd < topDecls.size) { batchEnd } else { topDecls.size }
             taskResults.add(taskQueue.AddTask<ArrayList<PendingMangledDecl>>({ =>
                 DoNewMangling(baseMangler, topDecls, taskStart, taskEnd)
             }))
