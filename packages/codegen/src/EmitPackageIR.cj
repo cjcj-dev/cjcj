@@ -245,7 +245,15 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     if (!InitIncrementalGen(cgPkgContext)) {
         return cgPkgContext.ReleaseLLVMModules()
     }
-    GenSubCHIRPackages(cgPkgContext)
+    noHeapAllocChecker.BeginDeferredReports()
+    noWriteBarrierRecChecker.BeginDeferredReports()
+    try {
+        GenSubCHIRPackages(cgPkgContext)
+    } finally {
+        // GenSubCHIRPackages drains each phase before returning or throwing.
+        noHeapAllocChecker.FlushDeferredReports()
+        noWriteBarrierRecChecker.FlushDeferredReports()
+    }
     let localizedSymbols = cgPkgContext.GetLocalizedSymbols()
     let localizedSymbolsVec = ArrayList<String>()
     for (symbol in localizedSymbols) {

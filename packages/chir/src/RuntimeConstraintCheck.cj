@@ -2,8 +2,41 @@ package cjcj::chir
 
 import std.collection.*
 import std.sync.Mutex
+import std.sort.*
 import cjcj::basic.DiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+
+private class ConstraintReport {
+    public let fn: Function
+    public let root: Function
+    public let expr: Option<Expression>
+    public let operation: String
+
+    public init(fn: Function, root: Function, expr: Option<Expression>, operation: String) {
+        this.fn = fn
+        this.root = root
+        this.expr = expr
+        this.operation = operation
+    }
+}
+
+private func CompareConstraintReport(left: ConstraintReport, right: ConstraintReport): Ordering {
+    let leftFn = left.fn.GetIdentifier()
+    let rightFn = right.fn.GetIdentifier()
+    if (leftFn < rightFn) { return Ordering.LT }
+    if (leftFn > rightFn) { return Ordering.GT }
+    let leftPos = if (let Some(expr) <- left.expr) { GetDebugPos(expr)[1].begin } else { GetDebugPos(left.fn)[1].begin }
+    let rightPos = if (let Some(expr) <- right.expr) { GetDebugPos(expr)[1].begin } else { GetDebugPos(right.fn)[1].begin }
+    if (leftPos.fileID < rightPos.fileID) { return Ordering.LT }
+    if (leftPos.fileID > rightPos.fileID) { return Ordering.GT }
+    if (leftPos.line < rightPos.line) { return Ordering.LT }
+    if (leftPos.line > rightPos.line) { return Ordering.GT }
+    if (leftPos.column < rightPos.column) { return Ordering.LT }
+    if (leftPos.column > rightPos.column) { return Ordering.GT }
+    if (left.operation < right.operation) { return Ordering.LT }
+    if (left.operation > right.operation) { return Ordering.GT }
+    return Ordering.EQ
+}
 
 public class NoHeapAllocChecker {
     private let diag: BasicDiagnosticEngine
@@ -14,6 +47,8 @@ public class NoHeapAllocChecker {
     private let reportedFunctions: HashSet<Int64> = HashSet<Int64>()
     // Module generation workers report concurrently; constrainedRoots and paths are frozen by RunOnPackage.
     private let reportMutex: Mutex = Mutex()
+    private var deferReports: Bool = false
+    private let pendingReports: ArrayList<ConstraintReport> = ArrayList<ConstraintReport>()
 
     public init(diag: BasicDiagnosticEngine) {
         this.diag = diag
@@ -75,9 +110,24 @@ public class NoHeapAllocChecker {
     public func CheckFunction(fn: Function, expr: Option<Expression>, operation: String): Unit {
         synchronized(reportMutex) {
             if (let Some(root) <- constrainedRoots.get(fn.nodeId)) {
-                ReportFunction(fn, root, expr, operation)
+                if (deferReports) { pendingReports.add(ConstraintReport(fn, root, expr, operation)) }
+                else { ReportFunction(fn, root, expr, operation) }
             }
         }
+    }
+
+    // The driver opens/closes this phase only outside the worker lifetime. Unit callers retain
+    // immediate reporting; both serial and parallel codegen use the same deterministic flush.
+    public func BeginDeferredReports(): Unit {
+        deferReports = true
+        pendingReports.clear()
+    }
+
+    public func FlushDeferredReports(): Unit {
+        deferReports = false
+        sort(pendingReports, by: CompareConstraintReport, stable: true)
+        for (report in pendingReports) { ReportFunction(report.fn, report.root, report.expr, report.operation) }
+        pendingReports.clear()
     }
 
     private func ReportFunction(fn: Function, root: Function, expr: Option<Expression>, operation: String): Unit {
@@ -122,6 +172,8 @@ public class NoWriteBarrierRecChecker {
     private let reportedFunctions: HashSet<Int64> = HashSet<Int64>()
     // Module generation workers report concurrently; constrainedRoots and paths are frozen by RunOnPackage.
     private let reportMutex: Mutex = Mutex()
+    private var deferReports: Bool = false
+    private let pendingReports: ArrayList<ConstraintReport> = ArrayList<ConstraintReport>()
 
     public init(diag: BasicDiagnosticEngine) {
         this.diag = diag
@@ -197,9 +249,26 @@ public class NoWriteBarrierRecChecker {
     public func CheckFunction(fn: Function, expr: Option<Expression>): Unit {
         synchronized(reportMutex) {
             if (let Some(root) <- constrainedRoots.get(fn.nodeId)) {
-                ReportFunction(fn, root, expr)
+                if (deferReports) {
+                    let operation = if (let Some(e) <- expr) { ExprKindName(e.GetExprKind()) } else { "codegen-generated" }
+                    pendingReports.add(ConstraintReport(fn, root, expr, operation))
+                } else { ReportFunction(fn, root, expr) }
             }
         }
+    }
+
+    // The driver opens/closes this phase only outside the worker lifetime. Unit callers retain
+    // immediate reporting; both serial and parallel codegen use the same deterministic flush.
+    public func BeginDeferredReports(): Unit {
+        deferReports = true
+        pendingReports.clear()
+    }
+
+    public func FlushDeferredReports(): Unit {
+        deferReports = false
+        sort(pendingReports, by: CompareConstraintReport, stable: true)
+        for (report in pendingReports) { ReportFunction(report.fn, report.root, report.expr) }
+        pendingReports.clear()
     }
 
     private func ReportFunction(fn: Function, root: Function, expr: Option<Expression>): Unit {
