@@ -2542,6 +2542,7 @@ public class IRBuilder2 <: Resource {
             let paramTys = funcType.GetParamTypes()
             var idx: Int64 = 0
             for (arg in args) {
+                var allocatedOwner: Option<LLVMValueRef> = None
                 let fixedArg = if (idx < paramTys.size) {
                     let paramType = calleeType.GetParamType(idx)
                     let isThis = idx == 0 && applyExprWrapper.isSome() &&
@@ -2549,7 +2550,9 @@ public class IRBuilder2 <: Resource {
                     var llvmVal = if (isThis) {
                         DoSimpleCast(arg, paramType, name)
                     } else {
-                        FixFuncArg(arg, paramType, name: name)
+                        let (value, owner) = FixFuncArgAndOwner(arg, paramType, name: name)
+                        allocatedOwner = owner
+                        value
                     }
                     llvmVal
                 } else {
@@ -2557,7 +2560,11 @@ public class IRBuilder2 <: Resource {
                 }
                 callArgs.add(fixedArg)
                 if (idx < paramTys.size && calleeType.HasBasePtr() && IsRefStructParam(paramTys[idx])) {
-                    callArgs.add(unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) })
+                    // Resolve the owner of the final argument, not of storage
+                    // that FixFuncArg may have copied into a new object.
+                    let owner = allocatedOwner ?? GetTrackedBasePtr(fixedArg) ??
+                        GetUntrackedFuncArgBasePtr(fixedArg)
+                    callArgs.add(owner)
                 }
                 idx++
             }
@@ -2706,9 +2713,27 @@ public class IRBuilder2 <: Resource {
     }
 
     private func FixFuncArg(arg: CGValue, destType: CGType, name!: String = ""): LLVMValueRef {
+        return FixFuncArgAndOwner(arg, destType, name: name)[0]
+    }
+
+    private func GetUntrackedFuncArgBasePtr(value: LLVMValueRef): LLVMValueRef {
+        let refType = CGType.GetRefType(GetLLVMContext())
+        // The x86 runtime distinguishes global aggregate roots from plain
+        // stack storage by this established ABI marker. Unknown origins are
+        // not globals, and other targets retain their existing convention.
+        if (GetCGContext().GetCompileOptions().target.arch == ArchType.X86_64 &&
+            IsGlobalVariableBasePtr(value)) {
+            return unsafe { LLVMConstIntToPtr(LLVMConstInt(
+                LLVMInt64TypeInContext(GetLLVMContext().raw), 1u64, 0), refType) }
+        }
+        return unsafe { LLVMConstNull(refType) }
+    }
+
+    private func FixFuncArgAndOwner(arg: CGValue, destType: CGType,
+        name!: String = ""): (LLVMValueRef, Option<LLVMValueRef>) {
         let raw = arg.GetRawValue()
         let rawTy = unsafe { LLVMTypeOf(raw) }
-        let argCGType = arg.GetCGType() ?? return raw
+        let argCGType = arg.GetCGType() ?? return (raw, None)
         let destDerefType = CGType.GetOrCreate(cgMod, destType.GetOriginal().StripAllRefs())
         let isValueOrAddr0 = rawTy.isNull() || unsafe { LLVMGetTypeKind(rawTy) } != LLVM_POINTER_TYPE_KIND ||
             unsafe { LLVMGetPointerAddressSpace(rawTy) } == 0u32
@@ -2731,9 +2756,11 @@ public class IRBuilder2 <: Resource {
                     extraInfo: TypeExtraInfo(1u32))
                 CreateStore(arg, CGValue(addr, addrType))
             }
-            return objectValue
+            // Do not mark the header address as a headerless payload in the
+            // general GEP provenance map. This owner belongs to this call.
+            return (objectValue, Some(objectValue))
         }
-        return DoSimpleCast(arg, destType, name)
+        return (DoSimpleCast(arg, destType, name), None)
     }
 
     private func StoreAggregateArgToSlot(raw: LLVMValueRef, slot: LLVMValueRef): LLVMValueRef {

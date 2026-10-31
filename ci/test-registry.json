@@ -929,5 +929,10 @@
     "file": "ci/test-catch-unit-any.mjs",
     "executor": "manual",
     "reason": "Real CLI catch Unit/empty to Any, non-Unit/Nothing/finally controls. Requires paired target std.core and isolated work; no skip path."
+  },
+  {
+    "file": "ci/test-ref-struct-owner.mjs",
+    "executor": "manual",
+    "reason": "Real CLI pre-opt call emission and native heap/global/local/forwarded/exception/tuple controls; paired compiler, target std.core and llvm-dis required, no skip."
   }
 ]
