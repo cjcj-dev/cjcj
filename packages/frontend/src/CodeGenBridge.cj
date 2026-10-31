@@ -649,10 +649,12 @@ private class ToCHIR {
             }
             RunFunctionInline(currentPackage, devirtInfo)
             if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_LOAD)) {
-                RedundantLoadElimination().RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
+                RedundantLoadElimination().RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer,
+                    threadNum: Int64(options.GetJobs()))
             }
             if (options.enableChirRGetOrThrowE) {
-                RedundantGetOrThrowElimination().RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
+                RedundantGetOrThrowElimination().RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer,
+                    threadNum: Int64(options.GetJobs()))
             }
             RunRangePropagation(currentPackage)
             if (options.IsCHIROptimizationLevelOverO2()) {

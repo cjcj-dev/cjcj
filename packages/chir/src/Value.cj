@@ -140,6 +140,25 @@ public open class Value <: Base & Hashable & Equatable<Value> {
         }
     }
 
+    // Moves every occurrence of expr to the end of the list, keeping the occurrence count.
+    public func MoveUserToTail(expr: Expression): Unit {
+        synchronized(userMutex) {
+            var moved: Int64 = 0
+            var idx: Int64 = 0
+            while (idx < users.size) {
+                if (users[idx].nodeId == expr.nodeId) {
+                    users.remove(at: idx)
+                    moved++
+                    continue
+                }
+                idx++
+            }
+            for (_ in 0..moved) {
+                users.add(expr)
+            }
+        }
+    }
+
     public func ClearUsersOnly(): Unit {
         users.clear()
     }
