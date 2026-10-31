@@ -112,6 +112,11 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
       {from:host.install+'/runtime/lib/'+sdkPlatform(host.platform??platform).tuple,to:'.host/runtime/lib/'+sdkPlatform(host.platform??platform).tuple,owner:'bootstrap host comparison runtime'},
       {from:product,to:compilerName,owner:'compiler'});
   }
+  // Native LLVM executables run from the retained bin directory. Clang
+  // derives its builtin headers from that executable, so carry the producer's
+  // matching resource tree beside it as well as in the public LLVM prefix.
+  copies.push({from:llvm.install+'/third_party/llvm/lib/clang',
+    to:'.native-tools/third_party/llvm/lib/clang',owner:'N clang resources'});
   // These repository tools belong to the installation, before pending
   // consumers run. Packaging only archives this same installed directory.
   const scripts=['check_sdk_usable.mjs','verifier_artifact_gate.mjs'];
