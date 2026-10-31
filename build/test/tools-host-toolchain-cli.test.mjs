@@ -31,9 +31,11 @@ function fixture(name) {
   const depCommit=freeze(deps);
   write(path.join(root,'dependencies.json'),JSON.stringify({json:{repo:'file://'+deps,commit:depCommit,path:deps}}));
   write(path.join(tools,'packages/lsp/main.cj'),'main() { println(42) }\n');
-  for(const name of ['lsp','cjlint'])write(path.join(tools,'packages',name,'build/build.mjs'),'// controlled root producer below\n');
+  for(const name of ['lsp','cjlint','cjcompat'])write(path.join(tools,'packages',name,'build/build.mjs'),'// controlled root producer below\n');
   write(path.join(tools,'build.mjs'),`import fs from 'node:fs';import path from 'node:path';import {spawnSync} from 'node:child_process';
-const a=process.argv.slice(2),value=k=>a[a.indexOf(k)+1];if(a[0]!=='build'||value('--tool')!=='lsp')throw Error('PUBLIC_ROOT_PRODUCER');
+const a=process.argv.slice(2),value=k=>a[a.indexOf(k)+1];
+if(a[0]==='build'&&value('--tool')==='cjcompat'){fs.mkdirSync(value('--build-root'),{recursive:true});fs.writeFileSync(path.join(value('--build-root'),'cjcompat-command.json'),JSON.stringify({argv:a}));process.exit(73);}
+if(a[0]!=='build'||value('--tool')!=='lsp')throw Error('PUBLIC_ROOT_PRODUCER');
 const out=path.join(value('--build-root'),'lsp/server/target/release/bin/main');fs.mkdirSync(path.dirname(out),{recursive:true});
 const p=spawnSync(path.join(process.env.CANGJIE_HOME,'bin/cjc'),[new URL('./packages/lsp/main.cj',import.meta.url).pathname,'-o',out],{stdio:'inherit'});
 fs.writeFileSync(path.join(value('--build-root'),'lsp/server-build-command.json'),JSON.stringify({rc:p.status,signal:p.signal,fixture:'bounded public producer; not actual LSP',argv:process.argv}));
@@ -70,6 +72,24 @@ test('official H reaches the public tools producer without a synthetic stage rec
 test('retired C++ cjlint GCC selection is rejected rather than silently changing the new frontend',()=>{
  const f=fixture('retired-gcc'),r=f.build('cjlint',['--tools-gcc-toolchain','/usr']);
  assert.equal(r.status,2);assert.match(r.stderr,/retired C\+\+ cjlint/);
+});
+
+for(const explicit of [false,true])test('cjcompat fixed frontend caller '+(explicit?'explicit':'default'),()=>{
+ const f=fixture('compat-'+explicit),frontend=path.join(f.root,'compiler');
+ f.write(path.join(frontend,'runtime_shim/source.txt'),'fixed compiler source\n');
+ for(const argv of [['git','init',frontend],['git','-C',frontend,'add','.'],['git','-C',frontend,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','test: fixed frontend']])f.ok(f.run(argv));
+ const defaultSha=f.ok(f.run(['git','-C',frontend,'rev-parse','HEAD'])).stdout.trim();
+ const selection=path.join(f.workspace,'.source-selection.json'),value=JSON.parse(fs.readFileSync(selection));
+ value.compiler={url:'file://'+frontend,tag:defaultSha};f.write(selection,JSON.stringify(value));
+ if(explicit){f.write(path.join(frontend,'selected.txt'),'explicit frontend\n');f.ok(f.run(['git','-C',frontend,'add','.']));f.ok(f.run(['git','-C',frontend,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','test: distinct explicit frontend']));}
+ const sha=f.ok(f.run(['git','-C',frontend,'rev-parse','HEAD'])).stdout.trim();
+ const selected=explicit?frontend:path.join(f.workspace,'cangjie_compiler');
+ const r=f.build('cjcompat',explicit?['--tools-frontend-source',frontend,'--tools-frontend-ref',sha]:[]);
+ assert.equal(r.status,1,r.stdout+'\n'+r.stderr);
+ const row=JSON.parse(fs.readFileSync(path.join(f.root,'buildtools/cjcompat-command.json'))),arg=k=>row.argv[row.argv.indexOf(k)+1];
+ assert.equal(arg('--compiler-source'),selected);assert.equal(arg('--frontend-ref'),sha);
+ assert.match(r.stderr,/73/,'producer failure must remain visible');
+ console.log('CJCOMPAT_FIXED_FRONTEND_CALLER_ASSERTION_REACHED '+explicit);
 });
 
 // Stop only after the real public stage has prepared its fixed Git inputs.

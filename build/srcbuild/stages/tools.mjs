@@ -67,9 +67,10 @@ function buildArgsFor(name, config, jobs) {
     return ['build','--sdk',consumerSdk(config),'--jni-home',config.toolsJniHome,'--runtime-header',config.toolsRuntimeHeader,'--lombok-jar',config.toolsLombokJar,'--build-dir',cjprofBuildDirectory(config)];
   }
   if(name==='cjcompat') {
-    const source=config.repoPath('compiler'),sdk=consumerSdk(config);
+    const source=config.toolsFrontendSource??config.repoPath('compiler'),sdk=consumerSdk(config);
     return ['build','--build-dir',toolProducerDirectory(config,name),'--type',config.buildType==='relwithdebinfo'?'release':config.buildType,
-      '--sdk',sdk,'--compiler-source',source,'--compiler-libs',config.toolsCompilerLibs??path.join(source,'target/release'),
+      '--sdk',sdk,'--compiler-source',source,'--frontend-ref',config.toolsFrontendRef??config.repo('compiler').tag,
+      '--compiler-libs',config.toolsCompilerLibs??path.join(source,'target/release'),
       '--runtime-config',config.toolsRuntimeConfig??path.join(source,'runtime_shim/cjc_runtime_config.o'),
       '--shim',config.toolsLlvmShim??path.join(sdk,'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o'),
       '--llvm',config.toolsLlvmLibrary??path.join(sdk,'third_party/llvm/lib',config.target.spec.hostLlvmLibrary),
