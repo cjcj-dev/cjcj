@@ -3039,12 +3039,19 @@ public class IRBuilder2 <: Resource {
         resultType: Option<Type>): LLVMValueRef {
         let parameters = MapIntrinsicArguments(args)
         if (kind == IntrinsicKind.FILL_IN_STACK_TRACE) {
-            CJC_ASSERT(!parameters.isEmpty())
-            let retTy = resultType.getOrThrow()
-            let uint64ArrayTy = (DeRef(retTy) as RawArrayType).getOrThrow()
-            let funcArgs = RawValuesOfCGValues(parameters)
+            CJC_ASSERT(parameters.size == 2)
+            let captureTy = (DeRef(resultType.getOrThrow()) as ClassType).getOrThrow()
+            let frameArrayTy = (DeRef(captureTy.GetClassDef().GetDirectInstanceVar(0).ty) as RawArrayType)
+                .getOrThrow()
+            let frameTy = (DeRef(frameArrayTy.GetElementType()) as StructType).getOrThrow()
+            let byteArrayTy = (DeRef(frameTy.GetStructDef().GetInstanceVar(0).ty) as RawArrayType).getOrThrow()
             let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
-            funcArgs[0] = CreateBitCast(CreateTypeInfo(uint64ArrayTy), i8PtrTy)
+            let funcArgs = ArrayList<LLVMValueRef>([
+                CreateBitCast(CreateTypeInfo(captureTy), i8PtrTy),
+                CreateBitCast(CreateTypeInfo(frameArrayTy), i8PtrTy),
+                CreateBitCast(CreateTypeInfo(byteArrayTy), i8PtrTy),
+                parameters[1].GetRawValue()
+            ])
             return CreateIntrinsicCallNoInvoke(FILL_IN_STACK_TRACE_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(),
                 funcArgs)
         }
@@ -3059,6 +3066,12 @@ public class IRBuilder2 <: Resource {
                 funcArgs)
         }
         if (kind == IntrinsicKind.DECODE_STACK_TRACE) {
+            CJC_ASSERT(parameters.size == 2)
+            CJC_ASSERT(DeRef(args[0].GetType().getOrThrow()) is ClassType)
+            // A class pointer is one GC reference, not a struct payload with an extra base argument.
+            let capture = parameters[0]
+            parameters[0] = CGValue(CreateBitCast(capture.GetRawValue(), CGType.GetRefType(GetLLVMContext())),
+                capture.GetCGType().getOrThrow())
             let retTy = resultType.getOrThrow()
             let retCGType = CGType.GetOrCreate(cgMod, retTy)
             let resultStructTy = (retTy as StructType).getOrThrow()
