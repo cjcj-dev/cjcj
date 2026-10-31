@@ -1028,9 +1028,9 @@ public open class BaseMangler {
             }
             return
         }
-        if (let Some(prop) <- (decl as PropDecl)) {
-            for (getter in prop.getters) { touches.add(getter) }
-            for (setter in prop.setters) { touches.add(setter) }
+        if (let Some(propertyDecl) <- (decl as PropDecl)) {
+            for (getter in propertyDecl.getters) { touches.add(getter) }
+            for (setter in propertyDecl.setters) { touches.add(setter) }
             return
         }
         for (member in decl.GetMemberDeclPtrs()) { CollectExportIdTouches(member, touches, seen) }
