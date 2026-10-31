@@ -934,5 +934,10 @@
     "file": "ci/test-ref-struct-owner.mjs",
     "executor": "manual",
     "reason": "Real CLI pre-opt call emission and native heap/global/local/forwarded/exception/tuple controls; paired compiler, target std.core and llvm-dis required, no skip."
+  },
+  {
+    "file": "packages/codegen/src/AggregateArgumentOwner_test.cj",
+    "executor": "cjpm",
+    "member": "packages/codegen"
   }
 ]
