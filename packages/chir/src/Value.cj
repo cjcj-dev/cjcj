@@ -18,6 +18,9 @@ public open class Value <: Base & Hashable & Equatable<Value> {
         this.ty = ty
         this.identifier = identifier
         this.kind = kind
+        if (kind == ValueKind.KIND_GLOBALVAR || kind == ValueKind.KIND_FUNC) {
+            SetSharedAttributeMutex(userMutex)
+        }
     }
 
     public operator func ==(right: Value): Bool {
