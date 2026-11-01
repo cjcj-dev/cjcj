@@ -9,8 +9,8 @@ import {command,copyOutputs} from '../../../ci/bootstrap/sdk-flow.mjs';
 import {toolConsumerCopies} from '../../../ci/bootstrap/sdk-targets.mjs';
 import {cleanSdkEnvironment} from '../../../ci/bootstrap/sdk-platform.mjs';
 import {installSourceTools,sourceToolOutputs} from '../install-tools.mjs';
-import {beginToolBuild,finishToolBuild,toolBuildInputs,finishToolInstall} from '../tool-build-inputs.mjs';
-import {TOOL_NAMES,TOOL_DIRECTORIES,requireToolProducer,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,hleBuildDirectory,toolProducerDirectory} from '../tool-layout.mjs';
+import {beginToolBuild,finishToolBuild,toolBuildInputs,finishToolInstall,toolInstallConfig} from '../tool-build-inputs.mjs';
+import {TOOL_NAMES,TOOL_DIRECTORIES,requireToolProducer,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,hleBuildDirectory,toolProducerDirectory,toolProducerBuildRoot} from '../tool-layout.mjs';
 import {installHleDependencies,installIndependentHle} from '../hle-dependencies.mjs';
 import {installPath as mingwInstallPath} from '../../toolchain/mingw.mjs';
 import path from 'node:path';
@@ -30,7 +30,7 @@ function toolArgv(config,name,args) {
   const prefixKey=name==='lsp'?'--install':'--prefix',i=native.indexOf(prefixKey);
   if(i>=0)prefix=native.splice(i,2)[1];
   return [process.execPath,path.join(config.repoPath('tools'),'build.mjs'),phase,'--tool',name,
-    '--build-root',config.buildRoot,...(prefix?['--prefix',prefix]:[]),'--',...native];
+    '--build-root',toolProducerBuildRoot(config,name),...(prefix?['--prefix',prefix]:[]),'--',...native];
 }
 const runTool=(config,name,cwd,args,options)=>runBuildScript(config,config.repoPath('tools'),toolArgv(config,name,args).slice(2),{...options,script:'build.mjs'});
 
@@ -201,6 +201,7 @@ export async function run(config) {
     // through the root tools entry into separate prefixes, without publishing an SDK.
     if(config.toolsInstallPrefix) {
       const independent=allTools.filter(([name])=>!selected||selected.has(name));
+      config=await toolInstallConfig(config,independent.map(([name])=>name));
       if(config.target.spec.crossCompile)
         throw new BuildError('tools.install','independent install requires native tools');
       await assertSourceIdentity(config.repo('tools'),toolsRoot);
@@ -248,7 +249,8 @@ export async function run(config) {
     // Each producer writes its own project build/dist tree. Shared HLE inputs
     // are installed above, and the shared SDK is published only after every
     // producer succeeds. Bound outer work; do not multiply it by native -j.
-    const outputs=sourceToolOutputs(config);
+    if(config.toolsPhase!=='build')config=await toolInstallConfig(config,allTools.filter(([name])=>!pending.some(([built])=>built===name)).map(([name])=>name));
+    let outputs=sourceToolOutputs(config);
     if(config.toolsBuildMode==='incremental'&&process.env.CANGJIE_BUILD_DRY_RUN!=='1')checkToolCaches(config,toolsRoot);
     if(selected&&config.toolsPhase!=='build'&&process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
       for(const [name]of allTools.filter(([name])=>!selected.has(name))) {
@@ -289,6 +291,8 @@ export async function run(config) {
     // a failure prevents new work and all shared publication.
     if (failures.length) throw new AggregateError(failures, 'tool producers failed; SDK was not published');
     if(config.toolsPhase==='build')return;
+    config=await toolInstallConfig(config,allTools.map(([name])=>name));
+    outputs=sourceToolOutputs(config);
     // Validate reused outputs before any shared install. Their recorded source
     // may legitimately differ from this invocation's selectors.
     if(process.env.CANGJIE_BUILD_DRY_RUN!=='1')for(const [name]of allTools){

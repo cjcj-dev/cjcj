@@ -6,6 +6,8 @@ import {parseArgs} from 'node:util';
 import {buildConfig} from '../../build/lib/config.mjs';
 import {runGcUnitLanguageTests,gcUnitLanguageGateEnabled} from '../../build/srcbuild/gc-unit-gate.mjs';
 import {cleanSdkEnvironment} from './sdk-platform.mjs';
+import {readJson} from './sdk-flow.mjs';
+import {compilerExecutionRoot} from './sdk-targets.mjs';
 
 export function installedLanguageConfig({sdk,platform,host,work}) {
   const targetKey={linux_x86_64:'linux-x64',linux_aarch64:'linux-aarch64'}[platform];
@@ -23,6 +25,7 @@ export async function verifyInstalledLanguage(options) {
 export async function installedLanguage({source,sdk,platform,host,work,runtimeSource}) {
   // Default and explicit inputs use one execution path; even a completed
   // previous run must execute this invocation's language consumers again.
+  host??=compilerExecutionRoot(sdk,(await readJson(path.join(sdk,'STAGE-INPUTS.json'))).selection);
   await verifyInstalledLanguage({sdk,platform,host,work,runtimeSource});
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {

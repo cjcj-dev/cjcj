@@ -194,6 +194,14 @@ export async function installRecipe({root, recipe, build, tools, platform, test,
     const owners = await copyOutputs(pending, recipe.copies || []);
     if (recipe.entries?.length) await installEntries({root:pending,build,groups:recipe.entries,tools,records,platform});
     await installLinks(pending,recipe.links);
+    if(recipe.runtimeLanguageInputs) {
+      const {buildConfig}=await import('../../build/lib/config.mjs');
+      const {installGcUnitInputs}=await import('../../build/srcbuild/gc-unit-gate.mjs');
+      const targetKey={linux_x86_64:'linux-x64',linux_aarch64:'linux-aarch64'}[platform];
+      if(!targetKey)throw Error('INSTALL_RUNTIME_LANGUAGE_PLATFORM '+platform);
+      const {runtime,gateStatus}=recipe.runtimeLanguageInputs;
+      installGcUnitInputs(buildConfig({targetKey}),runtime,pending,{gateStatus});
+    }
     if (recipe.metadata) {
       const metadata={...recipe.metadata};
       if(metadata.compilerFile) {
