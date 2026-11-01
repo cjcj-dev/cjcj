@@ -276,7 +276,7 @@ export function createBootstrapTargets(input) {
   }
   stages.find(s=>s.id==='stage3-std').test={commands:[{argv:[process.execPath,
     fileURLToPath(new URL('./sdk-final-std.mjs',import.meta.url)), '--sdk',out('stage2'),
-    '--std','${output}','--runtime',runtime.install,'--host',compilerExecutionRoot(out('stage2'),stages.find(s=>s.id==='stage2').metadata.selection),
+    '--std','${output}','--runtime',runtime.install,'--host',host.install,
     '--platform',platform,'--work','${work}/final-std-consumers']}]};
   // The original Linux language obligation consumes the final installed
   // compiler/runtime, after std install and before the source phase handoff.

@@ -41,14 +41,14 @@ function checkIncrementalConfiguration(config, directory, compilerInclude) {
 export async function consumeStdx(config,prefix) {
   if(config.target.spec.crossCompile)return {status:'NOT_RUN',reason:'HOST_CROSS_EXEC'};
   const platform=config.target.spec.llvmPlatform,native=sdkPlatform(platform),sdk=consumerSdk(config);
-  const work=fs.mkdtempSync(path.join(path.dirname(prefix),'stdx-consumer-'));
+  const work=fs.mkdtempSync(path.join(config.workspace,'stdx-consumer-'));
   const input=path.join(work,'json.cj'),output=path.join(work,'json'+native.exe),records=[];
   fs.writeFileSync(input,'import stdx.encoding.json.*\nmain(): Int64 { if (JsonValue.fromStr("42").toString() != "42") { return 42 }; println("STDX_INSTALLED_JSON_PASS"); return 0 }\n');
   const lib=path.join(prefix,config.target.stdxTargetSubdir(),'static','stdx');
   const env=cleanSdkEnvironment(sdk,platform);env.CANGJIE_STDX_PATH=lib;
   try {
     await command([path.join(sdk,'bin','cjc'+native.exe),input,'--import-path',lib,'-L',lib,
-      '-lstdx.encoding.json','-lstdx.encoding.jsonFFI','-o',output],{cwd:work,env,records});
+      '-lstdx.encoding.json','-lstdx.encoding.jsonFFI','-lstdx.serialization.serialization','-o',output],{cwd:work,env,records});
     await command([output],{cwd:work,env,records});
     return {status:'EXECUTED',commands:records};
   } finally {await atomicJson(path.join(work,'commands.json'),records);}

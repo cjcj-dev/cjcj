@@ -12,7 +12,6 @@ import {verifyStdBuildInputs} from './stdlib-build.mjs';
 import {injectCangjieVersion} from '../srcbuild/steps/inject-version-lib.mjs';
 import {prepareTrimpath} from '../release/trimpath.mjs';
 import {assertFinalStdInput} from './sdk-final-std.mjs';
-import {compilerExecutionRoot} from './sdk-targets.mjs';
 import {writeStdProvenance} from '../../build/lib/provenance.mjs';
 import {stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
 import {resolveProductBinary} from '../srcbuild/lib/product-binary.mjs';
@@ -93,7 +92,7 @@ export async function nativeStage(options, {signal} = {}) {
     for(const rel of stdInstallFiles(platform))
       if(!(await fs.stat(path.join(output,rel))).isFile())throw new Error('STD_INSTALL_SHAPE '+rel);
     if(options['compiler-runtime']==='target')await assertFinalStdInput({sdk,std:output,runtime,
-      host:compilerExecutionRoot(sdk,JSON.parse(await fs.readFile(path.join(sdk,'STAGE-INPUTS.json'),'utf8')).selection),platform,work:output+'.consumers',signal});
+      host:JSON.parse(await fs.readFile(path.join(sdk,'STAGE-INPUTS.json'),'utf8')).selection.bootstrapHost.install,platform,work:output+'.consumers',signal});
     // Use the revision checked against the consumed source before target startup.
     // The legacy writer's trusted environment default is not a native CLI identity.
     await writeStdProvenance({sourceDir:stdlib,sourceRoot:source,sourceRevision:commit,installPrefix:output,compiler:await compilerProducer(sdk),buildSdk:sdk,
@@ -107,7 +106,7 @@ export async function nativeStage(options, {signal} = {}) {
   } else if(kind==='compiler') {
     const target=await privateRoot(options['target-dir']||path.join(source,'target'));
     if(options.phase==='stage3')await assertFinalStdInput({sdk,std:sdk,runtime:sdk,
-      host:compilerExecutionRoot(sdk,JSON.parse(await fs.readFile(path.join(sdk,'STAGE-INPUTS.json'),'utf8')).selection),platform,work:output+'.std-consumers',signal});
+      host:JSON.parse(await fs.readFile(path.join(sdk,'STAGE-INPUTS.json'),'utf8')).selection.bootstrapHost.install,platform,work:output+'.std-consumers',signal});
     if(process.env.SOURCE_SDK_VERSION)await injectCangjieVersion(source,process.env.SOURCE_SDK_VERSION);
     const before=await fs.readFile(path.join(source,'cjpm.toml'));
     env.CJCJ_LLVM_SHIM_O=path.join(sdk,'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o');

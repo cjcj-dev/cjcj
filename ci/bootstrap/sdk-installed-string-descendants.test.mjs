@@ -18,7 +18,7 @@ async function fixture(mode){
  await fs.chmod(driver,0o755);
  const compiler=await put('sdk/libexec/compiler/cjcj-stage1','compiler fixture');
  await put('sdk/bin/cjc.entry','cjcj-sdk-entry-v1\n1\nlibexec/compiler/cjcj-stage1\nlinux\nnative-target:x64\nruntime/lib/linux_x86_64_cjnative\n');
- await put('sdk/compiler-inputs.json',JSON.stringify({compilerSha256:await fileDigest(compiler)}));
+ await put('sdk/STAGE-INPUTS.json',JSON.stringify({compilerSha256:await fileDigest(compiler)}));
  const tuple='linux_x86_64_cjnative';
  await put('std/lib/'+tuple+'/libcangjie-std-core.a','archive fixture');await put('std/modules/'+tuple+'/std/std.core.cjo','module fixture');
  const r=await put('runtime/runtime/lib/'+tuple+'/libcangjie-runtime.so','runtime fixture');
