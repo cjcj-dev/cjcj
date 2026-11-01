@@ -136,7 +136,16 @@ int main(int argc, char **argv) {
 #error Unsupported SDK entry architecture
 #endif
         if (lines[4] != targetRole) throw std::runtime_error("entry architecture mismatch");
-        // Preserve ordinary build inputs; only the runtime loader is selected here.
+        // cjfmt's Options uses HOME for configuration fallback after -c. Keep
+        // that caller input separate from the descriptor-selected loader paths.
+        // Other tools still use the installed SDK as their resource home.
+        const bool formatterHome = lines[2] == ".target-tools/tools/bin/cjfmt" ||
+                                   lines[2] == ".target-tools/tools/bin/cjfmt.exe";
+
+        // cjlint derives its application root (modules/config/runtime) from
+        // argv0. Its normal producer payload lives beside the retained body.
+        const bool privateApplication = lines[2] == ".target-tools/tools/cjlint/bin/cjlint" ||
+                                        lines[2] == ".target-tools/tools/cjlint/bin/cjlint.exe";
 
         std::string libraries;
         for (size_t i = 5; i < lines.size(); ++i) {
@@ -150,7 +159,7 @@ int main(int argc, char **argv) {
         }
 #ifdef _WIN32
         if (lines[3] != "windows") throw std::runtime_error("entry platform mismatch");
-        env(L"CANGJIE_HOME", root);
+        if (!formatterHome || !std::getenv("CANGJIE_HOME")) env(L"CANGJIE_HOME", root);
         std::wstring oldPath;
         const DWORD size = GetEnvironmentVariableW(L"PATH", nullptr, 0);
         if (size) { std::vector<wchar_t> b(size); GetEnvironmentVariableW(L"PATH", b.data(), size); oldPath = b.data(); }
@@ -164,9 +173,10 @@ int main(int argc, char **argv) {
         if (!args) throw std::runtime_error("entry arguments");
         std::wstring reportedArgv0;
         const auto realDir = real.parent_path();
-        if (count > 0 && args[0] && realDir.filename() == L"compiler" &&
-            realDir.parent_path().filename() == L"libexec") {
-            reportedArgv0 = (root / L"bin" / fs::path(args[0]).filename()).wstring();
+        if (count > 0 && args[0] && (privateApplication || (realDir.filename() == L"compiler" &&
+            realDir.parent_path().filename() == L"libexec"))) {
+            reportedArgv0 = privateApplication ? real.wstring() :
+                (root / L"bin" / fs::path(args[0]).filename()).wstring();
             args[0] = reportedArgv0.data();
         }
         std::wstring command;
@@ -204,7 +214,7 @@ int main(int argc, char **argv) {
             const char *callerLibraries = getenv(loader);
             if (callerLibraries && *callerLibraries) libraries += ":" + std::string(callerLibraries);
         }
-        if (setenv(loader, libraries.c_str(), 1) || setenv("CANGJIE_HOME", root.c_str(), 1))
+        if (setenv(loader, libraries.c_str(), 1) || setenv("CANGJIE_HOME", root.c_str(), formatterHome ? 0 : 1))
             throw std::runtime_error("entry environment");
         unsetenv("LD_PRELOAD"); unsetenv("LD_AUDIT"); unsetenv("DYLD_INSERT_LIBRARIES");
         const char *inheritedPath = getenv("PATH");
@@ -212,16 +222,17 @@ int main(int argc, char **argv) {
             (root / "third_party/llvm/bin").string() + ":" + (inheritedPath ? inheritedPath : "/usr/bin:/bin");
         if (setenv("PATH", search.c_str(), 1)) throw std::runtime_error("entry PATH");
         // Compiler-relative resources belong to the public SDK. Preserve the
-        // invoked basename, while exec and the loader still select the retained
-        // compiler and its separate execution libraries above.
+        // invoked basename; analysis applications instead use their private
+        // producer layout. Execution libraries remain descriptor-selected.
         std::vector<char *> execArgs;
         std::string reportedArgv0;
         char **childArgv = argv;
         std::vector<std::string> selectedArgs;
         const auto realDir = real.parent_path();
-        if (argc > 0 && argv[0] && realDir.filename() == "compiler" &&
-            realDir.parent_path().filename() == "libexec") {
-            reportedArgv0 = (root / "bin" / fs::path(argv[0]).filename()).string();
+        if (argc > 0 && argv[0] && (privateApplication || (realDir.filename() == "compiler" &&
+            realDir.parent_path().filename() == "libexec"))) {
+            reportedArgv0 = privateApplication ? real.string() :
+                (root / "bin" / fs::path(argv[0]).filename()).string();
             execArgs.assign(argv, argv + argc);
             execArgs[0] = reportedArgv0.data();
             execArgs.push_back(nullptr);
