@@ -90,7 +90,7 @@ export async function installSourceTools(config, installRoot=path.join(config.so
   // producer's build inputs. Record it once for native macro consumers; their
   // applicability is determined at the consumer, not by copying these facts.
   const installationInputs=rows.some(row=>row.producer==='lsp'
-    &&files[row.to].producer.source.status==='resolved')?await sdkInputs(config,original):undefined;
+    &&(files[row.to].producer.source.status==='resolved'||files[row.to].producer.build?.nativeConfiguration?.protocol))?await sdkInputs(config,original):undefined;
   await atomicJson(path.join(sdk,'TOOLS-INPUTS.json'),{files,payloadFiles,commands:records,installationInputs,
     buildSelection:{phase:config.toolsPhase??'all',builtThisInvocation:config.toolsPhase==='install'?'none':config.toolsBuildSet??'all',
       reusedExistingOutputs:config.toolsPhase==='install'?TOOL_NAMES:config.toolsBuildSet&&config.toolsBuildSet!=='all'

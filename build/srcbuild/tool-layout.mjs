@@ -9,8 +9,8 @@ const execute=promisify(execFile);
 export const TOOL_NAMES = ['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'];
 export const TOOL_DIRECTORIES = Object.fromEntries(TOOL_NAMES.map(name=>[name,'packages/'+name]));
 export const toolProducerWorkspace = (config,name) => config.toolsProducerWorkspaces?.[name] ?? config.workspace;
-export const toolSourceRoot = (config,name) => config.toolsProducerWorkspaces?.[name]
-  ? path.join(toolProducerWorkspace(config,name),config.repo('tools').dirName) : config.repoPath('tools');
+export const toolSourceRoot = (config,name) => config.toolsProducerSources?.[name] ?? (config.toolsProducerWorkspaces?.[name]
+  ? path.join(toolProducerWorkspace(config,name),config.repo('tools').dirName) : config.repoPath('tools'));
 export const toolInstallRoot = (config,name) => config.toolsInstallRoots?.[name];
 export const toolProducerBuildRoot = (config,name) => config.toolsProducerBuildRoots?.[name] ?? config.buildRoot;
 export const toolProducerDirectory = (config,name) => config.toolsProducerDirectories?.[name] ?? config.toolsProducerBuildDir ?? path.join(toolProducerBuildRoot(config,name),name);
