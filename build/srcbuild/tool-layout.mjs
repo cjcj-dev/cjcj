@@ -11,6 +11,7 @@ export const TOOL_DIRECTORIES = Object.fromEntries(TOOL_NAMES.map(name=>[name,'p
 export const toolProducerWorkspace = (config,name) => config.toolsProducerWorkspaces?.[name] ?? config.workspace;
 export const toolSourceRoot = (config,name) => config.toolsProducerWorkspaces?.[name]
   ? path.join(toolProducerWorkspace(config,name),config.repo('tools').dirName) : config.repoPath('tools');
+export const toolInstallRoot = (config,name) => config.toolsInstallRoots?.[name];
 export const toolProducerBuildRoot = (config,name) => config.toolsProducerBuildRoots?.[name] ?? config.buildRoot;
 export const toolProducerDirectory = (config,name) => config.toolsProducerDirectories?.[name] ?? config.toolsProducerBuildDir ?? path.join(toolProducerBuildRoot(config,name),name);
 export const TOOL_PUBLIC_NAMES = {lsp:'LSPServer'};
@@ -32,10 +33,11 @@ export function toolOutputs(config) {
     ['cjcov','packages/cjcov/dist/bin/cjcov'],['cjtrace-recover','packages/cjtrace-recover/dist/bin/cjtrace-recover'],
     ['cjlint','packages/cjlint/dist/bin/cjlint'],['cjprof','packages/cjprof/dist/bin/cjprof'],['cjcompat','packages/cjcompat/dist/bin/cjcompat'],['cjhead','packages/cjhead/dist/bin/cjhead'],
   ].map(([producer,rel])=>({producer,name:(TOOL_PUBLIC_NAMES[producer]??producer)+exe,
-    from:producer==='hle'?path.join(hleBuildDirectory(config),'bin','main'+exe):path.join(toolSourceRoot(config,producer),rel+exe),to:'tools/bin/'+(TOOL_PUBLIC_NAMES[producer]??producer)+exe}));
+    from:toolInstallRoot(config,producer)?path.join(toolInstallRoot(config,producer),'bin',(producer==='lsp'?'cangjie-lsp':producer)+exe):producer==='hle'?path.join(hleBuildDirectory(config),'bin','main'+exe):path.join(toolSourceRoot(config,producer),rel+exe),to:'tools/bin/'+(TOOL_PUBLIC_NAMES[producer]??producer)+exe}));
 }
 export function toolBuildProduct(config,name) {
   const exe=config.target.spec.exeSuffix;
+  if(name==='hle')return path.join(hleBuildDirectory(config),'bin','main'+exe);
   if(name==='lsp')return path.join(toolProducerDirectory(config,name),'server/target/release/bin/main'+exe);
   if(name==='cjhead')return path.join(toolProducerDirectory(config,name),'cjhead'+exe);
   if(name==='cjtrace-recover')return path.join(toolProducerDirectory(config,name),'cjtrace-recover'+exe);
@@ -65,7 +67,7 @@ export function nativeToolLibraries(name,os) {
 }
 // Enumerate the normal producer's install tree, not a hand-picked substitute
 // library. A missing mandatory payload fails before shared SDK publication.
-export async function toolPayloads(config,name,installPrefix) {
+export async function toolPayloads(config,name,installPrefix=toolInstallRoot(config,name)) {
   const root=toolSourceRoot(config,name),rows=[];
   const add=(rel,to)=>rows.push({producer:name,from:installPrefix
     ?path.join(installPrefix,to.replace(/^\.target-tools\//,'').replace(/^tools\//,'')):path.join(root,rel),to});

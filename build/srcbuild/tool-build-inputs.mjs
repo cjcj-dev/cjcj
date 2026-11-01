@@ -6,7 +6,8 @@ import {execFile} from 'node:child_process';
 import {promisify, isDeepStrictEqual} from 'node:util';
 import {atomicJson, fileDigest, readJson} from '../../ci/bootstrap/sdk-flow.mjs';
 import {compilerProducer} from '../../ci/bootstrap/compiler_identity.mjs';
-import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,toolProducerDirectory,toolProducerWorkspace,toolSourceRoot} from './tool-layout.mjs';
+import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,toolProducerDirectory,toolProducerWorkspace,toolSourceRoot,toolInstallRoot} from './tool-layout.mjs';
+import {assertSourceIdentity} from '../lib/git.mjs';
 import {sha256} from '../../ci/bootstrap/sdk-io.mjs';
 
 const execute = promisify(execFile);
@@ -18,6 +19,8 @@ const dry = () => process.env.CANGJIE_BUILD_DRY_RUN === '1';
 export async function toolInstallConfig(config, names) {
   if(dry())return config;
   const roots={...config.toolsProducerBuildRoots},producerDirectories={...config.toolsProducerDirectories};
+  let analysisSdk=config.toolsAnalysisSdk;
+  const checkedSources=new Set();
   for(const name of names) {
     const facts=await readJson(recordPath(config,name)),argv=facts.build?.argv;
     const reject=()=>{throw Error('TOOL_BUILD_DIRECTORY_INPUT '+name);};
@@ -32,9 +35,21 @@ export async function toolInstallConfig(config, names) {
       ||one(outer,'--tool')!==name)reject();
     const root=one(outer,'--build-root'),directory=one(native,name==='lsp'?'--build':'--build-dir');
     if([root,directory].some(value=>!path.isAbsolute(value)||path.resolve(value)!==value))reject();
+    // Reuse is bound to the original fixed producer, not today's source pin.
+    if(facts.source?.status!=='resolved'||!facts.source.repository||!(/^[0-9a-f]{40}$/).test(facts.source.commit??'')
+      ||facts.build.directory!==TOOL_DIRECTORIES[name])throw Error('TOOL_BUILD_SOURCE_INPUT '+name);
+    const source=toolSourceRoot(config,name),identity=JSON.stringify([source,facts.source.repository,facts.source.commit]);
+    if(!checkedSources.has(identity)) {
+      await assertSourceIdentity({name:'tools',url:facts.source.repository,tag:facts.source.commit},source);
+      checkedSources.add(identity);
+    }
+    if(name==='cjlint') {
+      analysisSdk=one(native,'--analysis-sdk');
+      if(!path.isAbsolute(analysisSdk)||path.resolve(analysisSdk)!==analysisSdk)reject();
+    }
     roots[name]=root;producerDirectories[name]=directory;
   }
-  return {...config,toolsProducerBuildRoots:roots,toolsProducerDirectories:producerDirectories};
+  return {...config,toolsAnalysisSdk:analysisSdk,toolsProducerBuildRoots:roots,toolsProducerDirectories:producerDirectories};
 }
 
 async function sourceState(root, directory, revision) {
@@ -135,7 +150,7 @@ export async function finishToolBuild(config, name, facts, product) {
 export async function toolBuildInputs(config, name, product, {installed=false}={}) {
   const digest=await fileDigest(product);
   let facts;
-  try { facts=await readJson(recordPath(config,name)); }
+  try { facts=await readJson(installed&&toolInstallRoot(config,name)?path.join(toolInstallRoot(config,name),'build-inputs.json'):recordPath(config,name)); }
   catch(e){if(e.code!=='ENOENT')throw e;
     return {source:{status:'unresolved',reason:'original producer did not record source/build inputs'},artifact:{sha256:digest}};}
   if(facts.build?.rc!==0 || (installed&&facts.install!==undefined?facts.install?.artifact:facts.artifact)?.sha256!==digest || facts.build.platform!==config.target.spec.llvmPlatform
@@ -152,7 +167,7 @@ export async function toolBuildInputs(config, name, product, {installed=false}={
 
 // Record the normal install's complete payload only after its command succeeds.
 // Existing build facts stay attached to reused bytes, never to today's selector.
-export async function finishToolInstall(config,name,product,argv,{prefix}={}) {
+export async function finishToolInstall(config,name,product,argv,{prefix=toolInstallRoot(config,name)}={}) {
   if(dry())return;
   const facts=await toolBuildInputs(config,name,toolBuildProduct(config,name));
   if(facts.source.status!=='resolved')throw new Error('TOOL_INSTALL_SOURCE_MISSING '+name);
