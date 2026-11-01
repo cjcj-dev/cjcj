@@ -6,6 +6,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {getBuildTarget} from '../lib/build-target.mjs';
+import {readPeSymbols} from '../lib/pe-symbols.mjs';
 import {readRuntimeSymbols, readCompilerSymbols, countLoadBadMask} from '../lib/runtime-split.mjs';
 
 // Existing apparatus dependencies: Clang 15 C producer, LLVM 14 COFF reader/linker.
@@ -52,6 +53,8 @@ for (const [symbol, count] of [['g_cjLoadBadMask', 1], ['ordinary_fixture_symbol
     assert.equal(countLoadBadMask(imported), count);
     assert.match(exported, new RegExp('^' + symbol + '$', 'm'));
     assert.match(imported, new RegExp('^' + symbol + '$', 'm'));
+    assert.equal(readPeSymbols(path.join(root, 'consumer.exe'), target, 'imports', 'runtime.dll'), symbol);
+    assert.equal(readPeSymbols(path.join(root, 'consumer.exe'), target, 'imports', 'different.dll'), '');
     assert.throws(() => readRuntimeSymbols(path.join(root, 'runtime.obj'), target), /expected x64 PE\/COFF image/);
   });
 }

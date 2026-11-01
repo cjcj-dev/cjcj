@@ -5,7 +5,7 @@ import {BuildError} from './errors.mjs';
 
 // PE DLL exports and executable imports are separate tables. `nm -D` is an
 // ELF interface and cannot establish either table for a stripped Windows SDK.
-export function readPeSymbols(file, target, kind) {
+export function readPeSymbols(file, target, kind, provider) {
   if (!['imports', 'exports'].includes(kind)) throw new BuildError('runtime.pe-symbols', 'invalid table');
   const fd = fs.openSync(file, 'r');
   try {
@@ -27,6 +27,8 @@ export function readPeSymbols(file, target, kind) {
   const block = kind === 'exports' ? /Export \{([\s\S]*?)^\}/gm : /(?:Delay)?Import \{([\s\S]*?)^\}/gm;
   const names = [];
   for (const match of result.stdout.matchAll(block)) {
+    if (provider && kind === 'imports'
+      && match[1].match(/^\s*Name: (\S+)\s*$/m)?.[1].toLowerCase() !== provider.toLowerCase()) continue;
     const expression = kind === 'exports' ? /^\s*Name: (\S+)\s*$/gm : /^\s*Symbol: (\S+) \(\d+\)\s*$/gm;
     for (const row of match[1].matchAll(expression)) names.push(row[1]);
   }

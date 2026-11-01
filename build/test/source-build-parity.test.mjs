@@ -381,6 +381,7 @@ test('packaged SDK colour ABI accepts a SAME fake SDK', () => {
     const result = assertSdkCompilerRuntimeAbi({
       sdk,
       target,
+      readImports: () => [],
       readCompiler: fileName => fileName === compiler ? '' : 'unexpected',
       readRuntime: fileName => fileName === runtime ? '' : 'unexpected',
       log: message => messages.push(message),
@@ -406,6 +407,7 @@ test('packaged SDK colour ABI recognizes Darwin leading-underscore symbols', () 
     const result = assertSdkCompilerRuntimeAbi({
       sdk,
       target,
+      readImports: () => [],
       readCompiler: () => symbols,
       readRuntime: () => '0000000000000000 T _g_cjLoadBadMask\n',
       log: () => {},
@@ -417,7 +419,7 @@ test('packaged SDK colour ABI recognizes Darwin leading-underscore symbols', () 
   }
 });
 
-test('packaged SDK colour ABI rejects a MISMATCH fake SDK', () => {
+test('packaged SDK colour ABI rejects a real import missing from its provider', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-colour-abi-mismatch-'));
   try {
     const target = buildConfig({targetKey: 'linux-x64'}).target;
@@ -430,10 +432,11 @@ test('packaged SDK colour ABI rejects a MISMATCH fake SDK', () => {
       () => assertSdkCompilerRuntimeAbi({
         sdk,
         target,
-        readCompiler: () => '',
+        readCompiler: () => ' U arbitrary_dependency@RUNTIME_1\n',
+        readImports: () => ['arbitrary_dependency@RUNTIME_1'],
         readRuntime: () => `00000000 D g_cjLoadBadMask\n`,
       }),
-      /g_cjLoadBadMask ABI mismatch: compiler=0 .* runtime=1 /,
+      /unresolved runtime ABI imports: arbitrary_dependency@RUNTIME_1/,
     );
   } finally {
     fs.rmSync(root, {recursive: true, force: true});

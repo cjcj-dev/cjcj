@@ -170,7 +170,7 @@ export function runtimeSplitPaths({hostSdk, targetSdk, target}) {
 export function readRuntimeSymbols(file, target) {
   if (target.spec.os === 'windows' && (!target.spec.crossCompile || /\.dll$/i.test(file))) return readPeSymbols(file, target, 'exports');
   const args = target.spec.os === 'darwin'
-    ? ['-g', file]
+    ? ['-gU', file]
     : ['-D', '--defined-only', file];
   const result = spawnSync('nm', args, {encoding: 'utf8'});
   if (result.status !== 0) {
@@ -210,11 +210,56 @@ function countSdkLoadBadMask(symbols, target) {
     .filter(line => new RegExp(`\\b${symbol}\\b`).test(line)).length;
 }
 
+// ELF version needs record the provider of versioned imports. Do not infer
+// runtime ownership from API spelling: the compiler also imports LLVM/libc.
+// Unversioned ELF symbols have no provider attribution in this metadata.
+export function readRuntimeImports(file, target) {
+  if (target.spec.os === 'windows' && (!target.spec.crossCompile || /\.exe$/i.test(file))) {
+    return readPeSymbols(file, target, 'imports', target.spec.runtimeLibrary).split('\n').filter(Boolean);
+  }
+  const darwin = target.spec.os === 'darwin';
+  const result = spawnSync(darwin ? 'nm' : 'readelf',
+    darwin ? ['-m', '-u', file] : ['--wide', '--dyn-syms', '--version-info', file],
+    {encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, env: {...process.env, LC_ALL: 'C'}});
+  if (result.status !== 0) throw new BuildError('runtime.sdk-abi',
+    `import providers unavailable for ${file}: rc=${result.status} ${result.error?.message || result.stderr || ''}`);
+  if (darwin) {
+    const provider = path.basename(target.spec.runtimeLibrary, '.dylib');
+    return result.stdout.split(/\r?\n/).flatMap(line => {
+      const match = line.match(/\(undefined\) external (\S+) \(from ([^)]+)\)/);
+      return match && match[2] === provider ? [match[1]] : [];
+    });
+  }
+  const versions = new Set();
+  let provider = null, needs = false;
+  for (const line of result.stdout.split(/\r?\n/)) {
+    if (/^Version needs section/.test(line)) needs = true;
+    else if (/^Version .* section/.test(line)) needs = false;
+    if (!needs) continue;
+    const library = line.match(/\bFile: (\S+)/);
+    if (library) provider = library[1];
+    const version = line.match(/\bVersion: (\d+)/);
+    if (version && provider === target.spec.runtimeLibrary) versions.add(version[1]);
+  }
+  return result.stdout.split(/\r?\n/).flatMap(line => {
+    const symbol = line.match(/^\s*\d+:\s+\S+\s+\S+\s+\S+\s+GLOBAL\s+\S+\s+UND\s+(\S+)\s+\((\d+)\)\s*$/);
+    return symbol && versions.has(symbol[2]) ? [symbol[1]] : [];
+  });
+}
+
+function symbolNames(symbols, imports = false) {
+  return String(symbols).split(/\r?\n/).flatMap(line => {
+    const fields = line.trim().split(/\s+/);
+    return !fields.at(-1) || (imports && ['w', 'v'].includes(fields.at(-2))) ? [] : [fields.at(-1)];
+  });
+}
+
 export function assertSdkCompilerRuntimeAbi({
   sdk,
   target,
   readCompiler = readCompilerSymbols,
   readRuntime = readRuntimeSymbols,
+  readImports = readRuntimeImports,
   log = console.log,
 }) {
   const sdkRoot = requireDirectory(sdk, 'SDK');
@@ -223,27 +268,31 @@ export function assertSdkCompilerRuntimeAbi({
     path.join(sdkRoot, runtimeRelativePath(target, 'target')),
     'packaged',
   );
-  const compilerCount = countSdkLoadBadMask(readCompiler(compiler, target), target);
-  const runtimeCount = countSdkLoadBadMask(readRuntime(runtime, target), target);
-  if (![compilerCount, runtimeCount].every(count => count === 0 || count === 1)) {
-    throw new BuildError(
-      'runtime.sdk-abi',
-      `${LOAD_BAD_MASK_SYMBOL} ABI count is not boolean: compiler=${compilerCount} path=${compiler}; ` +
-      `runtime=${runtimeCount} path=${runtime}`,
-    );
+  const compilerSymbols = readCompiler(compiler, target);
+  const runtimeSymbols = readRuntime(runtime, target);
+  const compilerCount = countSdkLoadBadMask(compilerSymbols, target);
+  const runtimeCount = countSdkLoadBadMask(runtimeSymbols, target);
+  // Counts describe the products, not the barrier implementation. N575 uses
+  // ThreadLocal.gcData + loadBadMask; runtime accessors can read the global in
+  // their callee. Neither requires the executable to import that global.
+  const required = new Set(readImports(compiler, target));
+  const mask = target.spec.os === 'darwin' ? `_${LOAD_BAD_MASK_SYMBOL}` : LOAD_BAD_MASK_SYMBOL;
+  // Preserve the original direct, unversioned global dependency check too.
+  // This is not a claim to resolve every unversioned/flat-namespace import.
+  if (symbolNames(compilerSymbols, true).includes(mask)) required.add(mask);
+  const provided = new Set();
+  for (const name of symbolNames(runtimeSymbols)) {
+    provided.add(name.replace('@@', '@'));
+    if (name.includes('@@')) provided.add(name.split('@', 1)[0]);
   }
-  if (compilerCount !== runtimeCount) {
-    throw new BuildError(
-      'runtime.sdk-abi',
-      `${LOAD_BAD_MASK_SYMBOL} ABI mismatch: compiler=${compilerCount} path=${compiler}; ` +
-      `runtime=${runtimeCount} path=${runtime}`,
-    );
-  }
+  const missing = [...required].filter(name => !provided.has(name));
+  if (missing.length) throw new BuildError('runtime.sdk-abi',
+    `unresolved runtime ABI imports: ${missing.join(', ')}; compiler=${compiler}; runtime=${runtime}`);
   const compilerReal = fs.realpathSync(compiler);
   const runtimeReal = fs.realpathSync(runtime);
   log(
     `SDK_COLOUR_ABI_ASSERT_PASS compiler=${compilerCount} path=${compilerReal} ` +
-    `runtime=${runtimeCount} path=${runtimeReal}`,
+    `runtime=${runtimeCount} path=${runtimeReal} imports=${required.size}`,
   );
   return {
     sdk: sdkRoot,
@@ -251,6 +300,7 @@ export function assertSdkCompilerRuntimeAbi({
     runtime: runtimeReal,
     compilerCount,
     runtimeCount,
+    runtimeImports: [...required],
   };
 }
 
