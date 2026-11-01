@@ -10,7 +10,7 @@ async function fixture(){
  const compile=spawnSync('cc',[original,'-o',producer],{encoding:'utf8'});assert.equal(compile.status,0,compile.stderr);
  const stage2=path.join(work,'sdk-stage2');await installCompiler(stage2,producer);
  await atomicJson(path.join(stage2,'STAGE-INPUTS.json'),{phase:'stage2',compilerFile:'bin/cjcj-stage1',compilerSha256:await fileDigest(producer)});
- for(const [rel,data]of Object.entries({['lib/'+tuple+'/libcangjie-std-core.a']:'std input bytes',['modules/'+tuple+'/std/std.core.cjo']:'module input bytes','share/cjcj/runtime_shim/cjselfhost_llvmshim.o':'LLVM shim input','share/cjcj/runtime_shim/cjc_runtime_config.o':'runtime config input'})){
+ for(const [rel,data]of Object.entries({['lib/'+tuple+'/libcangjie-std-core.a']:'std input bytes',['modules/'+tuple+'/std/std.core.cjo']:'module input bytes','share/cjcj/runtime_shim/cjselfhost_llvmshim.o':'LLVM shim input','share/cjcj/runtime_shim/cjc_runtime_config.o':'runtime config input','share/cjcj/runtime_shim/cjc_heap_defaults.o':'compiler defaults input'})){
   await fs.mkdir(path.dirname(path.join(stage2,rel)),{recursive:true});await fs.writeFile(path.join(stage2,rel),data);}
  return {root,work,sdk,source,tuple,stage2,producer,producerSha256:await fileDigest(producer)};
 }

@@ -127,7 +127,7 @@ export async function nativeStage(options, {signal} = {}) {
       // a build-tree facility, not a package member: copying it would carry an
       // absolute path out of the tree, which the install guard rejects as escape.
       {from:path.join(target,'release'),to:'share/cjcj/cjo',exclude:['bin','runtime']},
-      ...['cjselfhost_llvmshim.o','cjc_runtime_config.o'].map(name=>({from:path.join(source,'runtime_shim',name),to:'share/cjcj/runtime_shim/'+name}))]);
+      ...['cjselfhost_llvmshim.o','cjc_runtime_config.o','cjc_heap_defaults.o'].map(name=>({from:path.join(source,'runtime_shim',name),to:'share/cjcj/runtime_shim/'+name}))]);
     await atomicJson(path.join(destination,'compiler-inputs.json'),{commit,version:process.env.SOURCE_SDK_VERSION,parentSha256:await fileDigest(await compilerProducer(sdk)),
       stdSha256:await stdIdentity(options['std-input']||sdk),
       stdCoreSha256:await fileDigest(path.join(sdk,'lib',native.tuple,'libcangjie-std-core.a')),

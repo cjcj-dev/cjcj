@@ -202,6 +202,42 @@ static size_t GetStackSizeFromEnv(const char* name)
     return stackSize;
 }
 
+#if defined(__linux__)
+/* Heap syntax follows the consumed runtime's CString::ParseSizeFromEnv,
+ * not the independent coroutine-stack parser above. In particular, positive
+ * digit strings are converted with base 0 (a leading zero means octal). */
+__attribute__((visibility("hidden"))) int CJCJ_CompilerHeapAboveSoftDefault(const char* hard)
+{
+    if (hard == NULL) return 0;
+    char* compact = malloc(strlen(hard) + 1);
+    if (compact == NULL) return 0;
+    size_t n = 0;
+    for (size_t i = 0; hard[i] != '\0'; ++i) {
+        if (hard[i] != ' ') compact[n++] = hard[i];
+    }
+    compact[n] = '\0';
+    if (n <= 2) { free(compact); return 0; }
+    const char unit = (char)tolower((unsigned char)compact[n - 2]);
+    if (tolower((unsigned char)compact[n - 1]) != 'b' ||
+        (unit != 'k' && unit != 'm' && unit != 'g')) {
+        free(compact); return 0;
+    }
+    compact[n - 2] = '\0';
+    size_t firstDigit = compact[0] == '+' ? 1 : 0;
+    if (firstDigit == n - 2) { free(compact); return 0; }
+    for (size_t i = firstDigit; i < n - 2; ++i) {
+        if (compact[i] < '0' || compact[i] > '9') { free(compact); return 0; }
+    }
+    /* Match runtime conversion, including its base-0 partial conversion and
+     * size_t unit arithmetic; leave invalid sizes to normal runtime validation. */
+    size_t kilobytes = (size_t)strtoul(compact, NULL, 0);
+    free(compact);
+    if (unit == 'm') kilobytes *= KB;
+    if (unit == 'g') kilobytes *= MB;
+    return kilobytes <= SIZE_MAX / KB && kilobytes > 8 * MB;
+}
+#endif
+
 #ifdef _WIN32
 static void __cdecl CallRuntime(void);
 #pragma section(".CRT$XCU", read)

@@ -1051,5 +1051,10 @@
     "file": "ci/test-features-metadata.mjs",
     "executor": "manual",
     "reason": "Real compiler features directive compile/run, metadata scan and invalid-declaration control need a paired installed compiler/std/runtime; invoke with ABS_COMPILER NEW_WORK TARGET_LD."
+  },
+  {
+    "file": "runtime_shim/tests/compiler_heap_defaults.test.mjs",
+    "executor": "zx",
+    "args": []
   }
 ]

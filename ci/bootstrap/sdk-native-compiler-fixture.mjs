@@ -12,7 +12,7 @@ test('native compiler build/install, source restoration and repeated publication
  const run=(exe,args,extra={})=>{const p=spawnSync(exe,args,{encoding:'utf8',maxBuffer:16*1024*1024,...extra});return p;};
  await write(source+'/cjpm.toml','compile-option = "-O1"\n');
  await write(source+'/.gitignore','target/\nruntime_shim/*.o\n');
- await write(source+'/runtime_shim/build_shim.mjs',`import fs from 'node:fs/promises';await fs.writeFile('runtime_shim/cjselfhost_llvmshim.o','fixture shim');await fs.writeFile('runtime_shim/cjc_runtime_config.o','fixture config');`);
+ await write(source+'/runtime_shim/build_shim.mjs',`import fs from 'node:fs/promises';await fs.writeFile('runtime_shim/cjselfhost_llvmshim.o','fixture shim');await fs.writeFile('runtime_shim/cjc_runtime_config.o','fixture config');await fs.writeFile('runtime_shim/cjc_heap_defaults.o','fixture heap defaults');`);
  await write(source+'/main.c','#include <stdio.h>\nint main(void){puts("42");return 0;}\n');
  const compile=run('cc',[source+'/main.c','-o',root+'/parent']);assert.equal(compile.status,0,compile.stderr);
  await write(sdk+'/STAGE-INPUTS.json',JSON.stringify({compilerFile:'bin/parent'}));await fs.mkdir(sdk+'/bin',{recursive:true});await fs.copyFile(root+'/parent',sdk+'/bin/parent');
