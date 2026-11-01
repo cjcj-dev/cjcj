@@ -5,6 +5,11 @@
     "args": []
   },
   {
+    "file": "build/test/package-runtime-abi.test.mjs",
+    "executor": "manual",
+    "reason": "Requires Linux x64, Node, GNU nm/readelf, a complete installed SDK in PACKAGE_ABI_SDK with the N575 TLS/indirect barrier compiler and its paired runtime, and the genuine older official SDK in PACKAGE_ABI_OFFICIAL_SDK whose provider lacks required imports. RELEASE_EVIDENCE_TEST_ROOT must be an owned absolute directory. Run node --test build/test/package-runtime-abi.test.mjs. Public build/cli.mjs package reads these products; package-abi-observer.mjs stops after the real ABI gate with rc78, before any SDK write. Private prefixes copy only the normal entry/recipe and link existing products for an actual wrong-provider refusal and plain pair control. No whole SDK copy or rebuild. Missing inputs skip; generic GATING cannot qualify this integration. Finite ABI arrival is not complete package/release or all-platform layout compatibility."
+  },
+  {
     "file": "ci/bootstrap/sdk-cjfmt-entry.test.mjs",
     "executor": "manual",
     "reason": "Requires a dedicated Linux x64 worker with Node, CMake, Ninja and a C++ compiler with static C++ runtime support; CJCJ_CJFMT_TEST_SDK must name an existing installed source-built SDK with .target-tools/tools/bin/cjfmt, tools/config/cangjie-format.toml and runtime/lib/linux_x86_64_cjnative. Set RELEASE_EVIDENCE_TEST_ROOT to an owned absolute directory, then run node --test ci/bootstrap/sdk-cjfmt-entry.test.mjs. Copies the existing tool and runtime into an independent prefix and builds only the native entry; retain installation and loader logs. Missing SDK input skips the test, so generic GATING cannot qualify this integration without provisioning its input. Tests config-home fallback and execution-library isolation, not full SDK qualification."
