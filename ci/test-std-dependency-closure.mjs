@@ -55,6 +55,9 @@ main(): Int64 {
     let token = Token(TokenKind.IDENTIFIER, "closure")
     let bytes = token.toBytes()
     if (token.value != "closure" || bytes.size <= 7) { return 2 }
+    let parsed = parseExpr(Tokens([Token(TokenKind.INTEGER_LITERAL, "42")]))
+    let tokens = parsed.toTokens()
+    if (tokens.size != 1 || tokens[0].value != "42") { return 3 }
     println("STD_AST_PRIVATE_SUPPORT_LINKED")
     return 0
 }
