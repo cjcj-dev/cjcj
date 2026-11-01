@@ -1,0 +1,73 @@
+#!/usr/bin/env zx
+// Real scan/CJO/link regression; use a compiler and its matching installed SDK.
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+const [compiler, workArg, targetLd] = process.argv.slice(2);
+assert.ok(compiler && path.isAbsolute(compiler) && workArg && targetLd,
+  'usage: zx ci/test-std-dependency-closure.mjs ABS_COMPILER NEW_WORK TARGET_LD; set paired compiler environment');
+const work = path.resolve(workArg);
+assert.ok(!fs.existsSync(work), 'use new evidence, preserving first failures');
+fs.mkdirSync(work, {recursive: true});
+const records = [];
+function run(name, argv, env = process.env) {
+  const started = new Date().toISOString();
+  const out = fs.openSync(path.join(work, name + '.stdout'), 'wx');
+  const err = fs.openSync(path.join(work, name + '.stderr'), 'wx');
+  const p = spawnSync(argv[0], argv.slice(1), {cwd: work, env,
+    stdio: ['ignore', out, err], timeout: 300000});
+  fs.closeSync(out); fs.closeSync(err);
+  records.push({name, argv, cwd: work, started, ended: new Date().toISOString(),
+    pid: p.pid, rc: p.status, signal: p.signal, error: p.error?.message ?? null});
+  fs.writeFileSync(path.join(work, 'commands.json'), JSON.stringify(records, null, 2) + '\n');
+  assert.equal(p.error, undefined, name); assert.equal(p.signal, null, name); assert.equal(p.status, 0, name);
+  return fs.readFileSync(path.join(work, name + '.stdout'), 'utf8');
+}
+function descriptor(text) {
+  const value = JSON.parse(text);
+  const found = [];
+  function visit(v) {
+    if (!v || typeof v !== 'object') return;
+    if (v.package === 'stddepfixture' && Array.isArray(v['std-dependencies'])) found.push(v);
+    else for (const child of Object.values(v)) visit(child);
+  }
+  visit(value);
+  assert.equal(found.length, 1, 'one real package descriptor');
+  return found[0];
+}
+function checkDependencies(info) {
+  const graph = Object.assign({}, ...info['std-dependencies']);
+  assert.ok(Object.hasOwn(graph, 'std.ast'), 'retain the real std.ast library');
+  assert.ok(Object.hasOwn(graph, 'std.core'), 'retain transitive std dependencies');
+  assert.ok(!Object.hasOwn(graph, 'flatbuffers'), 'private support is not a std library node');
+  for (const edges of Object.values(graph)) assert.ok(!edges.includes('flatbuffers'), 'no private support std edge');
+  assert.equal(info.dependencies.find(d => d.package === 'flatbuffers')?.isStd, false,
+    'an explicit non-std import must still be reported');
+}
+const source = path.join(work, 'main.cj');
+fs.writeFileSync(source, `package stddepfixture
+import std.ast.*
+import flatbuffers.*
+main(): Int64 {
+    let token = Token(TokenKind.IDENTIFIER, "closure")
+    let bytes = token.toBytes()
+    if (token.value != "closure" || bytes.size <= 7) { return 2 }
+    println("STD_AST_PRIVATE_SUPPORT_LINKED")
+    return 0
+}
+`);
+checkDependencies(descriptor(run('source-scan', [compiler, source, '--scan-dependency'])));
+const exe = path.join(work, 'stddepfixture');
+const map = path.join(work, 'link.map');
+run('compile', [compiler, source, '-O0', '--link-options', '-Map=' + map, '-o', exe]);
+const cjo = path.join(work, 'stddepfixture.cjo');
+assert.ok(fs.existsSync(cjo), 'normal compiler exports the package CJO');
+checkDependencies(descriptor(run('cjo-scan', [compiler, cjo, '--scan-dependency'])));
+const linkMap = fs.readFileSync(map, 'utf8');
+assert.match(linkMap, /libcangjie-std-ast\.a\(flatbuffers\.o\)/,
+  'the installed std.ast archive supplies its real flatbuffers object');
+assert.ok(!linkMap.includes('libcangjie-std-flatbuffers'), 'no invented link library');
+assert.match(run('target', [exe], {...process.env, LD_LIBRARY_PATH: targetLd}),
+  /STD_AST_PRIVATE_SUPPORT_LINKED/);
+console.log('STD_DEPENDENCY_CLOSURE source/cjo/direct-nonstd/archive/target PASS');

@@ -1041,5 +1041,10 @@
     "file": "packages/sema/src/TypeManagerConcurrent_test.cj",
     "executor": "cjpm",
     "member": "packages/sema"
+  },
+  {
+    "file": "ci/test-std-dependency-closure.mjs",
+    "executor": "manual",
+    "reason": "Real source/CJO scan, std.ast private flatbuffers archive link and target execution require a matching installed compiler/std/runtime tuple; invoke with ABS_COMPILER NEW_WORK TARGET_LD."
   }
 ]

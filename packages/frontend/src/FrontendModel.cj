@@ -6862,7 +6862,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 
     private func CollectStdDependency(stdDependencies: HashMap<String, HashSet<String>>, stdPkg: String): Unit {
-        if (stdDependencies.contains(stdPkg)) {
+        if (!STANDARD_LIBS.contains(stdPkg) || stdDependencies.contains(stdPkg)) {
             return
         }
         let importInfo = HashSet<String>()
@@ -6882,7 +6882,13 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         if (let Some(stdPkgInfo) <- pkgOpt) {
             for (file in stdPkgInfo.files) {
                 for (importSpec in file.imports) {
-                    importInfo.add(importSpec.content.GetImportedPackageNameWithIsDecl())
+                    let importedPackage = importSpec.content.GetImportedPackageNameWithIsDecl()
+                    // std.ast's private flatbuffers support is linked into std.ast,
+                    // not installed as a separate libcangjie-std-flatbuffers library.
+                    // Keep non-std imports in dependencies, not this std link graph.
+                    if (STANDARD_LIBS.contains(importedPackage)) {
+                        importInfo.add(importedPackage)
+                    }
                 }
             }
         }
