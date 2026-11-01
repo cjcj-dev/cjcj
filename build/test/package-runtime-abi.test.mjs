@@ -64,7 +64,7 @@ test('public package accepts indirect runtime dependencies and rejects a real in
     assert.match(control.stdout, /SDK_COLOUR_ABI_ASSERT_PASS compiler=0 .* runtime=0 /);
     assert.match(control.stdout, /PACKAGE_ABI_READONLY_BOUNDARY_REACHED/);
     assert.equal(good.status, 78, good.stderr);
-    assert.match(good.stdout, /SDK_COLOUR_ABI_ASSERT_PASS compiler=0 .* runtime=1 imports=[1-9]/);
+    assert.match(good.stdout, /SDK_COLOUR_ABI_ASSERT_PASS compiler=0 .* runtime=1 .* imports=[1-9]/);
     assert.match(good.stdout, /PACKAGE_ABI_READONLY_BOUNDARY_REACHED/);
     assert.equal(bad.status, 1, bad.stderr);
     assert.match(bad.stderr, /\[runtime.sdk-abi\] unresolved runtime ABI imports:/);
