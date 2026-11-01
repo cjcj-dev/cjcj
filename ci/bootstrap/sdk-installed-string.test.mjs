@@ -53,7 +53,7 @@ for(const mode of ['cancel-zero','signal'])test('public entry records child and 
  await fs.chmod(cjc,0o755);
  const compiler=await put('sdk/libexec/compiler/cjcj-stage1','compiler fixture');
  await put('sdk/bin/cjc.entry','cjcj-sdk-entry-v1\nlinux\nlibexec/compiler/cjcj-stage1\n\n\nruntime/lib/'+tuple+'\n');
- await put('sdk/compiler-inputs.json',JSON.stringify({compilerSha256:await fileDigest(compiler)}));
+ await put('sdk/STAGE-INPUTS.json',JSON.stringify({compilerSha256:await fileDigest(compiler)}));
  await put('std/lib/'+tuple+'/libcangjie-std-core.a','archive fixture');
  await put('std/modules/'+tuple+'/std/std.core.cjo','module fixture');
  const r=await put('runtime/runtime/lib/'+tuple+'/libcangjie-runtime.so','runtime fixture');

@@ -75,7 +75,7 @@ export async function stringInstall({sdk,std,runtime,platform,work,signal}) {
   if(!(await fs.realpath(compiler)).startsWith(sdk+path.sep))throw new Error('STRING_COMPILER_ESCAPE');
   result.inputs={compiler:await identify(compiler),entry:await identify(entry),module:await identify(module),
    core:await identify(core),runtime:await identify(runtimeFile)};
-  result.compilerInputs=JSON.parse(await fs.readFile(path.join(sdk,'compiler-inputs.json'),'utf8'));
+  result.compilerInputs=JSON.parse(await fs.readFile(path.join(sdk,'STAGE-INPUTS.json'),'utf8'));
   if(result.compilerInputs.compilerSha256!==result.inputs.compiler.sha256)throw new Error('STRING_COMPILER_INPUT_MISMATCH');
   await save();
   const input=path.join(work,'installed-string.cj'),binary=path.join(work,'string-consumer'),map=path.join(work,'link.map');
