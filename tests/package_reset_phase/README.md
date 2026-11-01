@@ -1,10 +1,14 @@
 # Package reset across split modules
 
-Status: NOT_RUN. This is a normal CLI consumer for the package-wide reset phase;
+Status: the initial ArrayList-valued fixture compiled with four tasks but its
+imports initializer remained in the main module (COVERAGE_MISS). The scalar
+fixture below preserves the collection import/init dependency without adding
+ArrayList generic bodies to the splitter workload; its foreign placement still
+must be checked from the actual emitted IR. This is a normal CLI consumer for the package-wide reset phase;
 it does not reproduce or explain the historical LLVM getName fault by itself.
 
 With an independently installed candidate and its matching target SDK, compile
-`consumer.cj` using `--apc 4 --jobs 4 --save-temps=<new-directory>` and
+`consumer.cj` using `--apc=4 --jobs 4 --save-temps=<new-directory>` and
 `CJCJ_BACKEND_CONCURRENCY_TRACE=1`. Use a new output path and retain the actual
 compiler command, exit status, trace and emitted IR. No LLVM/runtime substitution,
 debugger, retry loop or disabled concurrency is required.
