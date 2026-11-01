@@ -326,8 +326,9 @@ test('component install carries root assets and the tool consumer preserves them
  const tuple='linux_x86_64_cjnative',host=root+'/H',llvm=root+'/N';
  const selection={platform:'linux_x86_64',bootstrapHost:{install:host},compilerExecution:{role:'target'},
   targetComponents:{compiler:{product:root+'/C/bin/cjc'},runtime:{install:root+'/R'},std:{install:root+'/std'},llvm:{install:llvm}}};
- const recipe=installationRecipe(selection),names=['LICENSE','Open_Source_Software_Notice.docx','envsetup.sh'];
- const copies=recipe.copies.filter(row=>names.includes(row.to));assert.equal(copies.length,3);
+ const recipe=installationRecipe(selection),names=['LICENSE','Open_Source_Software_Notice.docx','envsetup.sh',
+  'share/cjcj/build-inputs/native-build.json','share/cjcj/build-inputs/python-original.json'];
+ const copies=recipe.copies.filter(row=>names.includes(row.to));assert.equal(copies.length,5);
  assert.equal(recipe.links['lib/'+tuple+'/libboundscheck.so'],'../../runtime/lib/'+tuple+'/libboundscheck.so');
  const put=async(file,text)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,text);};
  for(const row of copies)await put(row.from,row.to+' selected producer bytes');
@@ -341,7 +342,7 @@ test('component install carries root assets and the tool consumer preserves them
  const green=await invoke('normal',config);assert.equal(green.status,0,green.stderr);
  await put(installed+'/bin/cjc','finite consumer entry');
  const consumer=await toolConsumerCopies(installed,'linux_x86_64');
- for(const name of names)assert.ok(consumer.some(row=>row.to===name));
+ for(const name of names)assert.ok(consumer.some(row=>row.to===name||name.startsWith(row.to+'/')));
  const forward={...config,work:root+'/consumer-work',install:root+'/consumer',stages:[{id:'assets',output:'${install}',copies:consumer}],finalStage:'assets'};
  const forwarded=await invoke('consumer',forward);assert.equal(forwarded.status,0,forwarded.stderr);
  for(const name of names)assert.equal(await fs.readFile(root+'/consumer/'+name,'utf8'),name+' selected producer bytes');

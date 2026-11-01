@@ -138,6 +138,14 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   }
   copies.push(...scripts.map(name=>({from:fileURLToPath(new URL('../../scripts/'+name,import.meta.url)),
     to:'tools/'+name,owner:'repository SDK tools'})));
+  // The component path consumes the same original N/AST installations as
+  // bootstrap, but does not run bootstrap's native-check stage. Transport the
+  // producer's own records unchanged, not a fabricated successful check.
+  if(!bootstrap&&!nativeChecks&&layout!=='native-output')copies.push(
+    {from:llvm.buildResult??path.join(llvm.install,'BUILD-INPUTS.json'),to:'share/cjcj/build-inputs/native-build.json',owner:'N original build'},
+    ...(native.os==='win32'?[]:[{from:path.join(llvm.install,'share/cjcj/build-inputs/python-original.json'),to:'share/cjcj/build-inputs/python-original.json',owner:'N original Python input'}]),
+    ...(ast&&ast.install!==llvm.install?[{from:ast.buildResult??path.join(ast.install,'BUILD-INPUTS.json'),
+      to:'share/cjcj/build-inputs/native-ast.json',owner:'AST original build'}]:[]));
   if(nativeChecks)copies.push(
     {from:nativeChecks+'/llvm/native-input-result.json',to:'share/cjcj/build-inputs/native-llvm.json',owner:'native LLVM checks'},
     {from:llvm.buildResult,to:'share/cjcj/build-inputs/native-build.json',owner:'native LLVM build'},
