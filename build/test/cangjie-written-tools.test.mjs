@@ -187,3 +187,35 @@ for (const layout of ['same', 'alias', 'separate']) {
     }
   });
 }
+
+test('package parity consumes native layout and ELF SONAME through the public command', async () => {
+  const {root, officialSdkRoot, config} = packageFixture();
+  const installed = path.join(config.softwareDir, 'cangjie');
+  const {spawnSync} = await import('node:child_process');
+  try {
+    file(officialSdkRoot, ['runtime/lib/windows_x86_64_cjnative/runtime.dll']);
+    file(officialSdkRoot, ['third_party/mingw/lib/crt2.o']);
+    const source = file(root, ['soname.c'], 'int library_interface(void){return 0;}\n');
+    const old = file(officialSdkRoot, ['third_party/llvm/lib/libxml2.so.2.14.0']);
+    const current = file(installed, ['third_party/llvm/lib/libxml2.so.16.1.4']);
+    for (const output of [old, current]) {
+      const args = ['-shared', '-fPIC', '-Wl,-soname,libxml2.so.16', source, '-o', output];
+      const r = spawnSync('cc', args, {encoding:'utf8'}); assert.equal(r.status, 0, r.stderr);
+    }
+    const loaderName = path.join(path.dirname(current), 'libxml2.so.16');
+    fs.symlinkSync(path.basename(current), loaderName);
+    // This finite fixture deliberately has no STAGE-INPUTS. Reaching that
+    // existing consumer is parity coverage, never a complete SDK/package pass.
+    await rejectsMissingStage(config);
+    fs.unlinkSync(loaderName);
+    await assert.rejects(publicPackage(config), /missing-official-path\tthird_party\/llvm\/lib\/libxml2.so.2.14.0/);
+    fs.symlinkSync(path.basename(current), loaderName);
+    const mismatch = spawnSync('cc', ['-shared','-fPIC','-Wl,-soname,libxml2.so.99',source,'-o',current], {encoding:'utf8'});
+    assert.equal(mismatch.status, 0, mismatch.stderr);
+    await assert.rejects(publicPackage(config), /missing-official-path\tthird_party\/llvm\/lib\/libxml2.so.2.14.0/);
+    const restore = spawnSync('cc', ['-shared','-fPIC','-Wl,-soname,libxml2.so.16',source,'-o',current], {encoding:'utf8'});
+    assert.equal(restore.status, 0, restore.stderr);
+    await rejectsMissingStage(config);
+    console.log('PUBLIC_PARITY_SONAME_MISSING_MISMATCH_RESTORED finite=true');
+  } finally { fs.rmSync(root, {recursive:true, force:true}); }
+});

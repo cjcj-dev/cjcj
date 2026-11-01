@@ -35,6 +35,7 @@ export async function toolConsumerCopies(sdk,platform) {
   if(entry===null)await fs.access(path.join(sdk,'bin/cjc'+native.exe));
   const paths=new Set(['bin','libexec','runtime','lib','modules','third_party','.native-tools','include','schema','share/cjcj',
     'STAGE-INPUTS.json','compiler-inputs.json','PROVENANCE.txt','RUNTIME-INPUTS.json',
+    'LICENSE','Open_Source_Software_Notice.docx','envsetup.sh','envsetup.bat','envsetup.ps1',
     ...recipe.slice(5).filter(rel=>rel.startsWith('.host/')||rel.startsWith('.compiler-exec/'))]);
   const copies=[];
   for(const rel of paths) {
@@ -117,6 +118,12 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
       {from:host.install+'/runtime/lib/'+sdkPlatform(host.platform??platform).tuple,to:'.host/runtime/lib/'+sdkPlatform(host.platform??platform).tuple,owner:'bootstrap host comparison runtime'},
       {from:product,to:compilerName,owner:'compiler'});
   }
+  // Component installation lacks the root assets carried by the ordinary
+  // native-output and bootstrap recipes. Keep the selected host's legal texts
+  // and the selected native producer's environment entry; never borrow binaries.
+  if(!bootstrap&&layout!=='native-output'&&native.os==='linux')copies.push(
+    ...['LICENSE','Open_Source_Software_Notice.docx'].map(name=>({from:path.join(host.install,name),to:name,owner:'H legal texts'})),
+    {from:path.join(llvm.install,'envsetup.sh'),to:'envsetup.sh',owner:'N environment entry'});
   // Native LLVM executables run from the retained bin directory. Clang
   // derives its builtin headers from that executable, so carry the producer's
   // matching resource tree beside it as well as in the public LLVM prefix.
@@ -150,7 +157,8 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     ]:[]),
     {directory:'tools/bin',retain:'.native-tools/tools/bin',names:['cjdb'+exe,'chir-dis'+exe,'LSPMacroServer'+exe],libraries:nLib},
     {directory:'third_party/llvm/bin',retain:'.native-tools/third_party/llvm/bin',libraries:nLib,exclude:llvm.windowsToolchain?.installedFiles.filter(row=>row.path.startsWith('third_party/llvm/bin/')).map(row=>path.basename(row.path))||[]},
-  ],links:{['bin/cjc'+exe]:'cjcj-stage1'+exe,['bin/cjc-frontend'+exe]:'cjcj-stage1'+exe,
+  ],links:{...(!hostObjects&&layout!=='native-output'&&native.os==='linux'?{
+    ['lib/'+tuple+'/libboundscheck.so']:'../../runtime/lib/'+tuple+'/libboundscheck.so'}:{}),['bin/cjc'+exe]:'cjcj-stage1'+exe,['bin/cjc-frontend'+exe]:'cjcj-stage1'+exe,
     ['libexec/compiler/cjc'+exe]:'cjcj-stage1'+exe,['libexec/compiler/cjc-frontend'+exe]:'cjcj-stage1'+exe,
     'libexec/runtime':prefix?'../'+prefix+'/runtime':'../runtime'}};
 }
