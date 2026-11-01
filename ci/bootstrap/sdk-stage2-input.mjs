@@ -49,7 +49,7 @@ export async function stage2Input(supplied, input) {
   const llvm = path.join('third_party/llvm',native.llvmDirectory,native.llvmLibrary);
   if (await fileDigest(path.join(install,llvm)) !== await fileDigest(path.join(input.llvm.install,llvm)))
     throw new Error('C2_REUSE_LLVM_IDENTITY');
-  for (const name of ['cjselfhost_llvmshim.o','cjc_runtime_config.o'])
+  for (const name of ['cjselfhost_llvmshim.o','cjc_runtime_config.o','cjc_heap_defaults.o'])
     await fs.access(path.join(install,'share/cjcj/runtime_shim',name));
   await fs.access(path.join(install,'share/cjcj/cjo'));
   // These are source/configuration facts. No new PASS or authority is minted.

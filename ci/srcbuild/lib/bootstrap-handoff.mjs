@@ -20,7 +20,7 @@ export async function prepareBootstrapHandoff({work,sdk,source,tuple}){
  const installed=path.join(work,'sdk-stage2');
  const compiler=await compilerProducer(installed);
  if(path.resolve(sdk)!==path.resolve(installed))await copyOutputs(sdk,[{from:installed,to:''}]);
- const objects=['cjselfhost_llvmshim.o','cjc_runtime_config.o'];
+ const objects=['cjselfhost_llvmshim.o','cjc_runtime_config.o','cjc_heap_defaults.o'];
  for(const name of objects){await fs.mkdir(path.join(source,'runtime_shim'),{recursive:true});
   await fs.copyFile(path.join(installed,'share/cjcj/runtime_shim',name),path.join(source,'runtime_shim',name));}
  const targetLd=[sdk+'/third_party/llvm/lib',sdk+'/runtime/lib/'+tuple,sdk+'/lib/'+tuple,sdk+'/tools/lib'].join(path.delimiter);

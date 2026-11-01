@@ -203,45 +203,13 @@ static size_t GetStackSizeFromEnv(const char* name)
 }
 
 #if defined(__linux__)
-/* In KB, matching GetSizeFromEnv. */
-#define COMPILER_SOFT_MAX_HEAP_SIZE (8 * MB)
-
-static int IsCompilerExecutable(void)
+/* Shared size syntax; the compiler-only link object owns the default policy.
+ * This common object must never export an implicit soft limit through env. */
+__attribute__((visibility("hidden"))) int CJCJ_CompilerHeapAboveSoftDefault(const char* hard)
 {
-    char path[4096];
-    ssize_t length = readlink("/proc/self/exe", path, sizeof(path) - 1);
-    if (length <= 0) {
-        return 0;
-    }
-    path[length] = '\0';
-    const char* slash = strrchr(path, '/');
-    const char* name = slash == NULL ? path : slash + 1;
-    return strcmp(name, "cjc") == 0 || strcmp(name, "cjcj::cjc") == 0;
-}
-
-/*
- * An explicit cjHeapSize also becomes the GC pacing target, so a compile keeps
- * far more heap committed than it needs. Compiling packages/chir with
- * cjHeapSize=16GB peaked at 17.9GiB; cjSoftMaxHeapSize=8GB peaked at 12.5GiB
- * with the same wall and CPU time.
- *
- * Only the compiler sets this. The object is linked into every product using
- * packages/utils, the variable is inherited, and the runtime refuses to start
- * a process whose soft limit exceeds its cjHeapSize, so a tool setting it could
- * break a program it starts with a smaller heap. At or below the default the
- * soft limit already follows cjHeapSize, so nothing needs setting.
- */
-static void SetCompilerSoftMaxHeapSize(void)
-{
-    const char* hard = getenv("cjHeapSize");
-    if (hard == NULL || getenv("cjSoftMaxHeapSize") != NULL) {
-        return;
-    }
+    if (hard == NULL) return 0;
     size_t hardSize = GetSizeFromEnv(hard);
-    if (hardSize == SIZE_MAX || hardSize <= COMPILER_SOFT_MAX_HEAP_SIZE || !IsCompilerExecutable()) {
-        return;
-    }
-    (void)setenv("cjSoftMaxHeapSize", "8GB", 0);
+    return hardSize != SIZE_MAX && hardSize > 8 * MB;
 }
 #endif
 
@@ -262,8 +230,5 @@ __attribute__((constructor)) static void CallRuntime(void)
     char stackSize[32];
     (void)snprintf(stackSize, sizeof(stackSize), "%zukb", GetStackSizeFromEnv("cjStackSize"));
     (void)setenv("cjStackSize", stackSize, 1);
-#if defined(__linux__)
-    SetCompilerSoftMaxHeapSize();
-#endif
 }
 #endif

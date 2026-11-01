@@ -21,7 +21,7 @@ export async function stage2Fixture(){
  await write('std/lib/'+tuple+'/libcangjie-std-core.a','bootstrap std bytes');await write('sdk/lib/'+tuple+'/libcangjie-std-core.a','bootstrap std bytes');
  for(const base of ['sdk','N'])await write(base+'/third_party/llvm/lib/libLLVM-15.so','LLVM interface bytes');
  await write('sdk/share/cjcj/cjo/package.cjo','CJO');
- for(const name of ['cjselfhost_llvmshim.o','cjc_runtime_config.o'])await write('sdk/share/cjcj/runtime_shim/'+name,'shim');
+ for(const name of ['cjselfhost_llvmshim.o','cjc_runtime_config.o','cjc_heap_defaults.o'])await write('sdk/share/cjcj/runtime_shim/'+name,'shim');
  const buildResult=path.join(root,'producer/result.json');
  await atomicJson(buildResult,{argv:['controlled-cjpm','build','-j8'],cwd:path.join(root,'producer'),rc:0,signal:null});
  const facts={commit,compilerSha256:await fileDigest(product),parentSha256:await fileDigest(parentProduct),stdSha256:await stdIdentity(path.join(root,'std')),stdCoreSha256:await fileDigest(path.join(root,'std/lib',tuple,'libcangjie-std-core.a')),sourceProduct:product,sourceBuildResult:buildResult};

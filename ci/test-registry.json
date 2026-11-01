@@ -1041,5 +1041,10 @@
     "file": "packages/sema/src/TypeManagerConcurrent_test.cj",
     "executor": "cjpm",
     "member": "packages/sema"
+  },
+  {
+    "file": "runtime_shim/tests/compiler_heap_defaults.test.mjs",
+    "executor": "zx",
+    "args": []
   }
 ]

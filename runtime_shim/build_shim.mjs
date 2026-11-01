@@ -56,6 +56,7 @@ async function isFile(target) {
 }
 
 await $`${ccLauncher} ${cc} -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L ${commitDefine} -c ${here}/cjc_runtime_config.c -o ${here}/cjc_runtime_config.o`;
+await $`${ccLauncher} ${cc} -std=c11 -O2 -fPIC -c ${here}/cjc_heap_defaults.c -o ${here}/cjc_heap_defaults.o`;
 console.log(`CJCJ_COMMIT=${cjcjCommit}`);
 
 // The caller validates an explicitly selected installed object. Without one,

@@ -13,6 +13,14 @@
   link-option = "--export-dynamic runtime_shim/cjselfhost_llvmshim.o ${CANGJIE_HOME}/third_party/llvm/lib/libLLVM-15.so -lstdc++"
   package-configuration = {}
 
+# Only the Linux compiler executable receives this process-local default.
+# Public SDK retained names and direct CJPM installs use the same init calls.
+[target.x86_64-unknown-linux-gnu]
+  link-option = "runtime_shim/cjc_heap_defaults.o --wrap=CJ_MRT_CjRuntimeInit --wrap=CJ_MRT_CjRuntimeInitWithConfigV1"
+
+[target.aarch64-unknown-linux-gnu]
+  link-option = "runtime_shim/cjc_heap_defaults.o --wrap=CJ_MRT_CjRuntimeInit --wrap=CJ_MRT_CjRuntimeInitWithConfigV1"
+
 [dependencies]
   "cjcj::driver" = { path = "../driver" }
   "cjcj::utils" = { path = "../utils" }
