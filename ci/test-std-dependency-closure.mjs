@@ -67,9 +67,17 @@ const cjo = path.join(work, 'stddepfixture.cjo');
 assert.ok(fs.existsSync(cjo), 'normal compiler exports the package CJO');
 checkDependencies(descriptor(run('cjo-scan', [compiler, cjo, '--scan-dependency'])));
 const linkMap = fs.readFileSync(map, 'utf8');
-assert.match(linkMap, /libcangjie-std-ast\.a\(flatbuffers\.o\)/,
-  'the installed std.ast archive supplies its real flatbuffers object');
+assert.match(linkMap, /libcangjie-std-ast\.so/,
+  'normal Linux std.ast selection is shared, including its private support');
+const targetLib = targetLd.split(path.delimiter).find(dir => fs.existsSync(path.join(dir, 'libcangjie-std-ast.so')));
+assert.ok(targetLib, 'the matching target std.ast is installed');
+const table = run('std-ast-dynamic', ['readelf', '-d', path.join(targetLib, 'libcangjie-std-ast.so')]);
+assert.ok(!table.split('\n').some(line => line.includes('NEEDED') && line.includes('flatbuffers')),
+  'private flatbuffers is embedded, not an unresolved separate DSO dependency');
 assert.ok(!linkMap.includes('libcangjie-std-flatbuffers'), 'no invented link library');
-assert.match(run('target', [exe], {...process.env, LD_LIBRARY_PATH: targetLd}),
+assert.match(run('target', [exe], {...process.env, LD_LIBRARY_PATH: targetLd, LD_DEBUG: 'files'}),
   /STD_AST_PRIVATE_SUPPORT_LINKED/);
-console.log('STD_DEPENDENCY_CLOSURE source/cjo/direct-nonstd/archive/target PASS');
+const loader = fs.readFileSync(path.join(work, 'target.stderr'), 'utf8');
+assert.ok(loader.includes('calling init: ' + path.join(targetLib, 'libcangjie-std-ast.so')),
+  'actual target loads the selected installed std.ast');
+console.log('STD_DEPENDENCY_CLOSURE source/cjo/direct-nonstd/std-ast-flatbuffers/target PASS');

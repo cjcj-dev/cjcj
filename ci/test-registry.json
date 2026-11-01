@@ -1045,6 +1045,6 @@
   {
     "file": "ci/test-std-dependency-closure.mjs",
     "executor": "manual",
-    "reason": "Real source/CJO scan, std.ast private flatbuffers archive link and target execution require a matching installed compiler/std/runtime tuple; invoke with ABS_COMPILER NEW_WORK TARGET_LD."
+    "reason": "Real source/CJO scan, std.ast private flatbuffers linkage and target execution require a matching installed compiler/std/runtime tuple; invoke with ABS_COMPILER NEW_WORK TARGET_LD."
   }
 ]
