@@ -136,7 +136,11 @@ int main(int argc, char **argv) {
 #error Unsupported SDK entry architecture
 #endif
         if (lines[4] != targetRole) throw std::runtime_error("entry architecture mismatch");
-        // Preserve ordinary build inputs; only the runtime loader is selected here.
+        // cjfmt's Options uses HOME for configuration fallback after -c. Keep
+        // that caller input separate from the descriptor-selected loader paths.
+        // Other tools still use the installed SDK as their resource home.
+        const bool formatterHome = lines[2] == ".target-tools/tools/bin/cjfmt" ||
+                                   lines[2] == ".target-tools/tools/bin/cjfmt.exe";
 
         std::string libraries;
         for (size_t i = 5; i < lines.size(); ++i) {
@@ -150,7 +154,7 @@ int main(int argc, char **argv) {
         }
 #ifdef _WIN32
         if (lines[3] != "windows") throw std::runtime_error("entry platform mismatch");
-        env(L"CANGJIE_HOME", root);
+        if (!formatterHome || !std::getenv("CANGJIE_HOME")) env(L"CANGJIE_HOME", root);
         std::wstring oldPath;
         const DWORD size = GetEnvironmentVariableW(L"PATH", nullptr, 0);
         if (size) { std::vector<wchar_t> b(size); GetEnvironmentVariableW(L"PATH", b.data(), size); oldPath = b.data(); }
@@ -204,7 +208,7 @@ int main(int argc, char **argv) {
             const char *callerLibraries = getenv(loader);
             if (callerLibraries && *callerLibraries) libraries += ":" + std::string(callerLibraries);
         }
-        if (setenv(loader, libraries.c_str(), 1) || setenv("CANGJIE_HOME", root.c_str(), 1))
+        if (setenv(loader, libraries.c_str(), 1) || setenv("CANGJIE_HOME", root.c_str(), formatterHome ? 0 : 1))
             throw std::runtime_error("entry environment");
         unsetenv("LD_PRELOAD"); unsetenv("LD_AUDIT"); unsetenv("DYLD_INSERT_LIBRARIES");
         const char *inheritedPath = getenv("PATH");
