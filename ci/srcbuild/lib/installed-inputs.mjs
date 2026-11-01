@@ -48,13 +48,23 @@ async function installedPython(sdk,platform,llvm,loaded){
     ||!names.includes(interpreter)||names.filter(name=>name?.endsWith('/Python.h')).length!==1
     ||names.filter(name=>/\/(?:libpython3\.11[^/]*|python311\.lib)$/.test(name||'')).length!==1)
     throw new Error('INSTALLED_PYTHON_ARTIFACTS');
-  const products=[];
+  const products=[];let entry;
   for(const row of artifacts){
     if(!row.path.startsWith('third_party/llvm/')||!sha(row.sha256))throw new Error('INSTALLED_PYTHON_ARTIFACTS');
     relative(row.path);
-    const root=await fs.realpath(sdk),actual=await fs.realpath(path.join(root,row.path));
-    if(!actual.startsWith(root+path.sep))throw new Error('INSTALLED_PYTHON_ESCAPE '+row.path);
-    products.push(await artifact(sdk,row.path,row.sha256));
+    let installedPath=row.path;
+    if(row.path===interpreter){
+      const text=await fs.readFile(path.join(sdk,interpreter+'.entry'),'utf8').catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+      if(text!==null){
+        const recipe=text.trimEnd().split('\n');
+        if(recipe[0]!=='cjcj-sdk-entry-v1'||recipe[2]!=='.native-tools/'+interpreter)throw Error('INSTALLED_PYTHON_ENTRY');
+        installedPath=recipe[2];
+        entry={...await artifact(sdk,interpreter),recipe:await artifact(sdk,interpreter+'.entry')};
+      }
+    }
+    const root=await fs.realpath(sdk),actual=await fs.realpath(path.join(root,installedPath));
+    if(!actual.startsWith(root+path.sep))throw new Error('INSTALLED_PYTHON_ESCAPE '+installedPath);
+    products.push(await artifact(sdk,installedPath,row.sha256));
   }
   let installation;
   if(platform==='windows_x86_64'){
@@ -66,7 +76,7 @@ async function installedPython(sdk,platform,llvm,loaded){
   }
   return {component:'python',source:origin,build:{...build,observed:llvm.pythonInstallation.observed},
     ...(installation?{installation}:{}),
-    artifacts:products,loadedArtifacts:loaded};
+    artifacts:products,loadedArtifacts:loaded,...(entry?{entry}:{})};
 }
 export async function installedInputs(sdk,platform){
   const native=sdkPlatform(platform),stage=await optional(path.join(sdk,'STAGE-INPUTS.json')),
@@ -123,9 +133,22 @@ export async function installedInputs(sdk,platform){
     rows.push({component:'std',source:source({...stage?.sources?.std,commit}),
       artifact:await artifact(sdk,'PROVENANCE.txt'),build:{provenance:text,...await reconcileStdArtifacts(sdk,text)}});
   }catch(e){if(e.code!=='ENOENT')throw e;rows.push({component:'std',source:unresolved('original std provenance missing')});}
-  const llvm=await optional(path.join(sdk,'share/cjcj/build-inputs/native-llvm.json'));
+  const llvmCheck=await optional(path.join(sdk,'share/cjcj/build-inputs/native-llvm.json'));
+  // Component installs carry N's normal BUILD-INPUTS verbatim. A bootstrap
+  // check is optional history, not the producer of these installed bytes.
+  // Reuse the existing artifact/Python readers without inventing a check rc.
+  if(!llvmCheck&&nativeFacts?.llvmLibrary&&(nativeFacts.platform!==platform
+    ||nativeFacts.commits?.llvm!==stage?.sources?.llvm?.commit))throw Error('INSTALLED_NATIVE_SOURCE');
+  const llvm=llvmCheck??(nativeFacts?.llvmLibrary?{
+    platform:nativeFacts.platform,source:source(stage.sources.llvm),configuration:nativeFacts.configuration,
+    commands:nativeFacts.commands,install:nativeFacts.configuration?.install,
+    artifacts:[{path:nativeFacts.llvmLibrary.file,sha256:nativeFacts.llvmLibrary.sha256},
+      ...(nativeFacts.nativeShim?.object?[nativeFacts.nativeShim.object]:[])],
+    pythonConfiguration:nativeFacts.python?.configured,pythonInstallation:nativeFacts.python?.installed,
+    pythonSource:nativeFacts.pythonSource,windowsToolchain:nativeFacts.windowsToolchain,
+  }:null);
   if(llvm){
-    if(llvm.rc!==0||llvm.platform!==platform)throw new Error('INSTALLED_NATIVE_INPUT');
+    if(llvmCheck&&llvmCheck.rc!==0||llvm.platform!==platform)throw new Error('INSTALLED_NATIVE_INPUT');
     if(!Array.isArray(llvm.artifacts)||llvm.artifacts.length<2)throw new Error('INSTALLED_NATIVE_ARTIFACTS');
     const products=[];
     for(const product of llvm.artifacts??[]){
@@ -145,7 +168,7 @@ export async function installedInputs(sdk,platform){
       const installedFiles=await Promise.all(input.installedFiles.map(row=>artifact(sdk,row.path,row.sha256)));
       windowsToolchain={...input,original,installedFiles};
     }
-    rows.push({component:'llvm-cjdb',source:source(llvm.source),build:{configuration:llvm.configuration,python:llvm.pythonConfiguration,...(windowsToolchain?{windowsToolchain}:{})},artifacts:products});
+    rows.push({component:'llvm-cjdb',source:source(llvm.source),build:{configuration:llvm.configuration,python:llvm.pythonConfiguration,...(llvm.commands?{commands:llvm.commands}:{}),...(windowsToolchain?{windowsToolchain}:{})},artifacts:products});
     rows.push(await installedPython(sdk,platform,llvm,python));
   }
   for(const producer of TOOL_NAMES){
@@ -171,7 +194,7 @@ export async function installedInputs(sdk,platform){
   if(await optional(path.join(sdk,STDX_BUILD_INPUTS))) rows.push(await readInstalledStdxInputs({sdk,platform}));
   const records={};
 
-  for(const rel of ['STAGE-INPUTS.json','compiler-inputs.json',RUNTIME_INPUTS,'TOOLS-INPUTS.json','tools/dtsparser/DEPENDENCIES.json','share/cjcj/build-inputs/native-llvm.json',nativeRecord,astRecord,STDX_BUILD_INPUTS])
+  for(const rel of ['STAGE-INPUTS.json','compiler-inputs.json',RUNTIME_INPUTS,'TOOLS-INPUTS.json','tools/dtsparser/DEPENDENCIES.json','share/cjcj/build-inputs/native-llvm.json',nativeRecord,astRecord,'share/cjcj/build-inputs/python-original.json',STDX_BUILD_INPUTS])
     if(await optional(path.join(sdk,rel)))records[rel]=await artifact(sdk,rel);
   return {components:rows,inputs:records};
 }

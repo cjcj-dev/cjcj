@@ -1,6 +1,8 @@
 import {resolveOfficialSdkRoot} from './config.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {nativeToolLibraries, retainedToolPath} from '../srcbuild/tool-layout.mjs';
 import {BuildError} from './errors.mjs';
 import {pinnedOfficialSdkRoot} from './package-lineage.mjs';
 
@@ -52,13 +54,40 @@ export function collectRelativePaths(root, {excludedSubtrees = []} = {}) {
   return Object.freeze(entries);
 }
 
+// A relative link to a file inside the SDK is the same installed file
+// interface as a regular file. Its storage type is not a loader ABI.
+function installedFile(root, relative) {
+  const file = path.join(root, relative);
+  try {
+    return fs.statSync(file).isFile()
+      && fs.realpathSync(file).startsWith(fs.realpathSync(root) + path.sep);
+  } catch { return false; }
+}
+function soname(file) {
+  const result = spawnSync('readelf', ['-d', file], {encoding:'utf8', env:{...process.env, LC_ALL:'C'}});
+  if (result.status !== 0) return null;
+  const name = result.stdout.match(/\(SONAME\).*\[([^\]]+)\]/)?.[1];
+  return name && !name.includes('/') && !name.includes('\\') ? name : null;
+}
+function installedTool(root, producer) {
+  const to = 'tools/bin/' + producer;
+  const retained = retainedToolPath({producer, name:producer, to});
+  let recipe;
+  try { recipe = fs.readFileSync(path.join(root, to + '.entry'), 'utf8').trimEnd().split('\n'); }
+  catch { return false; }
+  return recipe[0] === 'cjcj-sdk-entry-v1' && recipe[2] === retained
+    && installedFile(root, to) && installedFile(root, retained);
+}
+
 export function compareSdkPathSets(officialRoot, candidateRoot, {target} = {}) {
   const exclusions = [...OFFICIAL_PATH_EXCLUSIONS];
-  // Linux releases can contain optional Windows cross-target modules. The
-  // native Linux SDK contract does not require those two exact target roots.
-  // Windows and unspecified targets retain the complete reference inventory.
+  // This command packages one native target. Cross-target release assembly
+  // separately requires its declared tuples (targets.mjs RELEASE_PLATFORMS).
+  // Keep the Windows runtime, std/FFI and MinGW closure together; none is a
+  // native Linux producer. Windows and unspecified targets retain them.
   if (['linux-x64', 'linux-aarch64'].includes(target)) {
-    exclusions.push('lib/windows_x86_64_cjnative', 'modules/windows_x86_64_cjnative');
+    exclusions.push('lib/windows_x86_64_cjnative', 'modules/windows_x86_64_cjnative',
+      'runtime/lib/windows_x86_64_cjnative', 'third_party/mingw', 'lib/libstdFFI.dll', 'lib/libstdFFI.dll.a');
   }
   const officialEntries = collectRelativePaths(officialRoot, {excludedSubtrees: exclusions});
   const candidateEntries = collectRelativePaths(candidateRoot);
@@ -66,33 +95,67 @@ export function compareSdkPathSets(officialRoot, candidateRoot, {target} = {}) {
   const candidate = new Map(candidateEntries.map(entry => [entry.relativePath, entry]));
   const officialPaths = Object.freeze([...official.keys()]);
   const candidatePaths = Object.freeze([...candidate.keys()]);
-  const typeMismatches = officialEntries.flatMap(officialEntry => {
-    const candidateEntry = candidate.get(officialEntry.relativePath);
-    if (!candidateEntry) return [];
-    // The managed compiler has two public entries into one authenticated
-    // stage compiler. This exact relative relationship is the release ABI;
-    // it does not exempt other symlinks (including pcre) from type parity.
-    if (['bin/cjc', 'bin/cjc-frontend'].includes(officialEntry.relativePath)
+  const nativeLinux = ['linux-x64', 'linux-aarch64'].includes(target);
+  const lint = nativeLinux && installedTool(candidateRoot, 'cjlint');
+  const prof = nativeLinux && installedTool(candidateRoot, 'cjprof');
+  const missing = [], typeMismatches = [], counterparts = [];
+  for (const officialEntry of officialEntries) {
+    const relative = officialEntry.relativePath;
+    let candidateEntry = candidate.get(relative);
+    if (!candidateEntry && lint && relative.startsWith('tools/config/')) {
+      const relocated = '.target-tools/tools/cjlint/config/' + relative.slice('tools/config/'.length);
+      candidateEntry = candidate.get(relocated);
+      if (candidateEntry) counterparts.push({official:relative, candidate:relocated});
+    }
+    // The current Cangjie producers have different payloads from the retired
+    // C++ tools. Require their actual public entry and current dependencies.
+    if (!candidateEntry && ((relative === 'tools/lib/libcjlint.so' && lint
+        && candidate.get('.target-tools/tools/cjlint/modules')?.type === 'dir')
+      || (relative === 'tools/lib/libcjprof.so' && prof
+        && [...nativeToolLibraries('cjprof', 'linux').map(row => row.to), 'tools/share/java/cjprof.jar']
+          .every(rel => installedFile(candidateRoot, rel))))) {
+      counterparts.push({official:relative, candidate:'tools/bin/' + (relative.includes('cjlint') ? 'cjlint' : 'cjprof')});
+      continue;
+    }
+    // A producer may change a versioned ELF filename while retaining its
+    // actual loader name. Do not infer compatibility from a filename regex.
+    if (!candidateEntry && nativeLinux && officialEntry.type === 'file' && relative.includes('.so')) {
+      const name = soname(path.join(officialRoot, relative));
+      const relocated = name && path.posix.join(path.posix.dirname(relative), name);
+      if (relocated && installedFile(candidateRoot, relocated)
+        && soname(path.join(candidateRoot, relocated)) === name) {
+        candidateEntry = candidate.get(relocated);
+        if (candidateEntry) counterparts.push({official:relative, candidate:relocated, soname:name});
+      }
+    }
+    if (!candidateEntry) { missing.push(relative); continue; }
+    // Both public compiler names intentionally select the same stage entry.
+    if (['bin/cjc', 'bin/cjc-frontend'].includes(relative)
       && candidateEntry.type === 'symlink' && candidateEntry.symlinkTarget === 'cjcj-stage1'
       && candidate.get('bin/cjcj-stage1')?.type === 'file'
       && candidate.get('bin/cjc')?.symlinkTarget === 'cjcj-stage1'
-      && candidate.get('bin/cjc-frontend')?.symlinkTarget === 'cjcj-stage1') return [];
+      && candidate.get('bin/cjc-frontend')?.symlinkTarget === 'cjcj-stage1') continue;
     if (officialEntry.type === candidateEntry.type
-      && officialEntry.symlinkTarget === candidateEntry.symlinkTarget) return [];
-    return [Object.freeze({
-      relativePath: officialEntry.relativePath,
+      && officialEntry.symlinkTarget === candidateEntry.symlinkTarget) continue;
+    if (officialEntry.type === 'file' && candidateEntry.type === 'symlink'
+      && !['bin/cjc', 'bin/cjc-frontend'].includes(relative)
+      && !path.isAbsolute(candidateEntry.symlinkTarget)
+      && installedFile(candidateRoot, candidateEntry.relativePath)) continue;
+    typeMismatches.push(Object.freeze({
+      relativePath: relative,
       officialType: officialEntry.type,
       candidateType: candidateEntry.type,
       officialSymlinkTarget: officialEntry.symlinkTarget,
       candidateSymlinkTarget: candidateEntry.symlinkTarget,
-    })];
-  });
+    }));
+  }
   return Object.freeze({
     officialEntries,
     candidateEntries,
     officialPaths,
     candidatePaths,
-    missingInCandidate: Object.freeze(officialPaths.filter(relative => !candidate.has(relative))),
+    missingInCandidate: Object.freeze(missing),
+    counterparts: Object.freeze(counterparts),
     extraInCandidate: Object.freeze(candidatePaths.filter(relative => !official.has(relative))),
     typeMismatches: Object.freeze(typeMismatches),
   });

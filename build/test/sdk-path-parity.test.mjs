@@ -177,3 +177,58 @@ test('compiler alias exception requires both relative entries and the physical s
   put(candidate, 'bin/cjc-frontend');
   await assert.rejects(assertSdkPathParity(candidate, {officialRoot: official}), /type-mismatch\tbin\/cjc\t/);
 });
+
+test('native Linux parity excludes the complete Windows closure but retains native and unspecified requirements', async t => {
+  const {official, candidate} = fixture(t);
+  for (const rel of ['runtime/lib/windows_x86_64_cjnative/runtime.dll', 'third_party/mingw/lib/crt2.o',
+    'lib/libstdFFI.dll', 'lib/libstdFFI.dll.a']) put(official, rel);
+  for (const rel of ['LICENSE', 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so']) {
+    put(official, rel); put(candidate, rel);
+  }
+  for (const rel of ['lib', 'third_party']) fs.mkdirSync(path.join(candidate, rel), {recursive:true});
+  await assertSdkPathParity(candidate, {officialRoot:official, target:'linux-x64'});
+  await assert.rejects(assertSdkPathParity(candidate, {officialRoot:official}), /missing-official-path\tlib\/libstdFFI.dll/);
+  fs.unlinkSync(path.join(candidate, 'LICENSE'));
+  await assert.rejects(assertSdkPathParity(candidate, {officialRoot:official, target:'linux-x64'}), /missing-official-path\tLICENSE/);
+});
+
+test('file interfaces accept internal relative file links, retaining broken, outside and directory rejection', async t => {
+  const {root, official, candidate} = fixture(t);
+  put(official, 'third_party/llvm/lib/libxml2.so');
+  const lib = 'third_party/llvm/lib/';
+  put(candidate, lib + 'libxml2.so.16.1.4');
+  fs.symlinkSync('libxml2.so.16.1.4', path.join(candidate, lib, 'libxml2.so'));
+  await assertSdkPathParity(candidate, {officialRoot:official});
+  fs.unlinkSync(path.join(candidate, lib, 'libxml2.so.16.1.4'));
+  await assert.rejects(assertSdkPathParity(candidate, {officialRoot:official}), /package-link-invalid/);
+  fs.mkdirSync(path.join(candidate, lib, 'libxml2.so.16.1.4'));
+  await assert.rejects(assertSdkPathParity(candidate, {officialRoot:official}), /type-mismatch/);
+  fs.unlinkSync(path.join(candidate, lib, 'libxml2.so'));
+  const outside = put(root, 'outside.so');
+  fs.symlinkSync(outside, path.join(candidate, lib, 'libxml2.so'));
+  await assert.rejects(assertSdkPathParity(candidate, {officialRoot:official}), /package-link-outside/);
+});
+
+test('private cjlint config requires its actual entry and every former config; current cjprof needs its payload', async t => {
+  const {official, candidate} = fixture(t);
+  for (const name of ['cjlint', 'cjprof']) {
+    const retained = name === 'cjlint' ? '.target-tools/tools/cjlint/bin/cjlint' : '.target-tools/tools/bin/cjprof';
+    put(candidate, 'tools/bin/' + name);
+    put(candidate, retained);
+    put(candidate, 'tools/bin/' + name + '.entry', 'cjcj-sdk-entry-v1\n2\n' + retained + '\nlinux\nnative-target:x64\n');
+    put(official, 'tools/lib/lib' + name + '.so');
+  }
+  put(official, 'tools/config/cjlint_rule_list.json');
+  put(candidate, '.target-tools/tools/cjlint/config/cjlint_rule_list.json');
+  put(candidate, '.target-tools/tools/cjlint/modules/parser.cjo');
+  for (const rel of ['tools/lib/libcjprof-cangjie.so', 'tools/lib/libcjprof-jni.so', 'tools/share/java/cjprof.jar']) put(candidate, rel);
+  // Common directories are still real interfaces, not excluded wholesale.
+  fs.mkdirSync(path.join(candidate, 'tools/config'), {recursive:true});
+  const options = {officialRoot:official, target:'linux-x64'};
+  await assertSdkPathParity(candidate, options);
+  fs.unlinkSync(path.join(candidate, 'tools/lib/libcjprof-jni.so'));
+  await assert.rejects(assertSdkPathParity(candidate, options), /missing-official-path\ttools\/lib\/libcjprof.so/);
+  put(candidate, 'tools/lib/libcjprof-jni.so');
+  fs.unlinkSync(path.join(candidate, '.target-tools/tools/cjlint/config/cjlint_rule_list.json'));
+  await assert.rejects(assertSdkPathParity(candidate, options), /missing-official-path\ttools\/config\/cjlint_rule_list.json/);
+});
