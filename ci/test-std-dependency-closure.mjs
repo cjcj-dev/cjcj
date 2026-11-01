@@ -45,7 +45,9 @@ function checkDependencies(info) {
   assert.equal(info.dependencies.find(d => d.package === 'flatbuffers')?.isStd, false,
     'an explicit non-std import must still be reported');
 }
-const source = path.join(work, 'main.cj');
+const sourceDir = path.join(work, 'source');
+fs.mkdirSync(sourceDir);
+const source = path.join(sourceDir, 'main.cj');
 fs.writeFileSync(source, `package stddepfixture
 import std.ast.*
 import flatbuffers.*
@@ -57,7 +59,7 @@ main(): Int64 {
     return 0
 }
 `);
-checkDependencies(descriptor(run('source-scan', [compiler, source, '--scan-dependency'])));
+checkDependencies(descriptor(run('source-scan', [compiler, '-p', sourceDir, '--scan-dependency'])));
 const exe = path.join(work, 'stddepfixture');
 const map = path.join(work, 'link.map');
 run('compile', [compiler, source, '-O0', '--link-options', '-Map=' + map, '-o', exe]);
