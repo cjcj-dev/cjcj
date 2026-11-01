@@ -59,6 +59,7 @@ function usage() {
     + '  --tools-build-set all|NAME,... (default: all; omitted tools reuse existing outputs)\n'
     + '  --tools-mangle-source DIR (compiler Cangjie demangler source for cjtrace-recover)\n'
     + '  --tools-producer-build-dir PATH (one selected tool; normal existing producer directory)\n'
+    + '  --tools-producer-workspace NAME=PATH (repeatable; install reads original producer facts/source)\n'
     + '  --tools-json-build PATH (LSP matching JSON producer)\n'
     + '  --tools-phase all|build|install (default: all; build does not publish the shared SDK)\n'
     + '  --jobs INTEGER (tools total CPU budget; default: CANGJIE_BUILD_JOBS or available CPUs)\n'
@@ -102,6 +103,12 @@ function parseGlobal(args) {
     if (argument === '--version') return {version: true};
     if (!argument.startsWith('-')) return {options, command: argument, rest: args.slice(index + 1)};
     let parsed;
+    parsed = optionValue(args, index, '--tools-producer-workspace');
+    if (parsed) {
+      (options.toolsProducerWorkspaces ??= []).push(parsed.value);
+      index = parsed.next;
+      continue;
+    }
     for (const [flag, key] of [
       ['--workspace', 'workspace'], ['--build-root', 'buildRoot'], ['--target', 'targetKey'],
       ['--official-sdk-root', 'officialSdkRoot'],

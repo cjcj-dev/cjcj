@@ -10,7 +10,7 @@ import {toolConsumerCopies} from '../../../ci/bootstrap/sdk-targets.mjs';
 import {cleanSdkEnvironment} from '../../../ci/bootstrap/sdk-platform.mjs';
 import {installSourceTools,sourceToolOutputs} from '../install-tools.mjs';
 import {beginToolBuild,finishToolBuild,toolBuildInputs,finishToolInstall,toolInstallConfig} from '../tool-build-inputs.mjs';
-import {TOOL_NAMES,TOOL_DIRECTORIES,requireToolProducer,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,hleBuildDirectory,toolProducerDirectory,toolProducerBuildRoot} from '../tool-layout.mjs';
+import {TOOL_NAMES,TOOL_DIRECTORIES,requireToolProducer,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,hleBuildDirectory,toolProducerDirectory,toolProducerBuildRoot,toolSourceRoot} from '../tool-layout.mjs';
 import {installHleDependencies,installIndependentHle} from '../hle-dependencies.mjs';
 import {installPath as mingwInstallPath} from '../../toolchain/mingw.mjs';
 import path from 'node:path';
@@ -29,10 +29,10 @@ function toolArgv(config,name,args) {
   let prefix;
   const prefixKey=name==='lsp'?'--install':'--prefix',i=native.indexOf(prefixKey);
   if(i>=0)prefix=native.splice(i,2)[1];
-  return [process.execPath,path.join(config.repoPath('tools'),'build.mjs'),phase,'--tool',name,
+  return [process.execPath,path.join(toolSourceRoot(config,name),'build.mjs'),phase,'--tool',name,
     '--build-root',toolProducerBuildRoot(config,name),...(prefix?['--prefix',prefix]:[]),'--',...native];
 }
-const runTool=(config,name,cwd,args,options)=>runBuildScript(config,config.repoPath('tools'),toolArgv(config,name,args).slice(2),{...options,script:'build.mjs'});
+const runTool=(config,name,cwd,args,options)=>runBuildScript(config,toolSourceRoot(config,name),toolArgv(config,name,args).slice(2),{...options,script:'build.mjs'});
 
 function buildArgsFor(name, config, jobs) {
   if(['lsp','cjhead'].includes(name)) {
@@ -205,9 +205,11 @@ export async function run(config) {
       if(config.target.spec.crossCompile)
         throw new BuildError('tools.install','independent install requires native tools');
       await assertSourceIdentity(config.repo('tools'),toolsRoot);
+      for(const root of new Set(independent.map(([name])=>toolSourceRoot(config,name))))if(root!==toolsRoot)
+        await assertSourceIdentity(config.repo('tools'),root);
       for(const [name,subpath]of independent) {
         if(process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
-          requireFile(path.join(toolsRoot,'build.mjs'),{stage:'tools.'+name+'.source'});
+          requireFile(path.join(toolSourceRoot(config,name),'build.mjs'),{stage:'tools.'+name+'.source'});
           const facts=await toolBuildInputs(config,name,toolBuildProduct(config,name));
           if(facts.source.status!=='resolved')throw new BuildError('tools.install','original build inputs required: '+name);
         }
@@ -215,14 +217,15 @@ export async function run(config) {
       const env=targetToolsEnv(config);
       if(process.env.CANGJIE_BUILD_DRY_RUN!=='1')fs.mkdirSync(config.toolsInstallPrefix,{recursive:true});
       for(const [name,subpath]of independent) {
+        const producerRoot=toolSourceRoot(config,name);
         const prefix=path.join(config.toolsInstallPrefix,name);
         const destination=name==='hle'?path.join(prefix,'tools'):prefix;
         if(process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
           fs.mkdirSync(prefix,{recursive:false});
         }
-        const argv=installArgsFor(name,toolsRoot,config,destination);
-        await runTool(config,name,path.join(toolsRoot,subpath),argv,{stageName:'tools.'+name+'.install',extraEnv:env});
-        if(name==='hle'&&process.env.CANGJIE_BUILD_DRY_RUN!=='1')await installIndependentHle({toolsRoot,prefix,sdk:consumerSdk(config),platform:config.target.spec.llvmPlatform,build:path.join(config.buildRoot,'hle-entries'),input:await readHleDependencies(process.env.CJCJ_HLE_DEPENDENCIES,config.target.spec.llvmPlatform)});
+        const argv=installArgsFor(name,producerRoot,config,destination);
+        await runTool(config,name,path.join(producerRoot,subpath),argv,{stageName:'tools.'+name+'.install',extraEnv:env});
+        if(name==='hle'&&process.env.CANGJIE_BUILD_DRY_RUN!=='1')await installIndependentHle({toolsRoot:producerRoot,prefix,sdk:consumerSdk(config),platform:config.target.spec.llvmPlatform,build:path.join(config.buildRoot,'hle-entries'),input:await readHleDependencies(process.env.CJCJ_HLE_DEPENDENCIES,config.target.spec.llvmPlatform)});
         await finishToolInstall(config,name,path.join(prefix,name==='hle'?'tools/bin':'bin',(name==='lsp'?'cangjie-lsp':name)+suffix),
           toolArgv(config,name,argv),{prefix});
       }
@@ -230,10 +233,12 @@ export async function run(config) {
     }
 
     await assertSourceIdentity(config.repo('tools'), toolsRoot);
+    for(const root of new Set(allTools.map(([name])=>toolSourceRoot(config,name))))if(root!==toolsRoot)
+      await assertSourceIdentity(config.repo('tools'),root);
     if(process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
       requireFile(path.join(toolsRoot,'build.mjs'),{stage:'tools.source'});
       for(const [name]of config.toolsPhase==='build'?pending:allTools)
-        requireFile(path.join(toolsRoot,requireToolProducer(name),'build/build.mjs'),{stage:'tools.'+name+'.source'});
+        requireFile(path.join(toolSourceRoot(config,name),requireToolProducer(name),'build/build.mjs'),{stage:'tools.'+name+'.source'});
     }
     const toolEnv = targetToolsEnv(config);
     let dependencies;
@@ -244,7 +249,7 @@ export async function run(config) {
         if(!input)throw new BuildError('tools.hle.dependencies','HLE_DEPENDENCIES_REQUIRED');
         // Build uses the selected read-only SDK and explicit acquired inputs.
         // Dependency publication belongs to install, never to the shared H.
-      } else dependencies=await installHleDependencies({toolsRoot,sdk:consumerSdk(config),platform:config.target.spec.llvmPlatform,input,prepareOnly:true});
+      } else dependencies=await installHleDependencies({toolsRoot:toolSourceRoot(config,'hle'),sdk:consumerSdk(config),platform:config.target.spec.llvmPlatform,input,prepareOnly:true});
     }
     // Each producer writes its own project build/dist tree. Shared HLE inputs
     // are installed above, and the shared SDK is published only after every
@@ -300,19 +305,20 @@ export async function run(config) {
       await toolBuildInputs(config,name,product);
     }
     for (const [name, subpath] of allTools) {
-      const argv=installArgsFor(name,toolsRoot,config);
+      const producerRoot=toolSourceRoot(config,name);
+      const argv=installArgsFor(name,producerRoot,config);
       // Native install reads the build tree; preserve old dist separately so
       // removed configuration/JNI members cannot survive as new output.
       if(['cjfmt','cjlint','cjprof','cjcompat'].includes(name)&&process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
-        const dist=path.join(toolsRoot,TOOL_DIRECTORIES[name],'dist');
+        const dist=path.join(producerRoot,TOOL_DIRECTORIES[name],'dist');
         if(fs.existsSync(dist))fs.renameSync(dist,dist+'.previous-'+Date.now());
       }
-      await runTool(config,name,path.join(toolsRoot,subpath),argv, {
+      await runTool(config,name,path.join(producerRoot,subpath),argv, {
         stageName:`tools.${name}.install`, extraEnv:installEnv,
       });
       await finishToolInstall(config,name,outputs.find(row=>row.producer===name).from,toolArgv(config,name,argv));
     }
-    requireFile(path.join(toolsRoot, TOOL_DIRECTORIES.cjpm, 'dist/bin', `cjpm${suffix}`), {stage: 'tools.cjpm.verify'});
+    requireFile(path.join(toolSourceRoot(config,'cjpm'), TOOL_DIRECTORIES.cjpm, 'dist/bin', `cjpm${suffix}`), {stage: 'tools.cjpm.verify'});
     if(process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
       const sdk=consumerSdk(config);
       await installSourceTools(config,sdk,{dependencies,consume:config.target.spec.crossCompile?undefined:async pending=>{
@@ -331,8 +337,9 @@ export async function run(config) {
         // and restores the selected compiler entry. Keep the public cjpm path.
         env.CJPM_REGRESSION_PRIVATE_SDK=installed;
         const out=fs.mkdtempSync(path.join(config.workspace,'verify-cjpm-'));
-        await command([process.execPath,path.join(toolsRoot,'packages/cjpm/tests/public/test-cache-errors.mjs'),
-          path.join(installed,'tools/bin/cjpm'),out,'candidate'],{cwd:toolsRoot,env});
+        const cjpmSource=toolSourceRoot(config,'cjpm');
+        await command([process.execPath,path.join(cjpmSource,'packages/cjpm/tests/public/test-cache-errors.mjs'),
+          path.join(installed,'tools/bin/cjpm'),out,'candidate'],{cwd:cjpmSource,env});
       }
       }});
     }

@@ -146,6 +146,7 @@ export function buildConfig({
   toolsLlvmShim,
   toolsLlvmLibrary,
   toolsProducerBuildDir,
+  toolsProducerWorkspaces = [],
   toolsJsonBuild,
   toolsPhase = 'all',
   toolsInstallPrefix,
@@ -164,6 +165,13 @@ export function buildConfig({
   }
   if(Number(toolsPackageJobs)>4)throw new ConfigError('tools-package-jobs exceeds the four heavy C2 package limit');
   const toolNames=TOOL_NAMES;
+  const producerWorkspaces = {};
+  for(const item of Array.isArray(toolsProducerWorkspaces)?toolsProducerWorkspaces:Object.entries(toolsProducerWorkspaces).map(([name,dir])=>name+'='+dir)) {
+    const separator=item.indexOf('='),name=item.slice(0,separator),directory=item.slice(separator+1);
+    if(separator<1||!toolNames.includes(name)||Object.hasOwn(producerWorkspaces,name)||!path.isAbsolute(directory)||toolsPhase!=='install')
+      throw new ConfigError('tools-producer-workspace requires unique NAME=absolute-path and install phase');
+    producerWorkspaces[name]=path.resolve(directory);
+  }
   if(toolsInstallPrefix!==undefined && (toolsPhase!=='install' || !path.isAbsolute(toolsInstallPrefix)))
     throw new ConfigError('tools-install-prefix requires install phase and absolute prefix');
   const selectedTools=String(toolsBuildSet).split(',');
@@ -230,6 +238,7 @@ export function buildConfig({
     toolsLlvmShim: toolsLlvmShim == null ? null : absolute(toolsLlvmShim),
     toolsLlvmLibrary: toolsLlvmLibrary == null ? null : absolute(toolsLlvmLibrary),
     toolsProducerBuildDir: toolsProducerBuildDir == null ? null : absolute(toolsProducerBuildDir),
+    toolsProducerWorkspaces: Object.freeze(producerWorkspaces),
     toolsJsonBuild: toolsJsonBuild == null ? null : absolute(toolsJsonBuild),
     toolsPhase,
     toolsInstallPrefix,
@@ -283,6 +292,7 @@ export function withBuildType(config, buildType) {
     toolsLlvmShim: config.toolsLlvmShim,
     toolsLlvmLibrary: config.toolsLlvmLibrary,
     toolsProducerBuildDir: config.toolsProducerBuildDir,
+    toolsProducerWorkspaces: config.toolsProducerWorkspaces,
     toolsJsonBuild: config.toolsJsonBuild,
     toolsPhase: config.toolsPhase,
     toolsInstallPrefix: config.toolsInstallPrefix,

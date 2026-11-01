@@ -194,7 +194,7 @@ if(process.argv[2]==='build'){const out=path.resolve('target/release/bin/main');
     'packages/cjprof/dist/lib/libcjprof-cangjie.so':'unloaded fixture','packages/cjprof/dist/lib/libcjprof-jni.so':'unloaded fixture','packages/cjprof/dist/share/java/cjprof.jar':'unloaded fixture','packages/cjprof/dist/config/static/index.html':'fixture page'};
    await write(tools+'/build.mjs',`import fs from 'node:fs';import path from 'node:path';
 const args=process.argv.slice(2),verb=args[0],value=k=>args[args.indexOf(k)+1],name=value('--tool'),build=value(name==='lsp'?'--build':'--build-dir'),bodies=${JSON.stringify(bodies)};
-fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'producer',name,verb,buildRoot:value('--build-root'),buildDirectory:build})+'\\n');
+fs.appendFileSync(${JSON.stringify(trace)},JSON.stringify({event:'producer',name,verb,source:process.argv[1],buildRoot:value('--build-root'),buildDirectory:build})+'\\n');
 const raw={cjpm:'dist/cjpm',cjcov:'dist/cjcov',cjfmt:'cjfmt',hle:'bin/main',lsp:'server/target/release/bin/main',cjhead:'cjhead','cjtrace-recover':'cjtrace-recover',cjcompat:'cjcompat',cjprof:'cjprof',cjlint:'target/release/bin/cjlint'};
 const out=verb==='build'?path.join(build,raw[name]):path.join(${JSON.stringify(tools)},${JSON.stringify(outputs)}[name]);
 fs.mkdirSync(path.dirname(out),{recursive:true});
@@ -290,18 +290,27 @@ test('installed cjpm public regression follows tools installation and blocks pac
 test('public install reuses distinct producer roots and rejects a missing root',async()=>{
  const f=await installedRegressionFixture();
  let r=await f.invoke('roots-initial');assert.equal(r.status,0,r.stderr);
- const other=f.root+'/other-producers';
- r=await f.invoke('roots-head-build',['--tools-phase','build','--tools-build-set','cjhead','--build-root',other,'--tools-producer-build-dir',other+'/custom-head']);
+ const other=f.root+'/other-producers',workspace=f.root+'/other-workspace',tools=workspace+'/cjcj-tools';
+ await fs.mkdir(workspace,{recursive:true});
+ await fs.cp(f.workspace+'/cjcj-tools',tools,{recursive:true});
+ // The controlled producer owns its install destination just as the actual
+ // source-root dispatcher does. Keep its copied body in the selected root.
+ await fs.writeFile(tools+'/build.mjs',(await fs.readFile(tools+'/build.mjs','utf8')).replaceAll(JSON.stringify(f.workspace+'/cjcj-tools'),JSON.stringify(tools))+"\nif(name==='cjhead'&&verb==='build')fs.appendFileSync(out,'console.log(\"selected producer workspace\");\\n');\n");
+ r=await f.invoke('roots-head-build',['--workspace',workspace,'--tools-phase','build','--tools-build-set','cjhead','--build-root',other,'--tools-producer-build-dir',other+'/custom-head']);
  assert.equal(r.status,0,r.stderr);assert.equal(r.events.filter(e=>e.event==='producer'&&e.verb==='build').length,1);
- const factFile=f.workspace+'/build/tools/cjhead/build-inputs.json',facts=await fs.readFile(factFile,'utf8');
- const install=label=>f.invoke(label,['--tools-phase','install','--build-root',f.root+'/unused-current-selector']);
+ const factFile=workspace+'/build/tools/cjhead/build-inputs.json',facts=await fs.readFile(factFile,'utf8');
+ const previous=await fs.readFile(f.workspace+'/build/tools/cjhead/build-inputs.json','utf8');
+ const install=label=>f.invoke(label,['--tools-phase','install','--build-root',f.root+'/unused-current-selector','--tools-producer-workspace','cjhead='+workspace]);
  r=await install('roots-install');assert.equal(r.status,0,r.stderr);
  const rows=r.events.filter(e=>e.event==='producer');assert.equal(rows.length,10);
  assert(rows.every(e=>e.verb==='install'));
- for(const row of rows){assert.equal(row.buildRoot,row.name==='cjhead'?other:f.root+'/buildtools');assert.equal(row.buildDirectory,row.name==='cjhead'?other+'/custom-head':f.root+'/buildtools/'+row.name);}
+ for(const row of rows){assert.equal(row.buildRoot,row.name==='cjhead'?other:f.root+'/buildtools');assert.equal(row.buildDirectory,row.name==='cjhead'?other+'/custom-head':f.root+'/buildtools/'+row.name);assert.equal(row.source,(row.name==='cjhead'?tools:f.workspace+'/cjcj-tools')+'/build.mjs');}
  assert.equal(r.events.filter(e=>e.event==='regression').length,1);
  assert.equal(JSON.parse(await fs.readFile(f.workspace+'/verify-tools/hello-result.json')).packaged.rc,0);
  assert.equal(await fs.readFile(factFile,'utf8'),facts,'reuse must preserve the original build argv');
+ assert.equal(await fs.readFile(f.workspace+'/build/tools/cjhead/build-inputs.json','utf8'),previous,'other workspace facts remain untouched');
+ const selected=spawnSync(f.sdk+'/tools/bin/cjhead',[],{encoding:'utf8'});
+ assert.equal(selected.status,0,selected.stderr);assert.match(selected.stdout,/selected producer workspace/);
  console.log('DISTINCT_PRODUCER_ROOTS_PENDING_CONSUMER_REACHED');
  await fs.rename(other+'/custom-head',other+'/custom-head-cut');
  try {
@@ -320,6 +329,10 @@ test('public install reuses distinct producer roots and rejects a missing root',
  }finally{await fs.writeFile(factFile,facts);}
  r=await install('roots-input-restored');assert.equal(r.status,0,r.stderr);
  console.log('DISTINCT_PRODUCER_ROOTS_RESTORED_INPUT_UNAMBIGUOUS');
+ for(const selection of ['cjhead=relative','unknown='+workspace]) {
+  const invalid=await f.invoke('roots-invalid-'+selection.split('=')[0],['--tools-phase','install','--tools-producer-workspace',selection]);
+  assert.equal(invalid.status,2,invalid.stderr);assert.match(invalid.stderr,/tools-producer-workspace requires/);assert(!invalid.events.some(e=>e.event==='producer'));
+ }
 });
 
 test('installed cjpm hello remains independent of the full regression call',async()=>{

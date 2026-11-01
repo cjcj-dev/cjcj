@@ -6,12 +6,12 @@ import {execFile} from 'node:child_process';
 import {promisify, isDeepStrictEqual} from 'node:util';
 import {atomicJson, fileDigest, readJson} from '../../ci/bootstrap/sdk-flow.mjs';
 import {compilerProducer} from '../../ci/bootstrap/compiler_identity.mjs';
-import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,toolProducerDirectory} from './tool-layout.mjs';
+import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,toolProducerDirectory,toolProducerWorkspace,toolSourceRoot} from './tool-layout.mjs';
 import {sha256} from '../../ci/bootstrap/sdk-io.mjs';
 
 const execute = promisify(execFile);
 const directories = TOOL_DIRECTORIES;
-const recordPath = (config, name) => path.join(config.workspace,'build','tools',name,'build-inputs.json');
+const recordPath = (config, name) => path.join(toolProducerWorkspace(config,name),'build','tools',name,'build-inputs.json');
 const dry = () => process.env.CANGJIE_BUILD_DRY_RUN === '1';
 // Install reuses each successful public producer's actual directory. Today's
 // build selector cannot relocate an earlier producer or its native inputs.
@@ -28,7 +28,7 @@ export async function toolInstallConfig(config, names) {
       if(positions.length!==1||!args[positions[0]+1]||args[positions[0]+1].startsWith('--'))reject();
       return args[positions[0]+1];
     };
-    if(split<3||argv[1]!==path.join(config.repoPath('tools'),'build.mjs')||argv[2]!=='build'
+    if(split<3||argv[1]!==path.join(toolSourceRoot(config,name),'build.mjs')||argv[2]!=='build'
       ||one(outer,'--tool')!==name)reject();
     const root=one(outer,'--build-root'),directory=one(native,name==='lsp'?'--build':'--build-dir');
     if([root,directory].some(value=>!path.isAbsolute(value)||path.resolve(value)!==value))reject();
@@ -64,7 +64,7 @@ export async function sdkInputs(config, sdk) {
 }
 export async function beginToolBuild(config, name, {argv, env, sdk}) {
   if(dry()) return null;
-  const root=config.repoPath('tools'), directory=directories[name];
+  const root=toolSourceRoot(config,name), directory=directories[name];
   if(!directory)throw new Error('TOOL_BUILD_NAME '+name);
   // Invalidate a prior success before the next attempt. Preserve it as evidence
   // so an upstream build.py returning zero after failure cannot reuse the row.
@@ -119,7 +119,7 @@ async function nativeConfigurationInputs(config,name) {
 }
 export async function finishToolBuild(config, name, facts, product) {
   if(dry())return;
-  const state=await sourceState(config.repoPath('tools'),facts.build.directory,facts.source.commit);
+  const state=await sourceState(toolSourceRoot(config,name),facts.build.directory,facts.source.commit);
   if(state.changes_sha256!==facts.build.source_changes_sha256)throw new Error('TOOL_SOURCE_CHANGED_DURING_BUILD '+name);
   for(const [name,row]of Object.entries(facts.build.dependencies??{})) {
     const current=await sourceState(row.path,'.','HEAD');
