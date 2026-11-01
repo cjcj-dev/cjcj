@@ -57,6 +57,9 @@ int main(int argc,char** argv) {
     if (!strcmp(argv[1],"linked-soft")) {
         const Entry entries[]={{"cjSoftMaxHeapSize","12GB"}};
         CJ_MRT_CjRuntimeInitWithConfigV1(entries,1); expected="12GB";
+    } else if (!strcmp(argv[1],"linked-octal-hard")) {
+        const Entry entries[]={{"cjHeapSize","010000MB"}};
+        CJ_MRT_CjRuntimeInitWithConfigV1(entries,1);
     } else if (!strcmp(argv[1],"linked-hard")) {
         const Entry entries[]={{"cjHeapSize","16GB"}};
         CJ_MRT_CjRuntimeInitWithConfigV1(entries,1); expected="8GB";
@@ -89,5 +92,9 @@ int main(int argc,char** argv) {
   run('low',[exe,'low'],{...env,cjHeapSize:'2GB'});
   const linked={...env}; delete linked.cjHeapSize;
   run('linked-hard',[exe,'linked-hard'],linked);
+  // The consumed runtime parses this legal leading-zero hard as 4096 MiB.
+  // Neither environment nor embedded-table selection may add an 8 GiB soft.
+  run('octal-hard',[exe,'low'],{...env,cjHeapSize:'010000MB'});
+  run('linked-octal-hard',[exe,'linked-octal-hard'],linked);
   console.log('COMPILER_HEAP_DEFAULTS_EVIDENCE '+dir);
 });
