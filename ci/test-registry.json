@@ -1046,5 +1046,10 @@
     "file": "ci/test-std-dependency-closure.mjs",
     "executor": "manual",
     "reason": "Real source/CJO scan, std.ast private flatbuffers linkage and target execution require a matching installed compiler/std/runtime tuple; invoke with ABS_COMPILER NEW_WORK TARGET_LD."
+  },
+  {
+    "file": "ci/test-features-metadata.mjs",
+    "executor": "manual",
+    "reason": "Real compiler features directive compile/run, metadata scan and invalid-declaration control need a paired installed compiler/std/runtime; invoke with ABS_COMPILER NEW_WORK TARGET_LD."
   }
 ]

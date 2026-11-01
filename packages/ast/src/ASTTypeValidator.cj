@@ -216,10 +216,13 @@ public class ASTTypeValidator {
     }
 
     private func isIgnoreKind(kind: ASTKind): Bool {
+        // Features are package metadata, not typed expressions/declarations.
+        // The reference semantic walker omits File.feature altogether; our
+        // general walker retains it for structural/serialization consumers.
         return kind == ASTKind.GENERIC_PARAM_DECL || kind == ASTKind.GENERIC_CONSTRAINT ||
             kind == ASTKind.PRIMARY_CTOR_DECL || kind == ASTKind.TYPE_ALIAS_DECL ||
             kind == ASTKind.BUILTIN_DECL || kind == ASTKind.MODIFIER || kind == ASTKind.ANNOTATION ||
-            kind == ASTKind.PACKAGE_SPEC || kind == ASTKind.IMPORT_SPEC ||
+            kind == ASTKind.PACKAGE_SPEC || kind == ASTKind.IMPORT_SPEC || kind == ASTKind.FEATURES_DIRECTIVE ||
             kind == ASTKind.WILDCARD_PATTERN || kind == ASTKind.GENERIC ||
             kind == ASTKind.MACRO_EXPAND_DECL || kind == ASTKind.MACRO_EXPAND_EXPR ||
             kind == ASTKind.MACRO_EXPAND_PARAM
