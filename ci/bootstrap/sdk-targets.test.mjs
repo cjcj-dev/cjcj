@@ -52,6 +52,8 @@ test('H1 execution and N target backend use explicit different library directori
  const c=createBootstrapTargets(inputs('linux_x86_64'));
  for(const id of ['stage0-run','stage1-initial','stage1-std'])assert.ok(c.stages.find(s=>s.id===id).entries[0].libraries.some(dir=>dir.startsWith('.host/runtime/')));
  for(const id of ['stage2','stage3'])assert.ok(c.stages.find(s=>s.id===id).entries[0].libraries.includes('runtime/lib/linux_x86_64_cjnative'));
+ const finalStd=c.stages.find(s=>s.id==='stage3-std').test.commands[0].argv;
+ assert.equal(finalStd[finalStd.indexOf('--host')+1],'/fixture/H','colour comparison retains the actual bootstrap reference');
 });
 test('every target SDK and C3 preparation install N target dependencies with separate AST/std owners',()=>{
  for(const platform of Object.keys(PLATFORMS)){
