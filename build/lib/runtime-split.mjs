@@ -185,7 +185,7 @@ export function readRuntimeSymbols(file, target) {
 export function readCompilerSymbols(file, target) {
   if (target.spec.os === 'windows' && (!target.spec.crossCompile || /\.exe$/i.test(file))) return readPeSymbols(file, target, 'imports');
   const args = target.spec.os === 'darwin'
-    ? ['-u', file]
+    ? ['-m', '-u', file]
     : ['-D', '--undefined-only', file];
   const result = spawnSync('nm', args, {encoding: 'utf8'});
   if (result.status !== 0) {
@@ -213,23 +213,19 @@ function countSdkLoadBadMask(symbols, target) {
 // ELF version needs record the provider of versioned imports. Do not infer
 // runtime ownership from API spelling: the compiler also imports LLVM/libc.
 // Unversioned ELF symbols have no provider attribution in this metadata.
-export function readRuntimeImports(file, target) {
+export function readRuntimeImports(file, target, compilerSymbols) {
   if (target.spec.os === 'windows' && (!target.spec.crossCompile || /\.exe$/i.test(file))) {
     return readPeSymbols(file, target, 'imports', target.spec.runtimeLibrary).split('\n').filter(Boolean);
   }
-  const darwin = target.spec.os === 'darwin';
-  const result = spawnSync(darwin ? 'nm' : 'readelf',
-    darwin ? ['-m', '-u', file] : ['--wide', '--dyn-syms', '--version-info', file],
+  if (target.spec.os === 'darwin') {
+    const provider = path.basename(target.spec.runtimeLibrary, '.dylib');
+    return darwinStrongImports(compilerSymbols ?? readCompilerSymbols(file, target))
+      .filter(symbol => symbol.provider === provider).map(symbol => symbol.name);
+  }
+  const result = spawnSync('readelf', ['--wide', '--dyn-syms', '--version-info', file],
     {encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, env: {...process.env, LC_ALL: 'C'}});
   if (result.status !== 0) throw new BuildError('runtime.sdk-abi',
     `import providers unavailable for ${file}: rc=${result.status} ${result.error?.message || result.stderr || ''}`);
-  if (darwin) {
-    const provider = path.basename(target.spec.runtimeLibrary, '.dylib');
-    return result.stdout.split(/\r?\n/).flatMap(line => {
-      const match = line.match(/\(undefined\) external (\S+) \(from ([^)]+)\)/);
-      return match && match[2] === provider ? [match[1]] : [];
-    });
-  }
   const versions = new Set();
   let provider = null, needs = false;
   for (const line of result.stdout.split(/\r?\n/)) {
@@ -244,6 +240,16 @@ export function readRuntimeImports(file, target) {
   return result.stdout.split(/\r?\n/).flatMap(line => {
     const symbol = line.match(/^\s*\d+:\s+\S+\s+\S+\s+\S+\s+GLOBAL\s+\S+\s+UND\s+(\S+)\s+\((\d+)\)\s*$/);
     return symbol && versions.has(symbol[2]) ? [symbol[1]] : [];
+  });
+}
+
+// Apple nm -u prints names only, losing N_WEAK_REF. Both provider selection
+// and the direct-mask check must consume the same attribute-preserving -m -u
+// output. An optional weak reference must not become a required dependency.
+function darwinStrongImports(symbols) {
+  return String(symbols).split(/\r?\n/).flatMap(line => {
+    const symbol = line.match(/^\s*\(undefined\) (weak )?external (\S+)(?: \(from ([^)]+)\))?/);
+    return symbol && !symbol[1] ? [{name: symbol[2], provider: symbol[3]}] : [];
   });
 }
 
@@ -275,11 +281,14 @@ export function assertSdkCompilerRuntimeAbi({
   // Counts describe the products, not the barrier implementation. N575 uses
   // ThreadLocal.gcData + loadBadMask; runtime accessors can read the global in
   // their callee. Neither requires the executable to import that global.
-  const required = new Set(readImports(compiler, target));
+  const required = new Set(readImports(compiler, target, compilerSymbols));
   const mask = target.spec.os === 'darwin' ? `_${LOAD_BAD_MASK_SYMBOL}` : LOAD_BAD_MASK_SYMBOL;
   // Preserve the original direct, unversioned global dependency check too.
   // This is not a claim to resolve every unversioned/flat-namespace import.
-  if (symbolNames(compilerSymbols, true).includes(mask)) required.add(mask);
+  const strongImports = target.spec.os === 'darwin'
+    ? darwinStrongImports(compilerSymbols).map(symbol => symbol.name)
+    : symbolNames(compilerSymbols, true);
+  if (strongImports.includes(mask)) required.add(mask);
   const provided = new Set();
   for (const name of symbolNames(runtimeSymbols)) {
     provided.add(name.replace('@@', '@'));

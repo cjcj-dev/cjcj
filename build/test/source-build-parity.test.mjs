@@ -1,6 +1,7 @@
 import {pinnedRemote} from '../../ci/fixtures/git/pinned-remote.mjs';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
+import childProcess, {spawnSync} from 'node:child_process';
+import {syncBuiltinESMExports} from 'node:module';
 import {assertGitObjectProof, assertRemoteObjectProof} from './git-object-proof.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -403,7 +404,7 @@ test('packaged SDK colour ABI recognizes Darwin leading-underscore symbols', () 
     file(sdk, [
       'runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary,
     ], 'fake Mach-O runtime');
-    const symbols = '                 U _g_cjLoadBadMask\n';
+    const symbols = '                 (undefined) external _g_cjLoadBadMask\n';
     const result = assertSdkCompilerRuntimeAbi({
       sdk,
       target,
@@ -474,6 +475,92 @@ test('packaged SDK colour ABI rejects a missing runtime', () => {
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
+});
+
+// Format-level reader regression only: Apple cctools nm.c print_mach_symbols
+// emits these strong/weak rows; no native Darwin execution is claimed here.
+// Keep the real reader -> provider/direct-mask -> ABI assertion call chain.
+function withAbiSymbolOutput(t, targetKey, rows, check) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-abi-symbol-format-'));
+  const target = buildConfig({targetKey}).target;
+  const sdk = directory(root, 'sdk');
+  const compiler = file(sdk, ['bin', 'cjc'], 'format fixture, not a native image');
+  const runtime = file(sdk, ['runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary],
+    'format fixture, not a native image');
+  const calls = [];
+  const mock = t.mock.method(childProcess, 'spawnSync', (program, args) => {
+    calls.push({program, args});
+    let stdout;
+    if (program === 'readelf') stdout = rows.versions;
+    else if (program === 'nm' && args.at(-1) === runtime) stdout = rows.exports;
+    else if (program === 'nm' && args.at(-1) === compiler) {
+      // Model the actual information loss too, so the pre-fix reader produces
+      // its real false-positive ABI failure rather than an argv mock failure.
+      stdout = target.spec.os === 'darwin' && !args.includes('-m')
+        ? rows.imports.split('\n').flatMap(line => {
+          const name = line.match(/external (\S+)/); return name ? [name[1]] : [];
+        }).join('\n') : rows.imports;
+    }
+    assert.equal(typeof stdout, 'string', `unexpected symbol reader: ${program} ${args}`);
+    return {status: 0, signal: null, stdout, stderr: ''};
+  });
+  syncBuiltinESMExports();
+  try { check(() => assertSdkCompilerRuntimeAbi({sdk, target, log: () => {}}), calls, rows, compiler); }
+  finally {
+    mock.mock.restore();
+    syncBuiltinESMExports();
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+}
+
+test('packaged SDK colour ABI preserves Darwin optional weak references through both readers', t => {
+  withAbiSymbolOutput(t, 'darwin-arm64', {
+    imports: '                 (undefined) weak external _g_cjLoadBadMask (from libcangjie-runtime)\n'
+      + '                 (undefined) weak external _optional_runtime_api (from libcangjie-runtime)\n',
+    exports: '',
+  }, (check, calls, rows, compiler) => {
+    assert.deepEqual(check().runtimeImports, []);
+    assert.deepEqual(calls.filter(call => call.args.at(-1) === compiler),
+      [{program: 'nm', args: ['-m', '-u', compiler]}], 'one attribute-preserving read shared by both consumers');
+    rows.imports = '                 (undefined) weak external _g_cjLoadBadMask (dynamically looked up)\n';
+    assert.deepEqual(check().runtimeImports, []);
+  });
+});
+
+test('packaged SDK colour ABI still requires Darwin strong unversioned and bound imports', t => {
+  withAbiSymbolOutput(t, 'darwin-arm64', {
+    imports: '                 (undefined) external _g_cjLoadBadMask (dynamically looked up)\n',
+    exports: '',
+  }, (check, calls, rows) => {
+    assert.throws(check, /unresolved runtime ABI imports: _g_cjLoadBadMask/);
+    rows.exports = '0000000000000000 D _g_cjLoadBadMask\n';
+    assert.deepEqual(check().runtimeImports, ['_g_cjLoadBadMask']);
+    rows.imports = '                 (undefined) external _arbitrary_dependency (from libcangjie-runtime)\n';
+    assert.throws(check, /unresolved runtime ABI imports: _arbitrary_dependency/);
+    rows.exports = '0000000000000000 T _arbitrary_dependency\n';
+    assert.deepEqual(check().runtimeImports, ['_arbitrary_dependency']);
+  });
+});
+
+test('packaged SDK colour ABI retains ELF version-provider and strong/weak controls', t => {
+  withAbiSymbolOutput(t, 'linux-x64', {
+    imports: ' U arbitrary_dependency@RUNTIME_1\n w optional_dependency@RUNTIME_1\n U unrelated@RUNTIME_1\n',
+    exports: '0000000000000000 T arbitrary_dependency@@RUNTIME_2\n',
+    versions: `Symbol table '.dynsym' contains 4 entries:
+   1: 0000000000000000 0 FUNC GLOBAL DEFAULT UND arbitrary_dependency@RUNTIME_1 (3)
+   2: 0000000000000000 0 FUNC WEAK DEFAULT UND optional_dependency@RUNTIME_1 (3)
+   3: 0000000000000000 0 FUNC GLOBAL DEFAULT UND unrelated@RUNTIME_1 (4)
+Version needs section '.gnu.version_r' contains 2 entries:
+  0x0000: Version: 1 File: libcangjie-runtime.so Cnt: 1
+  0x0010: Name: RUNTIME_1 Flags: none Version: 3
+  0x0020: Version: 1 File: libunrelated.so Cnt: 1
+  0x0030: Name: RUNTIME_1 Flags: none Version: 4
+`,
+  }, (check, calls, rows) => {
+    assert.throws(check, /unresolved runtime ABI imports: arbitrary_dependency@RUNTIME_1/);
+    rows.exports = '0000000000000000 T arbitrary_dependency@@RUNTIME_1\n';
+    assert.deepEqual(check().runtimeImports, ['arbitrary_dependency@RUNTIME_1']);
+  });
 });
 
 test('tools select the target compiler home while keeping the plain host loader', () => {
