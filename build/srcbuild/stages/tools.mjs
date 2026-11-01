@@ -312,8 +312,8 @@ export async function run(config) {
       });
       await finishToolInstall(config,name,outputs.find(row=>row.producer===name).from,toolArgv(config,name,argv));
     }
-    requireFile(outputs.find(row=>row.producer==='cjpm').from, {stage: 'tools.cjpm.verify'});
     if(process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
+      requireFile(outputs.find(row=>row.producer==='cjpm').from, {stage: 'tools.cjpm.verify'});
       const sdk=consumerSdk(config);
       await installSourceTools(config,sdk,{dependencies,consume:config.target.spec.crossCompile?undefined:async pending=>{
         const sdk=pending;
