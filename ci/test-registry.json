@@ -5,6 +5,16 @@
     "args": []
   },
   {
+    "file": "ci/bootstrap/sdk-cjfmt-entry.test.mjs",
+    "executor": "manual",
+    "reason": "Requires a dedicated Linux x64 worker with Node, CMake, Ninja and a C++ compiler with static C++ runtime support; CJCJ_CJFMT_TEST_SDK must name an existing installed source-built SDK with .target-tools/tools/bin/cjfmt, tools/config/cangjie-format.toml and runtime/lib/linux_x86_64_cjnative. Set RELEASE_EVIDENCE_TEST_ROOT to an owned absolute directory, then run node --test ci/bootstrap/sdk-cjfmt-entry.test.mjs. Copies the existing tool and runtime into an independent prefix and builds only the native entry; retain installation and loader logs. Missing SDK input skips the test, so generic GATING cannot qualify this integration without provisioning its input. Tests config-home fallback and execution-library isolation, not full SDK qualification."
+  },
+  {
+    "file": "ci/bootstrap/sdk-cjlint-entry.test.mjs",
+    "executor": "manual",
+    "reason": "Requires a dedicated Linux x64 worker with Node, CMake, Ninja and a C++ compiler with static C++ runtime support; CJCJ_CJLINT_TEST_SDK must name an existing installed source-built SDK with the complete .target-tools/tools/cjlint normal producer layout (bin/config/modules/lib/runtime). Set RELEASE_EVIDENCE_TEST_ROOT to an owned absolute directory, then run node --test ci/bootstrap/sdk-cjlint-entry.test.mjs. Budget for the full copied payload and copy-before-overwrite tool ELF during native-entry installation; the current retained fixture needs up to 416 MiB with evidence. Optional CJCJ_CJLINT_TEST_PREFIX may only reuse the test owner's unchanged payload for sequential cut/restoration, never a shared SDK. Builds only the native entry, runs public cjlint without -m, and retains diagnostic/loader/exit evidence. Missing SDK input skips the test; generic GATING does not provision these inputs or qualify a full SDK."
+  },
+  {
     "file": "ci/bootstrap/cpp-headers.integration.mjs",
     "executor": "manual",
     "reason": "Cold bootstrap integration needs pinned C++ source, host LLVM, AST archive and colour tuple; allocates a private full build worker."
