@@ -36,21 +36,32 @@ function descriptor(text) {
   assert.equal(found.length, 1, 'one real package descriptor');
   return found[0];
 }
-function checkDependencies(info) {
+function checkDependencies(info, directPrivateImport) {
   const graph = Object.assign({}, ...info['std-dependencies']);
   assert.ok(Object.hasOwn(graph, 'std.ast'), 'retain the real std.ast library');
   assert.ok(Object.hasOwn(graph, 'std.core'), 'retain transitive std dependencies');
   assert.ok(!Object.hasOwn(graph, 'flatbuffers'), 'private support is not a std library node');
   for (const edges of Object.values(graph)) assert.ok(!edges.includes('flatbuffers'), 'no private support std edge');
-  assert.equal(info.dependencies.find(d => d.package === 'flatbuffers')?.isStd, false,
-    'an explicit non-std import must still be reported');
+  if (directPrivateImport) {
+    assert.equal(info.dependencies.find(d => d.package === 'flatbuffers')?.isStd, false,
+      'an explicit non-std import must still be reported by the scanner');
+  } else {
+    assert.ok(!info.dependencies.some(d => d.package === 'flatbuffers'),
+      'the public std.ast consumer has no direct private support import');
+  }
 }
 const sourceDir = path.join(work, 'source');
 fs.mkdirSync(sourceDir);
 const source = path.join(sourceDir, 'main.cj');
+// Private flatbuffers is available to dependency scanning, but its symbols are
+// hidden inside std.ast.so. A public executable must import std.ast, not its
+// private support package. Keep that scanner classification control separate.
+const scanDir = path.join(work, 'direct-import');
+fs.mkdirSync(scanDir);
+fs.writeFileSync(path.join(scanDir, 'main.cj'),
+  'package stddepfixture\nimport std.ast.*\nimport flatbuffers.*\nmain() {}\n');
 fs.writeFileSync(source, `package stddepfixture
 import std.ast.*
-import flatbuffers.*
 main(): Int64 {
     let token = Token(TokenKind.IDENTIFIER, "closure")
     let bytes = token.toBytes()
@@ -62,13 +73,13 @@ main(): Int64 {
     return 0
 }
 `);
-checkDependencies(descriptor(run('source-scan', [compiler, '-p', sourceDir, '--scan-dependency'])));
+checkDependencies(descriptor(run('source-scan', [compiler, '-p', scanDir, '--scan-dependency'])), true);
 const exe = path.join(work, 'stddepfixture');
 const map = path.join(work, 'link.map');
 run('compile', [compiler, source, '-O0', '--link-options', '-Map=' + map, '-o', exe]);
 const cjo = path.join(work, 'stddepfixture.cjo');
 assert.ok(fs.existsSync(cjo), 'normal compiler exports the package CJO');
-checkDependencies(descriptor(run('cjo-scan', [compiler, cjo, '--scan-dependency'])));
+checkDependencies(descriptor(run('cjo-scan', [compiler, cjo, '--scan-dependency'])), false);
 const linkMap = fs.readFileSync(map, 'utf8');
 assert.match(linkMap, /libcangjie-std-ast\.so/,
   'normal Linux std.ast selection is shared, including its private support');
