@@ -8,13 +8,14 @@ import {promisify} from 'node:util';
 const execute=promisify(execFile);
 export const TOOL_NAMES = ['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'];
 export const TOOL_DIRECTORIES = Object.fromEntries(TOOL_NAMES.map(name=>[name,'packages/'+name]));
-export const toolProducerDirectory = (config,name) => config.toolsProducerBuildDir ?? path.join(config.buildRoot,name);
+export const toolProducerBuildRoot = (config,name) => config.toolsProducerBuildRoots?.[name] ?? config.buildRoot;
+export const toolProducerDirectory = (config,name) => config.toolsProducerDirectories?.[name] ?? config.toolsProducerBuildDir ?? path.join(toolProducerBuildRoot(config,name),name);
 export const TOOL_PUBLIC_NAMES = {lsp:'LSPServer'};
 export const toolName = name => { const plain=name.replace(/\.exe$/,''); return plain==='LSPServer'?'lsp':plain; };
-export const cjlintBuildDirectory = config => path.join(config.buildRoot,'cjlint');
+export const cjlintBuildDirectory = config => toolProducerDirectory(config,'cjlint');
 export const retainedToolPath = row => ['cjlint','lsp','cjhead'].includes(row.producer)?'.target-tools/tools/'+row.producer+'/bin/'+row.name:'.target-tools/'+row.to;
 export const hleBuildDirectory = config => toolProducerDirectory(config,'hle');
-export const cjprofBuildDirectory = config => path.join(config.buildRoot,'cjprof');
+export const cjprofBuildDirectory = config => toolProducerDirectory(config,'cjprof');
 export function requireToolProducer(name) {
   const directory=TOOL_DIRECTORIES[name];
   if(!directory)throw new Error('TOOL_SOURCE_MISSING '+name+': fixed source producer required; host output cannot substitute');

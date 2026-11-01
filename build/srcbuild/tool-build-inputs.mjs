@@ -13,6 +13,30 @@ const execute = promisify(execFile);
 const directories = TOOL_DIRECTORIES;
 const recordPath = (config, name) => path.join(config.workspace,'build','tools',name,'build-inputs.json');
 const dry = () => process.env.CANGJIE_BUILD_DRY_RUN === '1';
+// Install reuses each successful public producer's actual directory. Today's
+// build selector cannot relocate an earlier producer or its native inputs.
+export async function toolInstallConfig(config, names) {
+  if(dry())return config;
+  const roots={...config.toolsProducerBuildRoots},producerDirectories={...config.toolsProducerDirectories};
+  for(const name of names) {
+    const facts=await readJson(recordPath(config,name)),argv=facts.build?.argv;
+    const reject=()=>{throw Error('TOOL_BUILD_DIRECTORY_INPUT '+name);};
+    if(facts.build?.rc!==0||!Array.isArray(argv)||argv.some(arg=>typeof arg!=='string'))reject();
+    const split=argv.indexOf('--'),outer=argv.slice(3,split),native=argv.slice(split+1);
+    const one=(args,key)=>{
+      const positions=args.flatMap((value,index)=>value===key?[index]:[]);
+      if(positions.length!==1||!args[positions[0]+1]||args[positions[0]+1].startsWith('--'))reject();
+      return args[positions[0]+1];
+    };
+    if(split<3||argv[1]!==path.join(config.repoPath('tools'),'build.mjs')||argv[2]!=='build'
+      ||one(outer,'--tool')!==name)reject();
+    const root=one(outer,'--build-root'),directory=one(native,name==='lsp'?'--build':'--build-dir');
+    if([root,directory].some(value=>!path.isAbsolute(value)||path.resolve(value)!==value))reject();
+    roots[name]=root;producerDirectories[name]=directory;
+  }
+  return {...config,toolsProducerBuildRoots:roots,toolsProducerDirectories:producerDirectories};
+}
+
 async function sourceState(root, directory, revision) {
   const query = async args => (await execute('git',['-C',root,...args],{maxBuffer:16*1024*1024})).stdout;
   const commit = (await query(['rev-parse','--verify',revision+'^{commit}'])).trim();
