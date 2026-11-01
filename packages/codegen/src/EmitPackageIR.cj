@@ -95,8 +95,8 @@ private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
     return result
 }
 
-// Mirrors EmitPackageIR.cpp:351-358. All split modules finish this definition-emission phase
-// before GenSubCHIRPackagePart2 builds the package reset closure.
+// Mirrors EmitPackageIR.cpp:351-358. All split modules finish definitions before
+// the package entry/reset phase reads their IR.
 private func GenSubCHIRPackage(cgMod: CGModule): Unit {
     let subCHIRPackage = cgMod.GetCGContext().GetSubCHIRPackage()
     EmitTIOrTTForCustomDefs(cgMod)
@@ -109,12 +109,17 @@ private func GenSubCHIRPackage(cgMod: CGModule): Unit {
     }
 }
 
-// Mirrors the remainder of C++ GenSubCHIRPackage at EmitPackageIR.cpp:359-415.
-private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
+// Reset generation follows declarations into other split modules. It must finish
+// before any module starts finalization: that phase mutates ValueNames and can
+// erase the functions/instructions being traversed by CollectDependentPackages.
+private func GenPackageEntryIR(cgMod: CGModule): Unit {
     let subCHIRPackage = cgMod.GetCGContext().GetSubCHIRPackage()
-    let options = cgMod.GetCGContext().GetCGPkgContext().GetGlobalOptions()
-    var subDirNum: Int64 = 0
-    if (subCHIRPackage.mainModule) {
+    if (!subCHIRPackage.mainModule) { return }
+    let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+    let index = subCHIRPackage.subCHIRPackageIdx
+    let worker = Thread.currentThread.id
+    if (trace) { eprintln("CJCJ_MODULE_TASK begin phase=package module=${index} worker=${worker}") }
+    try {
         // Mirror C++ EmitPackageIR.cpp:359: the main-module block runs for every output type,
         // including libraries. Emitting the SDK version and the package-init-reset function is
         // required for a shared/static library to be loadable by the runtime (the runtime reads
@@ -126,7 +131,16 @@ private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
         RegisterExceptionRaiser(cgMod)
         CreatePackageInitResetFunction(cgMod)
         SpecifyPackageInitFunc(cgMod)
+    } finally {
+        if (trace) { eprintln("CJCJ_MODULE_TASK end phase=package module=${index} worker=${worker}") }
     }
+}
+
+// Module-local finalization remains parallel after the cross-module reader ends.
+private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
+    let subCHIRPackage = cgMod.GetCGContext().GetSubCHIRPackage()
+    let options = cgMod.GetCGContext().GetCGPkgContext().GetGlobalOptions()
+    var subDirNum: Int64 = 0
     GenerateInterfaceExtensionDefs(cgMod)
     InitializeCjStringLiteral(cgMod)
     // Mirror C++ EmitPackageIR.cpp:370 cgMod.GenTypeTemplate(): drain delayed generic
@@ -192,6 +206,12 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
             }
             taskQueueDefinitions.RunAndWaitForAllTasksCompleted()
             ConsumeModuleGenerationResults(results)
+        }
+        // This is the sole cross-module IR-reading phase. Do not enqueue any
+        // finalizer until it returns; per-module contexts alone do not protect
+        // foreign-module Value pointers obtained while building the reset graph.
+        for (cgModule in cgModules) {
+            GenPackageEntryIR(cgModule)
         }
         if (IsModuleGenerationSerial(options)) {
             for (cgModule in cgModules) {
