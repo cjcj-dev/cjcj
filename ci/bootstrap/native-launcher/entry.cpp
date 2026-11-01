@@ -142,6 +142,11 @@ int main(int argc, char **argv) {
         const bool formatterHome = lines[2] == ".target-tools/tools/bin/cjfmt" ||
                                    lines[2] == ".target-tools/tools/bin/cjfmt.exe";
 
+        // cjlint derives its application root (modules/config/runtime) from
+        // argv0. Its normal producer payload lives beside the retained body.
+        const bool privateApplication = lines[2] == ".target-tools/tools/cjlint/bin/cjlint" ||
+                                        lines[2] == ".target-tools/tools/cjlint/bin/cjlint.exe";
+
         std::string libraries;
         for (size_t i = 5; i < lines.size(); ++i) {
             if (i > 5) libraries +=
@@ -168,9 +173,10 @@ int main(int argc, char **argv) {
         if (!args) throw std::runtime_error("entry arguments");
         std::wstring reportedArgv0;
         const auto realDir = real.parent_path();
-        if (count > 0 && args[0] && realDir.filename() == L"compiler" &&
-            realDir.parent_path().filename() == L"libexec") {
-            reportedArgv0 = (root / L"bin" / fs::path(args[0]).filename()).wstring();
+        if (count > 0 && args[0] && (privateApplication || (realDir.filename() == L"compiler" &&
+            realDir.parent_path().filename() == L"libexec"))) {
+            reportedArgv0 = privateApplication ? real.wstring() :
+                (root / L"bin" / fs::path(args[0]).filename()).wstring();
             args[0] = reportedArgv0.data();
         }
         std::wstring command;
@@ -216,16 +222,17 @@ int main(int argc, char **argv) {
             (root / "third_party/llvm/bin").string() + ":" + (inheritedPath ? inheritedPath : "/usr/bin:/bin");
         if (setenv("PATH", search.c_str(), 1)) throw std::runtime_error("entry PATH");
         // Compiler-relative resources belong to the public SDK. Preserve the
-        // invoked basename, while exec and the loader still select the retained
-        // compiler and its separate execution libraries above.
+        // invoked basename; analysis applications instead use their private
+        // producer layout. Execution libraries remain descriptor-selected.
         std::vector<char *> execArgs;
         std::string reportedArgv0;
         char **childArgv = argv;
         std::vector<std::string> selectedArgs;
         const auto realDir = real.parent_path();
-        if (argc > 0 && argv[0] && realDir.filename() == "compiler" &&
-            realDir.parent_path().filename() == "libexec") {
-            reportedArgv0 = (root / "bin" / fs::path(argv[0]).filename()).string();
+        if (argc > 0 && argv[0] && (privateApplication || (realDir.filename() == "compiler" &&
+            realDir.parent_path().filename() == "libexec"))) {
+            reportedArgv0 = privateApplication ? real.string() :
+                (root / "bin" / fs::path(argv[0]).filename()).string();
             execArgs.assign(argv, argv + argc);
             execArgs[0] = reportedArgv0.data();
             execArgs.push_back(nullptr);
