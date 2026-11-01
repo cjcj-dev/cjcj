@@ -151,7 +151,7 @@ export async function toolBuildInputs(config, name, product, {installed=false}={
   const digest=await fileDigest(product);
   let facts;
   try { facts=await readJson(installed&&toolInstallRoot(config,name)?path.join(toolInstallRoot(config,name),'build-inputs.json'):recordPath(config,name)); }
-  catch(e){if(e.code!=='ENOENT')throw e;
+  catch(e){if(e.code!=='ENOENT'||(installed&&toolInstallRoot(config,name)))throw e;
     return {source:{status:'unresolved',reason:'original producer did not record source/build inputs'},artifact:{sha256:digest}};}
   if(facts.build?.rc!==0 || (installed&&facts.install!==undefined?facts.install?.artifact:facts.artifact)?.sha256!==digest || facts.build.platform!==config.target.spec.llvmPlatform
     || !/^[0-9a-f]{40}$/.test(facts.source?.commit||'') || !facts.source?.repository)
