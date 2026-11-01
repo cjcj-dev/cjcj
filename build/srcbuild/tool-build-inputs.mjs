@@ -8,6 +8,8 @@ import {atomicJson, fileDigest, readJson} from '../../ci/bootstrap/sdk-flow.mjs'
 import {compilerProducer} from '../../ci/bootstrap/compiler_identity.mjs';
 import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,toolProducerDirectory,toolProducerWorkspace,toolSourceRoot,toolInstallRoot} from './tool-layout.mjs';
 import {assertSourceIdentity} from '../lib/git.mjs';
+import {assertLauncherFormat} from '../../ci/bootstrap/sdk-install-entries.mjs';
+import {sdkPlatform} from '../../ci/bootstrap/sdk-platform.mjs';
 import {sha256} from '../../ci/bootstrap/sdk-io.mjs';
 
 const execute = promisify(execFile);
@@ -19,10 +21,23 @@ const dry = () => process.env.CANGJIE_BUILD_DRY_RUN === '1';
 export async function toolInstallConfig(config, names) {
   if(dry())return config;
   const roots={...config.toolsProducerBuildRoots},producerDirectories={...config.toolsProducerDirectories};
+  const sources={...config.toolsProducerSources};
   let analysisSdk=config.toolsAnalysisSdk;
   const checkedSources=new Set();
   for(const name of names) {
-    const facts=await readJson(recordPath(config,name)),argv=facts.build?.argv;
+    let facts;
+    try { facts=await readJson(recordPath(config,name)); }
+    catch(error) {
+      if(error.code!=='ENOENT'||name!=='lsp'||!config.toolsProducerWorkspaces?.[name])throw error;
+      // The ordinary root producer owns source/ and build/<tool>; it does not
+      // emit the CI wrapper's workspace record or require a Git checkout.
+      const root=toolProducerWorkspace(config,name);
+      sources[name]=path.join(root,'source');roots[name]=path.join(root,'build');
+      producerDirectories[name]=path.join(roots[name],name);
+      await fs.access(path.join(sources[name],'build.mjs'));
+      continue;
+    }
+    const argv=facts.build?.argv;
     const reject=()=>{throw Error('TOOL_BUILD_DIRECTORY_INPUT '+name);};
     if(facts.build?.rc!==0||!Array.isArray(argv)||argv.some(arg=>typeof arg!=='string'))reject();
     const split=argv.indexOf('--'),outer=argv.slice(3,split),native=argv.slice(split+1);
@@ -33,7 +48,8 @@ export async function toolInstallConfig(config, names) {
     };
     if(split<3||argv[1]!==path.join(toolSourceRoot(config,name),'build.mjs')||argv[2]!=='build'
       ||one(outer,'--tool')!==name)reject();
-    const root=one(outer,'--build-root'),directory=one(native,name==='lsp'?'--build':'--build-dir');
+    const root=one(outer,'--build-root'),key=name==='lsp'?'--build':'--build-dir';
+    const directory=native.includes(key)?one(native,key):path.join(root,name);
     if([root,directory].some(value=>!path.isAbsolute(value)||path.resolve(value)!==value))reject();
     // Reuse is bound to the original fixed producer, not today's source pin.
     if(facts.source?.status!=='resolved'||!facts.source.repository||!(/^[0-9a-f]{40}$/).test(facts.source.commit??'')
@@ -49,7 +65,7 @@ export async function toolInstallConfig(config, names) {
     }
     roots[name]=root;producerDirectories[name]=directory;
   }
-  return {...config,toolsAnalysisSdk:analysisSdk,toolsProducerBuildRoots:roots,toolsProducerDirectories:producerDirectories};
+  return {...config,toolsAnalysisSdk:analysisSdk,toolsProducerBuildRoots:roots,toolsProducerDirectories:producerDirectories,toolsProducerSources:sources};
 }
 
 async function sourceState(root, directory, revision) {
@@ -150,6 +166,29 @@ export async function finishToolBuild(config, name, facts, product) {
 export async function toolBuildInputs(config, name, product, {installed=false}={}) {
   const digest=await fileDigest(product);
   let facts;
+  if(name==='lsp'&&config.toolsProducerSources?.[name]) {
+    const directory=toolProducerDirectory(config,name);
+    const nativeConfiguration=await nativeConfigurationInputs(config,name);
+    const file=path.join(directory,'build-command.json');
+    nativeConfiguration.protocol={path:file,values:await readJson(file)};
+    for(const [key,cwd]of [['protocol',directory],['cangjie',path.join(directory,'server')]]) {
+      const row=nativeConfiguration[key].values;
+      if(row.rc!==0||row.signal||row.error||row.cwd!==cwd||!Array.isArray(row.argv)
+        ||row.argv[1]!=='build'||row.argv[row.argv.indexOf('--target-dir')+1]!==path.join(cwd,'target'))
+        throw Error('TOOL_BUILD_DIRECTORY_INPUT '+name);
+    }
+    await assertLauncherFormat({binary:product,native:sdkPlatform(config.target.spec.llvmPlatform),platform:config.target.spec.llvmPlatform});
+    if(installed) {
+      facts=await readJson(path.join(toolInstallRoot(config,name),'build-inputs.json'));
+      if(!isDeepStrictEqual(facts.build?.nativeConfiguration,nativeConfiguration)||facts.install?.artifact?.sha256!==digest)
+        throw Error('TOOL_BUILD_INPUT_MISMATCH '+name);
+      return facts;
+    }
+    // Keep the native commands verbatim. They do not record a source revision
+    // or build-time SDK hashes; an install must not invent that history.
+    return {source:{status:'unresolved',path:toolSourceRoot(config,name),reason:'native producer does not record source revision'},
+      build:{nativeConfiguration},artifact:{path:product,sha256:digest}};
+  }
   try { facts=await readJson(installed&&toolInstallRoot(config,name)?path.join(toolInstallRoot(config,name),'build-inputs.json'):recordPath(config,name)); }
   catch(e){if(e.code!=='ENOENT'||(installed&&toolInstallRoot(config,name)))throw e;
     return {source:{status:'unresolved',reason:'original producer did not record source/build inputs'},artifact:{sha256:digest}};}
@@ -170,7 +209,7 @@ export async function toolBuildInputs(config, name, product, {installed=false}={
 export async function finishToolInstall(config,name,product,argv,{prefix=toolInstallRoot(config,name)}={}) {
   if(dry())return;
   const facts=await toolBuildInputs(config,name,toolBuildProduct(config,name));
-  if(facts.source.status!=='resolved')throw new Error('TOOL_INSTALL_SOURCE_MISSING '+name);
+  if(!facts.build)throw new Error('TOOL_INSTALL_SOURCE_MISSING '+name);
   const payloads={};
   for(const row of await toolPayloads(config,name,prefix))payloads[row.to]={source:row.from,sha256:await fileDigest(row.from)};
   if(['cjlint','cjprof'].includes(name)) {
@@ -184,7 +223,7 @@ export async function finishToolInstall(config,name,product,argv,{prefix=toolIns
     }
   }
   const artifact={path:product,sha256:await fileDigest(product)};
-  if(['cjprof','cjlint'].includes(name)&&artifact.sha256!==facts.artifact.sha256)throw Error('TOOL_INSTALL_BUILD_ARTIFACT_MISMATCH '+name);
+  if(['cjprof','cjlint','lsp'].includes(name)&&artifact.sha256!==facts.artifact.sha256)throw Error('TOOL_INSTALL_BUILD_ARTIFACT_MISMATCH '+name);
   await atomicJson(prefix?path.join(prefix,'build-inputs.json'):recordPath(config,name),{...facts,install:{argv,rc:0,artifact,payloads}});
 }
 export async function installedToolBuildInputs(config,name,product) {

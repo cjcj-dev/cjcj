@@ -194,3 +194,22 @@ readTest('Cangjie lint requires explicit analysis facts, bundled modules and hos
  await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,fixture:'different target SDK'}));
  assert.match(publicRead(f.root).cjlint.reason,/producer SDK selection differs/,'host analysis evidence does not grant target SDK readiness');
 });
+
+readTest('public native root LSP keeps unrecorded history unknown while admitting installed consumers',async t=>{
+  const f=await fixture(t),p=await cangjieLsp(f);
+  f.input.installationInputs=structuredClone(p.build.inputs);
+  p.source={status:'unresolved',path:'/original/source',reason:'native producer does not record source revision'};
+  p.build={nativeConfiguration:p.build.nativeConfiguration};
+  p.build.nativeConfiguration.protocol={path:'/original/build/lsp/build-command.json',values:{rc:0,signal:null,error:null}};
+  await f.save();const before=JSON.stringify(p),normal=publicRead(f.root);
+  assert.equal(normal.LSPServer.available,true,normal.LSPServer.reason);
+  assert.equal(normal.LSPServer.ready,false,'installation cannot invent build-time SDK identity or a semantic result');
+  assert.equal(normal.LSPServer.applicability.status,'NOT_CONSUMED');
+  p.build.nativeConfiguration.protocol.values.rc=1;await f.save();
+  const red=publicRead(f.root);assert.equal(red.LSPServer.available,false);assert.match(red.LSPServer.reason,/native protocol build failed/);assert.equal(red.cjprof.ready,true);
+  p.build.nativeConfiguration.protocol.values.rc=0;await f.save();assert.equal(publicRead(f.root).LSPServer.available,true);
+  const runtime=f.input.installationInputs.artifacts.runtime;delete f.input.installationInputs.artifacts.runtime;await f.save();
+  assert.match(publicRead(f.root).LSPServer.reason,/installed SDK input missing: runtime/);
+  f.input.installationInputs.artifacts.runtime=runtime;await f.save();assert.equal(publicRead(f.root).LSPServer.available,true);
+  assert.equal(JSON.stringify(p),before,'consumer does not relabel native records');
+});

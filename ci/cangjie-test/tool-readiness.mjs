@@ -40,21 +40,25 @@ export async function toolReadiness(root) {
     let applicability;
     try {
       const row=inputs.files?.[rel],facts=row?.producer;
-      if(facts?.source?.status!=='resolved'||!facts.source.repository||!/^[0-9a-f]{40}$/.test(facts.source.commit??''))throw Error('target producer source missing');
-      if(facts.build?.rc!==0||facts.build.platform!==stage.platform||facts.install?.rc!==0)throw Error('target build/install not recorded');
-      if(facts.build.directory!==TOOL_DIRECTORIES[name])throw Error('producer directory differs');
+      const nativeLsp=name==='lsp'&&facts?.source?.status==='unresolved'&&facts.source.path&&facts.build?.nativeConfiguration?.protocol;
+      if(!nativeLsp&&(facts?.source?.status!=='resolved'||!facts.source.repository||!/^[0-9a-f]{40}$/.test(facts.source.commit??'')))throw Error('target producer source missing');
+      if(facts.install?.rc!==0||(!nativeLsp&&(facts.build?.rc!==0||facts.build.platform!==stage.platform)))throw Error('target build/install not recorded');
+      if(!nativeLsp&&facts.build.directory!==TOOL_DIRECTORIES[name])throw Error('producer directory differs');
+      if(nativeLsp&&(nativeLsp.values?.rc!==0||nativeLsp.values.signal||nativeLsp.values.error))throw Error('native protocol build failed');
       const sdkInputs=toolSdkInputs(name);
       const compilerLoads=name==='lsp'?['compilerEntry','executionRuntime'].filter(key=>facts.build.inputs?.artifacts?.[key]):[];
       const runtimeInputs=toolRuntimeInputs(name),installed=runtimeInputs.length?inputs.installationInputs:undefined;
       // A recorded LSP installation may select different analysis inputs.
       // Validate that selection and its bytes below, without relabelling the
       // original producer or qualifying the unexecuted semantic consumer.
+      if(nativeLsp&&(stage.platform!=='linux_x86_64'||!installed))throw Error('native LSP installation selection missing');
+      if(nativeLsp)for(const key of sdkInputs)if(!installed.artifacts?.[key]?.sdkRelative)throw Error('installed SDK input missing: '+key);
       if(!installed&&!isDeepStrictEqual(facts.build.inputs?.stage,stage))throw Error('producer SDK selection differs');
       const changed=[];
       if(installed)for(const key of ['platform','compilerFile','compilerCommit','runtimeCommit']) {
         if(installed.stage?.[key]!==stage[key])throw Error('installed SDK selection differs: '+key);
       }
-      for(const key of [...sdkInputs,...compilerLoads]) {
+      for(const key of nativeLsp?[]:[...sdkInputs,...compilerLoads]) {
         const built=facts.build.inputs?.artifacts?.[key];
         if(!built?.sdkRelative)throw Error('producer SDK input missing: '+key);
         const input=installed&&runtimeInputs.includes(key)?installed.artifacts?.[key]:built;
@@ -62,11 +66,11 @@ export async function toolReadiness(root) {
         await bytes(sdk,input.sdkRelative,input.sha256);
         if(input.sdkRelative!==built.sdkRelative||input.sha256!==built.sha256)changed.push(key);
       }
-      if(installed)for(const key of runtimeInputs.filter(key=>!sdkInputs.includes(key)&&!compilerLoads.includes(key)&&installed.artifacts?.[key])) {
+      if(installed)for(const key of runtimeInputs.filter(key=>(nativeLsp||!sdkInputs.includes(key)&&!compilerLoads.includes(key))&&installed.artifacts?.[key])) {
         const input=installed.artifacts[key];await bytes(sdk,input.sdkRelative,input.sha256);changed.push(key);
       }
       applicability={build:facts.build.inputs?.stage,installation:installed?.stage??facts.build.inputs?.stage,
-        changedRuntimeInputs:changed,status:changed.length?'NOT_CONSUMED':'BUILD_INPUTS_MATCH'};
+        changedRuntimeInputs:nativeLsp?undefined:changed,status:nativeLsp||changed.length?'NOT_CONSUMED':'BUILD_INPUTS_MATCH'};
       const retained=retainedToolPath({producer:name,name:publicName+native.exe,to:rel});
       if(row.artifact?.path!==retained||row.entry?.path!==rel||row.entry.recipe?.path!==rel+'.entry'
         ||row.artifact.sha256!==row.sha256||facts.install.artifact?.sha256!==row.sha256)throw Error('target body/entry binding differs');
@@ -129,8 +133,8 @@ export async function toolReadiness(root) {
           if(actual.name!==name||actual.version!==version.replace(/^npm:[^@]+@/,''))throw Error('HLE module differs: '+name);
         }
       }
-      result[publicName]={ready:!changed.length,available:true,
-        reason:changed.length?'current native SDK consumer not run: '+changed.join(','):'actual target producer/install inputs and bytes match; semantic probe still required',
+      result[publicName]={ready:!nativeLsp&&!changed.length,available:true,
+        reason:nativeLsp?'native root installation available; build-time SDK bytes unrecorded; semantic probe still required':changed.length?'current native SDK consumer not run: '+changed.join(','):'actual target producer/install inputs and bytes match; semantic probe still required',
         source:facts.source,applicability};
     }catch(error){result[publicName]={ready:false,available:false,reason:error.message,...(applicability?{applicability}:{})};}
   }

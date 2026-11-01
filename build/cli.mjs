@@ -59,7 +59,7 @@ function usage() {
     + '  --tools-build-set all|NAME,... (default: all; omitted tools reuse existing outputs)\n'
     + '  --tools-mangle-source DIR (compiler Cangjie demangler source for cjtrace-recover)\n'
     + '  --tools-producer-build-dir PATH (one selected tool; normal existing producer directory)\n'
-    + '  --tools-producer-workspace NAME=PATH (repeatable; install-only reads original producer facts/source)\n'
+    + '  --tools-producer-workspace NAME=PATH (repeatable; install-only; CI workspace or native LSP root with source/ and build/)\n'
     + '    all-install writes each normal install under WORKSPACE/build/tools/NAME/install\n'
     + '  --tools-json-build PATH (LSP matching JSON producer)\n'
     + '  --tools-phase all|build|install (default: all; build does not publish the shared SDK)\n'

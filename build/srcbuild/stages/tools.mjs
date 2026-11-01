@@ -208,7 +208,7 @@ export async function run(config) {
         if(process.env.CANGJIE_BUILD_DRY_RUN!=='1') {
           requireFile(path.join(toolSourceRoot(config,name),'build.mjs'),{stage:'tools.'+name+'.source'});
           const facts=await toolBuildInputs(config,name,toolBuildProduct(config,name));
-          if(facts.source.status!=='resolved')throw new BuildError('tools.install','original build inputs required: '+name);
+          if(!facts.build)throw new BuildError('tools.install','original build inputs required: '+name);
         }
       }
       const env=targetToolsEnv(config);
