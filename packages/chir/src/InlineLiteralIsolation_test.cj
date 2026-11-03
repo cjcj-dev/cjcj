@@ -5,9 +5,10 @@ import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
 
-// Real inline and MergeBlocks worker entries must keep cloned literal users local.
-// The old-sharing witness remains frozen at 833d9750. This regression checks
-// isolation, not a dynamic overlap or reproduction of the production SIGSEGV.
+// Pipeline-independent ownership unit test using real inline and MergeBlocks entries.
+// Normal RulesChecking clears for-in flags before inline, and Annotation.Clone
+// resets this flag. Explicitly mark the actual caller block after inline below.
+// This checks literal isolation, not production reachability or the SIGSEGV.
 @Test
 class InlineLiteralIsolationTest {
     private func MakeCallee(builder: CHIRBuilder, global: GlobalVar): (Function, Constant) {
@@ -37,6 +38,7 @@ class InlineLiteralIsolationTest {
         join.AppendExpression(builder.CreateStore(constant.GetResult().getOrThrow(),
             fn.GetReturnValue().getOrThrow(), join))
         join.AppendExpression(builder.CreateExit(None, join))
+        // The caller must not rely on this flag surviving Block.Clone.
         join.SetGeneratedFromForIn(true)
         return (fn, constant)
     }
@@ -60,6 +62,28 @@ class InlineLiteralIsolationTest {
         block.AppendExpression(builder.CreateExit(None, block))
         FunctionInline(builder, OptimizationLevel.O2, false).DoFunctionInline(call, "literal-sharing-diagnostic")
         return fn
+    }
+
+    private func MarkCallerBlockForCopy(fn: Function): Block {
+        let targets = ArrayList<Block>()
+        for (block in fn.GetBody().getOrThrow().GetBlocks()) {
+            for (expr in block.GetExpressions()) {
+                if (let Some(constant) <- (expr as Constant)) {
+                    if (constant.IsIntLit() && constant.GetSignedIntLitVal() == 7i64) {
+                        @Assert(refEq(constant.GetTopLevelFunc().getOrThrow(), fn))
+                        targets.add(block)
+                    }
+                }
+            }
+        }
+        @Assert(targets.size == 1)
+        let target = targets[0]
+        @Assert(target.GetPredecessors().size == 2)
+        @Assert(!target.GetGeneratedFromForIn())
+        // Deliberate unit-test setup after real inline, outside normal pass order.
+        target.SetGeneratedFromForIn(true)
+        @Assert(target.GetGeneratedFromForIn())
+        return target
     }
 
     private func CheckLiteralUsers(source: Function, first: Function, second: Function,
@@ -107,10 +131,14 @@ class InlineLiteralIsolationTest {
         // the parallel dispatcher, independent of a particular interleaving.
         let firstBuilder = CHIRBuilder(builder.context)
         let secondBuilder = CHIRBuilder(builder.context)
+        let firstTarget = MarkCallerBlockForCopy(first)
         @Expect(MergeBlocks().RunOnFunction(first, firstBuilder) > 0, true)
+        @Expect(firstTarget.GetGeneratedFromForIn(), false)
         CheckLiteralUsers(callee, first, second, 2, 1)
         @Expect(global.GetUsers().size, 4)
+        let secondTarget = MarkCallerBlockForCopy(second)
         @Expect(MergeBlocks().RunOnFunction(second, secondBuilder) > 0, true)
+        @Expect(secondTarget.GetGeneratedFromForIn(), false)
         CheckLiteralUsers(callee, first, second, 2, 2)
         @Expect(global.GetUsers().size, 5)
     }
