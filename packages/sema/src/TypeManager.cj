@@ -474,6 +474,13 @@ public class TypeManager {
     private let boxedNonGenericDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
     private let boxedTys: ArrayList<Ty> = ArrayList<Ty>()
     private let tyUsedExtends: ArrayList<TyUsedExtendsEntry> = ArrayList<TyUsedExtendsEntry>()
+    // Lookup index over tyUsedExtends (positions in insertion order). SameTy(a, b)
+    // implies a.kind == b.kind, or both IsAny(); so an entry matching ty is either in
+    // the bucket of ty.kind or, when ty.IsAny(), in tyUsedExtendsAnyLike (every entry
+    // whose kind or type could make it IsAny()). Lookup returns the earliest matching
+    // position across both, which is the entry the linear scan would return.
+    private let tyUsedExtendsByKind: HashMap<Int64, ArrayList<Int64>> = HashMap<Int64, ArrayList<Int64>>()
+    private let tyUsedExtendsAnyLike: ArrayList<Int64> = ArrayList<Int64>()
     private let checkedTyExtendRelation: ArrayList<CheckedTyExtendRelation> = ArrayList<CheckedTyExtendRelation>()
     private let tyExtendInterfaceTyMap: HashMap<Int64, TySet> = HashMap<Int64, TySet>()
     private let tyToSuperTysMap: HashMap<String, TySet> = HashMap<String, TySet>()
@@ -2086,6 +2093,8 @@ public class TypeManager {
         boxUsedExtends.clear()
         boxedTys.clear()
         tyUsedExtends.clear()
+        tyUsedExtendsByKind.clear()
+        tyUsedExtendsAnyLike.clear()
         checkedTyExtendRelation.clear()
     }
 
@@ -3702,11 +3711,33 @@ public class TypeManager {
         return false
     }
 
+    private static func isAnyLikeTyUsedExtendsKey(ty: Ty): Bool {
+        return ty.kind == TypeKind.TYPE_ANY || ty.kind == TypeKind.TYPE_INTERFACE || (ty as InterfaceTy).isSome()
+    }
+
     private func findTyUsedExtendsEntry(ty: Ty): Option<TyUsedExtendsEntry> {
-        for (entry in tyUsedExtends) {
-            if (SameTy(entry.ty, ty)) {
-                return entry
+        var best: Int64 = -1
+        if (let Some(bucket) <- tyUsedExtendsByKind.get(TypeKindIndex(ty.kind))) {
+            for (pos in bucket) {
+                if (SameTy(tyUsedExtends[pos].ty, ty)) {
+                    best = pos
+                    break
+                }
             }
+        }
+        if (ty.IsAny()) {
+            for (pos in tyUsedExtendsAnyLike) {
+                if (best >= 0 && pos >= best) {
+                    break
+                }
+                if (SameTy(tyUsedExtends[pos].ty, ty)) {
+                    best = pos
+                    break
+                }
+            }
+        }
+        if (best >= 0) {
+            return tyUsedExtends[best]
         }
         return None
     }
@@ -3716,7 +3747,19 @@ public class TypeManager {
             return entry
         }
         let entry = TyUsedExtendsEntry(ty)
+        let pos = tyUsedExtends.size
         tyUsedExtends.add(entry)
+        let kindKey = TypeKindIndex(ty.kind)
+        if (let Some(bucket) <- tyUsedExtendsByKind.get(kindKey)) {
+            bucket.add(pos)
+        } else {
+            let bucket = ArrayList<Int64>()
+            bucket.add(pos)
+            tyUsedExtendsByKind[kindKey] = bucket
+        }
+        if (isAnyLikeTyUsedExtendsKey(ty)) {
+            tyUsedExtendsAnyLike.add(pos)
+        }
         return entry
     }
 
