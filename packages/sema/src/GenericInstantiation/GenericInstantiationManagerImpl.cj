@@ -1118,11 +1118,18 @@ class GenericInstantiationManagerImpl {
 
     private func CheckNodeInstantiation(node: Node, pkg: Package): VisitAction {
         // C++: GenericInstantiationManagerImpl.cpp:1131-1137.
-        if (let Some(packageNode) <- (node as Package)) {
-            for (file in packageNode.files) {
-                InstantiateReferencedGenericsInNode(file, pkg)
+        // Package, RefExpr, MemberAccess, ArrayExpr, ArrayLit, CallExpr and FuncBody are
+        // final classes whose constructors all pass one fixed ASTKind, so a node of any
+        // other kind cannot match those casts; testing the kind first skips a runtime
+        // subtype query per visited node without changing which branch is taken.
+        let kind = node.astKind
+        if (kind == ASTKind.PACKAGE) {
+            if (let Some(packageNode) <- (node as Package)) {
+                for (file in packageNode.files) {
+                    InstantiateReferencedGenericsInNode(file, pkg)
+                }
+                return VisitAction.SKIP_CHILDREN
             }
-            return VisitAction.SKIP_CHILDREN
         }
         let action = CheckVisitedNode(node)
         if (!action.isWalkChildren()) {
@@ -1141,22 +1148,31 @@ class GenericInstantiationManagerImpl {
                 GenericTyExtendInstantiate(ty, pkg)
             }
         }
-        if (let Some(refExpr) <- (node as RefExpr)) {
-            GenericRefExprInstantiate(refExpr, pkg)
-            return VisitAction.SKIP_CHILDREN
-        } else if (let Some(memberAccess) <- (node as MemberAccess)) {
-            GenericMemberAccessInstantiate(memberAccess, pkg)
-            return VisitAction.SKIP_CHILDREN
-        } else if (let Some(typeNode) <- (node as Type)) {
+        if (kind == ASTKind.REF_EXPR) {
+            if (let Some(refExpr) <- (node as RefExpr)) {
+                GenericRefExprInstantiate(refExpr, pkg)
+                return VisitAction.SKIP_CHILDREN
+            }
+        } else if (kind == ASTKind.MEMBER_ACCESS) {
+            if (let Some(memberAccess) <- (node as MemberAccess)) {
+                GenericMemberAccessInstantiate(memberAccess, pkg)
+                return VisitAction.SKIP_CHILDREN
+            }
+        }
+        if (let Some(typeNode) <- (node as Type)) {
             GenericTypeInstantiate(typeNode, pkg)
             if (typeNode.astKind == ASTKind.REF_TYPE || typeNode.astKind == ASTKind.QUALIFIED_TYPE) {
                 return VisitAction.SKIP_CHILDREN
             }
-        } else if (let Some(arrayExpr) <- (node as ArrayExpr)) {
-            GenericArrayExprInstantiate(arrayExpr, pkg)
-        } else if (let Some(arrayLit) <- (node as ArrayLit)) {
-            GenericArrayLitInstantiate(arrayLit, pkg)
-            return VisitAction.SKIP_CHILDREN
+        } else if (kind == ASTKind.ARRAY_EXPR) {
+            if (let Some(arrayExpr) <- (node as ArrayExpr)) {
+                GenericArrayExprInstantiate(arrayExpr, pkg)
+            }
+        } else if (kind == ASTKind.ARRAY_LIT) {
+            if (let Some(arrayLit) <- (node as ArrayLit)) {
+                GenericArrayLitInstantiate(arrayLit, pkg)
+                return VisitAction.SKIP_CHILDREN
+            }
         }
         return VisitAction.WALK_CHILDREN
     }
@@ -1531,23 +1547,36 @@ class GenericInstantiationManagerImpl {
             }
         }
         curTriggerNode = node
-        if (let Some(callExpr) <- (node as CallExpr)) {
-            RearrangeCallExprReference(callExpr, pkg)
-        } else if (let Some(refExpr) <- (node as RefExpr)) {
-            RearrangeRefExprReference(refExpr)
-        } else if (let Some(memberAccess) <- (node as MemberAccess)) {
-            RearrangeMemberAccessReference(memberAccess, pkg)
-        } else if (let Some(typeNode) <- (node as Type)) {
+        // See CheckNodeInstantiation: the final-class casts are gated by their fixed
+        // ASTKind; the abstract Type and Pattern checks keep their original order.
+        let kind = node.astKind
+        if (kind == ASTKind.CALL_EXPR) {
+            if (let Some(callExpr) <- (node as CallExpr)) {
+                RearrangeCallExprReference(callExpr, pkg)
+                return VisitAction.WALK_CHILDREN
+            }
+        } else if (kind == ASTKind.REF_EXPR) {
+            if (let Some(refExpr) <- (node as RefExpr)) {
+                RearrangeRefExprReference(refExpr)
+                return VisitAction.WALK_CHILDREN
+            }
+        } else if (kind == ASTKind.MEMBER_ACCESS) {
+            if (let Some(memberAccess) <- (node as MemberAccess)) {
+                RearrangeMemberAccessReference(memberAccess, pkg)
+                return VisitAction.WALK_CHILDREN
+            }
+        }
+        if (let Some(typeNode) <- (node as Type)) {
             RearrangeTypeReference(typeNode)
             if (typeNode.astKind == ASTKind.REF_TYPE || typeNode.astKind == ASTKind.QUALIFIED_TYPE) {
                 return VisitAction.SKIP_CHILDREN
             }
-        } else if (let Some(arrayExpr) <- (node as ArrayExpr)) {
-            RearrangeArrayExprReference(arrayExpr)
-        } else if (let Some(arrayLit) <- (node as ArrayLit)) {
-            RearrangeArrayLitReference(arrayLit)
-        } else if (let Some(funcBody) <- (node as FuncBody)) {
-            RearrangeFuncBodyReference(funcBody)
+        } else if (kind == ASTKind.ARRAY_EXPR && (node as ArrayExpr).isSome()) {
+            RearrangeArrayExprReference((node as ArrayExpr).getOrThrow())
+        } else if (kind == ASTKind.ARRAY_LIT && (node as ArrayLit).isSome()) {
+            RearrangeArrayLitReference((node as ArrayLit).getOrThrow())
+        } else if (kind == ASTKind.FUNC_BODY && (node as FuncBody).isSome()) {
+            RearrangeFuncBodyReference((node as FuncBody).getOrThrow())
         } else if (let Some(pattern) <- (node as Pattern)) {
             UpdateTypePatternMatchResult(pattern)
         }
