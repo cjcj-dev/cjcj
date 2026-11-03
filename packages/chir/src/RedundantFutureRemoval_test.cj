@@ -190,17 +190,17 @@ class RedundantFutureRemovalTest {
         let allocation = b.CreateAllocate(refTy, f.allocation.GetType(), block)
         let initCall = b.CreateApply(refTy, f.constructor,
             FuncCallContext(args: ArrayList<Value>([allocation.GetResult().getOrThrow(), closure])), block)
-        let spawn = b.CreateSpawn(refTy, initCall.GetResult().getOrThrow(), block)
-        block.AppendExpressions(ArrayList<Expression>([allocation, initCall, spawn, b.CreateExit(None, block)]))
+        let spawnExpr = b.CreateSpawn(refTy, initCall.GetResult().getOrThrow(), block)
+        block.AppendExpressions(ArrayList<Expression>([allocation, initCall, spawnExpr, b.CreateExit(None, block)]))
         @Expect(RedundantFutureRemoval(f.pkg).RunOnPackage(threadNum: 2), 1)
         @Expect(f.spawnExpr.IsExecuteClosure(), false)
         @Expect(observed.GetOperand(1).nodeId, f.initCall.GetResult().getOrThrow().nodeId)
-        @Expect(spawn.IsExecuteClosure(), true)
-        @Expect(spawn.GetClosure().nodeId, closure.nodeId)
-        @Expect(spawn.GetExecuteClosure().getOrThrow().nodeId, f.execute.nodeId)
+        @Expect(spawnExpr.IsExecuteClosure(), true)
+        @Expect(spawnExpr.GetClosure().nodeId, closure.nodeId)
+        @Expect(spawnExpr.GetExecuteClosure().getOrThrow().nodeId, f.execute.nodeId)
         @Expect(initCall.GetParentBlock().isNone(), true)
         @Expect(closure.GetUsers().size, 1)
-        @Expect(closure.GetUsers()[0].nodeId, spawn.nodeId)
+        @Expect(closure.GetUsers()[0].nodeId, spawnExpr.nodeId)
         @Expect(RedundantFutureRemoval(f.pkg).RunOnPackage(threadNum: 2), 0)
     }
 
