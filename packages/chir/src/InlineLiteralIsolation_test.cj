@@ -5,12 +5,11 @@ import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
 
-// Private diagnostic for fixed ae704, not a regression asserting desired behavior.
-// No threads, raw pointers, logging, or GC hooks. Two real inline operations expose
-// the alias; two calls to the real worker body show writes to that same users list.
-// This does not establish an overlap or reproduce the production SIGSEGV.
+// Real inline and MergeBlocks worker entries must keep cloned literal users local.
+// The old-sharing witness remains frozen at 833d9750. This regression checks
+// isolation, not a dynamic overlap or reproduction of the production SIGSEGV.
 @Test
-class InlineLiteralSharingDiagnosticTest {
+class InlineLiteralIsolationTest {
     private func MakeCallee(builder: CHIRBuilder, global: GlobalVar): (Function, Constant) {
         let context = builder.context
         let ty = context.GetInt64Ty()
@@ -63,29 +62,34 @@ class InlineLiteralSharingDiagnosticTest {
         return fn
     }
 
-    private func CheckLiteralUsers(literal: LiteralValue, source: Function,
-        first: Function, second: Function, firstCount: Int64, secondCount: Int64): Unit {
-        var sourceUsers: Int64 = 0
-        var firstUsers: Int64 = 0
-        var secondUsers: Int64 = 0
-        for (user in literal.GetUsers()) {
-            @Assert(user.GetExprKind() == ExprKind.CONSTANT)
-            let constant = (user as Constant).getOrThrow()
-            @Expect(refEq(constant.GetValue(), literal), true)
-            @Expect(constant.GetSignedIntLitVal(), 7i64)
-            let owner = user.GetTopLevelFunc().getOrThrow()
-            if (refEq(owner, source)) { sourceUsers++ }
-            else if (refEq(owner, first)) { firstUsers++ }
-            else if (refEq(owner, second)) { secondUsers++ }
-            else { throw IllegalStateException("unexpected literal user owner") }
+    private func CheckLiteralUsers(source: Function, first: Function, second: Function,
+        firstCount: Int64, secondCount: Int64): Unit {
+        let seen = HashSet<Int64>()
+        for ((fn, expected) in [(source, 1i64), (first, firstCount), (second, secondCount)]) {
+            var count: Int64 = 0
+            for (block in fn.GetBody().getOrThrow().GetBlocks()) {
+                for (expr in block.GetExpressions()) {
+                    if (let Some(constant) <- (expr as Constant)) {
+                        if (!constant.IsIntLit() || constant.GetSignedIntLitVal() != 7i64) { continue }
+                        let literal = constant.GetValue()
+                        @Expect(literal.IsGlobal(), false)
+                        @Expect(seen.contains(literal.nodeId), false)
+                        seen.add(literal.nodeId)
+                        @Expect(literal.GetUsers().size, 1)
+                        for (user in literal.GetUsers()) {
+                            @Expect(refEq(user, constant), true)
+                            @Expect(refEq(user.GetTopLevelFunc().getOrThrow(), fn), true)
+                        }
+                        count++
+                    }
+                }
+            }
+            @Expect(count, expected)
         }
-        @Expect(sourceUsers, 1)
-        @Expect(firstUsers, firstCount)
-        @Expect(secondUsers, secondCount)
     }
 
     @TestCase
-    func twoInlineCallersReachWritesToOneNonGlobalLiteral(): Unit {
+    func twoInlineCallersAndBlockCopiesOwnTheirLiterals(): Unit {
         let builder = CHIRBuilder(CHIRContext())
         let _ = builder.CreatePackage("inline_literal_sharing_diagnostic")
         let global = builder.CreateGlobalVar(builder.context.GetRefTy(builder.context.GetInt64Ty()), "global_control")
@@ -95,19 +99,19 @@ class InlineLiteralSharingDiagnosticTest {
         let literal = constant.GetValue()
         @Expect(literal.IsGlobal(), false)
         @Expect(global.IsGlobal(), true)
-        CheckLiteralUsers(literal, callee, first, second, 1, 1)
+        CheckLiteralUsers(callee, first, second, 1, 1)
         @Expect(global.GetUsers().size, 3)
 
         // RunOnPackage dispatches this same worker body once per function. Keep
-        // this witness serial: list identity and two reachable writes are the
-        // claim, not a fabricated dynamic overlap or a performance control.
+        // this regression serial: distinct identity is the invariant needed by
+        // the parallel dispatcher, independent of a particular interleaving.
         let firstBuilder = CHIRBuilder(builder.context)
         let secondBuilder = CHIRBuilder(builder.context)
         @Expect(MergeBlocks().RunOnFunction(first, firstBuilder) > 0, true)
-        CheckLiteralUsers(literal, callee, first, second, 2, 1)
+        CheckLiteralUsers(callee, first, second, 2, 1)
         @Expect(global.GetUsers().size, 4)
         @Expect(MergeBlocks().RunOnFunction(second, secondBuilder) > 0, true)
-        CheckLiteralUsers(literal, callee, first, second, 2, 2)
+        CheckLiteralUsers(callee, first, second, 2, 2)
         @Expect(global.GetUsers().size, 5)
     }
 }

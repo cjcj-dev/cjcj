@@ -1071,5 +1071,15 @@
     "file": "runtime_shim/tests/compiler_heap_defaults.test.mjs",
     "executor": "zx",
     "args": []
+  },
+  {
+    "file": "packages/chir/src/ConstantClone_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/InlineLiteralIsolation_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
   }
 ]

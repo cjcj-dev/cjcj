@@ -672,7 +672,24 @@ public class Constant <: Expression {
     public func IsUnitLit(): Bool { return GetValue().IsUnitLit() }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let litVal: LiteralValue = if (GetValue().IsNullLit()) { NullLiteral() } else { GetValue() }
+        // Literal payloads are immutable, but their Value users and type are not.
+        // Each cloned constant must own its literal before CreateConstant adds a user.
+        let litVal: LiteralValue = match (GetValue().literalKind) {
+            case LiteralKind.NULL => NullLiteral()
+            case LiteralKind.BOOL => BoolLiteral(GetBoolLitVal())
+            case LiteralKind.INT => IntLiteral(GetUnsignedIntLitVal())
+            case LiteralKind.FLOAT => FloatLiteral(GetFloatLitVal())
+            case LiteralKind.RUNE => RuneLiteral(GetRuneLitVal())
+            case LiteralKind.STRING => StringLiteral(GetStringLitVal())
+            case LiteralKind.UNIT => UnitLiteral()
+        }
+        if (!GetValue().IsNullLit()) {
+            // Preserve metadata previously retained by sharing the non-null Value.
+            // Null keeps its existing fresh-value behavior.
+            litVal.SetIdentifier(GetValue().GetIdentifier())
+            litVal.CopyBaseInfoFrom(GetValue())
+            litVal.AppendAttributeInfo(GetValue().GetAttributeInfo())
+        }
         let cloned = builder.CreateConstant(GetResult().getOrThrow().GetType().getOrThrow(), litVal, parent)
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
