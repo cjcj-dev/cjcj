@@ -42,24 +42,30 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
     // C++ ActiveStatePool.h:41-42,71-83,129-130: the pool is backed by
     // unordered_map<Value*, ValueDomain>. keys only preserves the existing
     // selfhost GetAt(index) iteration adapter.
-    private let data: HashMap<Value, VD> = HashMap<Value, VD>()
+    //
+    // Layout: keys[i] and vals[i] are the i-th entry in insertion order, and
+    // index maps a key's nodeId to i. Value equality and hashCode are both
+    // defined by nodeId (Value.cj), so keying the index by nodeId gives the
+    // same entry identity as the previous HashMap<Value, VD> while avoiding a
+    // generic Hashable/Equatable dispatch per lookup. The map itself is never
+    // iterated, so the observable order is still exactly keys.
+    private let index: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private let keys: ArrayList<Value> = ArrayList<Value>()
+    private let vals: ArrayList<VD> = ArrayList<VD>()
 
     public init() {}
 
     public init(other: FullStatePool<VD>) {
-        // C++ FullStatePool (ActiveStatePool.h:38-131) holds only unordered_map
-        // data (L130); its compiler-generated copy ctor bulk-copies data in one
-        // shot (implicit reserve). Preallocate data/keys to avoid rehash/realloc
-        // churn while cloning entry-by-entry. Capacity-only: no order/content change.
         let count = other.keys.size
-        data.reserve(count)
+        index.reserve(count)
         keys.reserve(count)
+        vals.reserve(count)
         var idx: Int64 = 0
         while (idx < count) {
             let key = other.keys[idx]
+            index[key.nodeId] = idx
             keys.add(key)
-            data[key] = other.data[key].Clone()
+            vals.add(other.vals[idx].Clone())
             idx++
         }
     }
@@ -74,92 +80,124 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
         return FullStatePool<VD>(this)
     }
 
+    private func SameLayout(rhs: FullStatePool<VD>): Bool {
+        let count = keys.size
+        if (count != rhs.keys.size) {
+            return false
+        }
+        var idx: Int64 = 0
+        while (idx < count) {
+            if (!refEq(keys[idx], rhs.keys[idx])) {
+                return false
+            }
+            idx++
+        }
+        return true
+    }
+
     public func CopyFrom(rhs: FullStatePool<VD>): Unit {
-        // Rebuild the observable insertion order in keys, while retaining the
-        // pass-local backing storage and matching domain objects.
-        for (key in keys) {
-            if (!rhs.data.contains(key)) {
-                data.remove(key)
+        // Result: keys in rhs order; a key already present keeps its domain
+        // object (updated via CopyFrom), a new key gets a clone, and keys
+        // absent from rhs are dropped.
+        let count = rhs.keys.size
+        if (SameLayout(rhs)) {
+            var idx: Int64 = 0
+            while (idx < count) {
+                vals[idx].CopyFrom(rhs.vals[idx])
+                idx++
             }
+            return
         }
-        var keyIdx: Int64 = 0
-        for (key in rhs.keys) {
-            if (let Some(domain) <- data.get(key)) {
-                domain.CopyFrom(rhs.data[key])
+        let newVals = ArrayList<VD>(count)
+        var idx: Int64 = 0
+        while (idx < count) {
+            let key = rhs.keys[idx]
+            if (let Some(pos) <- index.get(key.nodeId)) {
+                let domain = vals[pos]
+                domain.CopyFrom(rhs.vals[idx])
+                newVals.add(domain)
             } else {
-                data[key] = rhs.data[key].Clone()
+                newVals.add(rhs.vals[idx].Clone())
             }
-            if (keyIdx < keys.size) {
-                if (!refEq(keys[keyIdx], key)) {
-                    keys[keyIdx] = key
-                }
-            } else {
-                keys.add(key)
-            }
-            keyIdx++
+            idx++
         }
-        while (keys.size > rhs.keys.size) {
-            keys.remove(at: keys.size - 1)
+        index.clear()
+        keys.clear()
+        vals.clear()
+        idx = 0
+        while (idx < count) {
+            let key = rhs.keys[idx]
+            index[key.nodeId] = idx
+            keys.add(key)
+            vals.add(newVals[idx])
+            idx++
         }
     }
 
     public func Size(): Int64 {
-        return data.size
+        return keys.size
     }
 
     public func Clear(): Unit {
-        data.clear()
+        index.clear()
         keys.clear()
+        vals.clear()
     }
 
     public func Find(value: Value): Option<VD> {
         // C++ ActiveStatePool.h:71-83: data.find(value).
-        return data.get(value)
+        if (let Some(pos) <- index.get(value.nodeId)) {
+            return vals[pos]
+        }
+        return None
     }
 
     public func Contains(value: Value): Bool {
-        return data.contains(value)
+        return index.contains(value.nodeId)
     }
 
     public func At(value: Value): VD {
         // C++ ActiveStatePool.h:100-107: data.at(value).
-        if (let Some(domain) <- data.get(value)) {
-            return domain
+        if (let Some(pos) <- index.get(value.nodeId)) {
+            return vals[pos]
         }
         throw IllegalStateException("ValueAnalysis state missing value: " + value.GetIdentifier())
     }
 
     public func GetAt(index: Int64): (Value, VD) {
-        let key = keys[index]
-        return (key, data[key])
+        return (keys[index], vals[index])
+    }
+
+    private func Append(value: Value, domain: VD): Unit {
+        index[value.nodeId] = keys.size
+        keys.add(value)
+        vals.add(domain)
     }
 
     public func Insert(value: Value, domain: VD): Unit {
-        if (data.contains(value)) {
+        if (index.contains(value.nodeId)) {
             return
         }
         // C++ ActiveStatePool.h:91-94: data.emplace(value, domain).
-        data[value] = domain.Clone()
-        keys.add(value)
+        Append(value, domain.Clone())
     }
 
     public func SetRef(value: Value, refValue: Ref): Unit {
         // C++ ValueAnalysis.h:171-178,213-223 replaces the complete ValueDomain
         // when assigning a Ref, and emplaces only for a new destination.
-        if (data.contains(value)) {
-            data[value] = VD.Create(refValue)
+        if (let Some(pos) <- index.get(value.nodeId)) {
+            vals[pos] = VD.Create(refValue)
         } else {
             Insert(value, VD.Create(refValue))
         }
     }
 
     public func SetBound(value: Value, isTop: Bool): Unit {
-        if (let Some(domain) <- data.get(value)) {
-            domain.SetSelfToBound(isTop)
+        if (let Some(pos) <- index.get(value.nodeId)) {
+            vals[pos].SetSelfToBound(isTop)
             return
         }
-        data[value] = VD.Create(isTop)
-        keys.add(value)
+        Append(value, VD.Create(isTop))
     }
 
     public func Join(rhs: FullStatePool<VD>): Bool {
@@ -167,13 +205,18 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
         var idx: Int64 = 0
         while (idx < rhs.keys.size) {
             let rhsKey = rhs.keys[idx]
-            let rhsValue = rhs.data[rhsKey]
+            let rhsValue = rhs.vals[idx]
             // C++ Utils.h:33-40, ActiveStatePool.h:115-118: MapJoin on data.
-            if (let Some(lhsValue) <- data.get(rhsKey)) {
-                changed = lhsValue.Join(rhsValue) || changed
+            // keys are unique, so a same-position identical key is the entry.
+            let pos: Option<Int64> = if (idx < keys.size && refEq(keys[idx], rhsKey)) {
+                Some(idx)
             } else {
-                data[rhsKey] = rhsValue.Clone()
-                keys.add(rhsKey)
+                index.get(rhsKey.nodeId)
+            }
+            if (let Some(lhsPos) <- pos) {
+                changed = vals[lhsPos].Join(rhsValue) || changed
+            } else {
+                Append(rhsKey, rhsValue.Clone())
                 changed = true
             }
             idx++
