@@ -156,6 +156,9 @@ test('C2 import removes completed producers but preserves native and installed c
  assert.equal(stage.commands,undefined);assert.ok(stage.reuse);
  assert.deepEqual(stage.depends,['nativeN','nativeR','nativeAST']);
  assert.equal(stage.metadata.compilerCommit,'c'.repeat(40));
+ assert.notEqual(input.stage2.compilerCommit,input.compiler.commit);
+ assert.equal(stage.metadata.selection.compilerExecution.compiler.commit,input.stage2.compilerCommit);
+ assert.equal(stage.metadata.selection.targetComponents.compiler.commit,input.compiler.commit);
  assert.equal(stage.metadata.stdSource,'/fixture/bootstrap-std');
  assert.equal(stage.copies.find(row=>row.to==='bin/cjcj-stage1').from,'/fixture/C2/libexec/compiler/cjcj-stage1');
  assert.ok(stage.entries.length);assert.equal(stage.links['libexec/runtime'],'../runtime');
