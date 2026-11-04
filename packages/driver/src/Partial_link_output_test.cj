@@ -141,7 +141,14 @@ class PartialLinkOutputTest {
     @TestCase
     func RemoveTemporaryDeletesWithoutFailingTheJob(): Unit {
         let root = FSDirectory.createTemp(".").toString()
+        let options = DriverOptions()
+        options.output = root
+        options.outputMode = OutputMode.STATIC_LIB
+        options.moduleName = "partial_link_drop"
+        // Tools refuse to run once temporaries were deleted; start from a fresh manager state.
+        let manager = TempFileManager.Instance()
         try {
+            @Assert(manager.Init(options, false), true)
             let present = FileUtil.JoinPath(root, "pkg.partial.o")
             File.writeTo(present, "partial".toArray())
             for (path in [present, FileUtil.JoinPath(root, "missing.partial.o")]) {
@@ -159,6 +166,7 @@ class PartialLinkOutputTest {
                 @Expect(FileUtil.FileExist(path), false)
             }
         } finally {
+            manager.DeleteTempFiles()
             let _ = removeIfExists(root, recursive: true)
         }
     }
