@@ -265,7 +265,9 @@ export function createBootstrapTargets(input) {
     stage.reuse={...reused};
     delete stage.commands;
     const compilerFile=reused.compilerFile || 'libexec/compiler/cjcj-stage1'+exe;
-    const recipe=installationRecipe({platform,bootstrapHost:host,compilerExecution:{role:'target'},targetComponents:{compiler,std:stdlib,runtime,llvm,ast}},
+    const recipe=installationRecipe({platform,bootstrapHost:host,
+      compilerExecution:{role:'target',stage:'stage2',platform},
+      targetComponents:{compiler,std:stdlib,runtime,llvm,ast}},
       {compiler:path.join(reused.install,compilerFile),std:reused.bootstrapStd,bootstrap:true,nativeChecks:path.join(work,'native-check')});
     stage.copies=[...recipe.copies,
       {from:path.join(reused.install,'share/cjcj'),to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
