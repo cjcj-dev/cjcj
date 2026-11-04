@@ -101,3 +101,36 @@ test('symlink CLI cancellation reaches owned child', async () => {
     }
   }
 });
+
+// A payload PATH may deliberately select an installed SDK Python launcher.
+// Only the guardian must bypass it; payload lookup and loader state stay intact.
+test('host guardian preserves payload environment despite Python launcher on PATH', () => {
+  const label='host-python', bin=path.join(root,'sdk-bin'), marker=path.join(root,'launcher-used');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin,'python3'), `#!${process.execPath}
+const fs=require('fs'),cp=require('child_process');
+fs.appendFileSync(${JSON.stringify(marker)},'SDK_PYTHON\\n');
+const p=cp.spawnSync('/usr/bin/python3',process.argv.slice(2),{stdio:'inherit',env:{...process.env,LD_LIBRARY_PATH:'sdk-rewritten',CANGJIE_HOME:'sdk-rewritten'}});
+process.exit(p.status??1);
+`, {mode:0o755});
+  const env={...environment(label),PATH:bin+':'+process.env.PATH,
+    LD_LIBRARY_PATH:'/host-runtime',CANGJIE_HOME:'/target-sdk',PYTHONPATH:bin,PYTHONHOME:bin};
+  const file=path.join(root,'payload-environment.json');
+  const out=fs.openSync(path.join(root,label+'.stdout'),'wx'),err=fs.openSync(path.join(root,label+'.stderr'),'wx');
+  try {
+    const argv=[process.execPath,source,'--',process.execPath,'-e',
+      'require("fs").writeFileSync(process.argv[1],JSON.stringify(process.env))',file];
+    const p=spawnSync(argv[0],argv.slice(1),{cwd:root,env,stdio:['ignore',out,err],timeout:15000});
+    record(label,argv,p);assert.ifError(p.error);assert.equal(p.status,0);
+    const actual=JSON.parse(fs.readFileSync(file,'utf8'));
+    for(const key of ['PATH','LD_LIBRARY_PATH','CANGJIE_HOME','PYTHONPATH','PYTHONHOME'])
+      assert.equal(actual[key],env[key],key+' preserved through guardian');
+    assert(!fs.existsSync(marker),'guardian must not enter SDK Python launcher');
+    const targetArgv=[process.execPath,source,'--','python3','-I','-c',
+      'import os; assert os.environ["LD_LIBRARY_PATH"]=="sdk-rewritten"'];
+    const target=spawnSync(targetArgv[0],targetArgv.slice(1),{cwd:root,env,stdio:['ignore',out,err],timeout:15000});
+    record(label+'-target',targetArgv,target);assert.ifError(target.error);assert.equal(target.status,0);
+    assert.equal(fs.readFileSync(marker,'utf8'),'SDK_PYTHON\n','explicit SDK Python payload still uses its launcher');
+    console.log('HOST_GUARDIAN_ENV_AND_TARGET_LAUNCHER_ASSERT_REACHED');
+  } finally {fs.closeSync(out);fs.closeSync(err);}
+});

@@ -34,12 +34,14 @@ for(const arm of arms){
  if(arm==='disabled'||arm==='adapter-disabled')env.MAKEFLAGS='--jobserver-auth=-1,-1 -j64';
  if(arm==='noauth'||arm==='adapter-noauth')delete env.MAKEFLAGS;
  if(arm==='bad-fd')env.MAKEFLAGS='--jobserver-auth=998,999 -j3';
- if(arm==='missing-python'){fs.mkdirSync(dir+'/empty-path');env.PATH=dir+'/empty-path';}
  let prefix=[];
+ if(arm==='missing-python'){
+  const hook=dir+'/hook.mjs';write(hook,`import cp from 'node:child_process';import {syncBuiltinESMExports}from'node:module';const original=cp.spawn;cp.spawn=function(exe,args,opts){if(exe==='/usr/bin/python3'&&args?.[1]==='-c')exe=${JSON.stringify(dir+'/missing-host-python')};return original.call(this,exe,args,opts);};syncBuiltinESMExports();`);prefix=['--import',hook];
+ }
  if(arm==='api-fail'||arm==='status-invalid'){
   const hook=dir+'/hook.mjs';const from=arm==='api-fail'?'libc.prctl(36,1,0,0,0)':"data=(json.dumps(row)+'\\n').encode()";
   const to=arm==='api-fail'?'libc.prctl(999999,1,0,0,0)':"data=(('not-json' if row.get('type')=='ready' else json.dumps(row))+'\\n').encode()";
-  write(hook,`import cp from 'node:child_process';import {syncBuiltinESMExports}from'node:module';import assert from 'node:assert/strict';const original=cp.spawn;cp.spawn=function(...a){if(a[0]==='python3'&&a[1]?.[1]==='-c'){assert(a[1][2].includes(${JSON.stringify(from)}));a[1]=[...a[1]];a[1][2]=a[1][2].replace(${JSON.stringify(from)},${JSON.stringify(to)});}return original(...a);};syncBuiltinESMExports();`);prefix=['--import',hook];
+  write(hook,`import cp from 'node:child_process';import {syncBuiltinESMExports}from'node:module';import assert from 'node:assert/strict';const original=cp.spawn;cp.spawn=function(...a){if(['python3','/usr/bin/python3'].includes(a[0])&&a[1]?.[1]==='-c'){assert(a[1][2].includes(${JSON.stringify(from)}));a[1]=[...a[1]];a[1][2]=a[1][2].replace(${JSON.stringify(from)},${JSON.stringify(to)});}return original(...a);};syncBuiltinESMExports();`);prefix=['--import',hook];
  }
  const out=fs.openSync(dir+'/stdout','w'),err=fs.openSync(dir+'/stderr','w');
  let executable=process.execPath,args=[...prefix,cli,'--config',cfg,'--no-package'];

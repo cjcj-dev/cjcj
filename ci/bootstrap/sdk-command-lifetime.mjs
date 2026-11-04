@@ -501,7 +501,9 @@ export async function supervisedCommand(argv, {cwd, env=process.env, mode='ordin
   try {
     if(signal?.aborted)abort();
     const result=await new Promise((resolve,reject)=>{
-      child=spawn('python3',['-I','-c',program,JSON.stringify({argv,mode,jobs,ownerFd,workRoot})],{cwd,env:environment,stdio,detached:true});
+      // The guardian is a host dependency, not a tool selected by the payload SDK.
+      // Keep the payload environment intact; an SDK Python launcher rewrites it.
+      child=spawn('/usr/bin/python3',['-I','-c',program,JSON.stringify({argv,mode,jobs,ownerFd,workRoot})],{cwd,env:environment,stdio,detached:true});
       child.stdio[3]?.on('error',()=>{});
       const statusClosed=()=>{if(!final&&!incomplete){protocolError='SUPERVISOR_STATUS_CLOSED';child.stdio[3]?.end();}};
       child.stdio[4]?.on('error',statusClosed);
