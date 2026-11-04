@@ -2473,6 +2473,8 @@ public class CjoSignatureMaterializer {
         if (UInt32(fileID) != reader.U32Field(fileInfo, 4, 0u32)) {
             throw IllegalStateException("FlatBuffer common part file ID mismatch")
         }
+        // Import positions resolve through allFileIds while they are materialized.
+        allFileIds[fileIndex] = fileID
         let source = diag.GetSourceManager().GetSource(fileID)
         let file = CreateFile(source.path)
         file.fileName = FileUtil.GetFileName(source.path)
@@ -2495,7 +2497,6 @@ public class CjoSignatureMaterializer {
         file.EnableAttr(Attribute.FROM_COMMON_PART)
         file.EnableAttr(Attribute.COMMON)
         file.isCommon = true
-        allFileIds[fileIndex] = fileID
         file.begin = LoadFlatPosition(reader, reader.TableField(fileInfo, 6))
         file.end = LoadFlatPosition(reader, reader.TableField(fileInfo, 8))
         filesByIndex[UInt32(fileIndex + 1)] = file
@@ -6792,7 +6793,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 
     private func DependencyItemToJson(item: FrontendDepInfoItem, exportCJO: Bool): String {
-        SortImportSpecsByPosition(item.imports)
         var value = "{\"package\":\"" + EscapeJson(item.packageName) + "\","
         if (!item.orPackage.isEmpty()) {
             value += "\"orPackage\":\"" + EscapeJson(item.orPackage) + "\","
@@ -6807,6 +6807,9 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         for (importSpec in imports) {
             items.add(ImportSpecToJson(importSpec, exportCJO))
         }
+        // Canonicalize the emitted content, independent of file IDs and tied positions.
+        // Keep an array so identical import fragments are preserved.
+        sort(items)
         return "[" + JoinStrings(items, ",") + "]"
     }
 
@@ -6912,18 +6915,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             items.add("\"" + EscapeJson(feature) + "\"")
         }
         return "[" + JoinStrings(items, ",") + "]"
-    }
-
-    private func SortImportSpecsByPosition(imports: ArrayList<ImportSpec>): Unit {
-        sort(imports, by: { left: ImportSpec, right: ImportSpec =>
-            if (left.begin < right.begin) {
-                Ordering.LT
-            } else if (right.begin < left.begin) {
-                Ordering.GT
-            } else {
-                Ordering.EQ
-            }
-        })
     }
 
     private func DepInfoBool(value: Bool): String {
