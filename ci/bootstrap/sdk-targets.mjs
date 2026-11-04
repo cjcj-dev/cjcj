@@ -286,6 +286,21 @@ export function createBootstrapTargets(input) {
     for(const id of ['h1','compiler2','std0','stdBootstrap'])delete repos[id];
     for(let i=stages.length-1;i>=0;i--)if(['stage0','stage0-run','std-bootstrap','stage1-initial','stage1-std'].includes(stages[i].id))stages.splice(i,1);
   }
+  // The normal source-build handoff already contains the verified r4 std
+  // install. Keep the complete graph and its dependency/consumer checks, but
+  // make stage3-std consume that explicit normalized input instead of silently
+  // rebuilding std from the producer's historical path.
+  if (input.stage2?.stdSourceInstall) {
+    const stdStage = stages.find(s => s.id === 'stage3-std');
+    stdStage.output = input.stage2.stdSourceInstall;
+    stdStage.reuse = {
+      source: input.stage2.stdSourceInstall,
+      commit: input.stage2.stdSource?.commit ?? stdlib.commit,
+      identity: input.stage2.stdSource?.identity ?? input.stage2.stdSha256,
+      reason: 'verified std install handoff',
+    };
+    delete stdStage.commands;
+  }
   // One installed C2/target-std composition is both a deliverable and C3's input.
   // C2 executes against its own copied libraries; target modules/libraries stay
   // at the SDK root for compilation. No external runtime symlink or env fallback.

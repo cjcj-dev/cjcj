@@ -64,6 +64,7 @@ test('ordinary CJPM source-build is an explicit C2 input without fabricated comp
    sourceRoot:path.join(f.root,'source'),product:sourceProduct,
    install:path.join(f.root,'sdk/libexec/compiler/cjcj-stage1'),file:'libexec/compiler/cjcj-stage1'});
  assert.deepEqual(row.stdSource.repository,'https://github.com/cjcj-dev/cangjie-runtime.git');
+ assert.equal(row.stdSourceInstall,path.resolve(path.join(f.root,'std')));
  assert.equal(row.stdSha256,await (await import('../srcbuild/lib/final-compiler.mjs')).stdIdentity(path.join(f.root,'std')));
  const validated={...f.input,ast:f.input.compiler,stage2:row};
  await validateSourceInputs(validated);

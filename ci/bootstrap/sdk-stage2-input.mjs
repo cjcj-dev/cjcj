@@ -94,6 +94,10 @@ async function ordinaryCjpmInput(supplied, input) {
       install: product, file: compilerFile},
     stdSource: {repository: stdSelection.repository, commit: stdSelection.commit,
       install: bootstrapStd, identity: stdSha256},
+    // Keep the explicitly selected install as a first-class normalized input.
+    // The complete target graph consumes this path for its final-std stage;
+    // it must not fall back to the producer's historical selection.
+    stdSourceInstall: path.resolve(selectedStd || bootstrapStd),
     stdSha256,
     stdCoreSha256: await fileDigest(stdCore),
   };

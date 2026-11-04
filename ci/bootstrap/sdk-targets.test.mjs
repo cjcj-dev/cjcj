@@ -182,6 +182,23 @@ test('ordinary C2 reuse keeps command, bootstrap std identity, and one compiler 
  assert.doesNotThrow(()=>validateBootstrapTargets(c));
 });
 
+test('ordinary C2 reuses the normalized std install in the complete target graph',()=>{
+ const input=inputs('linux_x86_64');
+ input.stage2={mode:'ordinary-cjpm',install:'/fixture/C2',bootstrapStd:'/fixture/bootstrap-std',
+  stdSourceInstall:'/fixture/bootstrap-std',stdSource:{repository:'/fixture/std.git',commit:'e'.repeat(40),identity:'e'.repeat(64)},
+  buildResult:'/fixture/C2/original-result.json',command:'/fixture/C2/workspace.command.json',
+  sourceRoot:'/fixture/compiler-source',sourceProduct:'/fixture/compiler-source/target/release/bin/cjcj::cjc',
+  compilerFile:'libexec/compiler/cjcj-stage1',compilerCommit:'c'.repeat(40),llvmCommit:input.llvm.commit,
+  bootstrapRuntimeCommit:input.runtime.commit,compilerSha256:'d'.repeat(64),stdSha256:'e'.repeat(64),stdCoreSha256:'f'.repeat(64)};
+ const c=createBootstrapTargets(input);
+ const std=c.stages.find(row=>row.id==='stage3-std');
+ assert.equal(std.output,input.stage2.stdSourceInstall);
+ assert.equal(std.reuse.source,input.stage2.stdSourceInstall);
+ assert.equal('commands' in std,false);
+ assert.deepEqual(targetOrder(c.stages).map(row=>row.id),['nativeN','nativeR','nativeAST','stage2','stage3-std','stage2-target-sdk','stage3']);
+ assert.doesNotThrow(()=>validateBootstrapTargets(c));
+});
+
 test('explicit std Git identity reaches std targets without relabeling installed runtime or reused C2',()=>{
  for(const platform of Object.keys(PLATFORMS)){
   const input=inputs(platform),original=createBootstrapTargets(input);
