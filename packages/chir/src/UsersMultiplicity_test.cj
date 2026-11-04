@@ -175,6 +175,8 @@ class UsersMultiplicityTest {
         @Expect(target.GetPredecessors().size, 1)
         @Expect(target.GetUsers().size, 3)
         @Expect(target.GetUsers()[0].nodeId, term.nodeId)
+        @Expect(target.GetUsers()[1].nodeId, term.nodeId)
+        @Expect(target.GetUsers()[2].nodeId, term.nodeId)
 
         term.ReplaceOperand(target, replacement)
         @Expect(target.GetPredecessors().isEmpty(), true)
@@ -194,6 +196,8 @@ class UsersMultiplicityTest {
         @Expect(replacement.GetPredecessors().size, 1)
         @Expect(replacement.GetUsers().size, 3)
         @Expect(replacement.GetUsers()[0].nodeId, term2.nodeId)
+        @Expect(replacement.GetUsers()[1].nodeId, term2.nodeId)
+        @Expect(replacement.GetUsers()[2].nodeId, term2.nodeId)
         fn.DestroyFuncBody()
         @Expect(replacement.GetPredecessors().isEmpty(), true)
         @Expect(replacement.GetUsers().isEmpty(), true)
