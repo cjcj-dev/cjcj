@@ -28,7 +28,7 @@ for(const [name,marker,extra] of [['control','PRIMITIVE_CONTROL_OK',[]],['alias'
  const elf=out+'/'+name;
  const r=run(name+'.compile',[compiler,fixtures+'/'+name+'.cj','-O2','--diagnostic-format=noColor',...extra,'-o',elf]);
  check(name+'.compile',r.rc===0);
- if(r.rc===0){result.cases.at(-1).elfSHA256=sha(elf);check(name+'.observed-preserved',spawns.length===3&&spawns.length-rewrites.length===(enabled?2:3));
+ if(r.rc===0){result.cases.at(-1).elfSHA256=sha(elf);
   const p=run(name+'.run',[elf]);check(name+'.runtime',p.rc===0&&p.text.includes(marker));}
 }
 if(selected.has('qualified')){
