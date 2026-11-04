@@ -14,7 +14,7 @@ const product=path.resolve(import.meta.dirname,'sdk-native-input-check.mjs');
 const wrapper=path.join(root,'cmake-observe.mjs'),trace=path.join(root,'cmake-argv.jsonl');
 await fs.writeFile(wrapper,'#!'+process.execPath+'\n'+
  "import fs from 'node:fs';import {spawnSync} from 'node:child_process';\n"+
- 'const args=process.argv.slice(2);fs.appendFileSync('+JSON.stringify(trace)+',JSON.stringify(args)+"\\n");\n'+
+ 'const args=process.argv.slice(2);fs.appendFileSync('+JSON.stringify(trace)+',JSON.stringify({argv:args,loader:process.env.LD_LIBRARY_PATH??null})+"\\n");\n'+
  'const r=spawnSync('+JSON.stringify(base.tools.cmake.path)+',args,{stdio:"inherit"});process.exit(r.status??1);\n',{mode:0o755});
 const wrapperSha=crypto.createHash('sha256').update(await fs.readFile(wrapper)).digest('hex');
 const env={...process.env,CMAKE_BUILD_PARALLEL_LEVEL:'1'};
@@ -34,8 +34,9 @@ test('formal native input checker carries parent jobs to actual CMake and N C AP
  console.log('FORMAL_N_CAPI_RESULT '+JSON.stringify({root,rc:r.status}));
  assert.match(r.text,/LLVM_NATIVE_CAPI_VERIFIED/,'real library C API must execute');
  const calls=(await fs.readFile(trace,'utf8')).trim().split('\n').map(JSON.parse);
- const build=calls.find(argv=>argv.includes('--build'));
+ const build=calls.find(row=>row.argv.includes('--build'))?.argv;
  assert.ok(build);assert.equal(build[build.indexOf('--parallel')+1],'1');
+ for(const call of calls)assert.equal(call.loader,env.LD_LIBRARY_PATH??null,'host compiler keeps its parent loader domain');
  assert.equal(r.status,0,r.text);
 });
 test('formal native input checker preserves original N bad-byte rejection',async()=>{

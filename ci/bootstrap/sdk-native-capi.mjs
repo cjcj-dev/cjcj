@@ -40,7 +40,7 @@ export async function nativeCapiProbe({platform, tools, directory, jobs, env=pro
   await atomicJson(path.join(root,'probe-inputs.json'),{identity,sha256});
   return {binary,identity,sha256};
 }
-export async function verifyLlvmDylib({directory, llvmSha, sha256, platform, tools, probeDirectory, env, jobs}) {
+export async function verifyLlvmDylib({directory, llvmSha, sha256, platform, tools, probeDirectory, env, buildEnv=env, jobs}) {
   const library = path.join(directory, sdkPlatform(platform).llvmLibrary);
   // Native CMake installs the library directly. Source and bytes are checked
   // against the caller's fixed input; target registration is observed below.
@@ -50,7 +50,7 @@ export async function verifyLlvmDylib({directory, llvmSha, sha256, platform, too
   const stamps = new Set([...((await fs.readFile(library)).toString('latin1')).matchAll(/CJLLVM-COMMIT:([0-9a-z-]+)/g)].map(match => match[1]));
   if (stamps.size !== 1 || !stamps.has(llvmSha)) reject('LLVM_DYLIB_STAMP', platform, 'LLVM_DYLIB_SOURCE_STAMP_MISMATCH');
   await verifyEntryFormat(library,platform);
-  const probe = await nativeCapiProbe({platform,tools,directory:probeDirectory,jobs,env});
+  const probe = await nativeCapiProbe({platform,tools,directory:probeDirectory,jobs,env:buildEnv});
   console.log(`LLVM_NATIVE_CAPI_PROBE_READY ${canonical({binary:probe.binary,sha256:probe.sha256}).trim()}`);
   const result = await execute(probe.binary,[library],{env});
   const observed = JSON.parse(result.stdout);

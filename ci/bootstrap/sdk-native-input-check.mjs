@@ -77,7 +77,9 @@ export async function checkNativeInput(request) {
     const env={...process.env,[native.loader]:[path.join(root,native.llvmDirectory),path.join(install,'tools/lib'),
       process.env[native.loader]].filter(Boolean).join(path.delimiter)};
     facts.llvm=await verifyLlvmDylib({directory:path.join(root,native.llvmDirectory),llvmSha:commit,sha256:request.librarySha256,
-      platform,tools:request.tools,probeDirectory:path.join(work,'capi'),env,jobs:request.jobs});
+      // The host C++ compiler must not load the selected SDK's LLVM libraries.
+      // Only the resulting probe executes in that native installation's domain.
+      platform,tools:request.tools,probeDirectory:path.join(work,'capi'),env,buildEnv:process.env,jobs:request.jobs});
     await verifyInstalledBitcodeReaders({install,platform,work,commit});
     const buildInputs=request.buildResult||path.join(install,'BUILD-INPUTS.json');
     const original=await fs.readFile(buildInputs,'utf8').then(JSON.parse).catch(error=>{if(error.code==='ENOENT'&&!request.buildResult)return null;throw error;});
