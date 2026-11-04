@@ -32,21 +32,21 @@ const dep=source('dependency/dep.cj','package dependency\npublic func value(): I
 const depout=directory('depout');run('dependency',[dep,'--output-type=staticlib','-o',depout+'/']);
 const descriptors=[];
 for(const [name,files]of [['za',[z,a]],['az',[a,z]]]){
- const out=directory('cjo-'+name);run('serialize-'+name,[...files,'--output-type=staticlib','-I',depout,'-o',out+'/']);
+ const out=directory('cjo-'+name);run('serialize-'+name,[...files,'--output-type=staticlib','--import-path',depout,'-o',out+'/']);
  const embedded=metadata(out+'/orderfixture.cjo');descriptors.push(embedded);
  assert.deepEqual(JSON.parse(embedded).dependencies.find(d=>d.package==='dependency').imports.map(i=>i.file),['a.cj','z.cj']);
  assert.equal(run('read-cjo-'+name,[out+'/orderfixture.cjo','--scan-dependency']).trim(),embedded);
 }
 assert.equal(descriptors[0],descriptors[1]);console.log('PASS CJO_PKG_DEP_BYTES_AND_PUBLIC_READER');
 const ordinary=source('ordinary-use/main.cj','package ordinaryuse\nimport orderfixture.*\npublic func use(): Int64 { a() + z() }\n');
-run('ordinary-cjo-consumer',[ordinary,'--experimental','--output-type=chir','-I',output+'/cjo-za','-I',depout,'-o',directory('ordinaryout')+'/']);
+run('ordinary-cjo-consumer',[ordinary,'--experimental','--output-type=chir','--import-path',output+'/cjo-za','--import-path',depout,'-o',directory('ordinaryout')+'/']);
 console.log('PASS PUBLIC_ORDINARY_CJO_CONTROL');
 const commonA=source('common/a.cj','package commonfixture\nimport dependency.*\npublic common func left(): Int64\n');
 const commonB=source('common/b.cj','package commonfixture\nimport dependency.*\npublic common func right(): Int64\n');
-const commonout=directory('commonout');run('common-producer',[commonA,commonB,'--experimental','--output-type=chir','-I',depout,'-o',commonout+'/']);
+const commonout=directory('commonout');run('common-producer',[commonA,commonB,'--experimental','--output-type=chir','--import-path',depout,'-o',commonout+'/']);
 const specific=source('specific/main.cj','package commonfixture\npublic specific func left(): Int64 { 1 }\npublic specific func right(): Int64 { 2 }\n');
 const specificout=directory('specificout');
-const commonArgs=[specific,'--experimental','--output-type=chir','--common-part-cjo',commonout+'/commonfixture.cjo','--common-part-chir',commonout+'/commonfixture.chir','-I',depout,'-o',specificout+'/'];
+const commonArgs=[specific,'--experimental','--output-type=chir','--common-part-cjo',commonout+'/commonfixture.cjo','--common-part-chir',commonout+'/commonfixture.chir','--import-path',depout,'-o',specificout+'/'];
 run('specific-consumer',commonArgs);console.log('PASS PUBLIC_COMMON_SPECIFIC');
 // Preserve a real missing-import diagnostic from the common AST. The common
 // sources remain available so the diagnostic can resolve both file IDs.

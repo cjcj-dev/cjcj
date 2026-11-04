@@ -27,8 +27,18 @@ private func ImportFileIdCompiler(paths: Array<String>, output: String, commonCj
     return ci
 }
 
-private func ExpectImportFileIds(pkg: Package, common: Bool): Unit {
+private func CompileImportFileIdFixture(ci: CompilerInstance, stage: CompileStage): Unit {
+    let compiled = ci.Compile(stage: stage)
+    @Expect(compiled)
+    @Expect(ci.diag.GetErrorCount(), 0u64)
+    if (!compiled || ci.diag.GetErrorCount() != 0u64) {
+        throw IllegalStateException("Import file-ID fixture compilation failed")
+    }
+}
+
+private func ExpectImportFileIds(pkg: Package, common: Bool): Bool {
     var count = 0
+    var valid = true
     for (file in pkg.files) {
         if (file.TestAttr(Attribute.FROM_COMMON_PART) != common) { continue }
         for (spec in file.imports) {
@@ -40,9 +50,12 @@ private func ExpectImportFileIds(pkg: Package, common: Bool): Unit {
             @Expect(spec.end.fileID, file.begin.fileID)
             @Expect(spec.begin.fileID != 0u64)
             @Expect(spec.curFile.getOrThrow(), file)
+            valid = valid && spec.begin.fileID == file.begin.fileID && spec.end.fileID == file.begin.fileID &&
+                spec.begin.fileID != 0u64 && spec.curFile.getOrThrow() == file
         }
     }
     @Expect(count, 4)
+    return valid && count == 4
 }
 
 @Test
@@ -50,6 +63,7 @@ public class CommonImportFileIdTest {
     @TestCase
     public func PublicCommonCompileAndOrdinaryCjoControl(): Unit {
         let root = FSDirectory.createTemp(".").toString()
+        var passed = false
         try {
             for (name in ["common", "ordinary", "specific", "use"]) { FSDirectory.create(root + "/" + name) }
             for ((name, functionName) in [("a", "left"), ("b", "right")]) {
@@ -60,22 +74,32 @@ public class CommonImportFileIdTest {
                     ("package ordinaryidfixture" + imports + "public func " + functionName + "(): Int64 { 1 }\n").toArray())
             }
             let common = ImportFileIdCompiler([root + "/common/a.cj", root + "/common/b.cj"], root + "/common")
-            @Assert(common.Compile(stage: CompileStage.SAVE_CJO))
+            CompileImportFileIdFixture(common, CompileStage.MANGLING)
+            // CompilerInstance leaves file publication to frontend_tool. This
+            // loader unit fixture explicitly uses its public serialization API;
+            // the CLI test covers the complete producer and consumer entries.
+            FSFile.writeTo(root + "/common/commonidfixture.cjo", common.ExportAST(false, common.GetSourcePackages()[0]))
             FSFile.writeTo(root + "/specific/main.cj", ("package commonidfixture\n" +
                 "public specific func left(): Int64 { 1 }\npublic specific func right(): Int64 { 2 }\n").toArray())
             let specific = ImportFileIdCompiler([root + "/specific/main.cj"], root + "/specific",
                 commonCjo: root + "/common/commonidfixture.cjo")
-            @Assert(specific.Compile(stage: CompileStage.IMPORT_PACKAGE))
-            ExpectImportFileIds(specific.GetSourcePackages()[0], true)
+            CompileImportFileIdFixture(specific, CompileStage.IMPORT_PACKAGE)
+            let commonValid = ExpectImportFileIds(specific.GetSourcePackages()[0], true)
 
             let ordinary = ImportFileIdCompiler([root + "/ordinary/a.cj", root + "/ordinary/b.cj"],
                 root + "/ordinary", ordinary: true)
-            @Assert(ordinary.Compile(stage: CompileStage.SAVE_CJO))
+            CompileImportFileIdFixture(ordinary, CompileStage.MANGLING)
+            FSFile.writeTo(root + "/ordinary/ordinaryidfixture.cjo", ordinary.ExportAST(false, ordinary.GetSourcePackages()[0]))
             FSFile.writeTo(root + "/use/main.cj", "package ordinaryuse\nimport ordinaryidfixture.*\n".toArray())
             let consumer = ImportFileIdCompiler([root + "/use/main.cj"], root + "/use", ordinary: true)
             consumer.invocation.globalOptions.importPaths.add(root + "/ordinary")
-            @Assert(consumer.Compile(stage: CompileStage.IMPORT_PACKAGE))
-            ExpectImportFileIds(consumer.importManager.getOrThrow().GetPackage("ordinaryidfixture").getOrThrow(), false)
-        } finally { let _ = removeIfExists(root, recursive: true) }
+            CompileImportFileIdFixture(consumer, CompileStage.IMPORT_PACKAGE)
+            let ordinaryValid = ExpectImportFileIds(
+                consumer.importManager.getOrThrow().GetPackage("ordinaryidfixture").getOrThrow(), false)
+            passed = commonValid && ordinaryValid
+        } finally {
+            if (passed) { let _ = removeIfExists(root, recursive: true) }
+            else { println("PRESERVED_IMPORT_FILE_ID_FIXTURE ${root}") }
+        }
     }
 }
