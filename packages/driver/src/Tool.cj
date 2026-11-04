@@ -568,6 +568,14 @@ public class Tool {
             let full = GetFullArgs()
             return !FileUtil.FileExist(full[1]) || FileUtil.Remove(full[1])
         }
+        // Early, best-effort removal of a registered temporary; like DeleteTempFiles it never fails the job.
+        if (toolType == ToolType.INTERNAL_IMPLEMENTED && name == "RemoveTemporary") {
+            let full = GetFullArgs()
+            if (full.size >= 2 && FileUtil.FileExist(full[1])) {
+                let _ = FileUtil.Remove(full[1])
+            }
+            return true
+        }
         if (toolType == ToolType.INTERNAL_IMPLEMENTED && name == "CacheCopy") {
             let full = GetFullArgs()
             if (full.size < 3) {

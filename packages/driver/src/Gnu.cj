@@ -210,6 +210,14 @@ public open class Gnu <: ToolChain {
             }
             changeSymVis.AppendArg("--localize-symbols=" + symbolFile)
             chain.add(changeSymVis)
+            // Drop the partial link as soon as objcopy has read it: its pages are then discarded
+            // instead of being written back while the rest of the tail (CacheCopy, ar) runs.
+            if (linkOutput != outputFile && !driverOptions.saveTemps) {
+                let dropPartial = Tool("RemoveTemporary", ToolType.INTERNAL_IMPLEMENTED,
+                    driverOptions.environment.allVariables)
+                dropPartial.AppendArg(linkOutput)
+                chain.add(dropPartial)
+            }
         }
 
         processedObjFiles.add(TempFileInfo(fileName: FileUtil.GetFileNameWithoutExtension(outputFile),
