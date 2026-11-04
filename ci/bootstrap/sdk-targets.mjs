@@ -256,8 +256,10 @@ export function createBootstrapTargets(input) {
       [stageArg('compiler',repo('compiler3'),out('stage2-target-sdk'),'${build}/compiler','stage3')])];
   if(input.stage2) {
     const reused=input.stage2;
-    if(!/^[a-f0-9]{40}$/.test(reused.compilerCommit)||reused.parentCommit!==h1.commit||reused.llvmCommit!==llvm.commit
-        ||!reused.compilerInputs||!reused.bootstrapStd||!reused.buildResult)throw new Error('TARGET_C2_REUSE_INPUT');
+    const ordinary=reused.mode==='ordinary-cjpm';
+    if(!/^[a-f0-9]{40}$/.test(reused.compilerCommit)||reused.llvmCommit!==llvm.commit
+        ||(!ordinary&&reused.parentCommit!==h1.commit)||!reused.bootstrapStd||!reused.buildResult
+        ||(!ordinary&&!reused.compilerInputs))throw new Error('TARGET_C2_REUSE_INPUT');
     const stage=stages.find(s=>s.id==='stage2');
     stage.depends=nativeTargets.map(s=>s.id);
     stage.reuse={...reused};
@@ -266,11 +268,14 @@ export function createBootstrapTargets(input) {
       {compiler:path.join(reused.install,'libexec/compiler/cjcj-stage1'+exe),std:reused.bootstrapStd,bootstrap:true,nativeChecks:path.join(work,'native-check')});
     stage.copies=[...recipe.copies,
       {from:path.join(reused.install,'share/cjcj'),to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
-      {from:reused.compilerInputs,to:'compiler-inputs.json',owner:'compiler'}];
+      ...(reused.compilerInputs?[{from:reused.compilerInputs,to:'compiler-inputs.json',owner:'compiler'}]:[])];
     stage.metadata={...stage.metadata,compilerCommit:reused.compilerCommit,stdSource:reused.bootstrapStd,
       sources:{...stage.metadata.sources,compiler:{repository:compiler.repository,commit:reused.compilerCommit},
         std:{repository:runtime.repository}},
-      compilerOriginRuntimeCommit:reused.bootstrapRuntimeCommit,parentCommit:reused.parentCommit,llvmCommit:reused.llvmCommit};
+      compilerOriginRuntimeCommit:reused.bootstrapRuntimeCommit,llvmCommit:reused.llvmCommit,
+      ...(ordinary?{compilerProducer:{mode:'ordinary-cjpm',buildResult:reused.buildResult,
+        workspaceCommand:reused.workspaceCommand,sourceRoot:reused.sourceRoot,
+        sourceProduct:reused.sourceProduct}}:{parentCommit:reused.parentCommit})};
     for(const id of ['h1','compiler2','std0','stdBootstrap'])delete repos[id];
     for(let i=stages.length-1;i>=0;i--)if(['stage0','stage0-run','std-bootstrap','stage1-initial','stage1-std'].includes(stages[i].id))stages.splice(i,1);
   }
@@ -280,7 +285,8 @@ export function createBootstrapTargets(input) {
   const c2Target=composed('stage2-target-sdk',['stage2','stage3-std'],out('stage2')+'/libexec/compiler/cjcj-stage1'+exe,out('stage3-std'));
   c2Target.copies.push(
     {from:out('stage2')+'/share/cjcj',to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
-    {from:out('stage2')+'/compiler-inputs.json',to:'compiler-inputs.json',owner:'compiler'});
+    ...(!input.stage2 || input.stage2.compilerInputs
+      ?[{from:out('stage2')+'/compiler-inputs.json',to:'compiler-inputs.json',owner:'compiler'}]:[]));
   c2Target.metadata={...c2Target.metadata,compilerCommit:input.stage2?.compilerCommit??compiler.commit,
     sources:{...c2Target.metadata.sources,compiler:{repository:compiler.repository,commit:input.stage2?.compilerCommit??compiler.commit}},
     compilerPhase:'stage2',compilerExecutionSource:out('stage2')};

@@ -10,7 +10,59 @@ import {sdkPlatform} from './sdk-platform.mjs';
 import {stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
 const execute = promisify(execFile);
 const sha = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
+const sha256 = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+
+// A normal CJPM source-build is a real compiler producer, but it predates the
+// native-stage handoff record.  Accept it only through an explicit adapter:
+// validate the producer's existing command/result and installed bytes, while
+// retaining the absence of historical C2 receipt fields.
+async function ordinaryCjpmInput(supplied, input) {
+  const required = ['install', 'bootstrapStd', 'buildResult', 'command', 'sourceRoot', 'sourceProduct'];
+  if (!required.every(name => supplied?.[name])) throw new Error('C2_ORDINARY_LOCATIONS_REQUIRED');
+  const install = await privateRoot(supplied.install), bootstrapStd = await privateRoot(supplied.bootstrapStd);
+  const metadata = await readJson(path.join(install, 'STAGE-INPUTS.json'));
+  const build = await readJson(supplied.buildResult), command = await readJson(supplied.command);
+  const native = sdkPlatform(input.platform), tuple = native.tuple;
+  const product = path.join(install, metadata.compilerFile || 'libexec/compiler/cjcj-stage1' + native.exe);
+  if (metadata.phase !== 'source-build' || metadata.platform !== input.platform
+      || metadata.compilerCommit !== input.compiler.commit
+      || metadata.runtimeCommit !== input.runtime.commit
+      || !sha(metadata.compilerCommit) || !sha(metadata.runtimeCommit)
+      || !sha256(metadata.compilerSha256)) throw new Error('C2_ORDINARY_STAGE_FACTS');
+  if (build.rc !== 0 || build.signal || build.error
+      || !Array.isArray(command.argv) || !command.argv.includes('build')
+      || path.resolve(command.cwd || '') !== path.resolve(supplied.sourceRoot)
+      || !command.argv.includes('--target-dir'))
+    throw new Error('C2_ORDINARY_PRODUCER_MISMATCH');
+  await fs.access(path.join(supplied.sourceRoot, 'cjpm.toml'));
+  const sourceProduct = path.resolve(supplied.sourceProduct);
+  if (await fileDigest(product) !== metadata.compilerSha256
+      || await fileDigest(sourceProduct) !== metadata.compilerSha256)
+    throw new Error('C2_ORDINARY_PRODUCT_IDENTITY');
+  const selectedStd = metadata.selection?.targetComponents?.std?.install;
+  if (selectedStd && await stdIdentity(bootstrapStd) !== await stdIdentity(selectedStd))
+    throw new Error('C2_ORDINARY_STD_SOURCE');
+  for (const header of ['RuntimeConfig.h','Cangjie.h','CangjieRuntimeLayout.h','RuntimeAPI.h','RTInterface.h'])
+    if (!(await fs.readFile(path.join(install, 'include', header))).equals(await fs.readFile(path.join(input.runtime.install, 'include', header))))
+      throw new Error('C2_ORDINARY_RUNTIME_HEADER ' + header);
+  const llvm = path.join('third_party/llvm', native.llvmDirectory, native.llvmLibrary);
+  if (await fileDigest(path.join(install, llvm)) !== await fileDigest(path.join(input.llvm.install, llvm)))
+    throw new Error('C2_ORDINARY_LLVM_IDENTITY');
+  await fs.access(path.join(install, 'share/cjcj/runtime_shim/cjselfhost_llvmshim.o'));
+  await fs.access(path.join(install, 'share/cjcj/runtime_shim/cjc_runtime_config.o'));
+  await fs.access(path.join(install, 'share/cjcj/cjo'));
+  const stdCore = path.join(bootstrapStd, 'lib', tuple, 'libcangjie-std-core.a');
+  return {
+    mode: 'ordinary-cjpm', install, bootstrapStd, buildResult: path.resolve(supplied.buildResult),
+    workspaceCommand: path.resolve(supplied.command), sourceRoot: path.resolve(supplied.sourceRoot),
+    sourceProduct, compilerCommit: metadata.compilerCommit, llvmCommit: input.llvm.commit,
+    bootstrapRuntimeCommit: metadata.runtimeCommit, compilerSha256: metadata.compilerSha256,
+    stdSha256: metadata.selection?.targetComponents?.std?.commit || null,
+    stdCoreSha256: await fileDigest(stdCore),
+  };
+}
 export async function stage2Input(supplied, input) {
+  if (supplied?.mode === 'ordinary-cjpm') return ordinaryCjpmInput(supplied, input);
   if (!supplied?.install || !supplied.bootstrapStd || !supplied.parentProduct || !supplied.buildResult)
     throw new Error('C2_REUSE_LOCATIONS_REQUIRED');
   const install = await privateRoot(supplied.install), bootstrapStd = await privateRoot(supplied.bootstrapStd);

@@ -32,3 +32,28 @@ test('missing C2 source inputs fail rather than selecting an active HEAD',async(
  await fs.rm(path.join(f.supplied.install,'share/cjcj/runtime_shim/cjc_runtime_config.o'));
  await assert.rejects(stage2Input(f.supplied,f.input),/ENOENT/);
 });
+test('ordinary CJPM source-build is an explicit C2 input without fabricated compiler-inputs',async()=>{
+ const f=await stage2Fixture();
+ await fs.rm(path.join(f.root,'sdk/compiler-inputs.json'));
+ await f.write('source/cjpm.toml','[package]\nname="ordinary"\n');
+ const sourceProduct=path.join(f.root,'producer/target/release/bin/cjcj::cjc');
+ const command=path.join(f.root,'producer/workspace.command.json');
+ const buildResult=path.join(f.root,'producer/workspace.result.json');
+ await f.write('sdk/STAGE-INPUTS.json',JSON.stringify({
+   phase:'source-build',platform:'linux_x86_64',compilerFile:'libexec/compiler/cjcj-stage1',
+   compilerCommit:f.facts.commit,runtimeCommit:f.input.runtime.commit,
+   compilerSha256:f.facts.compilerSha256,
+   selection:{targetComponents:{std:{install:path.join(f.root,'std')}}}
+ }));
+ await f.write('producer/workspace.command.json',JSON.stringify({
+   argv:['cjpm','build','--target-dir',path.join(f.root,'producer/target')],cwd:path.join(f.root,'source')
+ }));
+ await f.write('producer/workspace.result.json',JSON.stringify({rc:0,signal:null}));
+ const row=await stage2Input({
+   mode:'ordinary-cjpm',install:path.join(f.root,'sdk'),bootstrapStd:path.join(f.root,'std'),
+   buildResult,command,sourceRoot:path.join(f.root,'source'),sourceProduct
+ },f.input);
+ assert.equal(row.mode,'ordinary-cjpm');
+ assert.equal('compilerInputs' in row,false);
+ assert.equal(row.compilerSha256,f.facts.compilerSha256);
+});
