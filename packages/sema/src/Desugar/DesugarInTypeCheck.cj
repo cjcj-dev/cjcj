@@ -853,3 +853,23 @@ public func HandleCtorForIncr(pkg: Package, mangledName2DeclMap: HashMap<String,
         }
     })
 }
+
+// Numeric aliases share primitive conversion semantics after alias substitution.
+// Keep the source argument until the conversion has been checked successfully.
+public func DesugarNumericTypeAliasCall(ce: CallExpr, baseTy: Ty): TypeConvExpr {
+    let conversion = TypeConvExpr()
+    let primitive = PrimitiveType()
+    CopyBasicInfo(ce, conversion)
+    CopyBasicInfo(ce.baseFunc.getOrThrow(), primitive)
+    primitive.kind = baseTy.kind
+    primitive.str = baseTy.String()
+    primitive.SetTy(baseTy)
+    conversion.typeNode = primitive
+    conversion.leftParenPos = ce.leftParenPos
+    conversion.rightParenPos = ce.rightParenPos
+    conversion.expr = ce.args[0].expr
+    conversion.scopeName = ce.scopeName
+    ce.desugarExpr = conversion
+    AddCurFile(ce, file: ce.curFile)
+    return conversion
+}

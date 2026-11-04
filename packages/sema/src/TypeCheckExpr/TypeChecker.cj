@@ -4679,7 +4679,8 @@ extend TypeChecker {
         if (target.TestAttr(Attribute.COMMON) && target.specificImplementation.isSome()) {
             target = target.specificImplementation.getOrThrow()
         }
-        if (IsBuiltinTypeAlias(target, TypeKind.TYPE_ANY) || target.IsBuiltIn()) {
+        if (NumericTypeAliasCallTy(impl.typeManager, ce).isSome() ||
+            IsBuiltinTypeAlias(target, TypeKind.TYPE_ANY) || target.IsBuiltIn()) {
             return (false, Some(target), ArrayList<FuncDecl>())
         }
         var isFunctionCall = true
@@ -5184,7 +5185,12 @@ extend TypeChecker {
                 { arg5: FuncArg => SynthesizeFuncArg(ctx, arg5) },
                 { fd2: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd2)) },
                 typeChecker: Some({ targetTy3: Ty, typeNode3: Type => Check(ctx, targetTy3, typeNode3) }),
-                typeSynthesizer: Some({ typeNode4: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode4) }))
+                typeSynthesizer: Some({ typeNode4: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode4) }),
+                conversionDesugar: Some({ call: CallExpr, ty: Ty => DesugarNumericTypeAliasCall(call, ty) }),
+                conversionChecker: Some({ expected: Ty, conversion: TypeConvExpr =>
+                    if (expected.IsInvalid()) { Ty.IsTyCorrect(SynTypeConvExpr(ctx, conversion)) }
+                    else { ChkTypeConvExpr(ctx, expected, conversion) }
+                }))
         }
         let baseFunc = ce.baseFunc.getOrThrow()
         if (!Ty.IsTyCorrect(baseFunc.GetTy())) {

@@ -104,46 +104,32 @@ public class MergeBlocks {
 
     public func RunOnBody(body: BlockGroup, builder: CHIRBuilder, enableCompileDebug!: Bool = false,
         enableCoverage!: Bool = false): Int64 {
-        var merged: Int64 = 0
-        var changed = true
-        while (changed) {
-            changed = false
-            let blocks = body.GetBlocks()
-            for (block in blocks) {
-                merged += RunOnNestedLambdas(block, builder, enableCompileDebug: enableCompileDebug,
-                    enableCoverage: enableCoverage)
+        let merged = ArrayList<Int64>([0])
+        let changed = ArrayList<Bool>([true])
+        while (changed[0]) {
+            changed[0] = false
+            // Snapshot iteration visits every nested block group, including groups
+            // owned by structured expressions rather than only direct lambdas.
+            Visitor.Visit(body, { block: Block =>
                 if (block.GetGeneratedFromForIn()) {
                     MergeForInCondBlock(builder, block, appendedGlobalUsers)
-                    merged++
-                    changed = true
+                    merged[0]++
+                    changed[0] = true
                 } else if (CanMergeIntoPredecessor(block, enableCompileDebug, enableCoverage)) {
                     if (MergeIntoPredecessor(block)) {
-                        merged++
-                        changed = true
+                        merged[0]++
+                        changed[0] = true
                     }
                 } else if (CanMergeGotoOnlyBlock(block, enableCompileDebug, enableCoverage)) {
                     if (MergeGotoOnlyBlock(block)) {
-                        merged++
-                        changed = true
+                        merged[0]++
+                        changed[0] = true
                     }
                 }
-            }
+                return VisitResult.CONTINUE
+            })
         }
-        return merged
-    }
-
-    private func RunOnNestedLambdas(block: Block, builder: CHIRBuilder, enableCompileDebug!: Bool = false,
-        enableCoverage!: Bool = false): Int64 {
-        var merged: Int64 = 0
-        for (expr in block.GetExpressionsRef()) {
-            if (let Some(lambdaExpr) <- (expr as Lambda)) {
-                if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                    merged += RunOnBody(lambdaBody, builder, enableCompileDebug: enableCompileDebug,
-                        enableCoverage: enableCoverage)
-                }
-            }
-        }
-        return merged
+        return merged[0]
     }
 
     private func CanMergeIntoPredecessor(block: Block, enableCompileDebug: Bool, enableCoverage: Bool): Bool {

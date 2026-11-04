@@ -1099,10 +1099,54 @@ public func ChkCFuncCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
     return ok
 }
 
+internal func NumericTypeAliasCallTy(typeManager: TypeManager, ce: CallExpr): Option<Ty> {
+    if (ce.args.size != 1) { return None }
+    let base = ce.baseFunc ?? return None
+    let decl = base.GetTarget() ?? return None
+    if (decl.astKind != ASTKind.TYPE_ALIAS_DECL) { return None }
+    let ty = typeManager.SubstituteTypeAliasInTy(base.GetTy() ?? return None)
+    if (ty.IsNumeric() || ty.IsRune()) { return ty }
+    return None
+}
+
+private func ChkNumericTypeAliasCall(typeManager: TypeManager, ctx: Option<ASTContext>,
+    target: Ty, ce: CallExpr, diag: BasicDiagnosticEngine,
+    conversionChecker: (Ty, TypeConvExpr) -> Bool,
+    conversionDesugar: (CallExpr, Ty) -> TypeConvExpr): Bool {
+    let baseTy = NumericTypeAliasCallTy(typeManager, ce) ?? return false
+    let arg = ce.args[0]
+    if (!arg.name.Val().isEmpty()) {
+        let _ = diag.Diagnose(ToBasicPosition(arg.name.Begin()), ToBasicPosition(arg.name.End()),
+            BasicDiagKind.sema_unknown_named_argument, args: StringDiagArgs([arg.name.Val()])).Emit()
+        ce.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+    let conversion = conversionDesugar(ce, baseTy)
+    if (let Some(context) <- ctx) {
+        context.RemoveTypeCheckCache(conversion)
+        context.RemoveTypeCheckCache(conversion.typeNode.getOrThrow())
+    }
+    let ok = conversionChecker(target, conversion)
+    ce.SetTy(conversion.GetTy() ?? TypeManager.GetInvalidTy())
+    if (ok) {
+        ce.args.clear()
+    } else {
+        arg.expr = conversion.expr
+        ce.desugarExpr = None
+    }
+    return ok
+}
+
 public func ChkBuiltinCall(typeManager: TypeManager, ctx: Option<ASTContext>, target: Ty, ce: CallExpr,
     importManager: SemaImportManager, diag: BasicDiagnosticEngine, checker: CallArgChecker,
     argSynthesizer: (FuncArg) -> Ty, declSynthesizer: CallDeclSynthesizer,
-    typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None): Bool {
+    typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
+    conversionChecker!: Option<(Ty, TypeConvExpr) -> Bool> = None,
+    conversionDesugar!: Option<(CallExpr, Ty) -> TypeConvExpr> = None): Bool {
+    if (NumericTypeAliasCallTy(typeManager, ce).isSome()) {
+        return ChkNumericTypeAliasCall(typeManager, ctx, target, ce, diag,
+            conversionChecker.getOrThrow(), conversionDesugar.getOrThrow())
+    }
     if (ChkPointerCall(typeManager, ctx, target, ce, typeChecker: typeChecker,
         typeSynthesizer: typeSynthesizer, argSynthesizer: Some(argSynthesizer), diag: Some(diag))) {
         return true
