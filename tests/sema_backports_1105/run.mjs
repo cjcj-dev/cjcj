@@ -6,10 +6,11 @@ import {createHash} from 'node:crypto';
 const [compiler,sdk,out,only]=process.argv.slice(2);
 const fixtures=import.meta.dirname;
 if(!compiler||!sdk||!out||!fixtures)throw Error('compiler sdk out fixtures');
-const selected=new Set((only??'control,alias,nested,future,qualified,alias-invalid,mock').split(','));
-if([...selected].some(name=>!['control','alias','nested','future','qualified','alias-invalid','mock'].includes(name)))throw Error('unknown selected case');
+const selected=new Set((only??'control,alias,nested,future,qualified,alias-invalid,mock,future-mechanism').split(','));
+if([...selected].some(name=>!['control','alias','nested','future','qualified','alias-invalid','mock','future-mechanism'].includes(name)))throw Error('unknown selected case');
 fs.mkdirSync(out,{recursive:true});
-const env={...process.env,CANGJIE_HOME:sdk,CANGJIE_PATH:sdk+'/modules/linux_x86_64_cjnative',LD_LIBRARY_PATH:['runtime/lib/linux_x86_64_cjnative','lib/linux_x86_64_cjnative','third_party/llvm/lib','tools/lib'].map(p=>sdk+'/'+p).join(':')};
+const runtimeLib=process.env.CJCJ_PRIVATE_RUNTIME_LIB??sdk+'/runtime/lib/linux_x86_64_cjnative';
+const env={...process.env,CANGJIE_HOME:sdk,CANGJIE_PATH:sdk+'/modules/linux_x86_64_cjnative',LD_LIBRARY_PATH:[runtimeLib,...['lib/linux_x86_64_cjnative','third_party/llvm/lib','tools/lib'].map(p=>sdk+'/'+p)].join(':')};
 const result={compiler,sdk,cases:[],assertions:[],rc:0};
 const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 result.compilerSHA256=sha(compiler);
@@ -48,6 +49,20 @@ if(selected.has('mock')){
 const mock=run('mock.compile',[compiler,'--test','--mock=on',fixtures+'/mock_test.cj','--diagnostic-format=noColor','-o',out+'/mock']);
 check('mock.compile',mock.rc===0);
 if(mock.rc===0){result.cases.at(-1).elfSHA256=sha(out+'/mock');const p=run('mock.run',[out+'/mock']);check('mock.runtime',p.rc===0);}
+}
+if(selected.has('future-mechanism')){
+for(const [name,flag,enabled] of [['future-enabled','--fchir-redundant-future-removal',true],['future-disabled','--fno-chir-redundant-future-removal',false]]){
+ const elf=out+'/'+name;
+ const r=run(name+'.compile',[compiler,fixtures+'/future.cj','-O2','--chir-opt-debug',flag,'--diagnostic-format=noColor','-o',elf]);
+ check(name+'.compile',r.rc===0);
+ if(r.rc===0){
+  const rewrites=r.text.split('\n').filter(line=>line.includes('[RedundantFutureRemoval]'));
+  result.cases.at(-1).rewrites=rewrites;
+  result.cases.at(-1).elfSHA256=sha(elf);
+  check(name+'.rewrite',enabled?rewrites.length>0:rewrites.length===0);
+  const p=run(name+'.run',[elf]);check(name+'.runtime',p.rc===0&&p.text.includes('FUTURE_EXCEPTION_OK'));
+ }
+}
 }
 fs.writeFileSync(out+'/result.json',JSON.stringify(result,null,2)+'\n');
 process.exitCode=result.rc;

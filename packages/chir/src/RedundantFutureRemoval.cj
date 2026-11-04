@@ -4,10 +4,10 @@ import std.collection.*
 
 private class RedundantFutureRemovalMatch {
     public let futureValue: LocalVar
-    public let apply: Apply
-    public let allocation: Allocate
+    public let apply: Expression
+    public let allocation: AllocateBase
 
-    public init(futureValue: LocalVar, apply: Apply, allocation: Allocate) {
+    public init(futureValue: LocalVar, apply: Expression, allocation: AllocateBase) {
         this.futureValue = futureValue
         this.apply = apply
         this.allocation = allocation
@@ -15,12 +15,14 @@ private class RedundantFutureRemovalMatch {
 }
 
 public class RedundantFutureRemoval {
+    private let builder: CHIRBuilder
     private let chirPackage: Package
     private let isDebug: Bool
     private var executeClosure: Option<Function> = None
     private let appendedGlobalUsers = ArrayList<(Value, Expression)>()
 
-    public init(chirPackage: Package, isDebug!: Bool = false) {
+    public init(builder: CHIRBuilder, chirPackage: Package, isDebug!: Bool = false) {
+        this.builder = builder
         this.chirPackage = chirPackage
         this.isDebug = isDebug
     }
@@ -31,14 +33,16 @@ public class RedundantFutureRemoval {
             for (fn in chirPackage.GetGlobalFuncsWithBody()) { changed += RunOnFunc(fn) }
             return changed
         }
-        let runs = RunFunctionLocalPass<(Int64, ArrayList<(Value, Expression)>)>(
+        let runs = RunFunctionLocalPass<(Int64, CHIRBuilder, ArrayList<(Value, Expression)>)>(
             chirPackage.GetGlobalFuncsWithBody(), threadNum, { fn =>
-                let worker = RedundantFutureRemoval(chirPackage)
-                (worker.RunOnFunc(fn), worker.appendedGlobalUsers)
+                let localBuilder = CHIRBuilder(builder.context)
+                let worker = RedundantFutureRemoval(localBuilder, chirPackage)
+                (worker.RunOnFunc(fn), localBuilder, worker.appendedGlobalUsers)
             }, passName: "redundant-future")
-        for ((count, users) in runs) {
+        for ((count, localBuilder, users) in runs) {
             changed += count
             for ((value, user) in users) { value.MoveUserToTail(user) }
+            localBuilder.MergeAllocatedInstance()
         }
         return changed
     }
@@ -59,7 +63,7 @@ public class RedundantFutureRemoval {
                     continue
                 }
                 if (let Some(matchResult) <- CheckSpawnWithFuture(expr)) {
-                    if (let Some(spawnExpr) <- (expr as Spawn)) {
+                    if (let Some(spawnExpr) <- (expr as SpawnBase)) {
                         RewriteSpawnWithoutFuture(spawnExpr, matchResult)
                         changed++
                         if (isDebug) {
@@ -79,9 +83,9 @@ public class RedundantFutureRemoval {
         return changed
     }
 
-    private func GetExecureClosureFunc(): Option<Function> {
+    private func GetExecuteClosureFunc(): Option<Function> {
         for (def in chirPackage.GetAllCustomTypeDef()) {
-            if (!IsCoreFuture(def)) {
+            if (!IsCoreFuture(def) || def.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
                 continue
             }
             for (method in def.GetMethods()) {
@@ -94,12 +98,23 @@ public class RedundantFutureRemoval {
         return None
     }
 
-    private func RewriteSpawnWithoutFuture(spawnExpr: Spawn, matched: RedundantFutureRemovalMatch): Unit {
+    private func ReplaceTerminatorWithGoTo(terminator: Expression, successBlock: Block): Unit {
+        let parent = terminator.GetParentBlock().getOrThrow()
+        let location = terminator.GetDebugLocation()
+        // Removing the terminator drops both predecessor links. Appending GoTo
+        // reconnects only the success edge; TrySpawn keeps its exception edge.
+        terminator.RemoveSelfFromBlock()
+        let goTo = builder.CreateGoTo(successBlock, parent)
+        goTo.SetDebugLocation(location)
+        parent.AppendExpression(goTo)
+    }
+
+    private func RewriteSpawnWithoutFuture(spawnExpr: SpawnBase, matched: RedundantFutureRemovalMatch): Unit {
         // CR01: allocated = Allocate(); updated = Future.init(allocated, closure);
         // Spawn(updated). Both receiver values must be unobserved outside this chain.
         let lambdaValue = matched.apply.GetOperand(2)
         if (executeClosure.isNone()) {
-            executeClosure = GetExecureClosureFunc()
+            executeClosure = GetExecuteClosureFunc()
         }
         let fn = executeClosure ??
             throw IllegalArgumentException("cannot find std.core.Future.executeClosure")
@@ -110,14 +125,22 @@ public class RedundantFutureRemoval {
             }
         }
         matched.futureValue.ReplaceWith(lambdaValue)
-        matched.apply.RemoveSelfFromBlock()
+        if (let Some(tryApply) <- (matched.apply as TryApply)) {
+            ReplaceTerminatorWithGoTo(tryApply, tryApply.GetSuccessBlock())
+        } else {
+            matched.apply.RemoveSelfFromBlock()
+        }
         matched.allocation.GetResult().getOrThrow().ReplaceWith(lambdaValue)
-        matched.allocation.RemoveSelfFromBlock()
+        if (let Some(tryAllocate) <- (matched.allocation as TryAllocate)) {
+            ReplaceTerminatorWithGoTo(tryAllocate, tryAllocate.GetSuccessBlock())
+        } else {
+            matched.allocation.RemoveSelfFromBlock()
+        }
         spawnExpr.SetExecuteClosure(fn)
     }
 
     private func CheckSpawnWithFuture(expr: Expression): Option<RedundantFutureRemovalMatch> {
-        let spawnExpr = (expr as Spawn) ?? return None
+        let spawnExpr = (expr as SpawnBase) ?? return None
         if (spawnExpr.IsExecuteClosure()) {
             return None
         }
@@ -129,24 +152,27 @@ public class RedundantFutureRemoval {
             return None
         }
         let producer = future.GetExpr() ?? return None
-        let apply = (producer as Apply) ?? return None
-        let callee = (apply.GetCallee() as Function) ?? return None
-        let owner = callee.GetParentCustomTypeDef() ?? return None
-        if (!ConstructorReturnsReceiver(callee) || !IsCoreFuture(owner) || apply.GetNumOfOperands() != 3) {
+        if (producer.GetExprKind() != ExprKind.APPLY && producer.GetExprKind() != ExprKind.TRY_APPLY) {
             return None
         }
-        let lambdaTy = apply.GetOperand(2).GetType() ?? return None
+        let apply = ApplyBase(producer)
+        let callee = (apply.GetCallee() as Function) ?? return None
+        let owner = callee.GetParentCustomTypeDef() ?? return None
+        if (!ConstructorReturnsReceiver(callee) || !IsCoreFuture(owner) || apply.GetOperands().size != 3) {
+            return None
+        }
+        let lambdaTy = producer.GetOperand(2).GetType() ?? return None
         if (!lambdaTy.IsFunc()) {
             return None
         }
-        let allocated = apply.GetOperand(1).AsLocalVar() ?? return None
+        let allocated = producer.GetOperand(1).AsLocalVar() ?? return None
         let allocationExpr = allocated.GetExpr() ?? return None
-        let allocation = (allocationExpr as Allocate) ?? return None
+        let allocation = (allocationExpr as AllocateBase) ?? return None
         let allocatedTy = (allocation.GetType() as ClassType) ?? return None
-        if (!refEq(allocatedTy.GetClassDef(), owner) || !HasOnlyUserApartFromDebug(allocated, apply)) {
+        if (!refEq(allocatedTy.GetClassDef(), owner) || !HasOnlyUserApartFromDebug(allocated, producer)) {
             return None
         }
-        return RedundantFutureRemovalMatch(future, apply, allocation)
+        return RedundantFutureRemovalMatch(future, producer, allocation)
     }
 
 }

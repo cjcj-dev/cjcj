@@ -72,6 +72,55 @@ private class ReceiverFutureFixture {
 @Test
 class RedundantFutureRemovalTest {
     @TestCase
+    func tryFutureDropsOnlyRemovedOperationsExceptionEdges(): Unit {
+        for (observed in [false, true]) {
+            let f = ReceiverFutureFixture()
+            let b = f.builder
+            let body = f.fn.GetBody().getOrThrow()
+            f.spawnExpr.RemoveSelfFromBlock()
+            f.initCall.RemoveSelfFromBlock()
+            f.allocation.RemoveSelfFromBlock()
+            let initialize = b.CreateBlock(body)
+            let start = b.CreateBlock(body)
+            let done = b.CreateBlock(body)
+            let error = b.CreateBlock(body)
+            let ty = f.constructor.GetFuncType().getOrThrow().GetReturnType()
+            let allocate = b.CreateTryAllocate(ty, f.allocation.GetType(), initialize, error, f.block)
+            f.block.AppendExpression(allocate)
+            let call = b.CreateTryApply(ty, f.constructor,
+                FuncCallContext(args: ArrayList<Value>([allocate.GetResult().getOrThrow(), f.closure])),
+                start, error, initialize)
+            initialize.AppendExpression(call)
+            let spawnExpr = b.CreateTrySpawn(ty, call.GetResult().getOrThrow(), done, error, start)
+            start.AppendExpression(spawnExpr)
+            let debug = b.CreateDebug(b.context.GetUnitTy(), call.GetResult().getOrThrow(), "future", done)
+            done.AppendExpression(debug)
+            if (observed) {
+                let use = b.CreateFunction(b.context.GetFuncTy(ArrayList<Type>([ty]), b.context.GetUnitTy()),
+                    "observeFuture")
+                done.AppendExpression(b.CreateApply(b.context.GetUnitTy(), use,
+                    FuncCallContext(args: ArrayList<Value>([call.GetResult().getOrThrow()])), done))
+            }
+            done.AppendExpression(b.CreateExit(None, done))
+            error.AppendExpression(b.CreateExit(None, error))
+            @Expect(error.GetPredecessors().size, 3)
+            @Expect(RedundantFutureRemoval(b, f.pkg).RunOnPackage(threadNum: 2), if (observed) { 0 } else { 1 })
+            @Expect(spawnExpr.IsExecuteClosure(), !observed)
+            @Expect(spawnExpr.GetErrorBlock().nodeId, error.nodeId)
+            @Expect(error.GetPredecessors().size, if (observed) { 3 } else { 1 })
+            @Expect(allocate.GetParentBlock().isSome(), observed)
+            @Expect(call.GetParentBlock().isSome(), observed)
+            if (!observed) {
+                @Expect(f.block.GetTerminator().getOrThrow().GetExprKind(), ExprKind.GOTO)
+                @Expect(initialize.GetTerminator().getOrThrow().GetExprKind(), ExprKind.GOTO)
+                @Expect(debug.GetOperand(0).nodeId, f.closure.nodeId)
+                @Expect(spawnExpr.GetClosure().nodeId, f.closure.nodeId)
+                @Expect(error.GetPredecessors()[0].nodeId, start.nodeId)
+            }
+        }
+    }
+
+    @TestCase
     func observedFutureGetKeepsReturnedReceiver(): Unit {
         // Actual std.process shape: Allocate -> returned init ref -> Spawn,
         // Debug and get(). The get call has only two operands without timeout.
@@ -82,7 +131,7 @@ class RedundantFutureRemovalTest {
             f.block.AppendExpression(debug)
             let get = f.AddGet(withTimeout)
             f.Finish()
-            @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 0)
+            @Expect(RedundantFutureRemoval(f.builder, f.pkg).RunOnFunc(f.fn), 0)
             @Expect(f.spawnExpr.IsExecuteClosure(), false)
             // Inspect the operand even if a product cut incorrectly changes the spawn mode.
             @Expect(f.spawnExpr.GetObject().nodeId, receiver.nodeId)
@@ -105,7 +154,7 @@ class RedundantFutureRemovalTest {
                 }
             }
             f.Finish()
-            @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 1)
+            @Expect(RedundantFutureRemoval(f.builder, f.pkg).RunOnFunc(f.fn), 1)
             @Expect(f.spawnExpr.IsExecuteClosure(), true)
             @Expect(f.spawnExpr.GetClosure().nodeId, f.closure.nodeId)
             @Expect(f.spawnExpr.GetExecuteClosure().getOrThrow().nodeId, f.execute.nodeId)
@@ -114,7 +163,7 @@ class RedundantFutureRemovalTest {
             for (debug in debugs) {
                 @Expect(debug.GetOperand(0).nodeId, f.closure.nodeId)
             }
-            @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 0)
+            @Expect(RedundantFutureRemoval(f.builder, f.pkg).RunOnFunc(f.fn), 0)
         }
     }
 
@@ -128,7 +177,7 @@ class RedundantFutureRemovalTest {
             FuncCallContext(args: ArrayList<Value>([raw])), f.block)
         f.block.AppendExpression(call)
         f.Finish()
-        @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 0)
+        @Expect(RedundantFutureRemoval(f.builder, f.pkg).RunOnFunc(f.fn), 0)
         @Expect(call.GetOperand(1).nodeId, raw.nodeId)
         @Expect(f.spawnExpr.GetFuture().nodeId, f.initCall.GetResult().getOrThrow().nodeId)
     }
@@ -138,7 +187,7 @@ class RedundantFutureRemovalTest {
         let f = ReceiverFutureFixture()
         f.constructor.SetFuncKind(FuncKind.DEFAULT)
         f.Finish()
-        @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 0)
+        @Expect(RedundantFutureRemoval(f.builder, f.pkg).RunOnFunc(f.fn), 0)
         @Expect(f.initCall.GetParentBlock().isSome(), true)
     }
 
@@ -147,7 +196,7 @@ class RedundantFutureRemovalTest {
         let f = ReceiverFutureFixture()
         f.constructor.EnableAttr(Attribute.FOREIGN)
         f.Finish()
-        @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 0)
+        @Expect(RedundantFutureRemoval(f.builder, f.pkg).RunOnFunc(f.fn), 0)
         @Expect(f.initCall.GetParentBlock().isSome(), true)
     }
 
@@ -157,7 +206,7 @@ class RedundantFutureRemovalTest {
         let other = f.builder.CreateClass(DebugLocation(), "Future", "other.Future", "example", true, false)
         f.constructor.SetOuterDeclaredOrExtendedDef(other)
         f.Finish()
-        @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 0)
+        @Expect(RedundantFutureRemoval(f.builder, f.pkg).RunOnFunc(f.fn), 0)
         @Expect(f.spawnExpr.IsExecuteClosure(), false)
     }
 
@@ -168,7 +217,7 @@ class RedundantFutureRemovalTest {
         let second = f.builder.CreateSpawn(receiver.GetType().getOrThrow(), receiver, f.block)
         f.block.AppendExpression(second)
         f.Finish()
-        @Expect(RedundantFutureRemoval(f.pkg).RunOnFunc(f.fn), 0)
+        @Expect(RedundantFutureRemoval(f.builder, f.pkg).RunOnFunc(f.fn), 0)
         @Expect(f.spawnExpr.IsExecuteClosure(), false)
         @Expect(second.IsExecuteClosure(), false)
     }
@@ -192,7 +241,7 @@ class RedundantFutureRemovalTest {
             FuncCallContext(args: ArrayList<Value>([allocation.GetResult().getOrThrow(), closure])), block)
         let spawnExpr = b.CreateSpawn(refTy, initCall.GetResult().getOrThrow(), block)
         block.AppendExpressions(ArrayList<Expression>([allocation, initCall, spawnExpr, b.CreateExit(None, block)]))
-        @Expect(RedundantFutureRemoval(f.pkg).RunOnPackage(threadNum: 2), 1)
+        @Expect(RedundantFutureRemoval(f.builder, f.pkg).RunOnPackage(threadNum: 2), 1)
         @Expect(f.spawnExpr.IsExecuteClosure(), false)
         @Expect(observed.GetOperand(1).nodeId, f.initCall.GetResult().getOrThrow().nodeId)
         @Expect(spawnExpr.IsExecuteClosure(), true)
@@ -201,7 +250,7 @@ class RedundantFutureRemovalTest {
         @Expect(initCall.GetParentBlock().isNone(), true)
         @Expect(closure.GetUsers().size, 1)
         @Expect(closure.GetUsers()[0].nodeId, spawnExpr.nodeId)
-        @Expect(RedundantFutureRemoval(f.pkg).RunOnPackage(threadNum: 2), 0)
+        @Expect(RedundantFutureRemoval(f.builder, f.pkg).RunOnPackage(threadNum: 2), 0)
     }
 
 }
