@@ -18,6 +18,7 @@ private class UsersMultiplicityFixture {
         builder = CHIRBuilder(CHIRContext())
         let ctx = builder.context
         let valueTy = ctx.GetInt64Ty()
+        let _ = builder.CreatePackage("users.multiplicity")
         fn = builder.CreateFunction(ctx.GetFuncTy(ArrayList<Type>(), ctx.GetUnitTy()), "users.fixture")
         let body = builder.CreateBlockGroup(fn)
         fn.InitBody(body)
@@ -32,7 +33,12 @@ private class UsersMultiplicityFixture {
     }
 
     public func CreateApply(args: ArrayList<Value>): Apply {
-        let call = builder.CreateApply(builder.context.GetUnitTy(), callee, FuncCallContext(args: args), block)
+        let callArgs = ArrayList<Value>()
+        for (arg in args) { callArgs.add(arg) }
+        // Match the callee's reference-typed global formal in every fixture call.
+        callArgs.add(globalValue)
+        let call = builder.CreateApply(builder.context.GetUnitTy(), callee,
+            FuncCallContext(args: callArgs), block)
         block.AppendExpression(call)
         return call
     }
@@ -109,11 +115,13 @@ class UsersMultiplicityTest {
     @TestCase
     func globalUsersKeepOccurrenceAndEraseContract(): Unit {
         let f = UsersMultiplicityFixture()
+        @Expect(f.globalValue.GetType().getOrThrow().nodeId,
+            f.builder.context.GetRefTy(f.builder.context.GetInt64Ty()).nodeId)
         let call = f.CreateApply(ArrayList<Value>([f.globalValue, f.globalValue]))
-        @Expect(f.globalValue.GetUsers().size, 2)
+        @Expect(f.globalValue.GetUsers().size, 3)
 
         call.ReplaceOperand(1, f.newValue)
-        @Expect(f.globalValue.GetUsers().size, 1)
+        @Expect(f.globalValue.GetUsers().size, 2)
         @Expect(f.newValue.GetUsers().size, 1)
         call.EraseOperands()
         @Expect(f.globalValue.GetUsers().isEmpty(), true)
@@ -172,8 +180,12 @@ class UsersMultiplicityTest {
         body.SetEntryBlock(entry)
         let condition = builder.CreateParameter(ctx.GetBoolTy(), DebugLocation(), fn)
         entry.AppendExpression(builder.CreateBranch(condition, left, right, entry))
+        left.AppendExpression(builder.CreateConstant(ty, IntLiteral(1), left))
         left.AppendExpression(builder.CreateGoTo(join, left))
+        right.AppendExpression(builder.CreateConstant(ty, IntLiteral(2), right))
         right.AppendExpression(builder.CreateGoTo(join, right))
+        @Expect(left.GetExpressions().size > 1, true)
+        @Expect(right.GetExpressions().size > 1, true)
         let callee = builder.CreateFunction(ctx.GetFuncTy(ArrayList<Type>([ty, ty]), ty), "copy.callee")
         let constant = builder.CreateConstant(ty, IntLiteral(7), join)
         let call = builder.CreateApply(ty, callee, FuncCallContext(args: ArrayList<Value>([
@@ -192,12 +204,16 @@ class UsersMultiplicityTest {
                     let rhs = expr.GetOperand(2)
                     @Expect(lhs.nodeId, rhs.nodeId)
                     @Expect(lhs.GetUsers().size, 2)
+                    for (user in lhs.GetUsers()) {
+                        @Expect(refEq(user, expr), true)
+                    }
                     repeatedValues.add(lhs)
                     repeatedCalls++
                 }
             }
         }
         @Expect(repeatedCalls, 2)
+        @Expect(repeatedValues[0].nodeId != repeatedValues[1].nodeId, true)
 
         fn.DestroyFuncBody()
         for (value in repeatedValues) {
