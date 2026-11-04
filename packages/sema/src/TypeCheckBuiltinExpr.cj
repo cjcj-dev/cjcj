@@ -8,7 +8,6 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.Position as BasicPosition
 import cjcj::modules.SemaImportManager
-import cjcj::sema.Desugar.DesugarNumericTypeAliasCall
 import cjcj::utils.{CSTRING_NAME, PData}
 
 private func ToBasicPosition(pos: Position): BasicPosition {
@@ -1112,7 +1111,8 @@ internal func NumericTypeAliasCallTy(typeManager: TypeManager, ce: CallExpr): Op
 
 private func ChkNumericTypeAliasCall(typeManager: TypeManager, ctx: Option<ASTContext>,
     target: Ty, ce: CallExpr, diag: BasicDiagnosticEngine,
-    conversionChecker: (Ty, TypeConvExpr) -> Bool): Bool {
+    conversionChecker: (Ty, TypeConvExpr) -> Bool,
+    conversionDesugar: (CallExpr, Ty) -> TypeConvExpr): Bool {
     let baseTy = NumericTypeAliasCallTy(typeManager, ce) ?? return false
     let arg = ce.args[0]
     if (!arg.name.Val().isEmpty()) {
@@ -1121,7 +1121,7 @@ private func ChkNumericTypeAliasCall(typeManager: TypeManager, ctx: Option<ASTCo
         ce.SetTy(TypeManager.GetInvalidTy())
         return false
     }
-    let conversion = DesugarNumericTypeAliasCall(ce, baseTy)
+    let conversion = conversionDesugar(ce, baseTy)
     if (let Some(context) <- ctx) {
         context.RemoveTypeCheckCache(conversion)
         context.RemoveTypeCheckCache(conversion.typeNode.getOrThrow())
@@ -1141,9 +1141,11 @@ public func ChkBuiltinCall(typeManager: TypeManager, ctx: Option<ASTContext>, ta
     importManager: SemaImportManager, diag: BasicDiagnosticEngine, checker: CallArgChecker,
     argSynthesizer: (FuncArg) -> Ty, declSynthesizer: CallDeclSynthesizer,
     typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
-    conversionChecker!: Option<(Ty, TypeConvExpr) -> Bool> = None): Bool {
+    conversionChecker!: Option<(Ty, TypeConvExpr) -> Bool> = None,
+    conversionDesugar!: Option<(CallExpr, Ty) -> TypeConvExpr> = None): Bool {
     if (NumericTypeAliasCallTy(typeManager, ce).isSome()) {
-        return ChkNumericTypeAliasCall(typeManager, ctx, target, ce, diag, conversionChecker.getOrThrow())
+        return ChkNumericTypeAliasCall(typeManager, ctx, target, ce, diag,
+            conversionChecker.getOrThrow(), conversionDesugar.getOrThrow())
     }
     if (ChkPointerCall(typeManager, ctx, target, ce, typeChecker: typeChecker,
         typeSynthesizer: typeSynthesizer, argSynthesizer: Some(argSynthesizer), diag: Some(diag))) {

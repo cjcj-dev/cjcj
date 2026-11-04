@@ -5186,6 +5186,7 @@ extend TypeChecker {
                 { fd2: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd2)) },
                 typeChecker: Some({ targetTy3: Ty, typeNode3: Type => Check(ctx, targetTy3, typeNode3) }),
                 typeSynthesizer: Some({ typeNode4: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode4) }),
+                conversionDesugar: Some({ call: CallExpr, ty: Ty => DesugarNumericTypeAliasCall(call, ty) }),
                 conversionChecker: Some({ expected: Ty, conversion: TypeConvExpr =>
                     if (expected.IsInvalid()) { Ty.IsTyCorrect(SynTypeConvExpr(ctx, conversion)) }
                     else { ChkTypeConvExpr(ctx, expected, conversion) }
