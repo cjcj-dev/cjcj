@@ -164,17 +164,6 @@ public open class Gnu <: ToolChain {
         let chain = ToolBatch()
         let dirPath = FileUtil.GetDirPath(modules[0].filePath)
         let outputFile = FileUtil.JoinPath(dirPath, pkgName + ".o")
-        if (!(modules.size == 1 && modules[0].filePath == outputFile)) {
-            let tool = Tool(ldPath, ToolType.BACKEND, driverOptions.environment.allVariables)
-            tool.AppendArg("-o")
-            tool.AppendArg(outputFile)
-            tool.AppendArg("-r")
-            for (module in modules) {
-                tool.AppendArg(module.filePath)
-            }
-            chain.add(tool)
-        }
-
         let outputDir = FileUtil.GetAbsPath(FileUtil.GetDirPath(outputFile)) ?? FileUtil.GetDirPath(outputFile)
         let symbolFile = FileUtil.JoinPath(outputDir, pkgName + ".__symbols")
         let symbolsToLocalize = if (let Some(perPkgSymbols) <- driverOptions.symbolsNeedLocalizedPerPkg.get(pkgName)) {
@@ -186,13 +175,39 @@ public open class Gnu <: ToolChain {
             eprintln("error: failed to write symbol localization list: " + symbolFile)
             return false
         }
-        if (!symbolsToLocalize.isEmpty()) {
-            if (objcopyPath.isEmpty()) {
-                eprintln("error: not found `objcopy` in search paths. You may add search path by `-B` option.")
-                return false
+        let needsPartialLink = !(modules.size == 1 && modules[0].filePath == outputFile)
+        let needsLocalization = !symbolsToLocalize.isEmpty()
+        if (needsLocalization && objcopyPath.isEmpty()) {
+            eprintln("error: not found `objcopy` in search paths. You may add search path by `-B` option.")
+            return false
+        }
+        // When both steps run, `ld -r` writes a registered temporary and llvm-objcopy creates the
+        // package object from it. Rewriting ld's output in place makes llvm-objcopy rename its
+        // result over an existing file, and ext4 (auto_da_alloc) flushes the whole object at
+        // such a replacing rename; on a busy disk that blocks the package tail. The package
+        // object keeps its path, bytes and the mode objcopy copies from ld's fresh output.
+        let linkOutput = if (needsPartialLink && needsLocalization) {
+            TempFileManager.Instance().CreateNewFileInfo(TempFileInfo(fileName: pkgName + ".partial"),
+                TempFileKind.T_OBJ).filePath
+        } else {
+            outputFile
+        }
+        if (needsPartialLink) {
+            let tool = Tool(ldPath, ToolType.BACKEND, driverOptions.environment.allVariables)
+            tool.AppendArg("-o")
+            tool.AppendArg(linkOutput)
+            tool.AppendArg("-r")
+            for (module in modules) {
+                tool.AppendArg(module.filePath)
             }
+            chain.add(tool)
+        }
+        if (needsLocalization) {
             let changeSymVis = Tool(objcopyPath, ToolType.BACKEND, driverOptions.environment.allVariables)
-            changeSymVis.AppendArg(outputFile)
+            changeSymVis.AppendArg(linkOutput)
+            if (linkOutput != outputFile) {
+                changeSymVis.AppendArg(outputFile)
+            }
             changeSymVis.AppendArg("--localize-symbols=" + symbolFile)
             chain.add(changeSymVis)
         }
