@@ -142,8 +142,8 @@ class UsersMultiplicityTest {
     @TestCase
     func globalUsersKeepOccurrenceAndEraseContract(): Unit {
         let f = UsersMultiplicityFixture()
-        @Expect(f.globalValue.GetType().getOrThrow().nodeId,
-            f.builder.context.GetRefTy(f.builder.context.GetInt64Ty()).nodeId)
+        @Expect(f.globalValue.GetType().getOrThrow().ToString(),
+            f.builder.context.GetRefTy(f.builder.context.GetInt64Ty()).ToString())
         let call = f.CreateGlobalApply(ArrayList<Value>([f.globalValue, f.globalValue, f.globalValue]))
         @Expect(f.globalValue.GetUsers().size, 3)
 
