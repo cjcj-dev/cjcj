@@ -12,6 +12,17 @@ public class Holder {
 }
 public class Primary {
     public Primary(public var value: Int64) {}
+}
+// Extension bodies use the supplied receiver directly. Spy member methods
+// otherwise forward to the original instance before executing their body.
+extend Primary {
+    public func read(): Int64 { value }
+    public func write(v: Int64): Unit { value = v }
+}
+public class OrdinaryFieldControl {
+    public var value = 3
+}
+extend OrdinaryFieldControl {
     public func read(): Int64 { value }
     public func write(v: Int64): Unit { value = v }
 }
@@ -38,6 +49,13 @@ class FieldBackportTest {
         @Expect(wrapped.read(), 41)
         wrapped.write(7)
         @Expect(original.value, 7)
+        let ordinary = OrdinaryFieldControl()
+        let ordinarySpy = spy(ordinary)
+        @On(ordinarySpy.value).returns(41).once()
+        @On(ordinarySpy.value = 7).setsOriginal().once()
+        @Expect(ordinarySpy.read(), 41)
+        ordinarySpy.write(7)
+        @Expect(ordinary.value, 7)
         let control = Primary(3)
         control.write(7)
         @Expect(control.read(), 7)
