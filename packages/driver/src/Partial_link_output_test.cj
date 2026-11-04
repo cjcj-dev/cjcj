@@ -7,6 +7,8 @@ import cjcj::utils.Semaphore
 import std.collection.{ArrayList, HashMap}
 import std.fs.{File, removeIfExists}
 import std.fs.Directory as FSDirectory
+@When[os == "Linux"]
+import std.process.execute
 import std.unittest.*
 import std.unittest.testmacro.*
 
@@ -224,9 +226,45 @@ class PartialLinkOutputTest {
             options.ltoMod = LTOMode.FULL_LTO
             @Expect(chain.UsesBundledArchiver(objects), false)
             options.ltoMod = LTOMode.NO_LTO
-            objects[0].isForeignInput = true
+            var foreignObject = objects[0]
+            foreignObject.isForeignInput = true
+            objects[0] = foreignObject
             @Expect(chain.UsesBundledArchiver(objects), false)
             @Expect(chain.UsesBundledArchiver(ArrayList<PartialLinkTempFileInfo>()), false)
+        }
+    }
+
+    @When[os == "Linux"]
+    @TestCase
+    func MissingBundledArchiverKeepsTheDiscoveredAr(): Unit {
+        let root = FSDirectory.createTemp(".").toString()
+        let options = DriverOptions()
+        options.output = root
+        options.outputMode = OutputMode.STATIC_LIB
+        options.moduleName = "fallback"
+        options.environment.paths.add("/usr/bin")
+        let manager = TempFileManager.Instance()
+        try {
+            @Assert(manager.Init(options, false), true)
+            let llvmBin = FileUtil.JoinPath(root, "third_party/llvm/bin")
+            FSDirectory.create(llvmBin, recursive: true)
+            // Only path discovery runs here; the copied executable stands in for the required objcopy.
+            @Assert(execute("/bin/cp", ["/usr/bin/true", FileUtil.JoinPath(llvmBin, "llvm-objcopy")]), 0)
+            let commands = ArrayList<ToolBatch>()
+            try (diag = DiagnosticEngine()) {
+                let driver = Driver(["cjc"], diag)
+                driver.cangjieHome = root
+                let chain = Gnu(driver, options, commands)
+                @Assert(chain.PrepareDependencyPath(), true)
+                @Expect(chain.llvmArPath.isEmpty(), true)
+                let objects = ArrayList<PartialLinkTempFileInfo>()
+                objects.add(PartialLinkModule(manager.GetTempFolder(), "pkg"))
+                @Assert(chain.ProcessGeneration(objects), true)
+                @Expect(commands[0][0].name, "/usr/bin/ar")
+            }
+        } finally {
+            manager.DeleteTempFiles()
+            let _ = removeIfExists(root, recursive: true)
         }
     }
 

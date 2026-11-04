@@ -25,7 +25,7 @@ try {
   fs.writeFileSync(path.join(output, 'app/main.cj'), 'import p.*\nimport p.partial.*\nmain(): Int64 {\n if (parentValue() != 11 || childValue() != 22) { return 1 }\n println("PARTIAL_LINK_TWO_PACKAGES_OK")\n return 0\n}\n');
   const args = ['-p', 'p', 'child', '--no-sub-pkg', '--output-type=staticlib', '--output-dir=lib', '-o=libpair.a', '-O0', '--apc=4', '-j8', '-V'];
   if (mode === 'saved') args.push('--save-temps=temps');
-  if (mode === 'cached') args.push('--incremental-compile');
+  if (mode === 'cached') args.push('--experimental', '--incremental-compile');
   const compiled = run('compile', compiler, args);
   // This is a product invariant, checked after real frontend/backend execution even if ar failed.
   const log = (compiled.stdout ?? '') + (compiled.stderr ?? '');
