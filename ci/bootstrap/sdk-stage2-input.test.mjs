@@ -74,6 +74,16 @@ test('ordinary CJPM source-build is an explicit C2 input without fabricated comp
    host:{install:path.join(f.root,'host'),version:'1.3.0-alpha.20261009001050'}};
  await validateSourceInputs(validated);
  await assert.rejects(validateSourceInputs({...validated,host:{...validated.host,version:'1.3.0-alpha.20261025001053'}}),/NATIVE_COMPONENT_ACTUAL_HOST/);
+ // Only the unused H1 macro contract is irrelevant to an ordinary producer.
+ // Keep the fixed Git object check and all consumed-compiler checks intact.
+ await f.write('packages/macro/src/InvokeUtil.cj','obsolete H1 macro source');
+ f.git('add','packages/macro/src/InvokeUtil.cj');f.git('commit','-qm','test: obsolete H1 macro source');
+ const obsolete={...f.input.h1,commit:f.git('rev-parse','HEAD'),tree:f.git('rev-parse','HEAD^{tree}')};
+ await validateSourceInputs({...validated,h1:obsolete});
+ await assert.rejects(validateSourceInputs({...validated,h1:{...obsolete,tree:f.input.h1.tree}}),/NATIVE_SOURCE_TREE h1/);
+ await assert.rejects(validateSourceInputs({...validated,h1:obsolete,stage2:undefined}),/NATIVE_MACRO_SOURCE h1/);
+ await assert.rejects(validateSourceInputs({...validated,h1:obsolete,stage2:{...row,mode:undefined}}),/NATIVE_MACRO_SOURCE h1/);
+ await assert.rejects(validateSourceInputs({...validated,compiler:obsolete}),/NATIVE_MACRO_SOURCE compiler/);
 });
 test('explicit final std reuse retains completed native commands and rejects failed production',async()=>{
  const f=await stage2Fixture(),install=path.join(f.root,'std');

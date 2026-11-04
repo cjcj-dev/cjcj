@@ -75,7 +75,10 @@ export async function validateSourceInputs(input) {
   for(const [name,row] of Object.entries({llvm:input.llvm,runtime:input.runtime,stdlib:input.stdlib??input.runtime,ast:input.ast,h1:input.h1,compiler:input.compiler})) {
     const actual=await gitInput(row.repository,row.commit);
     if(actual.tree!==row.tree)throw new Error('NATIVE_SOURCE_TREE '+name);
-    if(name==='h1'||name==='compiler') {
+    // An ordinary CJPM producer has no H1 parent or H1 execution node. Its
+    // installed compiler still must satisfy the current macro source contract;
+    // normal bootstrap and historical C2 retain their H1 compatibility check.
+    if(name==='compiler'||name==='h1'&&input.stage2?.mode!=='ordinary-cjpm') {
       const {stdout}=await execute('git',['-C',row.repository,'show',row.commit+':packages/macro/src/InvokeUtil.cj']);
       if(stdout!==expectedMacro)throw new Error('NATIVE_MACRO_SOURCE '+name);
     }
