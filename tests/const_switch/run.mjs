@@ -8,9 +8,10 @@ fs.mkdirSync(output, {recursive: true});
 const env = {...process.env, CANGJIE_HOME: sdk, CANGJIE_PATH: sdk + '/modules/linux_x86_64_cjnative',
   LD_LIBRARY_PATH: ['runtime/lib/linux_x86_64_cjnative', 'lib/linux_x86_64_cjnative', 'third_party/llvm/lib', 'tools/lib']
     .map(p => path.join(sdk, p)).join(':')};
+const compilerEnv = {...env, LD_LIBRARY_PATH: process.env.COMPILER_LD_LIBRARY_PATH || env.LD_LIBRARY_PATH};
 const result = {compiler, sdk, cases: [], rc: 0};
 function run(label, command) {
-  const child = spawnSync(command[0], command.slice(1), {cwd: output, env, encoding: 'utf8', timeout: 180000});
+  const child = spawnSync(command[0], command.slice(1), {cwd: output, env: label.endsWith('.compile') ? compilerEnv : env, encoding: 'utf8', timeout: 180000});
   const text = (child.stdout || '') + (child.stderr || '');
   fs.writeFileSync(path.join(output, label + '.log'), text);
   result.cases.push({label, command, rc: child.status, signal: child.signal, error: child.error?.message});

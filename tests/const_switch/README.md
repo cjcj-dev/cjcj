@@ -1,2 +1,4 @@
 Run `zx tests/const_switch/run.mjs /absolute/installed/compiler /absolute/matching/sdk /absolute/output`.
 The public CLI compiles legal const functions and requires ConstEval's optimizer diagnostics to confirm all initializers were evaluated. The resulting program compares each constant with the expected value and a call using a mutable input at O0. The separate Bool/UInt8 program controls the old-byte-truncation arm. The full-width program checks UInt16 256/257, Int16 -1, and UInt64 cases on both sides of the sign bit, plus defaults. It exercises the real bytecode producer, linker and interpreter; it has no simulated interpreter.
+
+For a compiler built by the bootstrap host, set `COMPILER_LD_LIBRARY_PATH` to that host's execution libraries. `SDK` still selects the target CJO/native libraries; generated programs run with that target SDK. This keeps host and target runtime ABIs separate.
