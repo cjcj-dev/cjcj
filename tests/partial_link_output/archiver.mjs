@@ -102,6 +102,7 @@ check('archiver-failure', () => {
 check('missing-bundled', () => {
   const home = output + '/missing-bundled-home';
   const bin = home + '/third_party/llvm/bin'; fs.mkdirSync(bin, { recursive: true });
+  fs.mkdirSync(home + '/modules/linux_x86_64_cjnative', { recursive: true });
   // Minimal real tool layout, not an SDK copy: imports/libraries remain the fixed installed inputs.
   for (const tool of ['opt', 'llc', 'llvm-objcopy']) {
     fs.copyFileSync(process.env.CANGJIE_HOME + '/.native-tools/third_party/llvm/bin/' + tool, bin + '/' + tool);
@@ -118,14 +119,14 @@ check('cross', () => {
   const bin = output + '/cross-tools'; fs.mkdirSync(bin);
   fs.copyFileSync('/usr/bin/llvm-ar-14', bin + '/aarch64-linux-gnu-ar');
   fs.copyFileSync('/usr/bin/ld.lld-14', bin + '/aarch64-linux-gnu-ld');
-  ok(run('cross-object', '/usr/bin/clang-15', ['--target=aarch64-linux-gnu', '-c', 'foreign.c', '-o', 'foreign-aarch64.o']));
+  ok(run('cross-object', '/usr/bin/clang-15', ['--target=aarch64-linux-gnu', '-c', 'foreign.c', '-o', 'foreign-aarch64.o'], { ...process.env, LD_LIBRARY_PATH: '' }));
   const r = run('cross', compiler, ['foreign-aarch64.o', '--experimental', '--target=aarch64-linux-gnu', '--output-type=staticlib', '-j8', '-V', '-o=cross.a'],
     { ...process.env, PATH: bin + ':' + process.env.PATH }); ok(r);
   assert.match(r.stdout + r.stderr, /cross-tools\/aarch64-linux-gnu-ar' 'crD'/, 'CROSS_PREFIXED_AR_NOT_REACHED');
   const index = run('cross-index', '/usr/bin/nm', ['--print-armap', 'cross.a']); ok(index);
   assert.match(index.stdout, /foreign_archive_marker in foreign-aarch64\.o/);
-  ok(run('cross-consumer-object', '/usr/bin/clang-15', ['--target=aarch64-linux-gnu', '-c', 'cmain.c', '-o', 'cross-main.o']));
-  ok(run('cross-consumer-link', '/usr/bin/ld.lld-14', ['-r', 'cross-main.o', 'cross.a', '-o', 'cross-consumed.o']));
+  ok(run('cross-consumer-object', '/usr/bin/clang-15', ['--target=aarch64-linux-gnu', '-c', 'cmain.c', '-o', 'cross-main.o'], { ...process.env, LD_LIBRARY_PATH: '' }));
+  ok(run('cross-consumer-link', '/usr/bin/ld.lld-14', ['-r', 'cross-main.o', 'cross.a', '-o', 'cross-consumed.o'], { ...process.env, LD_LIBRARY_PATH: '' }));
   const symbols = run('cross-consumer-symbols', '/usr/bin/nm', ['--defined-only', 'cross-consumed.o']); ok(symbols);
   assert.match(symbols.stdout, / T foreign_archive_marker/);
   const elf = run('cross-consumer-elf', '/usr/bin/readelf', ['-h', 'cross-consumed.o']); ok(elf); assert.match(elf.stdout, /AArch64/);
