@@ -3,7 +3,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';import path from 'node:path';
 import {stage2Input} from './sdk-stage2-input.mjs';
 import {stage2Fixture} from './stage2-input-fixture.mjs';
-import {validateSourceInputs} from './sdk-inputs.mjs';
+import {validateSourceInputs,installedFinalStd} from './sdk-inputs.mjs';
 test('C2 input preserves original compiler/parent/std facts without claiming the old installed gate passed',async()=>{
  const f=await stage2Fixture();const row=await stage2Input(f.supplied,f.input);
  assert.equal(row.compilerCommit,f.facts.commit);assert.equal(row.parentSha256,f.facts.parentSha256);
@@ -70,4 +70,21 @@ test('ordinary CJPM source-build is an explicit C2 input without fabricated comp
  assert.equal(row.stdSha256,await (await import('../srcbuild/lib/final-compiler.mjs')).stdIdentity(path.join(f.root,'std')));
  const validated={...f.input,ast:f.input.compiler,stage2:row};
  await validateSourceInputs(validated);
+});
+test('explicit final std reuse retains completed native commands and rejects failed production',async()=>{
+ const f=await stage2Fixture(),install=path.join(f.root,'std');
+ await f.write('std/modules/linux_x86_64_cjnative/std/std.core.cjo','module');
+ await f.write('std/PROVENANCE.txt',`STD_SOURCE_COMMIT = ${f.facts.commit}\nBUILT_BY_CJC = ${f.facts.commit}\nCOLOURED = true\n`);
+ const rows=[{argv:['python3','-I','build.py','build'],cwd:f.root,rc:0,signal:null},
+  {argv:['python3','-I','build.py','install','--prefix',install],cwd:f.root,rc:0,signal:null}];
+ const commands=await f.write('std.commands.json',JSON.stringify(rows));
+ const input={...f.input,stdlib:f.input.runtime,stage2:{compilerCommit:f.facts.commit}};
+ const row=await installedFinalStd({install,commands},input);
+ assert.deepEqual(row,{install,commands});
+ assert.deepEqual(await installedFinalStd(row,input),row);
+ rows[0].rc=1;await f.write('std.commands.json',JSON.stringify(rows));
+ await assert.rejects(installedFinalStd(row,input),/FINAL_STD_REUSE_PRODUCER/);
+ rows[0].rc=0;rows[1].argv[5]=install+'-other';
+ await f.write('std.commands.json',JSON.stringify(rows));
+ await assert.rejects(installedFinalStd(row,input),/FINAL_STD_REUSE_PRODUCER/);
 });

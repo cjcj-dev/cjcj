@@ -36,6 +36,28 @@ async function installation(root, required) {
     throw new Error('NATIVE_INSTALL_FILE ' + rel);
   return root;
 }
+// Reuse a completed native std producer through its existing command log and
+// provenance. Keep final std distinct from the compiler's bootstrap libraries.
+export async function installedFinalStd(supplied, input) {
+  if (!supplied?.install || !supplied.commands || !input.stage2) throw Error('FINAL_STD_REUSE_INPUT');
+  const install = await privateRoot(supplied.install), commands = path.resolve(supplied.commands);
+  const rows = await readJson(commands);
+  const built = rows.findIndex(row => row.argv?.includes('build.py') && row.argv.includes('build')
+    && row.rc === 0 && !row.signal);
+  const installed = rows.findIndex((row, index) => index > built && row.argv?.includes('build.py')
+    && row.argv.includes('install') && row.argv[row.argv.indexOf('--prefix') + 1] === install
+    && row.cwd === rows[built]?.cwd && row.rc === 0 && !row.signal);
+  if (built < 0 || installed < 0) throw Error('FINAL_STD_REUSE_PRODUCER');
+  const provenance = await fs.readFile(path.join(install, 'PROVENANCE.txt'), 'utf8');
+  const field = name => provenance.split('\n').find(line => line.startsWith(name+' = '))?.slice(name.length+3).trim();
+  if (field('STD_SOURCE_COMMIT') !== input.stdlib.commit
+      || field('BUILT_BY_CJC') !== input.stage2.compilerCommit || field('COLOURED') !== 'true')
+    throw Error('FINAL_STD_REUSE_SOURCE');
+  const native = sdkPlatform(input.platform);
+  await installation(install, ['modules/'+native.tuple+'/std/std.core.cjo',
+    'lib/'+native.tuple+'/libcangjie-std-core.a']);
+  return {install, commands};
+}
 // Validate the actual selected source objects, including an explicit inputs file.
 // The compiler's macro consumer must be this paired source, not an older C tree.
 export async function validateSourceInputs(input) {
@@ -56,6 +78,8 @@ export async function validateSourceInputs(input) {
     const actual = await stage2Input(input.stage2,input);
     if(!isDeepStrictEqual(actual,input.stage2))throw new Error('C2_REUSE_INPUT_CHANGED');
   }
+  if(input.reuseFinalStd && !isDeepStrictEqual(await installedFinalStd(input.reuseFinalStd,input),input.reuseFinalStd))
+    throw Error('FINAL_STD_REUSE_INPUT_CHANGED');
 }
 export async function prepareNativeInputs(descriptor, env = process.env) {
   const platform = descriptor.platform || hostPlatform(), native = sdkPlatform(platform);
@@ -194,6 +218,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     targetComponents:{compiler:component(rows.compiler),std:component(stdlib??rows.runtime),runtime:component(rows.runtime),
       llvm:component(rows.llvm),ast:component(rows.ast)}};
   if(installations.stage2)inputs.stage2=await stage2Input(installations.stage2,inputs);
+  if(descriptor.reuseFinalStd)inputs.reuseFinalStd=await installedFinalStd(descriptor.reuseFinalStd,inputs);
   await validateSourceInputs(inputs);
   const file = path.join(work, 'sdk-inputs.json');
   await atomicJson(file, inputs);

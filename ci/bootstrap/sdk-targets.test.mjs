@@ -202,7 +202,7 @@ test('ordinary C2 input compiler path is separate from canonical output and exec
  }
 });
 
-test('ordinary C2 reuses the normalized std install in the complete target graph',()=>{
+test('only explicit final std reuse skips production in the complete target graph',()=>{
  const input=inputs('linux_x86_64');
  input.stage2={mode:'ordinary-cjpm',install:'/fixture/C2',bootstrapStd:'/fixture/bootstrap-std',
   stdSourceInstall:'/fixture/bootstrap-std',stdSource:{repository:'/fixture/std.git',commit:'e'.repeat(40),identity:'e'.repeat(64)},
@@ -210,10 +210,12 @@ test('ordinary C2 reuses the normalized std install in the complete target graph
   sourceRoot:'/fixture/compiler-source',sourceProduct:'/fixture/compiler-source/target/release/bin/cjcj::cjc',
   compilerFile:'libexec/compiler/cjcj-stage1',compilerCommit:'c'.repeat(40),llvmCommit:input.llvm.commit,
   bootstrapRuntimeCommit:input.runtime.commit,compilerSha256:'d'.repeat(64),stdSha256:'e'.repeat(64),stdCoreSha256:'f'.repeat(64)};
+ assert.ok(createBootstrapTargets(input).stages.find(row=>row.id==='stage3-std').commands.length);
+ input.reuseFinalStd={install:'/fixture/final-std',commands:'/fixture/final-std.commands.json'};
  const c=createBootstrapTargets(input);
  const std=c.stages.find(row=>row.id==='stage3-std');
- assert.equal(std.output,input.stage2.stdSourceInstall);
- assert.equal(std.reuse.source,input.stage2.stdSourceInstall);
+ assert.equal(std.output,input.reuseFinalStd.install);
+ assert.equal(std.reuse.source,input.reuseFinalStd.install);
  assert.equal('commands' in std,false);
  assert.deepEqual(targetOrder(c.stages).map(row=>row.id),['nativeN','nativeR','nativeAST','stage2','stage3-std','stage2-target-sdk','stage3']);
  assert.doesNotThrow(()=>validateBootstrapTargets(c));
