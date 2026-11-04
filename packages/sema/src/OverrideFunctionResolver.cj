@@ -24,6 +24,23 @@ struct ResolverCacheKey <: Hashable & Equatable<ResolverCacheKey> {
     public func hashCode(): Int64 { return typeId.hashCode() ^ identifier.hashCode() }
 }
 
+// Upstream 16831cf5: a (instBaseTy, funcDecl) subproblem of one top-overridden query.
+// Both ids are unique per object, so the key holds no AST references.
+struct TopOverriddenFuncsKey <: Hashable & Equatable<TopOverriddenFuncsKey> {
+    let tyId: Int64
+    let declId: Int64
+    init(tyId: Int64, declId: Int64) {
+        this.tyId = tyId
+        this.declId = declId
+    }
+    public operator func ==(right: TopOverriddenFuncsKey): Bool {
+        return tyId == right.tyId && declId == right.declId
+    }
+    public operator func !=(right: TopOverriddenFuncsKey): Bool { return !(this == right) }
+    @OverflowWrapping
+    public func hashCode(): Int64 { return tyId.hashCode() * 31 + declId.hashCode() }
+}
+
 public class OverrideFunctionResolver {
     private let typeManager: TypeManager
     static let instTy2MembersCache = HashMap<ResolverCacheKey, MemberFuncsWithInstTys>()
@@ -281,6 +298,17 @@ public class OverrideFunctionResolver {
     }
 
     public func GetTopOverriddenFuncs(instBaseTy: Ty, funcDecl: FuncDecl): MemberFuncSet {
+        // Share completed subproblems within this one query only: the cache is not kept across
+        // compiler stages, incremental compilations or independent queries.
+        return GetTopOverriddenFuncs(instBaseTy, funcDecl, HashMap<TopOverriddenFuncsKey, MemberFuncSet>())
+    }
+
+    private func GetTopOverriddenFuncs(instBaseTy: Ty, funcDecl: FuncDecl,
+        cache: HashMap<TopOverriddenFuncsKey, MemberFuncSet>): MemberFuncSet {
+        let key = TopOverriddenFuncsKey(instBaseTy.objectId, funcDecl.objectId)
+        if (let Some(found) <- cache.get(key)) {
+            return found
+        }
         let baseDecl = Ty.GetInheritableDeclPtrOfTy(Some(instBaseTy))
         let superDecls = TreeSet<ClassLikeDecl>()
         let extendDecls = TreeSet<ExtendDecl>()
@@ -307,7 +335,7 @@ public class OverrideFunctionResolver {
             let visit = { member: Decl =>
                 if (let Some(parentFunc) <- (member as FuncDecl)) {
                     if (!SameDecl(parentFunc, funcDecl) && IsImplementationFunc(funcDecl, parentFunc)) {
-                        let parentTops = GetTopOverriddenFuncs(superDecl.GetTy().getOrThrow(), parentFunc)
+                        let parentTops = GetTopOverriddenFuncs(superDecl.GetTy().getOrThrow(), parentFunc, cache)
                         if (parentTops.isEmpty()) {
                             result.add(parentFunc)
                         } else {
@@ -318,6 +346,8 @@ public class OverrideFunctionResolver {
             }
             WorkForMembersOfDecl(superDecl, visit)
         }
+        // Cached sets are only read by callers within this query (isEmpty / add(all:)).
+        cache[key] = result
         return result
     }
 }
