@@ -311,6 +311,10 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
             }
         }
         if (stillUsed) {
+            if (let Some(_) <- (oldOperand as Block)) {
+                return
+            }
+            oldOperand.RemoveUserOccurrenceOnly(this)
             return
         }
         if (let Some(oldBlock) <- (oldOperand as Block)) {
@@ -325,11 +329,13 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
             return
         }
         var found = false
+        var replacedCount: Int64 = 0
         var idx: Int64 = 0
         while (idx < operands.size) {
             if (operands[idx].nodeId == oldOperand.nodeId) {
                 operands[idx] = newOperand
                 found = true
+                replacedCount++
             }
             idx++
         }
@@ -339,12 +345,20 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         if (let Some(oldBlock) <- (oldOperand as Block)) {
             oldBlock.RemovePredecessor(parent.getOrThrow())
         } else {
-            oldOperand.RemoveUserOnly(this)
+            var removedCount: Int64 = 0
+            while (removedCount < replacedCount) {
+                oldOperand.RemoveUserOccurrenceOnly(this)
+                removedCount++
+            }
         }
         if (let Some(newBlock) <- (newOperand as Block)) {
             newBlock.AddPredecessor(parent.getOrThrow())
         } else {
-            newOperand.AddUserOnly(this)
+            var addedCount: Int64 = 0
+            while (addedCount < replacedCount) {
+                newOperand.AddUserOnly(this)
+                addedCount++
+            }
         }
     }
 
@@ -355,7 +369,13 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
 
     public func EraseOperands(): Unit {
         for (operand in operands) {
-            operand.RemoveUserOnly(this)
+            if (let Some(_) <- (operand as Block)) {
+                // DetachFromBlockOnly owns CFG predecessor removal; preserve
+                // the all-match user cleanup for this relation.
+                operand.RemoveUserOnly(this)
+            } else {
+                operand.RemoveUserOccurrenceOnly(this)
+            }
         }
         operands.clear()
     }

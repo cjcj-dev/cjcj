@@ -117,12 +117,26 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     }
 
     public func RemoveUserOnly(expr: Expression): Unit {
+        RemoveMatchingUsers(expr, removeAll: true)
+    }
+
+    // Ordinary values have one user entry per operand occurrence.  This
+    // path removes exactly one entry; callers use it for index replacement,
+    // counted bulk replacement, and per-operand erasure.  Block CFG edges
+    // continue to use RemovePredecessor and the all-match RemoveUserOnly API.
+    public func RemoveUserOccurrenceOnly(expr: Expression): Unit {
+        RemoveMatchingUsers(expr, removeAll: false)
+    }
+
+    private func RemoveMatchingUsers(expr: Expression, removeAll: Bool): Unit {
         if (IsGlobal()) {
             synchronized(userMutex) {
                 var idx: Int64 = 0
-                while (idx < users.size) {
+                var removed = false
+                while (idx < users.size && (removeAll || !removed)) {
                     if (users[idx].nodeId == expr.nodeId) {
                         users.remove(at: idx)
+                        removed = true
                         continue
                     }
                     idx++
@@ -130,9 +144,11 @@ public open class Value <: Base & Hashable & Equatable<Value> {
             }
         } else {
             var idx: Int64 = 0
-            while (idx < users.size) {
+            var removed = false
+            while (idx < users.size && (removeAll || !removed)) {
                 if (users[idx].nodeId == expr.nodeId) {
                     users.remove(at: idx)
+                    removed = true
                     continue
                 }
                 idx++
