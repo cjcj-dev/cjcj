@@ -34,3 +34,37 @@ for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm6
     await assert.rejects(consumeFinalCompiler(options), /binary SHA-256 mismatch/);
   });
 }
+
+
+test('ordinary installed std uses existing source facts and bounded interface payloads', async t => {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'ordinary-std-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const sdk=path.join(root,'sdk'),std=path.join(root,'std');
+  const {stdInstallFiles}=await import('../../ci/bootstrap/sdk-platform.mjs');
+  const files=stdInstallFiles('linux_x86_64');
+  for(const prefix of [sdk,std])for(const relative of files){
+    const file=path.join(prefix,relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,relative);
+  }
+  const source={repository:'https://github.com/cjcj-dev/cangjie-runtime.git',commit:'a'.repeat(40)};
+  const stage={platform:'linux_x86_64',sources:{std:source},configuration:{layout:'components',platform:'linux_x86_64'},
+    selection:{targetComponents:{std:{...source,platform:'linux_x86_64',install:std}}}};
+  const save=()=>fs.writeFile(path.join(sdk,'STAGE-INPUTS.json'),JSON.stringify(stage));await save();
+  const expected=await stdIdentity(sdk);
+  assert.equal(await stdIdentity(std,std,{sourceSdk:sdk}),expected);
+  // Other SDK components do not become part of the std identity.
+  await fs.writeFile(path.join(sdk,'unrelated-compiler'),'changed');assert.equal(await stdIdentity(sdk),expected);
+  stage.sources.std={...source,commit:'b'.repeat(40)};await save();
+  await assert.rejects(stdIdentity(sdk),/STD_INPUT_SOURCE/);
+  stage.sources.std=source;stage.configuration.platform='windows_x86_64';await save();
+  await assert.rejects(stdIdentity(sdk),/STD_INPUT_SOURCE/);
+  stage.configuration.platform='linux_x86_64';await save();
+  await fs.writeFile(path.join(std,files[0]),'wrong CJO');
+  await assert.rejects(stdIdentity(std,std,{sourceSdk:sdk}),/STD_INPUT_PAYLOAD/);
+  await fs.writeFile(path.join(std,files[0]),files[0]);
+  stage.selection.targetComponents.std.install=sdk;await save();
+  await assert.rejects(stdIdentity(std,std,{sourceSdk:sdk}),/STD_INPUT_INSTALL/);
+  stage.selection.targetComponents.std.install=std;await save();
+  assert.equal(await stdIdentity(std,std,{sourceSdk:sdk}),expected);
+  for(const prefix of [sdk,std])assert.equal(await fs.stat(path.join(prefix,'PROVENANCE.txt')).catch(()=>null),null);
+  console.log('ORDINARY_STD_SOURCE_PAYLOAD_AND_RESTORE_ASSERT_REACHED');
+});
