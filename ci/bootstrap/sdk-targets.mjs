@@ -194,7 +194,9 @@ export function createBootstrapTargets(input) {
   if(input.nativeTargets)throw new Error('TARGET_NATIVE_OVERRIDE');
   if (input.nativePair && (input.nativePair.llvm !== llvm.commit || input.nativePair.runtime !== runtime.commit
     || !/^\d+\.\d+\.\d+-alpha\.\d+$/.test(input.nativePair.hostVersion || ''))) throw new Error('TARGET_NATIVE_PAIR');
-  if(host.version!==(input.nativePair?.hostVersion ?? readHostToolchainPin(platform).replace(/^nightly-/,'')))throw new Error('TARGET_HOST_VERSION');
+  const hostVersion=input.nativePair?.hostVersion ?? (input.stage2?.mode==='ordinary-cjpm'
+    ? host.version : readHostToolchainPin(platform).replace(/^nightly-/,''));
+  if(!/^\d+\.\d+\.\d+-alpha\.\d+$/.test(hostVersion||'')||host.version!==hostVersion)throw new Error('TARGET_HOST_VERSION');
   const out=id=>'${output.'+id+'}';
   const repo=id=>'${repo.'+id+'}';
   const stageArg=(kind,source,sdk,output,phase,compilerRuntime)=>({argv:[process.execPath,stageEntry,'--kind',kind,'--source',source,

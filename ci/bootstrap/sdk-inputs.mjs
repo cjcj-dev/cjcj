@@ -61,6 +61,12 @@ export async function installedFinalStd(supplied, input) {
 // Validate the actual selected source objects, including an explicit inputs file.
 // The compiler's macro consumer must be this paired source, not an older C tree.
 export async function validateSourceInputs(input) {
+  if(input.stage2?.mode==='ordinary-cjpm') {
+    const native=sdkPlatform(input.platform);
+    const observed=await execute(path.join(input.host.install,'bin/cjc'+native.exe),['--version']);
+    if(hostToolchainFromCjcVersion(observed.stdout)!=='nightly-'+input.host.version)
+      throw Error('NATIVE_COMPONENT_ACTUAL_HOST');
+  }
   if (input.nativePair) await receiveNativeRuntime({root:input.runtime.install,sourceRoot:input.runtime.sourceRoot,
     sourceRepository:input.runtime.sourceRepository??await runtimeSourceRepository(input.runtime.repository),configuration:input.runtime.configuration,
     platform:input.platform,llvmCommit:input.llvm.commit,runtimeCommit:input.runtime.commit,
@@ -110,13 +116,18 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   }
   const {compiler:{commit:compilerCommit},runtime:{commit:runtimeCommit},llvm:{commit:llvmCommit},ast:{commit:astCommit},h1:{commit:h1Commit}}=rows;
   const stdlib=rows.stdlib;
-  const version = descriptor.nativePair?.hostVersion ?? readHostToolchainPin(platform).replace(/^nightly-/, '');
+  // An imported normal producer carries its actual bootstrap host selection.
+  // It need not relabel that existing SDK with today's bootstrap default pin.
+  const ordinary=installations.stage2?.mode==='ordinary-cjpm';
+  const version = descriptor.nativePair?.hostVersion ?? (ordinary ? descriptor.host.version
+    : readHostToolchainPin(platform).replace(/^nightly-/, ''));
+  if(!/^\d+\.\d+\.\d+-alpha\.\d+$/.test(version||''))throw Error('NATIVE_HOST_VERSION');
   if (descriptor.nativePair && (descriptor.nativePair.llvm !== llvmCommit || descriptor.nativePair.runtime !== runtimeCommit))
     throw new Error('NATIVE_COMPONENT_PAIR_CONFLICT');
   if (descriptor.host.version !== version) throw new Error('NATIVE_HOST_VERSION');
   const host = {...descriptor.host, install:await installation(descriptor.host.install,
     ['bin/cjc'+native.exe, 'tools/bin/cjpm'+native.exe, 'modules/'+native.tuple+'/std/std.core.cjo'])};
-  if (descriptor.nativePair) {
+  if (descriptor.nativePair || ordinary) {
     const observed = await execute(path.join(host.install,'bin/cjc'+native.exe),['--version']);
     if (hostToolchainFromCjcVersion(observed.stdout) !== 'nightly-'+version) throw new Error('NATIVE_COMPONENT_ACTUAL_HOST');
   }
@@ -204,7 +215,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     rows.h1={...rows.h1,product,configuration:facts,buildResult:path.resolve(reused.buildResult)};
   }
   tools.privateRoot = path.resolve(tools.privateRoot);
-  for (const rel of ['cjcj-stage1.mjs', 'stage1-transform.mjs'])
+  for (const rel of installations.stage2 ? [] : ['cjcj-stage1.mjs', 'stage1-transform.mjs'])
     await fs.stat(path.join(tools.privateRoot, 'ts/src/sharedbuild', rel));
   const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,
     ...(descriptor.nativePair ? {nativePair:descriptor.nativePair} : {}), ...rows, stdlib:stdlib??rows.runtime,

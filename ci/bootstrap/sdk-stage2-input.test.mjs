@@ -68,8 +68,12 @@ test('ordinary CJPM source-build is an explicit C2 input without fabricated comp
  assert.equal(row.stdSourceInstall,path.resolve(path.join(f.root,'std')));
  assert.deepEqual(await stage2Input(row,f.input),row);
  assert.equal(row.stdSha256,await (await import('../srcbuild/lib/final-compiler.mjs')).stdIdentity(path.join(f.root,'std')));
- const validated={...f.input,ast:f.input.compiler,stage2:row};
+ const host=await f.write('host/bin/cjc',`#!${process.execPath}\nconsole.log('Cangjie Compiler: 1.3.0-alpha.20261009001050 (cjnative)');\n`);
+ await fs.chmod(host,0o755);
+ const validated={...f.input,ast:f.input.compiler,stage2:row,
+   host:{install:path.join(f.root,'host'),version:'1.3.0-alpha.20261009001050'}};
  await validateSourceInputs(validated);
+ await assert.rejects(validateSourceInputs({...validated,host:{...validated.host,version:'1.3.0-alpha.20261025001053'}}),/NATIVE_COMPONENT_ACTUAL_HOST/);
 });
 test('explicit final std reuse retains completed native commands and rejects failed production',async()=>{
  const f=await stage2Fixture(),install=path.join(f.root,'std');
