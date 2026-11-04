@@ -233,7 +233,7 @@ jobs:
       runtime_ref: ${{ inputs.runtime_ref }}
       targets: darwin-x64
 
-  # ops/design/DRYRUN_EXECUTION_POLICY.md §3 fixes this order, cheapest information
+  # ci/docs/dryrun-execution-policy.md §3 fixes this order, cheapest information
   # first, so a stop at phase N has not paid for phases N+1..5. A matrix cannot
   # express that: its cells are siblings and all five start together. The needs:
   # edges are the phase control, and the semantics they rest on -- a job whose

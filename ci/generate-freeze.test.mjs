@@ -57,7 +57,7 @@ async function fixture(root) {
   git(checkout, 'remote', 'add', 'origin', 'https://github.com/cjcj-dev/cjcj.git');
   for (const relative of [
     ...PIN_FILES,
-    'ops/design/DRYRUN_EXECUTION_POLICY.md',
+    'ci/docs/dryrun-execution-policy.md',
     '.github/workflows/release.yml',
   ]) {
     await write(checkout, relative, await fs.readFile(path.join(repo, relative), 'utf8'));

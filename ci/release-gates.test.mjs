@@ -174,7 +174,7 @@ test('G13 distinguishes ancestor, non-ancestor, and unreadable runtime histories
 async function platformFixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'release-platform-gates-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
-  for (const entry of ['build', 'ci', '.github', 'scripts', 'ops']) {
+  for (const entry of ['build', 'ci', '.github', 'scripts']) {
     await fs.cp(path.join(repo, entry), path.join(root, entry), {recursive: true,
       mode: fsSync.constants.COPYFILE_FICLONE,
       // These gates execute bundle/wire tests, not the separate G1 parser or
@@ -185,7 +185,7 @@ async function platformFixture(t) {
   }
   const evidence = path.join(root, 'private-evidence');
   await fs.mkdir(evidence);
-  const runbook = path.join(root, 'ops/coord/RELEASE_0_0_2_RUNBOOK.md');
+  const runbook = path.join(root, 'ci/docs/release-0.0.2-runbook.md');
   const original = await fs.readFile(runbook, 'utf8');
   assert.match(original, /^export RELEASE_EVIDENCE_ROOT=.+$/m);
   await fs.writeFile(runbook, original.replace(/^export RELEASE_EVIDENCE_ROOT=.+$/m,
@@ -398,7 +398,7 @@ test('platform fixtures isolate caller evidence, private registries and runbooks
   assert.deepEqual(gate(second, 'G3').value, control.value, 'registry mutation is case-local');
   await fs.rm(registry);
   assert.deepEqual(gate(first, 'G3').value, baseline.value, 'registry removal restores original missing-evidence semantics');
-  const runbook = path.join(first, 'ops/coord/RELEASE_0_0_2_RUNBOOK.md');
+  const runbook = path.join(first, 'ci/docs/release-0.0.2-runbook.md');
   const original = await fs.readFile(runbook, 'utf8');
   await fs.writeFile(runbook, original.replace(/^export RELEASE_EVIDENCE_ROOT=.+$/m, '# deliberately missing root'));
   const invalidRoot = gate(first, 'G3', [], {expectScope: false});

@@ -23,7 +23,7 @@ const input=JSON.parse(await fs.readFile(work+'/runtime/archive-case.json'));
 const sdk=input.install,checkout=work+'/checkout',llvm='b'.repeat(40),tuple='linux_x86_64_cjnative';
 await fs.mkdir(checkout);
 for(const file of ['.gitignore','ci/runtime_pin.env','ci/llvm_pin.env','ci/source_pin.env','ci/source_pin.env',
- 'ci/release-evidence/g2-identity.schema.json','ops/design/DRYRUN_EXECUTION_POLICY.md','.github/workflows/release.yml'])
+ 'ci/release-evidence/g2-identity.schema.json','ci/docs/dryrun-execution-policy.md','.github/workflows/release.yml'])
  await write(checkout+'/'+file,await fs.readFile(new URL('../'+file,import.meta.url)));
 let pins=await fs.readFile(checkout+'/ci/runtime_pin.env','utf8');
 pins=pins.replace(/^RUNTIME_REF=.*$/m,'RUNTIME_REF='+'a'.repeat(40)).replace(/^LOADERLIFE_MIN_REF=.*$/m,'LOADERLIFE_MIN_REF='+input.commit);

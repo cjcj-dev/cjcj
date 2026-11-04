@@ -122,7 +122,7 @@ test('formal host entry freezes the actual complete H and selected target pair, 
  git('init','-q');git('remote','add','origin','https://github.com/cjcj-dev/cjcj.git');
  const source=new URL('../../',import.meta.url);
  for(const file of ['.gitignore','ci/runtime_pin.env','ci/llvm_pin.env','ci/source_pin.env','ci/source_pin.env',
-  'ops/design/DRYRUN_EXECUTION_POLICY.md','.github/workflows/release.yml']){
+  'ci/docs/dryrun-execution-policy.md','.github/workflows/release.yml']){
   await fs.mkdir(path.dirname(checkout+'/'+file),{recursive:true});await fs.copyFile(new URL(file,source),checkout+'/'+file);
  }
  git('add','.');git('-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','Fixed host entry consumer fixture');

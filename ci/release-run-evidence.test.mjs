@@ -55,7 +55,7 @@ async function fixture(t, gate) {
     await write(checkout, file, await fs.readFile(path.join(repo, file), 'utf8'));
   }
   // Fixture checkout freezes the actual registry and workflow with its error dependency.
-  await write(checkout, 'ops/coord/RELEASE_0_0_2_RUNBOOK.md', `export RELEASE_EVIDENCE_ROOT=${path.join(root, 'evidence')}\n`);
+  await write(checkout, 'ci/docs/release-0.0.2-runbook.md', `export RELEASE_EVIDENCE_ROOT=${path.join(root, 'evidence')}\n`);
   git(checkout, 'init', '-q'); git(checkout, 'add', '.');
   git(checkout, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-qm', 'fixture');
   const head = git(checkout, 'rev-parse', 'HEAD');

@@ -256,7 +256,7 @@ function nestedValues(value, key, found = []) {
 }
 
 async function releaseEvidenceRoot(context) {
-  const runbook = await readFile(context, 'ops/coord/RELEASE_0_0_2_RUNBOOK.md', {absence: 'UNKNOWN'});
+  const runbook = await readFile(context, 'ci/docs/release-0.0.2-runbook.md', {absence: 'UNKNOWN'});
   const root = runbook.match(/^export RELEASE_EVIDENCE_ROOT=(.+)$/m)?.[1]?.trim();
   if (!root || root.includes('<')) {
     throw new GateInputError('UNKNOWN', 'runbook does not expose one concrete RELEASE_EVIDENCE_ROOT');
@@ -467,7 +467,7 @@ async function evaluateG1(context) {
   }
   const baseDigests = nestedValues(freeze, 'BASE_SDK_SHA256');
   if (baseDigests.length !== 1 || !SHA256.test(String(baseDigests[0] || ''))) failures.push('BASE_SDK_SHA256');
-  const policy = path.join(context.repo, 'ops/design/DRYRUN_EXECUTION_POLICY.md');
+  const policy = path.join(context.repo, 'ci/docs/dryrun-execution-policy.md');
   const workflow = path.join(context.repo, '.github/workflows/release.yml');
   const expectedHashes = {
     policy_sha256: await sha256(policy),
@@ -1632,8 +1632,8 @@ async function evaluateG16(context) {
 
 async function evaluateG17(context) {
   const [policy, runbook, manifestSource, ciWorkflow] = await Promise.all([
-    readFile(context, 'ops/design/DRYRUN_EXECUTION_POLICY.md'),
-    readFile(context, 'ops/coord/RELEASE_0_0_2_RUNBOOK.md'),
+    readFile(context, 'ci/docs/dryrun-execution-policy.md'),
+    readFile(context, 'ci/docs/release-0.0.2-runbook.md'),
     readFile(context, 'ci/test-manifest.mjs'),
     readFile(context, '.github/workflows/ci.yml'),
   ]);

@@ -187,7 +187,6 @@ export const GATING = Object.freeze([
   'build/test/sdk-path-parity.test.mjs',
   'build/test/source-build-parity.test.mjs',
   'build/test/source-tool-payload.test.mjs',
-  'build/test/srcbuild-kkk2.test.mjs',
   'ci/host-toolchain-pin.test.mjs',
   'ci/bootstrap/prepare_cpp_headers.test.mjs',
   'ci/release/bootstrap_entries.test.mjs',

@@ -15,7 +15,7 @@ authority or alternate SDK scheduler is retained.
 | old srcbuild stage1/stage2 scripts | The existing native target stages and fixed private H1 adapter; `sdk-native-stage` retains trimpath before compiler cjpm execution. The mainline trimpath helper and pinned local mirror fixture are retained. Full adapter/ABI/layout/compiler execution remains a native integration obligation, not a script-only result. |
 | `test/runtime_param_layout`, `test/macro_instance_stack` | Native startup owns the single loaded runtime. `test/macro_same_runtime` and `sdk-installed-macros` exercise the supported macro path; no second-runtime or CJ-side parameter-layout implementation remains. |
 | old compose SDK/install tests | `package-install`, shared installed verification, archive extraction and repeated verification; no second assembly path. |
-| `tools/srcbuild_kkk2.sh` | Existing `tools/srcbuild-kkk2.mjs` forwards the native configuration to the controlled box entry. |
+| `tools/srcbuild_kkk2.sh`, `tools/srcbuild-kkk2.mjs` | `sdk-flow.mjs --config` is the native entry on any host; scheduling it on a private build box belongs to that box's own tooling, not this repository. |
 
 The six frontend/macro consumer files are the complete fixed 02abc→1b
 mechanism, including loaded-image/API checks, CJ plugin calls, flatbuffers import
