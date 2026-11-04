@@ -272,12 +272,15 @@ export function createBootstrapTargets(input) {
       ...(reused.compilerInputs?[{from:reused.compilerInputs,to:'compiler-inputs.json',owner:'compiler'}]:[])];
     stage.metadata={...stage.metadata,compilerCommit:reused.compilerCommit,stdSource:reused.bootstrapStd,
       ...(ordinary?{stdSha256:reused.stdSha256,bootstrapStdIdentity:reused.stdSha256,compilerFile}:{}),
-      sources:{...stage.metadata.sources,compiler:{repository:compiler.repository,commit:reused.compilerCommit},
-        std:{repository:runtime.repository}},
+      sources:{...stage.metadata.sources,compiler:{repository:reused.compilerSource?.repository ?? compiler.repository,
+          commit:reused.compilerSource?.commit ?? reused.compilerCommit},
+        std:{repository:reused.stdSource?.repository ?? runtime.repository,
+          commit:reused.stdSource?.commit ?? stdlib.commit}},
       compilerOriginRuntimeCommit:reused.bootstrapRuntimeCommit,llvmCommit:reused.llvmCommit,
       ...(ordinary?{compilerProducer:{mode:'ordinary-cjpm',buildResult:reused.buildResult,
         command:reused.command,sourceRoot:reused.sourceRoot,
-        sourceProduct:reused.sourceProduct}}:{parentCommit:reused.parentCommit})};
+        sourceProduct:reused.sourceProduct,
+        compilerSource:reused.compilerSource,stdSource:reused.stdSource}}:{parentCommit:reused.parentCommit})};
     for(const id of ['h1','compiler2','std0','stdBootstrap'])delete repos[id];
     for(let i=stages.length-1;i>=0;i--)if(['stage0','stage0-run','std-bootstrap','stage1-initial','stage1-std'].includes(stages[i].id))stages.splice(i,1);
   }
@@ -290,7 +293,11 @@ export function createBootstrapTargets(input) {
     ...(!input.stage2 || input.stage2.compilerInputs
       ?[{from:out('stage2')+'/compiler-inputs.json',to:'compiler-inputs.json',owner:'compiler'}]:[]));
   c2Target.metadata={...c2Target.metadata,compilerCommit:input.stage2?.compilerCommit??compiler.commit,
-    sources:{...c2Target.metadata.sources,compiler:{repository:compiler.repository,commit:input.stage2?.compilerCommit??compiler.commit}},
+    sources:{...c2Target.metadata.sources,
+      compiler:input.stage2?.compilerSource
+        ? {repository:input.stage2.compilerSource.repository,commit:input.stage2.compilerSource.commit}
+        : {repository:compiler.repository,commit:input.stage2?.compilerCommit??compiler.commit},
+      ...(input.stage2?.stdSource ? {std:{repository:input.stage2.stdSource.repository,commit:input.stage2.stdSource.commit}} : {})},
     compilerPhase:'stage2',compilerExecutionSource:out('stage2')};
   stages.splice(stages.findIndex(s=>s.id==='stage3'),0,c2Target);
   stages.find(s=>s.id==='stage3').depends=['stage2-target-sdk'];

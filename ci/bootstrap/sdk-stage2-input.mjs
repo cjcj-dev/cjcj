@@ -39,11 +39,26 @@ async function ordinaryCjpmInput(supplied, input) {
     throw new Error('C2_ORDINARY_PRODUCER_MISMATCH');
   await fs.access(path.join(supplied.sourceRoot, 'cjpm.toml'));
   const sourceProduct = path.resolve(supplied.sourceProduct);
+  const targetDirArg = command.argv.indexOf('--target-dir');
+  const targetDirValue = targetDirArg >= 0 ? command.argv[targetDirArg + 1] : undefined;
+  if (!targetDirValue || targetDirValue.startsWith('-')) throw new Error('C2_ORDINARY_TARGET_DIR');
+  const targetDir = path.resolve(command.cwd, targetDirValue);
+  const expectedSourceProduct = path.join(targetDir, 'release', 'bin', 'cjcj::cjc');
+  if (sourceProduct !== expectedSourceProduct) throw new Error('C2_ORDINARY_COMPILER_OUTPUT');
   if (await fileDigest(product) !== metadata.compilerSha256
       || await fileDigest(sourceProduct) !== metadata.compilerSha256)
     throw new Error('C2_ORDINARY_PRODUCT_IDENTITY');
+  const compilerSelection = metadata.selection?.targetComponents?.compiler;
+  if (!compilerSelection?.repository || compilerSelection.commit !== metadata.compilerCommit
+      || compilerSelection.commit !== input.compiler.commit)
+    throw new Error('C2_ORDINARY_COMPILER_SOURCE');
   const selectedStd = metadata.selection?.targetComponents?.std?.install;
   if (selectedStd && await stdIdentity(bootstrapStd) !== await stdIdentity(selectedStd))
+    throw new Error('C2_ORDINARY_STD_SOURCE');
+  const stdSelection = metadata.selection?.targetComponents?.std;
+  const expectedStdCommit = input.stdlib?.commit ?? input.selection?.targetComponents?.std?.commit
+    ?? input.runtime.commit;
+  if (!stdSelection?.repository || !sha(stdSelection.commit) || stdSelection.commit !== expectedStdCommit)
     throw new Error('C2_ORDINARY_STD_SOURCE');
   for (const header of ['RuntimeConfig.h','Cangjie.h','CangjieRuntimeLayout.h','RuntimeAPI.h','RTInterface.h'])
     if (!(await fs.readFile(path.join(install, 'include', header))).equals(await fs.readFile(path.join(input.runtime.install, 'include', header))))
@@ -55,13 +70,19 @@ async function ordinaryCjpmInput(supplied, input) {
   await fs.access(path.join(install, 'share/cjcj/runtime_shim/cjc_runtime_config.o'));
   await fs.access(path.join(install, 'share/cjcj/cjo'));
   const stdCore = path.join(bootstrapStd, 'lib', tuple, 'libcangjie-std-core.a');
+  const stdSha256 = await stdIdentity(bootstrapStd);
   return {
     mode: 'ordinary-cjpm', install, bootstrapStd, buildResult: path.resolve(supplied.buildResult),
     command: path.resolve(supplied.command), sourceRoot: path.resolve(supplied.sourceRoot),
     compilerFile,
     sourceProduct, compilerCommit: metadata.compilerCommit, llvmCommit: input.llvm.commit,
     bootstrapRuntimeCommit: metadata.runtimeCommit, compilerSha256: metadata.compilerSha256,
-    stdSha256: await stdIdentity(bootstrapStd),
+    compilerSource: {repository: compilerSelection.repository, commit: compilerSelection.commit,
+      sourceRoot: path.resolve(supplied.sourceRoot), product: sourceProduct,
+      install: product, file: compilerFile},
+    stdSource: {repository: stdSelection.repository, commit: stdSelection.commit,
+      install: bootstrapStd, identity: stdSha256},
+    stdSha256,
     stdCoreSha256: await fileDigest(stdCore),
   };
 }
