@@ -104,32 +104,32 @@ public class MergeBlocks {
 
     public func RunOnBody(body: BlockGroup, builder: CHIRBuilder, enableCompileDebug!: Bool = false,
         enableCoverage!: Bool = false): Int64 {
-        var merged: Int64 = 0
-        var changed = true
-        while (changed) {
-            changed = false
+        let merged = ArrayList<Int64>([0])
+        let changed = ArrayList<Bool>([true])
+        while (changed[0]) {
+            changed[0] = false
             // Snapshot iteration visits every nested block group, including groups
             // owned by structured expressions rather than only direct lambdas.
             Visitor.Visit(body, { block: Block =>
                 if (block.GetGeneratedFromForIn()) {
                     MergeForInCondBlock(builder, block, appendedGlobalUsers)
-                    merged++
-                    changed = true
+                    merged[0]++
+                    changed[0] = true
                 } else if (CanMergeIntoPredecessor(block, enableCompileDebug, enableCoverage)) {
                     if (MergeIntoPredecessor(block)) {
-                        merged++
-                        changed = true
+                        merged[0]++
+                        changed[0] = true
                     }
                 } else if (CanMergeGotoOnlyBlock(block, enableCompileDebug, enableCoverage)) {
                     if (MergeGotoOnlyBlock(block)) {
-                        merged++
-                        changed = true
+                        merged[0]++
+                        changed[0] = true
                     }
                 }
                 return VisitResult.CONTINUE
             })
         }
-        return merged
+        return merged[0]
     }
 
     private func CanMergeIntoPredecessor(block: Block, enableCompileDebug: Bool, enableCoverage: Bool): Bool {
