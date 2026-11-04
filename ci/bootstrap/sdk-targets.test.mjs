@@ -165,6 +165,22 @@ test('C2 import removes completed producers but preserves native and installed c
  const bad=structuredClone(c);bad.stages.find(s=>s.id==='stage2').test.commands=[];
  assert.throws(()=>validateBootstrapTargets(bad),/BOOTSTRAP_TARGET_INPUT_MISMATCH/);
 });
+test('ordinary C2 reuse keeps command, bootstrap std identity, and one compiler copy path',()=>{
+ const input=inputs('linux_x86_64');
+ input.stage2={mode:'ordinary-cjpm',install:'/fixture/C2',bootstrapStd:'/fixture/bootstrap-std',
+  buildResult:'/fixture/C2/original-result.json',command:'/fixture/C2/workspace.command.json',
+  sourceRoot:'/fixture/compiler-source',sourceProduct:'/fixture/compiler-source/target/release/bin/cjcj::cjc',
+  compilerFile:'libexec/compiler/cjcj-stage1',compilerCommit:'c'.repeat(40),llvmCommit:input.llvm.commit,
+  bootstrapRuntimeCommit:input.runtime.commit,compilerSha256:'d'.repeat(64),stdSha256:'e'.repeat(64),stdCoreSha256:'f'.repeat(64)};
+ const c=createBootstrapTargets(input),stage=c.stages.find(s=>s.id==='stage2');
+ assert.equal(stage.metadata.compilerProducer.command,input.stage2.command);
+ assert.equal(stage.metadata.stdSha256,input.stage2.stdSha256);
+ assert.equal(stage.metadata.bootstrapStdIdentity,input.stage2.stdSha256);
+ assert.equal(stage.metadata.compilerFile,input.stage2.compilerFile);
+ assert.equal(stage.copies.filter(row=>row.to==='bin/cjcj-stage1').length,1);
+ assert.equal(stage.copies.find(row=>row.to==='bin/cjcj-stage1').from,'/fixture/C2/'+input.stage2.compilerFile);
+ assert.doesNotThrow(()=>validateBootstrapTargets(c));
+});
 
 test('explicit std Git identity reaches std targets without relabeling installed runtime or reused C2',()=>{
  for(const platform of Object.keys(PLATFORMS)){

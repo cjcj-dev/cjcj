@@ -23,7 +23,10 @@ async function ordinaryCjpmInput(supplied, input) {
   const metadata = await readJson(path.join(install, 'STAGE-INPUTS.json'));
   const build = await readJson(supplied.buildResult), command = await readJson(supplied.command);
   const native = sdkPlatform(input.platform), tuple = native.tuple;
-  const product = path.join(install, metadata.compilerFile || 'libexec/compiler/cjcj-stage1' + native.exe);
+  const compilerFile = metadata.compilerFile || 'libexec/compiler/cjcj-stage1' + native.exe;
+  if (path.isAbsolute(compilerFile) || compilerFile.split('/').some(part => part === '..'))
+    throw new Error('C2_ORDINARY_COMPILER_PATH');
+  const product = path.join(install, compilerFile);
   if (metadata.phase !== 'source-build' || metadata.platform !== input.platform
       || metadata.compilerCommit !== input.compiler.commit
       || metadata.runtimeCommit !== input.runtime.commit
@@ -54,10 +57,11 @@ async function ordinaryCjpmInput(supplied, input) {
   const stdCore = path.join(bootstrapStd, 'lib', tuple, 'libcangjie-std-core.a');
   return {
     mode: 'ordinary-cjpm', install, bootstrapStd, buildResult: path.resolve(supplied.buildResult),
-    workspaceCommand: path.resolve(supplied.command), sourceRoot: path.resolve(supplied.sourceRoot),
+    command: path.resolve(supplied.command), sourceRoot: path.resolve(supplied.sourceRoot),
+    compilerFile,
     sourceProduct, compilerCommit: metadata.compilerCommit, llvmCommit: input.llvm.commit,
     bootstrapRuntimeCommit: metadata.runtimeCommit, compilerSha256: metadata.compilerSha256,
-    stdSha256: metadata.selection?.targetComponents?.std?.commit || null,
+    stdSha256: await stdIdentity(bootstrapStd),
     stdCoreSha256: await fileDigest(stdCore),
   };
 }
@@ -70,7 +74,10 @@ export async function stage2Input(supplied, input) {
   const compilerInputs = path.join(install, 'compiler-inputs.json');
   const facts = await readJson(compilerInputs), metadata = await readJson(path.join(install, 'STAGE-INPUTS.json'));
   const build = await readJson(supplied.buildResult);
-  const product = path.join(install, 'libexec/compiler/cjcj-stage1' + native.exe);
+  const compilerFile = metadata.compilerFile || 'libexec/compiler/cjcj-stage1' + native.exe;
+  if (path.isAbsolute(compilerFile) || compilerFile.split('/').some(part => part === '..'))
+    throw new Error('C2_REUSE_COMPILER_PATH');
+  const product = path.join(install, compilerFile);
   const parent = await readJson(path.join(path.dirname(supplied.parentProduct),'build-inputs.json'));
   if(parent.source!==input.h1.commit || parent.sha256!==facts.parentSha256)throw new Error('C2_REUSE_H1_SOURCE');
   if (!sha(facts.commit) || metadata.compilerCommit !== facts.commit || metadata.phase !== 'stage2'

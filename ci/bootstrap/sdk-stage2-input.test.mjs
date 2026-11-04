@@ -56,4 +56,8 @@ test('ordinary CJPM source-build is an explicit C2 input without fabricated comp
  assert.equal(row.mode,'ordinary-cjpm');
  assert.equal('compilerInputs' in row,false);
  assert.equal(row.compilerSha256,f.facts.compilerSha256);
+ assert.equal(row.command,path.resolve(command));
+ assert.equal(row.stdSha256,await (await import('../srcbuild/lib/final-compiler.mjs')).stdIdentity(path.join(f.root,'std')));
+ const validated={...f.input,ast:f.input.compiler,stage2:row};
+ await validateSourceInputs(validated);
 });

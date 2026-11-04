@@ -264,17 +264,19 @@ export function createBootstrapTargets(input) {
     stage.depends=nativeTargets.map(s=>s.id);
     stage.reuse={...reused};
     delete stage.commands;
+    const compilerFile=reused.compilerFile || 'libexec/compiler/cjcj-stage1'+exe;
     const recipe=installationRecipe({platform,bootstrapHost:host,compilerExecution:{role:'target'},targetComponents:{compiler,std:stdlib,runtime,llvm,ast}},
-      {compiler:path.join(reused.install,'libexec/compiler/cjcj-stage1'+exe),std:reused.bootstrapStd,bootstrap:true,nativeChecks:path.join(work,'native-check')});
+      {compiler:path.join(reused.install,compilerFile),std:reused.bootstrapStd,bootstrap:true,nativeChecks:path.join(work,'native-check')});
     stage.copies=[...recipe.copies,
       {from:path.join(reused.install,'share/cjcj'),to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
       ...(reused.compilerInputs?[{from:reused.compilerInputs,to:'compiler-inputs.json',owner:'compiler'}]:[])];
     stage.metadata={...stage.metadata,compilerCommit:reused.compilerCommit,stdSource:reused.bootstrapStd,
+      ...(ordinary?{stdSha256:reused.stdSha256,bootstrapStdIdentity:reused.stdSha256,compilerFile}:{}),
       sources:{...stage.metadata.sources,compiler:{repository:compiler.repository,commit:reused.compilerCommit},
         std:{repository:runtime.repository}},
       compilerOriginRuntimeCommit:reused.bootstrapRuntimeCommit,llvmCommit:reused.llvmCommit,
       ...(ordinary?{compilerProducer:{mode:'ordinary-cjpm',buildResult:reused.buildResult,
-        workspaceCommand:reused.workspaceCommand,sourceRoot:reused.sourceRoot,
+        command:reused.command,sourceRoot:reused.sourceRoot,
         sourceProduct:reused.sourceProduct}}:{parentCommit:reused.parentCommit})};
     for(const id of ['h1','compiler2','std0','stdBootstrap'])delete repos[id];
     for(let i=stages.length-1;i>=0;i--)if(['stage0','stage0-run','std-bootstrap','stage1-initial','stage1-std'].includes(stages[i].id))stages.splice(i,1);
