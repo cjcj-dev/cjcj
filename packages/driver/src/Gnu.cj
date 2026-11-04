@@ -21,6 +21,8 @@ public open class Gnu <: ToolChain {
     protected var ldPath: String = ""
     protected var arPath: String = ""
     protected var objcopyPath: String = ""
+    // Optional bundled llvm-ar (empty when the installation has none); see UsesBundledArchiver.
+    protected var llvmArPath: String = ""
     protected let gccExecCrtFilePair: (String, String) = ("crtbegin.o", "crtend.o")
     protected let gccSharedCrtFilePair: (String, String) = ("crtbeginS.o", "crtendS.o")
 
@@ -70,6 +72,9 @@ public open class Gnu <: ToolChain {
         if (objcopyPath.isEmpty()) {
             return false
         }
+        let bundledTools = ArrayList<String>()
+        bundledTools.add(FileUtil.JoinPath(driver.cangjieHome, "third_party/llvm/bin"))
+        llvmArPath = FindToolPath(ToolName(ToolID.LLVM_AR), bundledTools)
         if (driverOptions.IsLTOEnabled() || driverOptions.EnableHwAsan()) {
             ldPath = FindCangjieLLVMToolPath(ToolName(ToolID.LLD))
         } else {
@@ -237,8 +242,27 @@ public open class Gnu <: ToolChain {
         return true
     }
 
+    // GNU ar `c` creates the archive, writes a temporary and then copies it into the truncated archive;
+    // ext4 flushes such a truncated file when it is closed, which blocks a busy disk. llvm-ar writes a
+    // temporary and renames it to the (removed, see PrepareArchiveOutput) archive path. For ELF objects
+    // the compiler produced itself both write identical `crD` archives, so only that case switches:
+    // native, non-LTO, no -B tool directory, no foreign or user objects. Everything else keeps `ar`.
+    protected func UsesBundledArchiver(objFiles: ArrayList<TempFileInfo>): Bool {
+        if (llvmArPath.isEmpty() || objFiles.isEmpty() || driverOptions.IsCrossCompiling() ||
+            driverOptions.IsLTOEnabled() || !driverOptions.toolChainPaths.isEmpty()) {
+            return false
+        }
+        for (objFile in objFiles) {
+            if (objFile.isForeignInput) {
+                return false
+            }
+        }
+        return true
+    }
+
     protected open func GenerateArchiveTool(objFiles: ArrayList<TempFileInfo>): Bool {
-        let tool = Tool(arPath, ToolType.BACKEND, driverOptions.environment.allVariables)
+        let archiver = if (UsesBundledArchiver(objFiles)) { llvmArPath } else { arPath }
+        let tool = Tool(archiver, ToolType.BACKEND, driverOptions.environment.allVariables)
         tool.AppendArg("crD")
         let outputFile = CreateNewFileInfoWrapper(objFiles, TempFileKind.O_STATICLIB).filePath
         if (!PrepareArchiveOutput(outputFile)) {

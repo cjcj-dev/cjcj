@@ -32,6 +32,11 @@ private func PartialLinkHasArg(args: Array<String>, value: String): Bool {
 // (package roots, archive batch, temporary folder).
 private func BuildPartialLinkGraph(symbols: Array<String>, moduleNames: Array<String>,
     check: (ToolBatch, ToolBatch, String) -> Unit): Unit {
+    BuildPartialLinkGraph(symbols, moduleNames, [], check)
+}
+
+private func BuildPartialLinkGraph(symbols: Array<String>, moduleNames: Array<String>, toolDirs: Array<String>,
+    check: (ToolBatch, ToolBatch, String) -> Unit): Unit {
     let root = FSDirectory.createTemp(".").toString()
     let options = DriverOptions()
     options.output = root
@@ -40,6 +45,9 @@ private func BuildPartialLinkGraph(symbols: Array<String>, moduleNames: Array<St
     options.aggressiveParallelCompile = MaybeUInt64(4u64)
     for (symbol in symbols) {
         options.symbolsNeedLocalized.add(symbol)
+    }
+    for (dir in toolDirs) {
+        options.toolChainPaths.add(dir)
     }
     let manager = TempFileManager.Instance()
     try {
@@ -56,6 +64,7 @@ private func BuildPartialLinkGraph(symbols: Array<String>, moduleNames: Array<St
             chain.ldPath = "/usr/bin/ld"
             chain.objcopyPath = "llvm-objcopy"
             chain.arPath = "/usr/bin/ar"
+            chain.llvmArPath = "llvm-ar"
             @Assert(chain.ProcessGeneration(modules), true)
             @Assert(commands.size, 2)
             check(commands[0], commands[1], tempDir)
@@ -95,7 +104,10 @@ class PartialLinkOutputTest {
             @Expect(drop.successors[0].name, "CacheCopy")
             @Expect(PartialLinkArgs(drop.successors[0])[0], packageObject)
             @Assert(archive.size, 1)
+            // The compiler's own package objects are archived by the bundled llvm-ar with the same `crD`.
+            @Expect(archive[0].name, "llvm-ar")
             let arArgs = PartialLinkArgs(archive[0])
+            @Expect(arArgs[0], "crD")
             @Expect(arArgs[arArgs.size - 1], packageObject)
             @Expect(PartialLinkHasArg(arArgs, partial), false)
         })
@@ -169,5 +181,13 @@ class PartialLinkOutputTest {
             manager.DeleteTempFiles()
             let _ = removeIfExists(root, recursive: true)
         }
+    }
+
+    @TestCase
+    func AToolDirectoryKeepsTheSelectedAr(): Unit {
+        BuildPartialLinkGraph(["_CN3pkg5localE"], ["0-pkg", "1-pkg"], ["/opt/user-tools"], { _, archive, _ =>
+            @Assert(archive.size, 1)
+            @Expect(archive[0].name, "/usr/bin/ar")
+        })
     }
 }
