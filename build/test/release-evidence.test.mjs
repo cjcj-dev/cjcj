@@ -291,7 +291,7 @@ for (const platform of CONTRACTS.filter(p => p.archiveKey !== p.host).map(p => p
 
 test('runbook jq accepts exactly the declared artifact set', async () => {
   const {work} = await fixture();
-  const runbook = await fs.readFile('ops/coord/RELEASE_0_0_2_RUNBOOK.md', 'utf8');
+  const runbook = await fs.readFile('ci/docs/release-0.0.2-runbook.md', 'utf8');
   const start = runbook.indexOf('EXPECTED_PACKAGES=$(');
   const endMarker = 'test "$(cut -f4 "$RELEASE_DIR/artifact-ids.review.tsv" | sort -u)" = false';
   const end = runbook.indexOf(endMarker, start) + endMarker.length;

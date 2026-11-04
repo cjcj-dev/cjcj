@@ -10,7 +10,7 @@ import {allReleasePlatforms, getReleasePlatform, getTarget, releasePlatformReadi
 const root = path.resolve(import.meta.dirname, '..', '..', '..');
 const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
 
-// ops/design/DRYRUN_EXECUTION_POLICY.md §3. The order is the policy's, not a
+// ci/docs/dryrun-execution-policy.md §3. The order is the policy's, not a
 // preference: each phase is placed by observed failure-prefix cost, cheapest
 // information first, so a stop at phase N has not yet paid for phases N+1…5.
 const PHASES = ['linux-x64', 'linux-aarch64', 'windows-x64', 'darwin-arm64', 'darwin-x64'];

@@ -227,7 +227,7 @@ export async function generateFreeze(options, now = new Date()) {
       host_sdk:selected.hostSdk,host_llvm:selected.hostLlvm,
       selected_host:selected.host.install}:{}),
     BASE_SDK_SHA256: selected ? selected.hostSdk.archive.sha256 : await sha256(baseSdk),
-    policy_sha256: await sha256(path.join(repo, 'ops/design/DRYRUN_EXECUTION_POLICY.md')),
+    policy_sha256: await sha256(path.join(repo, 'ci/docs/dryrun-execution-policy.md')),
     orchestrator_sha256: await sha256(path.join(repo, '.github/workflows/release.yml')),
     approval: {
       user_instruction_or_record_id: approvalRecord,

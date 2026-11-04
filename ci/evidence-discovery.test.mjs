@@ -61,7 +61,7 @@ async function fixture(t) {
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   await write(checkout, 'build/lib/release-manifest.mjs', "export const IDLE_WRITER_POLICY = 'FYS_CENSUS';\n");
   await write(checkout, '.github/workflows/release.yml', 'name: release\n');
-  await write(checkout, 'ops/coord/RELEASE_0_0_2_RUNBOOK.md',
+  await write(checkout, 'ci/docs/release-0.0.2-runbook.md',
     `export RELEASE_EVIDENCE_ROOT=${evidenceRoot}\n`);
   git(checkout, 'init', '-q');
   git(checkout, 'add', '.');

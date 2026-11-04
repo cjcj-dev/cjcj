@@ -18,7 +18,7 @@
 
 本文只定义执行政策，不授权 workflow dispatch、rerun、cancel、push、tag、draft 或 release。所有 GitHub Actions 动作都是外向动作，必须由主控先向用户取得批准。
 
-0.0.2 的最终候选发布另走 [`ops/coord/RELEASE_0_0_2_RUNBOOK.md`](../coord/RELEASE_0_0_2_RUNBOOK.md)：它固定 `draft=true,dry_run=false`，在同一个 run 内复核 artifact 后等待人工批准。本文的五平台演练固定 `dry_run=true`，不得拿演练 artifact 冒充候选发布 artifact。
+0.0.2 的最终候选发布另走 [`ci/docs/release-0.0.2-runbook.md`](release-0.0.2-runbook.md)：它固定 `draft=true,dry_run=false`，在同一个 run 内复核 artifact 后等待人工批准。本文的五平台演练固定 `dry_run=true`，不得拿演练 artifact 冒充候选发布 artifact。
 
 ## 1. 当前事实与版本边界
 

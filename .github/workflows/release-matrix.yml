@@ -4,7 +4,7 @@
 # the package -- with the platform table read from build/lib/targets.mjs by
 # ci/release/platform-matrix.mjs and nowhere else.
 #
-# release.yml remains the phased dry-run entry (ops/design/DRYRUN_EXECUTION_POLICY.md
+# release.yml remains the phased dry-run entry (ci/docs/dryrun-execution-policy.md
 # §3 orders the five native platforms by failure-prefix cost so a stop at phase
 # N has not paid for N+1..5). This workflow is the breadth entry: cells are
 # siblings, fail-fast is off, and a platform the DAG cannot build today gets a

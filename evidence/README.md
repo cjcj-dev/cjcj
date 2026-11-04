@@ -1,6 +1,6 @@
 # 发布持久证据路径政策
 
-发布版本的持久证据根只由 cjcj 仓 `ops/coord/RELEASE_0_0_2_RUNBOOK.md` 中的 `RELEASE_EVIDENCE_ROOT` 定义。按该 runbook 归档发布批准记录、environment JSON 与门证据；本文件不另设根路径。
+发布版本的持久证据根只由 cjcj 仓 `ci/docs/release-0.0.2-runbook.md` 中的 `RELEASE_EVIDENCE_ROOT` 定义。按该 runbook 归档发布批准记录、environment JSON 与门证据；本文件不另设根路径。
 
 `$RELEASE_EVIDENCE_ROOT/GATE_EVIDENCE.json` 是版本根下的门证据索引。`gates` 中的路径相对于该根解析，例如 `G12: gates/G12`、`G14: gates/G14`；门脚本 `ci/release-gates.mjs` 从 runbook 读取根，再读取索引。索引路径不得越出版本根。
 
