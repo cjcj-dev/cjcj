@@ -16,6 +16,7 @@ import {writeStdProvenance} from '../../build/lib/provenance.mjs';
 import {stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
 import {resolveProductBinary} from '../srcbuild/lib/product-binary.mjs';
 import {acceptInstalledStd, flag} from './sdk-std-resume.mjs';
+import {readInstalledNativeShim} from './native-shim-inputs.mjs';
 import {materializeNativeSource, nativeSourceOptions} from './sdk-source.mjs';
 export {acceptInstalledStd} from './sdk-std-resume.mjs';
 // Runtime inputs are a private build input snapshot, not an install overlay.
@@ -109,7 +110,17 @@ export async function nativeStage(options, {signal} = {}) {
       host:JSON.parse(await fs.readFile(path.join(sdk,'STAGE-INPUTS.json'),'utf8')).selection.bootstrapHost.install,platform,work:output+'.std-consumers',signal});
     if(process.env.SOURCE_SDK_VERSION)await injectCangjieVersion(source,process.env.SOURCE_SDK_VERSION);
     const before=await fs.readFile(path.join(source,'cjpm.toml'));
-    env.CJCJ_LLVM_SHIM_O=path.join(sdk,'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o');
+    const shimInstall=options['shim-install']||sdk;
+    const shim=await readInstalledNativeShim({install:shimInstall});
+    if(shim.source.commit!==commit)throw Error('NATIVE_SHIM_COMPILER_SOURCE '+shim.source.commit+' != '+commit);
+    // A separate shim installation may update compiler-owned glue, but must
+    // still target this SDK's LLVM and compiler schema dependency pair.
+    if(options['shim-install']) {
+      const sdkShim=await readInstalledNativeShim({install:sdk});
+      if(shim.llvm.commit!==sdkShim.llvm.commit||shim.compiler.commit!==sdkShim.compiler.commit)
+        throw Error('NATIVE_SHIM_DEPENDENCY_PAIR');
+    }
+    env.CJCJ_LLVM_SHIM_O=path.join(shimInstall,shim.object.path);
     await command([options.zx||'zx',path.join(source,'runtime_shim/build_shim.mjs')],{cwd:source,env,records});
     try {
       await prepareTrimpath(source);
@@ -128,7 +139,7 @@ export async function nativeStage(options, {signal} = {}) {
       // absolute path out of the tree, which the install guard rejects as escape.
       {from:path.join(target,'release'),to:'share/cjcj/cjo',exclude:['bin','runtime']},
       ...['cjselfhost_llvmshim.o','cjc_runtime_config.o','cjc_heap_defaults.o'].map(name=>({from:path.join(source,'runtime_shim',name),to:'share/cjcj/runtime_shim/'+name}))]);
-    await atomicJson(path.join(destination,'compiler-inputs.json'),{commit,version:process.env.SOURCE_SDK_VERSION,parentSha256:await fileDigest(await compilerProducer(sdk)),
+    await atomicJson(path.join(destination,'compiler-inputs.json'),{commit,nativeShim:shim,version:process.env.SOURCE_SDK_VERSION,parentSha256:await fileDigest(await compilerProducer(sdk)),
       stdSha256:await stdIdentity(options['std-input']||sdk),
       stdCoreSha256:await fileDigest(path.join(sdk,'lib',native.tuple,'libcangjie-std-core.a')),
       compileConfigurationBeforeSha256:(await import('./sdk-io.mjs')).sha256(before),compilerSha256:await fileDigest(product)});
@@ -138,7 +149,7 @@ export async function nativeStage(options, {signal} = {}) {
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir'].map(k=>[k,{type:'string'}]));
+    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install'].map(k=>[k,{type:'string'}]));
     spec['resume-installed']={type:'boolean'};
     nativeSourceOptions(process.argv); // Reject duplicate identity flags before parseArgs.
     const {values}=parseArgs({options:spec});

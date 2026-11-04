@@ -5,9 +5,9 @@ import {applyCompilerBoundscheckDependencies,applyCompilerLlvmVersion,applyCompi
 import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
-import {command,copyOutputs,atomicJson,readJson,fileDigest} from './sdk-flow.mjs';
+import {command,copyOutputs,atomicJson,readJson,fileDigest,assembleDirectory,privateRoot} from './sdk-flow.mjs';
 import {materializeNativeSource} from './sdk-source.mjs';
-import {nativeHostFlatc} from './native-shim-inputs.mjs';
+import {nativeHostFlatc,readInstalledNativeShim} from './native-shim-inputs.mjs';
 import {prepareNativeCompilerSource} from './native-compiler-input.mjs';
 import {nativeAstInstallation} from './native-ast-inputs.mjs';
 import {installNativeClang} from './native-clang-install.mjs';
@@ -45,6 +45,38 @@ export async function compileCjdbShim({flatc, compiler, llvm, llvmBuild, flatbuf
  const row=async file=>({bytes:(await fs.stat(file)).size,sha256:await fileDigest(file)});
  return {source,compiler:{commit:compilerCommit,schema:'schema/CjoFormat.fbs'},llvm:{commit:llvmCommit},
   flatc,object:{path:objectPath,...await row(object)},configuration:{argv,llvmBuild,generatedHeaders},commands};
+}
+
+// Rebuild only the compiler-owned shim against an already produced native
+// dependency closure. This installation contains the shim, not another SDK.
+export async function nativeCjdbShim(config) {
+ const {nativeInstall,shimSource,shimArchive,commit,build,install}=config;
+ await privateRoot(build);await privateRoot(install);
+ if(path.resolve(install)===path.resolve(nativeInstall)||path.resolve(install).startsWith(path.resolve(nativeInstall)+path.sep))
+  throw Error('NATIVE_SHIM_OUTPUT_IS_INPUT');
+ const original=await readJson(path.join(nativeInstall,'BUILD-INPUTS.json'));
+ await readInstalledNativeShim({install:nativeInstall,facts:original});
+ const {compilerSource,commits,configuration}=original;
+ if(compilerSource?.commit!==commits.compiler)throw Error('NATIVE_SHIM_SOURCE_PAIR');
+ const records=[],env={...process.env};
+ // Host C++ tools must not load the target SDK's LLVM through a caller loader.
+ for(const key of ['LD_LIBRARY_PATH','LD_PRELOAD','LD_AUDIT','DYLD_LIBRARY_PATH','DYLD_INSERT_LIBRARIES'])env[key]='';
+ const run=(argv,options={})=>command(argv,{env,records,...options});
+ const flatc=await nativeHostFlatc(nativeInstall,original.astInstallation);
+ await fs.mkdir(build,{recursive:true});
+ await assembleDirectory(install,async pending=>{
+  const object=path.join(pending,'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o');
+  await fs.mkdir(path.dirname(object),{recursive:true});
+  const nativeShim=await compileCjdbShim({flatc,compiler:compilerSource.root,
+   llvm:configuration.llvm,llvmBuild:original.nativeShim.configuration.llvmBuild,
+   flatbuffers:configuration.flatbuffers,generatedHeaders:path.join(build,'shim-schema'),
+   repository:shimSource,sourceArchive:shimArchive,commit,compilerCommit:commits.compiler,
+   llvmCommit:commits.llvm,object,install:pending,clang:configuration.tools.cxx,
+   launcher:configuration.tools.launcher,env},run);
+  await atomicJson(path.join(pending,'BUILD-INPUTS.json'),{
+   targets:['compiler-shim'],commits:{shim:commit,compiler:commits.compiler,llvm:commits.llvm},
+   nativeInstall,nativeShim,commands:records});
+ });
 }
 
 export async function nativeCjdb(config) {
@@ -151,5 +183,6 @@ export async function nativeCjdb(config) {
   astInstallation,clangInstallation,nativeShim,pythonInstallationInput,...(windowsToolchain?{windowsToolchain}:{}),configuration:config,python:{configured:observed,installed},pythonSource,commands:records});
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- try{await nativeCjdb(await readJson(process.argv[2]));}catch(e){console.error(e.stack);process.exitCode=e.rc||1;}
+ try{if(process.argv.length>4||process.argv[3]&&process.argv[3]!=='--shim-only')throw Error('NATIVE_CJDB_USAGE config.json [--shim-only]');
+  await (process.argv[3]==='--shim-only'?nativeCjdbShim:nativeCjdb)(await readJson(process.argv[2]));}catch(e){console.error(e.stack);process.exitCode=e.rc||1;}
 }
