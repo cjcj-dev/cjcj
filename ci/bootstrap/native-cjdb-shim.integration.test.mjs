@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {execFile} from 'node:child_process';
+import {execFile,spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {promisify} from 'node:util';
 import {compileCjdbShim} from './native-cjdb.mjs';
 import {nativeHostFlatc,readInstalledNativeShim} from './native-shim-inputs.mjs';
@@ -69,4 +70,62 @@ test('real complete compileCjdbShim produces a repeatable installed object and p
  assert.equal(await fs.stat(wrongArgs.object).catch(()=>null),null);
  assert.ok(records.slice(before).every(row=>row.argv[0]==='tar'));
  console.log('NATIVE_SHIM_FIXED_SOURCE_CONTROL_REACHED');
+});
+
+test('public native-stage selects independent source-owned shim and links the real macro package',async()=>{
+ const {sdk,host,producerTarget,shimInstall,shimSource,sourceArchive,zx}=input.consumer;
+ const source=path.join(root,'consumer-source'),target=path.join(root,'consumer-target'),output=path.join(root,'consumer-install');
+ await fs.mkdir(source,{recursive:true});
+ // Fixed current shim sources, plus a bounded CJ consumer fixture. No compiler
+ // package is rebuilt, and the existing producer target is only a link input.
+ await fs.cp(path.join(shimSource,'runtime_shim'),path.join(source,'runtime_shim'),{recursive:true});
+ const packages=[];
+ for(const name of await fs.readdir(producerTarget)){
+  const dir=path.join(producerTarget,name);
+  if(!(await fs.stat(dir)).isDirectory())continue;
+  const members=await fs.readdir(dir);
+  if(members.some(n=>n.endsWith('.cjo'))&&members.some(n=>n.endsWith('.a')))packages.push({dir,archives:members.filter(n=>n.endsWith('.a')).map(n=>path.join(dir,n))});
+ }
+ assert(packages.some(p=>p.archives.some(a=>a.endsWith('/libmacro_pkg@cjcj.a'))));
+ const compile='-O0';
+ const link='--export-dynamic --trace-symbol=CJSelfhostCheckMacroRuntimeBinding --start-group '+packages.flatMap(p=>p.archives).join(' ')+' --end-group runtime_shim/cjc_runtime_config.o runtime_shim/cjc_heap_defaults.o --wrap=CJ_MRT_CjRuntimeInit --wrap=CJ_MRT_CjRuntimeInitWithConfigV1 runtime_shim/cjselfhost_llvmshim.o '+sdk+'/third_party/llvm/lib/libLLVM-15.so -lstdc++ -ldl';
+ const packageManifest='[package]\ncjc-version = "1.1.0"\nname = "cjc"\norganization = "cjcj"\nversion = "0.0.1"\nsrc-dir = "src"\noutput-type = "executable"\ncompile-option = '+JSON.stringify(compile)+'\nlink-option = '+JSON.stringify(link)+'\n[target.x86_64-unknown-linux-gnu.bin-dependencies]\npath-option = '+JSON.stringify(packages.map(p=>p.dir))+'\n';
+ const manifest='[workspace]\nmembers = ["packages/cjc"]\nbuild-members = ["packages/cjc"]\ncompile-option = "-O0"\n';
+ await fs.writeFile(path.join(source,'cjpm.toml'),manifest);
+ await fs.mkdir(path.join(source,'packages/cjc/src'),{recursive:true});
+ await fs.writeFile(path.join(source,'packages/cjc/cjpm.toml'),packageManifest);
+ await fs.writeFile(path.join(source,'packages/cjc/src/main.cj'),'package cjcj::cjc\nimport cjcj::macro_pkg.*\nmain(): Int64 {\n    let handle = OpenMacroLibrary("/nonexistent-shim-consumer")\n    println("MACRO_LINK_CONSUMER_REACHED")\n    return 0\n}\n');
+ const argv=[process.execPath,fileURLToPath(new URL('./sdk-native-stage.mjs',import.meta.url)),
+  '--kind','compiler','--source',source,'--commit',input.commit,
+  '--source-archive',sourceArchive.file,'--source-archive-sha256',sourceArchive.sha256,
+  '--sdk',sdk,'--host',host,'--output',output,'--target-dir',target,
+  '--phase','stage2','--platform','linux_x86_64','--jobs','8','--heap','2GB','--zx',zx];
+ const env={...process.env,CC:'/usr/bin/gcc',CXX:'/usr/bin/g++'};
+ const calls=[];
+ async function invoke(label,args,want=0){
+  const out=await fs.open(path.join(root,label+'.stdout'),'wx'),err=await fs.open(path.join(root,label+'.stderr'),'wx');
+  const p=spawnSync(args[0],args.slice(1),{cwd:root,env,stdio:['ignore',out.fd,err.fd],timeout:180000});
+  await out.close();await err.close();calls.push({label,argv:args,rc:p.status,signal:p.signal,error:p.error?.message});
+  await fs.writeFile(path.join(root,'consumer-commands.json'),JSON.stringify(calls,null,2));
+  assert.ifError(p.error);assert.equal(p.status,want,await fs.readFile(path.join(root,label+'.stderr'),'utf8'));
+ }
+ await invoke('old-installed-refused',argv,1);
+ assert.match(await fs.readFile(path.join(root,'old-installed-refused.stderr'),'utf8'),/NATIVE_SHIM_COMPILER_SOURCE/);
+ assert.equal(await fs.stat(path.join(target,'release')).catch(()=>null),null,'stale input refused before compiler');
+ console.log('STALE_SHIM_SELECTION_ASSERT_REACHED');
+ await invoke('native-stage',[...argv,'--shim-install',shimInstall]);
+ const trace=await fs.readFile(path.join(root,'native-stage.stderr'),'utf8');
+ assert.match(trace,/libmacro_pkg@cjcj.a.*reference to.*CJSelfhostCheckMacroRuntimeBinding/);
+ assert.match(trace,/cjselfhost_llvmshim.o.*definition of.*CJSelfhostCheckMacroRuntimeBinding/);
+ const facts=JSON.parse(await fs.readFile(path.join(output,'compiler-inputs.json'),'utf8'));
+ assert.equal(facts.nativeShim.source.commit,input.commit);
+ assert.equal(facts.nativeShim.object.sha256,await fileDigest(path.join(source,'runtime_shim/cjselfhost_llvmshim.o')));
+ assert.equal(await fs.readFile(path.join(source,'cjpm.toml'),'utf8'),manifest);
+ // The installed executable uses the original SDK execution domain, not the
+ // shim-only installation (which contains no runtime, std or compiler).
+ env.LD_LIBRARY_PATH=sdk+'/runtime/lib/linux_x86_64_cjnative:'+sdk+'/third_party/llvm/lib:'+sdk+'/tools/lib';
+ env.CANGJIE_HOME=sdk;
+ await invoke('installed-consumer',[path.join(output,'bin/cjcj-stage1')]);
+ assert.match(await fs.readFile(path.join(root,'installed-consumer.stdout'),'utf8'),/MACRO_LINK_CONSUMER_REACHED/);
+ console.log('NATIVE_STAGE_MACRO_LINK_AND_INSTALL_ASSERT_REACHED '+root);
 });

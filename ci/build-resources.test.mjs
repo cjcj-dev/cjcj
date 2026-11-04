@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 const repo=path.resolve(import.meta.dirname,'..');
 const env={...process.env};
@@ -50,8 +51,13 @@ test('public native-stage passes default and explicit resources to its selected 
   const r=await run('git-'+label,['git','-C',source,...args]);assert.equal(r.status,0,r.text);
  }
  const head=await run('git-head',['git','-C',source,'rev-parse','HEAD']);
+ const sdk=root+'/resource-sdk',relative='third_party/llvm/fixed-llc/cjselfhost_llvmshim.o',bytes=Buffer.from('resource fixture shim');
+ const commit=head.stdout.trim();await fs.mkdir(path.join(sdk,path.dirname(relative)),{recursive:true});
+ await fs.writeFile(path.join(sdk,relative),bytes);
+ await fs.writeFile(path.join(sdk,'BUILD-INPUTS.json'),JSON.stringify({commits:{shim:commit,compiler:commit,llvm:commit},
+  nativeShim:{source:{commit},compiler:{commit},llvm:{commit},object:{path:relative,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}}}));
  const platform=({linux:'linux',darwin:'darwin',win32:'windows'}[process.platform])+'_'+(process.arch==='arm64'?'aarch64':'x86_64');
- const argv=[process.execPath,path.join(repo,'ci/bootstrap/sdk-native-stage.mjs'),'--kind','compiler','--zx',process.execPath,'--source',source,'--commit',head.stdout.trim(),'--sdk',root+'/absent-sdk','--output',root+'/stage','--platform',platform];
+ const argv=[process.execPath,path.join(repo,'ci/bootstrap/sdk-native-stage.mjs'),'--kind','compiler','--zx',process.execPath,'--source',source,'--commit',head.stdout.trim(),'--sdk',sdk,'--output',root+'/stage','--platform',platform];
  for(const [label,args,heap,jobs] of [['default',[],Math.min(48*1024,Math.floor(selected.memory*3/4/1024**2))+'MB',selected.cpus],['explicit',['--heap','4MB','--jobs',String(os.availableParallelism()+1)],'4MB',os.availableParallelism()+1]]) {
   const r=await run('stage-'+label,[...argv,...args]);
   assert.equal(r.status,17,r.text);

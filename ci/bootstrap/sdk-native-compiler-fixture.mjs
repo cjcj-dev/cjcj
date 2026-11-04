@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 const parent=process.env.SDK_NATIVE_INSTALLED_TEST_ROOT;
 if(!parent)throw new Error('SDK_NATIVE_INSTALLED_TEST_ROOT required');
@@ -17,9 +18,13 @@ test('native compiler build/install, source restoration and repeated publication
  const compile=run('cc',[source+'/main.c','-o',root+'/parent']);assert.equal(compile.status,0,compile.stderr);
  await write(sdk+'/STAGE-INPUTS.json',JSON.stringify({compilerFile:'bin/parent'}));await fs.mkdir(sdk+'/bin',{recursive:true});await fs.copyFile(root+'/parent',sdk+'/bin/parent');
  await write(sdk+'/PROVENANCE.txt','finite C fixture; not production std\n');await write(sdk+'/lib/linux_x86_64_cjnative/libcangjie-std-core.a','finite fixture identity\n');
- await write(sdk+'/tools/bin/cjpm',`#!${process.execPath}\nconst fs=require('fs'),cp=require('child_process');fs.appendFileSync(${JSON.stringify(root+'/calls')},'build\\n');if(process.env.SDK_COMPILER_FIXTURE_FAIL)process.exit(7);fs.mkdirSync('target/release/bin',{recursive:true});cp.execFileSync('cc',['main.c','-o','target/release/bin/cjcj::cjc']);`,0o755);
+ await write(sdk+'/.host/tools/bin/cjpm',`#!${process.execPath}\nconst fs=require('fs'),cp=require('child_process');fs.appendFileSync(${JSON.stringify(root+'/calls')},'build\\n');if(process.env.SDK_COMPILER_FIXTURE_FAIL)process.exit(7);fs.mkdirSync('target/release/bin',{recursive:true});cp.execFileSync('cc',['main.c','-o','target/release/bin/cjcj::cjc']);`,0o755);
  for(const args of [['init','-q',source],['-C',source,'add','.'],['-C',source,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','test: finite native compiler adapter']]){const p=run('git',args);assert.equal(p.status,0,p.stderr);}
  const commit=run('git',['-C',source,'rev-parse','HEAD']).stdout.trim(),tree=run('git',['-C',source,'rev-parse','HEAD^{tree}']).stdout.trim();
+ const relative='third_party/llvm/fixed-llc/cjselfhost_llvmshim.o',bytes=Buffer.from('fixture shim');
+ await write(sdk+'/'+relative,bytes);
+ await write(sdk+'/BUILD-INPUTS.json',JSON.stringify({commits:{shim:commit,compiler:commit,llvm:commit},
+  nativeShim:{source:{commit},compiler:{commit},llvm:{commit},object:{path:relative,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}}}));
  const config={work:root+'/work',install:output,repos:{compiler:{root:source,commit,tree}},stages:[{id:'compiler',output,commands:[{argv:[process.execPath,new URL('./sdk-native-stage.mjs',import.meta.url).pathname,'--kind','compiler','--source','${repo.compiler}','--sdk',sdk,'--runtime',sdk,'--output','${output}','--platform','linux_x86_64','--commit',commit,'--phase','stage2','--zx',process.execPath]}]}],finalStage:'compiler',test:{commands:[{argv:['${install}/bin/cjcj-stage1']}]}};
  const file=root+'/targets.json';await write(file,JSON.stringify(config));
  const results=[];

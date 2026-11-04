@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 
@@ -46,6 +47,7 @@ async function runCompilerStage({produceLink = true, explicitHost = false, decoy
   await fs.mkdir(path.join(sdk, 'third_party/llvm/fixed-llc'), {recursive:true});
   await fs.writeFile(path.join(sdk, 'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o'),
     'fixture shim object\n');
+  await fs.writeFile(path.join(source,'runtime_shim/cjc_heap_defaults.c'),'int fixture_heap_defaults;\n');
   // The shim links CANGJIE_HOME/runtime into the build tree, so its absence is
   // what makes the producer silent.
   if (produceLink) {
@@ -85,6 +87,12 @@ await fs.writeFile(path.join(target,'release/cjcj/parse@cjcj.cjo'), 'fixture cjo
   assert.equal(revision.status, 0, revision.stderr);
   const commit = revision.stdout.trim();
   assert.match(commit, /^[0-9a-f]{40}$/);
+  const relative='third_party/llvm/fixed-llc/cjselfhost_llvmshim.o';
+  const bytes=await fs.readFile(path.join(sdk,relative));
+  await fs.writeFile(path.join(sdk,'BUILD-INPUTS.json'),JSON.stringify({
+    commits:{shim:commit,compiler:commit,llvm:commit},nativeShim:{source:{commit},compiler:{commit},llvm:{commit},
+      object:{path:relative,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}}}));
+
 
   const result = spawnSync(process.execPath, [stage, '--kind', 'compiler', '--source', source, '--sdk', sdk,
     '--runtime', runtime, '--output', output, '--platform', 'linux_x86_64', '--commit', commit,
