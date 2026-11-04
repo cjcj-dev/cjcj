@@ -88,7 +88,7 @@ test('public native-stage selects independent source-owned shim and links the re
  }
  assert(packages.some(p=>p.archives.some(a=>a.endsWith('/libmacro_pkg@cjcj.a'))));
  const compile='-O0';
- const link='--export-dynamic --trace-symbol=CJSelfhostCheckMacroRuntimeBinding --start-group '+packages.flatMap(p=>p.archives).join(' ')+' --end-group runtime_shim/cjselfhost_llvmshim.o '+sdk+'/third_party/llvm/lib/libLLVM-15.so -lstdc++ -ldl';
+ const link='--export-dynamic --trace-symbol=CJSelfhostCheckMacroRuntimeBinding --start-group '+packages.flatMap(p=>p.archives).join(' ')+' --end-group runtime_shim/cjc_runtime_config.o runtime_shim/cjc_heap_defaults.o --wrap=CJ_MRT_CjRuntimeInit --wrap=CJ_MRT_CjRuntimeInitWithConfigV1 runtime_shim/cjselfhost_llvmshim.o '+sdk+'/third_party/llvm/lib/libLLVM-15.so -lstdc++ -ldl';
  const manifest='[package]\ncjc-version = "1.1.0"\nname = "cjc"\norganization = "cjcj"\nversion = "0.0.1"\nsrc-dir = "src"\noutput-type = "executable"\ncompile-option = '+JSON.stringify(compile)+'\nlink-option = '+JSON.stringify(link)+'\n[target.x86_64-unknown-linux-gnu.bin-dependencies]\npath-option = '+JSON.stringify(packages.map(p=>p.dir))+'\n';
  await fs.writeFile(path.join(source,'cjpm.toml'),manifest);
  await fs.mkdir(path.join(source,'src'));
