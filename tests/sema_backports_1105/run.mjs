@@ -28,7 +28,8 @@ for(const [name,marker,extra] of [['control','PRIMITIVE_CONTROL_OK',[]],['alias'
  const elf=out+'/'+name;
  const r=run(name+'.compile',[compiler,fixtures+'/'+name+'.cj','-O2','--diagnostic-format=noColor',...extra,'-o',elf]);
  check(name+'.compile',r.rc===0);
- if(r.rc===0){result.cases.at(-1).elfSHA256=sha(elf);const p=run(name+'.run',[elf]);check(name+'.runtime',p.rc===0&&p.text.includes(marker));}
+ if(r.rc===0){result.cases.at(-1).elfSHA256=sha(elf);check(name+'.observed-preserved',spawns.length===3&&spawns.length-rewrites.length===(enabled?2:3));
+  const p=run(name+'.run',[elf]);check(name+'.runtime',p.rc===0&&p.text.includes(marker));}
 }
 if(selected.has('qualified')){
 const lib=run('aliases.compile',[compiler,fixtures+'/aliases.cj','--output-type=staticlib','-o',out+'/libaliases.a']);
@@ -51,15 +52,23 @@ check('mock.compile',mock.rc===0);
 if(mock.rc===0){result.cases.at(-1).elfSHA256=sha(out+'/mock');const p=run('mock.run',[out+'/mock']);check('mock.runtime',p.rc===0);}
 }
 if(selected.has('future-mechanism')){
-for(const [name,flag,enabled] of [['future-enabled','--fchir-redundant-future-removal',true],['future-disabled','--fno-chir-redundant-future-removal',false]]){
+for(const [name,flag,enabled] of [['future-enabled','-O2',true],['future-disabled','-O0',false]]){
  const elf=out+'/'+name;
- const r=run(name+'.compile',[compiler,fixtures+'/future.cj','-O2','--chir-opt-debug',flag,'--diagnostic-format=noColor','-o',elf]);
+ const r=run(name+'.compile',[compiler,fixtures+'/future.cj',flag,'--dump-chir','--diagnostic-format=noColor','-o',elf]);
  check(name+'.compile',r.rc===0);
  if(r.rc===0){
-  const rewrites=r.text.split('\n').filter(line=>line.includes('[RedundantFutureRemoval]'));
+  const dumpDir=elf+'_CHIR';
+  const finalDump=fs.readdirSync(dumpDir).find(file=>file.endsWith('_CFFIFuncWrapper.chirtxt'));
+  if(!finalDump)throw Error('final product CHIR dump missing: '+dumpDir);
+  const dumpPath=path.join(dumpDir,finalDump);
+  const spawns=fs.readFileSync(dumpPath,'utf8').split('\n').filter(line=>/= TrySpawn\(/.test(line));
+  const rewrites=spawns.filter(line=>line.includes('// executeClosure:'));
+  result.cases.at(-1).dumpPath=dumpPath;
+  result.cases.at(-1).spawns=spawns;
   result.cases.at(-1).rewrites=rewrites;
   result.cases.at(-1).elfSHA256=sha(elf);
-  check(name+'.rewrite',enabled?rewrites.length>0:rewrites.length===0);
+  check(name+'.rewrite',enabled?rewrites.length===1:rewrites.length===0);
+  check(name+'.observed-preserved',spawns.length===3&&spawns.length-rewrites.length===(enabled?2:3));
   const p=run(name+'.run',[elf]);check(name+'.runtime',p.rc===0&&p.text.includes('FUTURE_EXCEPTION_OK'));
  }
 }
