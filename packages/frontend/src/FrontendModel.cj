@@ -2473,6 +2473,8 @@ public class CjoSignatureMaterializer {
         if (UInt32(fileID) != reader.U32Field(fileInfo, 4, 0u32)) {
             throw IllegalStateException("FlatBuffer common part file ID mismatch")
         }
+        // Import positions resolve through allFileIds while they are materialized.
+        allFileIds[fileIndex] = fileID
         let source = diag.GetSourceManager().GetSource(fileID)
         let file = CreateFile(source.path)
         file.fileName = FileUtil.GetFileName(source.path)
@@ -2495,7 +2497,6 @@ public class CjoSignatureMaterializer {
         file.EnableAttr(Attribute.FROM_COMMON_PART)
         file.EnableAttr(Attribute.COMMON)
         file.isCommon = true
-        allFileIds[fileIndex] = fileID
         file.begin = LoadFlatPosition(reader, reader.TableField(fileInfo, 6))
         file.end = LoadFlatPosition(reader, reader.TableField(fileInfo, 8))
         filesByIndex[UInt32(fileIndex + 1)] = file
@@ -3333,6 +3334,10 @@ public class CjoSignatureMaterializer {
                 idx++
             }
         }
+        // SaveImportSpec serializes only the complete spec range, not token
+        // positions. Keep those positions unknown: whitespace, aliases and
+        // desugared multi-imports prevent reconstructing them from the names.
+        // Import diagnostics use the serialized range for IMPORTED specs.
         importSpec.content.identifier = Identifier(identifier, DEFAULT_POSITION, DEFAULT_POSITION)
         importSpec.content.aliasName = Identifier(aliasName, DEFAULT_POSITION, DEFAULT_POSITION)
         importSpec.content.isDecl = reader.U8Field(importTable, 16, 0u8) != 0u8
@@ -6792,7 +6797,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 
     private func DependencyItemToJson(item: FrontendDepInfoItem, exportCJO: Bool): String {
-        SortImportSpecsByPosition(item.imports)
         var value = "{\"package\":\"" + EscapeJson(item.packageName) + "\","
         if (!item.orPackage.isEmpty()) {
             value += "\"orPackage\":\"" + EscapeJson(item.orPackage) + "\","
@@ -6807,6 +6811,9 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         for (importSpec in imports) {
             items.add(ImportSpecToJson(importSpec, exportCJO))
         }
+        // Canonicalize the emitted content, independent of file IDs and tied positions.
+        // Keep an array so identical import fragments are preserved.
+        sort(items)
         return "[" + JoinStrings(items, ",") + "]"
     }
 
@@ -6912,18 +6919,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             items.add("\"" + EscapeJson(feature) + "\"")
         }
         return "[" + JoinStrings(items, ",") + "]"
-    }
-
-    private func SortImportSpecsByPosition(imports: ArrayList<ImportSpec>): Unit {
-        sort(imports, by: { left: ImportSpec, right: ImportSpec =>
-            if (left.begin < right.begin) {
-                Ordering.LT
-            } else if (right.begin < left.begin) {
-                Ordering.GT
-            } else {
-                Ordering.EQ
-            }
-        })
     }
 
     private func DepInfoBool(value: Bool): String {
@@ -8269,7 +8264,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                         continue
                     } else if (!HasVisibleImportedDecl(pkg.fullPackageName, packageValue, importSpec.content.identifier.Val())) {
                         let im = importSpec.content
-                        let nameRange = MakeRange(im.prefixPoses[0], im.identifier.End())
+                        let nameRange = GetImportNameRange(importSpec)
                         diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
                             DiagKindRefactor.package_decl_not_find_in_package,
                             nameRange,
@@ -9060,16 +9055,25 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return false
     }
 
+    private func GetImportNameRange(importSpec: ImportSpec): BasicRange {
+        if (importSpec.TestAttr(Attribute.IMPORTED)) {
+            // The flat CJO has an exact spec range but no per-token positions.
+            // Do not manufacture a prefix/identifier position from its spelling.
+            return MakeRange(importSpec.begin, importSpec.end)
+        }
+        let im = importSpec.content
+        let begin = if (im.prefixPoses.isEmpty()) { im.identifier.Begin() } else { im.prefixPoses[0] }
+        return MakeRange(begin, im.identifier.End())
+    }
+
     private func GetPackageNameRange(importSpec: ImportSpec): BasicRange {
         let im = importSpec.content
         if (importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
             return MakeRange(DEFAULT_POSITION, im.identifier.Val())
         }
-        if (IsPackageImportForCheck(importSpec, im.GetImportedPackageNameWithIsDecl(), sourcePackagesForMembers)) {
-            if (im.prefixPoses.isEmpty()) {
-                return MakeRange(im.identifier.Begin(), im.identifier.End())
-            }
-            return MakeRange(im.prefixPoses[0], im.identifier.End())
+        if (importSpec.TestAttr(Attribute.IMPORTED) ||
+            IsPackageImportForCheck(importSpec, im.GetImportedPackageNameWithIsDecl(), sourcePackagesForMembers)) {
+            return GetImportNameRange(importSpec)
         }
         if (im.prefixPoses.isEmpty() || im.prefixPaths.isEmpty()) {
             return MakeRange(im.identifier.Begin(), im.identifier.End())
