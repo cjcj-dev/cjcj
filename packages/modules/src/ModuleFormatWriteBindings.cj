@@ -504,8 +504,9 @@ public func CreateSemaTy(builder: FlatBufferBuilder, kind: UInt16, typeArgs: Fla
 // withImplicitExport default true.
 func CreateImportSpec(builder: FlatBufferBuilder, begin: ArrayList<UInt8>, end: ArrayList<UInt8>, prefixPaths: FlatBufferOffset,
     identifier: FlatBufferOffset, asIdentifier: FlatBufferOffset, reExport: UInt8, isDecl: Bool, hasDoubleColon: Bool,
-    withImplicitExport: Bool): FlatBufferOffset {
-    builder.StartTable(9)
+    withImplicitExport: Bool, isImplicitAdd: Bool): FlatBufferOffset {
+    builder.StartTable(10)
+    builder.AddBool(9, isImplicitAdd, defaultValue: false)
     builder.AddOffset(4, asIdentifier)
     builder.AddOffset(3, identifier)
     builder.AddOffset(2, prefixPaths)

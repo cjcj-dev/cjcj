@@ -589,6 +589,26 @@ const MF_IMPORT_SPEC_VT_REEXPORT: UInt16 = 14u16
 const MF_IMPORT_SPEC_VT_ISDECL: UInt16 = 16u16
 const MF_IMPORT_SPEC_VT_HASDOUBLECOLON: UInt16 = 18u16
 const MF_IMPORT_SPEC_VT_WITHIMPLICITEXPORT: UInt16 = 20u16
+// CjoFormat.fbs@abef90c2: optional bool appended at field 9; old data defaults false.
+const MF_IMPORT_SPEC_VT_ISIMPLICITADD: UInt16 = 22u16
+
+// The native verifier may use the pre-C12 schema and skip this appended field.
+// Validate its presence separately from its value: an absent slot is valid,
+// but a present offset outside the table/buffer must not silently become false.
+public func VerifyImportSpecImplicitAdd(data: Array<UInt8>, table: Int64): Bool {
+    if (table < 0 || table + 4 > data.size) { return false }
+    let vtable = table - Int64(ReadScalar(data, table, 0i32))
+    if (vtable < 0 || vtable + 4 > data.size) { return false }
+    let vtableSize = Int64(ReadScalar(data, vtable, 0u16))
+    if (vtableSize < 4 || vtableSize % 2 != 0 || vtable + vtableSize > data.size) { return false }
+    let slot = Int64(MF_IMPORT_SPEC_VT_ISIMPLICITADD)
+    if (slot >= vtableSize) { return true }
+    let offset = Int64(ReadScalar(data, vtable + slot, 0u16))
+    if (offset == 0) { return true }
+    let objectSize = Int64(ReadScalar(data, vtable + 2, 0u16))
+    if (offset < 4 || offset >= objectSize || table + objectSize > data.size) { return false }
+    return data[table + offset] <= 1u8
+}
 
 // Imports. ModuleFormat_generated.h:6305.
 const MF_IMPORTS_VT_IMPORTSPECS: UInt16 = 4u16

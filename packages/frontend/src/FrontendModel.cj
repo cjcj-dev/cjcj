@@ -17,7 +17,7 @@ import cjcj::basic.Range as BasicRange
 import cjcj::chir.CHIRContext as RealCHIRContext
 import cjcj::chir.Package as RealCHIRPackage
 import cjcj::modules.{CheckCjoVersionCompat, CjoVersionCompat, CjoVersionTriplet,
-    VersionAtLeast, VersionAtMost, VersionExactly, ReadPackageVersionForDiagnostic}
+    VersionAtLeast, VersionAtMost, VersionExactly, ReadPackageVersionForDiagnostic, VerifyImportSpecImplicitAdd}
 import cjcj::modules.SemaCjoManager
 import cjcj::modules.SemaImportManager
 import cjcj::modules.MacroHostImportManager
@@ -731,7 +731,23 @@ private class CjoFlatBuffer {
         } catch (e: Exception) {
             result = false
         }
-        return result
+        // The native header predates field 9. It verifies the surrounding
+        // vectors/tables, but cannot validate the new slot before U8Field reads it.
+        return result && VerifyImportExtensions()
+    }
+
+    private func VerifyImportExtensions(): Bool {
+        let allFileImports = VectorField(RootTable(), 16)
+        for (fileIndex in 0..VectorLength(allFileImports)) {
+            let imports = VectorOffsetElement(allFileImports, fileIndex)
+            let specs = VectorField(imports, 4)
+            for (index in 0..VectorLength(specs)) {
+                if (!VerifyImportSpecImplicitAdd(data, VectorOffsetElement(specs, index))) {
+                    return false
+                }
+            }
+        }
+        return true
     }
 
     public func Indirect(pos: Int64): Int64 {
@@ -3343,6 +3359,10 @@ public class CjoSignatureMaterializer {
         importSpec.content.isDecl = reader.U8Field(importTable, 16, 0u8) != 0u8
         importSpec.content.hasDoubleColon = reader.U8Field(importTable, 18, 0u8) != 0u8
         importSpec.withImplicitExport = reader.U8Field(importTable, 20, 1u8) != 0u8
+        // VerifyPackageBuffer checked a present slot; absent old fields read false.
+        if (reader.U8Field(importTable, 22, 0u8) != 0u8) {
+            importSpec.EnableAttr(Attribute.IMPLICIT_ADD)
+        }
         SetFlatImportAccessLevel(importSpec, FlatImportAccessLevel(reader.U8Field(importTable, 14, 0u8)))
         importSpec.EnableAttr(Attribute.IMPORTED)
         importSpec.curFile = Some(targetFile)
