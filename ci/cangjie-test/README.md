@@ -12,8 +12,7 @@ python3 ci/cangjie-test/prepare.py /path/to/repositories /path/to/new-inputs
 python3 ci/cangjie-test/run.py /path/to/sdk /path/to/new-output 48 --compiler-jobs 1 --inputs /path/to/new-inputs
 ```
 
-Run on kkk2 through `/root/cj_build/ops/bin/wf_kkk2.sh sh <lane> '<command>'`,
-with `ulimit -c 0`. SDK must contain `envsetup.sh` and `bin/cjc`; its environment
+Run with `ulimit -c 0` on a host that meets the limits below. SDK must contain `envsetup.sh` and `bin/cjc`; its environment
 is sourced in a child process. A real compilation and execution preflight must
 succeed before any suite starts. Install the upstream framework dependencies
 (`pexpect`, `fasteners`, native compiler, JDK, LLVM and optional SDK tools) in
