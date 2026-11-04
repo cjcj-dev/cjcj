@@ -1331,7 +1331,7 @@ public class MockSupportManager {
     // C++: Sema/Test/MockSupportManager.cpp:1399-1408.
     private func ReplaceVarRefExprWithGetAccessor(refExpr: RefExpr): Option<Expr> {
         let target = refExpr.GetTarget().getOrThrow()
-        if (target.TestAttr(Attribute.COMPILER_ADD) || target.outerDecl.isNone()) {
+        if (target.outerDecl.isNone()) {
             return None
         }
         return ReplaceRefExprWithGetAccessor(refExpr)
@@ -1353,7 +1353,7 @@ public class MockSupportManager {
     // C++: Sema/Test/MockSupportManager.cpp:1589-1597.
     private func ReplaceRefExprFieldSetWithAccessorImpl(refExpr: RefExpr): Option<CallExpr> {
         let target = refExpr.GetTarget().getOrThrow()
-        if (target.TestAttr(Attribute.COMPILER_ADD) || target.outerDecl.isNone()) {
+        if (target.outerDecl.isNone()) {
             return None
         }
         return GenerateSetterCall(refExpr)
@@ -1728,6 +1728,15 @@ public class MockSupportManager {
         }
         assignment.leftValue.getOrThrow().EnableAttr(Attribute.LEFT_VALUE)
         if (assignment.isCompound) {
+            if (let Some(member) <- (assignment.leftValue.getOrThrow() as MemberAccess)) {
+                if (let Some(owner) <- member.target.flatMap({ target => target.outerDecl })) {
+                    if ((owner as StructDecl).isSome()) {
+                        ReplaceSubMemberAccessWithAccessor(member, isInConstructor,
+                            topLevelMutExpr: Some<Expr>(assignment))
+                        return assignment.desugarExpr
+                    }
+                }
+            }
             return None
         }
         return ReplaceFieldSetWithAccessor(assignment, isInConstructor)

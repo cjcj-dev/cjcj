@@ -108,10 +108,9 @@ public class MergeBlocks {
         var changed = true
         while (changed) {
             changed = false
-            let blocks = body.GetBlocks()
-            for (block in blocks) {
-                merged += RunOnNestedLambdas(block, builder, enableCompileDebug: enableCompileDebug,
-                    enableCoverage: enableCoverage)
+            // Snapshot iteration visits every nested block group, including groups
+            // owned by structured expressions rather than only direct lambdas.
+            Visitor.Visit(body, { block: Block =>
                 if (block.GetGeneratedFromForIn()) {
                     MergeForInCondBlock(builder, block, appendedGlobalUsers)
                     merged++
@@ -127,21 +126,8 @@ public class MergeBlocks {
                         changed = true
                     }
                 }
-            }
-        }
-        return merged
-    }
-
-    private func RunOnNestedLambdas(block: Block, builder: CHIRBuilder, enableCompileDebug!: Bool = false,
-        enableCoverage!: Bool = false): Int64 {
-        var merged: Int64 = 0
-        for (expr in block.GetExpressionsRef()) {
-            if (let Some(lambdaExpr) <- (expr as Lambda)) {
-                if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                    merged += RunOnBody(lambdaBody, builder, enableCompileDebug: enableCompileDebug,
-                        enableCoverage: enableCoverage)
-                }
-            }
+                return VisitResult.CONTINUE
+            })
         }
         return merged
     }
