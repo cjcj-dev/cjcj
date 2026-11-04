@@ -49,8 +49,13 @@ private func CreateFunctionWrapperForNormalCases(function: LLVMValueRef, wrapper
         let paramDerefType =
             CGType.GetOrCreate(cgMod, DeRef(cgType.GetParamType(0).GetOriginal())).GetLLVMType()
         let p1This = unsafe { LLVMPointerType(paramDerefType, 1u32) }
-        var dataPtr = builder.CreateBitCast(builder.GetPayloadFromObject(thisVal), p1This)
-        if (!cgType.HasBasePtr()) {
+        var dataPtr = if (cgType.HasHeaderedValueReceiver()) {
+            builder.CreateReceiverCopyFromHeader(thisVal,
+                DeRef(cgType.GetParamType(0).GetOriginal()))
+        } else {
+            builder.CreateBitCast(builder.GetPayloadFromObject(thisVal), p1This)
+        }
+        if (!cgType.HasHeaderedValueReceiver() && !cgType.ReceiverHasBasePtr()) {
             let ti = builder.GetTypeInfoFromObject(thisVal)
             let size = builder.GetSizeFromTypeInfo(ti)
             CJC_ASSERT(unsafe { LLVMGetTypeKind(paramDerefType) } == LLVM_INTEGER_TYPE_KIND &&
@@ -70,7 +75,7 @@ private func CreateFunctionWrapperForNormalCases(function: LLVMValueRef, wrapper
         while (argIdx < args.size) {
             if (argIdx == thisValOffset) {
                 callArgs.add(dataPtr)
-                if (cgType.HasBasePtr()) {
+                if (cgType.ReceiverHasBasePtr()) {
                     callArgs.add(builder.CreateBitCast(thisVal, p1i8))
                 }
             } else {
@@ -126,7 +131,7 @@ private func CreateFunctionWrapper(function: LLVMValueRef, cgType: CGFunctionTyp
             }
         }
     }
-    if (cgType.HasBasePtr()) {
+    if (cgType.ReceiverHasBasePtr()) {
         wrapperParamTypes.remove(at: if (cgType.HasSRet()) { 2 } else { 1 })
     } else {
         wrapperParamTypes[if (cgType.HasSRet()) { 1 } else { 0 }] = p1This
@@ -228,7 +233,17 @@ public class CGFunction <: CGValue {
     }
 
     public func GetOriginal(): Value { return chirFunc }
-    public func GetRawFunction(): LLVMValueRef { return GetRawValue() }
+    // A function used as a value must enter the copying wrapper. Direct body
+    // calls explicitly use GetRawFunction and prepare their own fresh copy.
+    public override func GetRawValue(): LLVMValueRef {
+        if (!wrapperF.isNull()) {
+            if (let Some(ty) <- cgFunctionType) {
+                if (ty.HasHeaderedValueReceiver()) { return wrapperF }
+            }
+        }
+        return super.GetRawValue()
+    }
+    public func GetRawFunction(): LLVMValueRef { return super.GetRawValue() }
     public func GetCGFunctionType(): Option<CGFunctionType> { return cgFunctionType }
     public func IsSRet(): Bool {
         if (let Some(functionType) <- cgFunctionType) {

@@ -113,10 +113,21 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     }
     if (let Some(instFuncTy) <- callType) {
         let typeInfo = TypeExtraInfo(0u32, isMethodType, isStaticMethodType, true, instTypeArgs)
-        if (let Some(instCGFuncTy) <- (CGType.GetOrCreate(irBuilder.GetCGModule(), instFuncTy,
-            extraInfo: typeInfo) as CGFunctionType)) {
+        var usesHeaderedReceiverWrapper = false
+        if (let Some(fn) <- (calleeValue as CGFunction)) {
+            if (let Some(fnType) <- fn.GetCGFunctionType()) {
+                usesHeaderedReceiverWrapper = fnType.HasHeaderedValueReceiver()
+            }
+        }
+        let instantiatedType = if (usesHeaderedReceiverWrapper) {
+            CGFunctionType(cgMod, cgMod.GetCGContext(), instFuncTy, typeInfo,
+                headeredReceiverWrapper: true)
+        } else {
+            CGType.GetOrCreate(cgMod, instFuncTy, extraInfo: typeInfo)
+        }
+        if (let Some(instCGFuncTy) <- (instantiatedType as CGFunctionType)) {
             let rawCallee = if (let Some(cgFunctionValue) <- (calleeValue as CGFunction)) {
-                cgFunctionValue.GetRawFunction()
+                cgFunctionValue.GetRawValue()
             } else {
                 calleeValue.GetRawValue()
             }
@@ -140,7 +151,7 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
                     let wrapper = cgFunctionValue.GetWrapperFunction()
                     CJC_ASSERT(!wrapper.isNull())
                     selectedFuncTy = (CGType.GetOrCreateWithNode(cgMod, callee,
-                        allowBasePtr: false) as CGFunctionType).getOrThrow()
+                        allowBasePtr: true, forWrapper: true) as CGFunctionType).getOrThrow()
                     funcPtrType = unsafe { LLVMTypeOf(wrapper) }
                     rawFunction = wrapper
                 }
@@ -157,7 +168,10 @@ private func GenerateApply(irBuilder: IRBuilder2, callee: Value, args: ArrayList
     }
     if (let Some(calleeType) <- calleeValue.GetCGType()) {
         if (let Some(functionType) <- (calleeType as CGFunctionType)) {
-            return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(functionType, calleeValue.GetRawValue(), argValues,
+            let selectedType = if (functionType.ReceiverNeedsValueCopy()) {
+                functionType.GetReceiverWrapperType()
+            } else { functionType }
+            return irBuilder.CreateCallOrInvokeWithMethodTypeInfo(selectedType, calleeValue.GetRawValue(), argValues,
                 None, instTypeArgs, thisTypeInfoArg: thisTypeInfoArg, name: "call")
         }
     }

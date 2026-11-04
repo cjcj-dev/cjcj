@@ -33,10 +33,12 @@ public class CGFunctionType <: CGType {
     private let staticMethodType: Bool
     private let forWrapper: Bool
     private let constructorType: Bool
+    private let headeredReceiverWrapper: Bool
     private let instantiatedParamTypes: ArrayList<Type> = ArrayList<Type>()
     public let closureParamIndices: ArrayList<LLVMMetadataRef> = ArrayList<LLVMMetadataRef>()
 
-    public init(cgMod: CGModule, cgCtx: CGContext, chirType: FuncType, extraInfo: TypeExtraInfo) {
+    public init(cgMod: CGModule, cgCtx: CGContext, chirType: FuncType, extraInfo: TypeExtraInfo,
+        headeredReceiverWrapper!: Bool = false) {
         super(cgMod, cgCtx, chirType, cgTypeKind: CGTypeKind.CG_FUNCTION)
         CJC_ASSERT(chirType.IsFunc())
         CJC_ASSERT(!extraInfo.forWrapper)
@@ -46,6 +48,7 @@ public class CGFunctionType <: CGType {
         staticMethodType = extraInfo.isStaticMethod
         forWrapper = false
         constructorType = false
+        this.headeredReceiverWrapper = headeredReceiverWrapper
         for (ty in extraInfo.instantiatedParamTypes) {
             instantiatedParamTypes.add(ty)
         }
@@ -58,14 +61,48 @@ public class CGFunctionType <: CGType {
             chirFunc.GetType().getOrThrow()
         }, cgTypeKind: CGTypeKind.CG_FUNCTION)
         this.chirFunc = chirFunc
-        allowBasePtr = if (extraInfo.forWrapper) { false } else { extraInfo.allowBasePtr }
+        allowBasePtr = extraInfo.allowBasePtr
         methodType = chirFunc.GetParentCustomTypeDef().isSome()
         staticMethodType = chirFunc.TestAttr(Attribute.STATIC)
         forWrapper = extraInfo.forWrapper
         constructorType = chirFunc.IsConstructor()
+        headeredReceiverWrapper = false
         for (genericTy in chirFunc.GetGenericTypeParams()) {
             instantiatedParamTypes.add(genericTy)
         }
+    }
+
+    // A by-value dynamic receiver crosses the body ABI as a complete headered
+    // copy. Reference receivers retain their existing payload/base pair.
+    public func HasStructReceiver(): Bool {
+        if (headeredReceiverWrapper) { return true }
+        if (let Some(fn) <- chirFunc) {
+            return !fn.TestAttr(Attribute.STATIC) && fn.GetWrappedRawMethod().isNone() && IsStructOrExtendMethod(fn) &&
+                !(chirType as FuncType).getOrThrow().GetParamTypes().isEmpty()
+        }
+        return false
+    }
+
+    public func HasHeaderedValueReceiver(): Bool {
+        if (headeredReceiverWrapper) { return true }
+        if (!HasStructReceiver()) { return false }
+        let ty = (chirType as FuncType).getOrThrow().GetParamTypes()[0]
+        return !ty.IsRef() && ty.IsStruct() && CGType.GetOrCreate(cgMod, ty).GetSize().isNone()
+    }
+
+    public func IsReceiverWrapper(): Bool { return forWrapper || headeredReceiverWrapper }
+    public func ReceiverNeedsValueCopy(): Bool { return HasHeaderedValueReceiver() && !IsReceiverWrapper() }
+    public func GetReceiverWrapperType(): CGFunctionType {
+        if (let Some(fn) <- chirFunc) {
+            return (CGType.GetOrCreateWithNode(cgMod, fn,
+                allowBasePtr: true, forWrapper: true) as CGFunctionType).getOrThrow()
+        }
+        return this
+    }
+    public func GetReceiverIndex(): Int64 { return if (HasSRet()) { 1 } else { 0 } }
+    public func ReceiverHasBasePtr(): Bool {
+        Complete()
+        return HasStructReceiver() && structParamNeedsBasePtr.contains(GetReceiverIndex())
     }
 
     public func HasSRet(): Bool { Complete(); return hasSRet }
@@ -168,10 +205,14 @@ public class CGFunctionType <: CGType {
             let paramCGType = CGType.GetOrCreate(cgMod, paramTy)
             realParamIndices.add(realArgIdx)
             let derefParamTy = paramTy.StripAllRefs()
-            if (paramTy.IsRef() && (derefParamTy.IsStruct() || derefParamTy.IsTuple())) {
+            let isReceiver = containedCGTypeIndex == 1 && HasStructReceiver()
+            if (isReceiver && (HasHeaderedValueReceiver() ||
+                (forWrapper && CGType.GetOrCreate(cgMod, derefParamTy).GetSize().isNone()))) {
+                paramLLVMTypes.add(CGType.GetRefType(cgCtx.GetLLVMContext()))
+            } else if (paramTy.IsRef() && (derefParamTy.IsStruct() || derefParamTy.IsTuple())) {
                 let derefParamCGType = CGType.GetOrCreate(cgMod, derefParamTy)
                 paramLLVMTypes.add(unsafe { LLVMPointerType(derefParamCGType.GetLLVMType(), 1u32) })
-                if (allowBasePtr) {
+                if (allowBasePtr && !(isReceiver && forWrapper)) {
                     paramLLVMTypes.add(CGType.GetRefType(cgCtx.GetLLVMContext()))
                     structParamNeedsBasePtr[realArgIdx] = containedCGTypeIndex
                     realArgIdx++
@@ -278,6 +319,9 @@ public class CGFunctionType <: CGType {
             return CGType.GetOrCreate(cgMod, paramTy, extraInfo: TypeExtraInfo(1u32))
         } else if (paramTy.IsStruct() || paramTy.IsTuple() || (paramCGType.GetSize().isNone() && !paramTy.IsGeneric())) {
             let refType = cgCtx.GetCHIRBuilder().context.GetRefTy(paramTy)
+            if (containedCGTypeIndex == 1 && HasHeaderedValueReceiver()) {
+                return CGType.GetOrCreate(cgMod, refType, extraInfo: TypeExtraInfo(1u32))
+            }
             if (IsFirstStructOrExtendThisParamForContained(containedCGTypeIndex)) {
                 return CGType.GetOrCreate(cgMod, refType)
             }

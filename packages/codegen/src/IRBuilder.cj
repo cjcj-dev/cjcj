@@ -2547,7 +2547,20 @@ public class IRBuilder2 <: Resource {
                     let paramType = calleeType.GetParamType(idx)
                     let isThis = idx == 0 && applyExprWrapper.isSome() &&
                         applyExprWrapper.getOrThrow().IsCalleeStructInstanceMethod()
-                    var llvmVal = if (isThis) {
+                    var llvmVal = if (idx == 0 && calleeType.ReceiverNeedsValueCopy()) {
+                        CreateReceiverValueCopy(arg, paramType)
+                    } else if (idx == 0 && calleeType.HasHeaderedValueReceiver() &&
+                        calleeType.IsReceiverWrapper()) {
+                        // A wrapper accepts the source header and makes the copy.
+                        let raw = arg.GetRawValue()
+                        if (GetTrackedBasePtr(raw).isNone() &&
+                            unsafe { LLVMSelfhostIsAddrSpaceCastOperator(raw) } == 0 &&
+                            (GetPointerAddressSpace(raw) ?? 0u32) == 1u32) {
+                            raw
+                        } else {
+                            CreateReceiverValueCopy(arg, paramType)
+                        }
+                    } else if (isThis) {
                         DoSimpleCast(arg, paramType, name)
                     } else {
                         let (value, owner) = FixFuncArgAndOwner(arg, paramType, name: name)
@@ -2559,7 +2572,9 @@ public class IRBuilder2 <: Resource {
                     arg.GetRawValue()
                 }
                 callArgs.add(fixedArg)
-                if (idx < paramTys.size && calleeType.HasBasePtr() && IsRefStructParam(paramTys[idx])) {
+                let realIndices = calleeType.GetRealArgIndices()
+                if (idx < realIndices.size &&
+                    calleeType.GetStructParamNeedsBasePtrIndices().contains(realIndices[idx])) {
                     // Resolve the owner of the final argument, not of storage
                     // that FixFuncArg may have copied into a new object.
                     let owner = allocatedOwner ?? GetTrackedBasePtr(fixedArg) ??
@@ -2761,6 +2776,66 @@ public class IRBuilder2 <: Resource {
             return (objectValue, Some(objectValue))
         }
         return (DoSimpleCast(arg, destType, name), None)
+    }
+
+    public func CreateReceiverCopyFromHeader(source: LLVMValueRef, recordType: Type): LLVMValueRef {
+        let typeInfo = GetTypeInfoFromObject(source)
+        let size = GetSizeFromTypeInfo(typeInfo)
+        let copy = CallAllocaGenericWithTypeInfoAndSize(recordType, typeInfo, size)
+        // source is used after the allocating safepoint as a real GC base.
+        // Derive its payload here so the statepoint sees the actual SSA chain.
+        let payload = GetPayloadFromObject(source)
+        CallGCReadGeneric(copy, source, payload, size)
+        return copy
+    }
+
+    private func CreateReceiverValueCopy(arg: CGValue, destType: CGType): LLVMValueRef {
+        let source = arg.GetRawValue()
+        if ((GetPointerAddressSpace(source) ?? 0u32) == 0u32) {
+            let recordType = arg.GetCGType().getOrThrow().GetOriginal().StripAllRefs()
+            let recordCGType = CGType.GetOrCreate(cgMod, recordType)
+            CJC_ASSERT(recordCGType.GetSize().isSome())
+            var native = source
+            let rawType = unsafe { LLVMTypeOf(source) }
+            if (unsafe { LLVMGetTypeKind(rawType) } != LLVM_POINTER_TYPE_KIND) {
+                native = CreateEntryAlloca(recordCGType.GetLLVMType(), name: "receiver.source")
+                CreateStore(source, native)
+            }
+            // Native source references are in their real typed slot before the
+            // allocation. Always allocate, including a concrete wrapper view.
+            let copy = CallAllocaGeneric(recordType)
+            let payload = GetPayloadFromObject(copy)
+            let size = GetLayoutSize_64(recordType)
+            if (IsTypeContainsRef(recordCGType.GetLLVMType())) {
+                CallGCWriteAgg(recordCGType.GetLayoutType(),
+                    ArrayList<LLVMValueRef>([copy, payload, native, size]))
+            } else {
+                CopyNoRefOrMemCpy(recordCGType.GetLLVMType(), payload, native, size)
+            }
+            return copy
+        }
+        if (unsafe { LLVMSelfhostIsAddrSpaceCastOperator(source) } != 0) {
+            let native = unsafe { LLVMSelfhostAddrSpaceCastOperatorGetOperand(source) }
+            if ((GetPointerAddressSpace(native) ?? 1u32) == 0u32) {
+                let argType = arg.GetCGType().getOrThrow().GetOriginal()
+                let nativeType = CGType.GetOrCreate(cgMod, argType, extraInfo: TypeExtraInfo(0u32))
+                return CreateReceiverValueCopy(CGValue(GetNativePayloadSource(source), nativeType), destType)
+            }
+        }
+        let recordType = arg.GetCGType().getOrThrow().GetOriginal().StripAllRefs()
+        if (let Some(base) <- GetTrackedManagedBase(source)) {
+            let typeInfo = CreateTypeInfo(recordType)
+            let size = GetLayoutSize_32(recordType)
+            let copy = CallAllocaGenericWithTypeInfoAndSize(recordType, typeInfo, size)
+            // source is a genuine derived GC pointer; both it and base remain
+            // SSA operands of the barrier after the allocation.
+            CallGCReadGeneric(copy, base, source, size)
+            return copy
+        }
+        // Unsized generic values use the established whole-header AS1 ABI.
+        CJC_ASSERT(CGType.GetOrCreate(cgMod, recordType).GetSize().isNone() ||
+            IsFreshHeapAllocation(source))
+        return CreateReceiverCopyFromHeader(source, recordType)
     }
 
     private func StoreAggregateArgToSlot(raw: LLVMValueRef, slot: LLVMValueRef): LLVMValueRef {

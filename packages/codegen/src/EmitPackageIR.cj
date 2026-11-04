@@ -383,6 +383,41 @@ private func SetSymbolLinkageType(cgMod: CGModule): Unit {
     }
 }
 
+// Existing LLVM Core C API, kept local to the debug call rewrite.
+foreign {
+    func LLVMCountIncoming(phi: LLVMValueRef): UInt32
+    func LLVMGetIncomingValue(phi: LLVMValueRef, index: UInt32): LLVMValueRef
+    func LLVMGetIncomingBlock(phi: LLVMValueRef, index: UInt32): LLVMBasicBlockRef
+    func LLVMIsAPHINode(value: LLVMValueRef): LLVMValueRef
+}
+
+private func RedirectReceiverWritebackPHIs(builder: IRBuilder2, destination: LLVMBasicBlockRef,
+    oldPredecessor: LLVMBasicBlockRef, edge: LLVMBasicBlockRef): Unit {
+    var phi = unsafe { LLVMGetFirstInstruction(destination) }
+    while (!phi.isNull() && !unsafe { LLVMIsAPHINode(phi) }.isNull()) {
+        let next = unsafe { LLVMGetNextInstruction(phi) }
+        let values = ArrayList<LLVMValueRef>()
+        let blocks = ArrayList<LLVMBasicBlockRef>()
+        let count = unsafe { LLVMCountIncoming(phi) }
+        var index = 0u32
+        while (index < count) {
+            values.add(unsafe { LLVMGetIncomingValue(phi, index) })
+            let incoming = unsafe { LLVMGetIncomingBlock(phi, index) }
+            blocks.add(if (incoming.toUIntNative() == oldPredecessor.toUIntNative()) { edge } else { incoming })
+            index++
+        }
+        builder.SetInsertPointBefore(phi)
+        let replacement = builder.CreatePHI(unsafe { LLVMTypeOf(phi) }, name: "receiver.writeback.phi")
+        builder.AddIncoming(replacement, values, blocks)
+        unsafe {
+            LLVMSelfhostInstructionCopyMetadata(replacement, phi)
+            LLVMReplaceAllUsesWith(phi, replacement)
+            LLVMInstructionEraseFromParent(phi)
+        }
+        phi = next
+    }
+}
+
 private func ReplaceFunction(cgMod: CGModule): Unit {
     if (!cgMod.GetCGContext().GetCompileOptions().enableCompileDebug) {
         return
@@ -395,7 +430,8 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
             let oldCall = item.callWithoutTI
             irBuilder.SetInsertPointBefore(oldCall)
             let hasSRet = unsafe { LLVMSelfhostCallBaseHasStructRetAttr(oldCall) } != 0
-            let thisParamOffset: Int64 = if (hasSRet) { 1 } else { 0 }
+            let receiverType = item.cgFuncCallee.GetCGFunctionType().getOrThrow()
+            let thisParamOffset = receiverType.GetReceiverIndex()
             let thisParamWithoutTI = unsafe { LLVMSelfhostCallBaseGetArgOperand(oldCall, UInt32(thisParamOffset)) }
             let argsVal = ArrayList<LLVMValueRef>()
             let argCount = unsafe { LLVMSelfhostCallBaseArgSize(oldCall) }
@@ -405,7 +441,7 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
                 argIdx++
             }
             var basePtr = LLVMNullValue()
-            if (item.isCalleeMutOrCtor) {
+            if (receiverType.ReceiverHasBasePtr()) {
                 let basePtrIndex = thisParamOffset + 1
                 basePtr = argsVal[basePtrIndex]
                 argsVal.remove(at: basePtrIndex)
@@ -427,14 +463,20 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
             let thisParamTypeInfo = irBuilder.CreateTypeInfo(thisCHIRType)
             let size32 = irBuilder.GetLayoutSize_32(thisCHIRType)
             let size64 = irBuilder.CreateSExt(size32, unsafe { LLVMInt64TypeInContext(cgMod.GetLLVMContext().raw) })
-            let thisParamWithTI = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>(
-                [thisParamTypeInfo, size32]))
+            let thisParamWithTI = if (receiverType.HasHeaderedValueReceiver()) {
+                thisParamWithoutTI
+            } else {
+                irBuilder.CallAllocaGenericWithTypeInfoAndSize(thisCHIRType, thisParamTypeInfo, size32)
+            }
             argsVal[thisParamOffset] = thisParamWithTI
 
             let payloadPtr = irBuilder.GetPayloadFromObject(thisParamWithTI)
             let thisCGType = CGType.GetOrCreate(cgMod, thisCHIRType)
             let thisLLVMType = thisCGType.GetLLVMType()
-            if (irBuilder.IsTypeContainsRef(thisLLVMType)) {
+            if (receiverType.HasHeaderedValueReceiver()) {
+                // Already a fresh headered value; the wrapper makes its own
+                // shallow copy. Never interpret this header as native payload.
+            } else if (irBuilder.IsTypeContainsRef(thisLLVMType)) {
                 if (item.isCalleeMutOrCtor) {
                     let load = irBuilder.CreateEntryAlloca(thisLLVMType)
                     let _ = irBuilder.CreateCJMemSetStructWith0(load)
@@ -455,18 +497,24 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
             CJC_ASSERT(!callee.isNull())
             let calleeType = unsafe { LLVMGlobalGetValueType(callee) }
             var newCall = LLVMNullValue()
+            var writebackDestination = LLVMNullBasicBlock()
+            var writebackEdge = LLVMNullBasicBlock()
             if (unsafe { LLVMSelfhostIsCallInst(oldCall) } != 0) {
                 newCall = irBuilder.CreateCall(callee, calleeType, argsVal)
                 irBuilder.SetInsertPointBefore(unsafe { LLVMGetNextInstruction(oldCall) })
             } else if (unsafe { LLVMSelfhostIsInvokeInst(oldCall) } != 0) {
                 let normalDest = unsafe { LLVMSelfhostInvokeGetNormalDest(oldCall) }
                 let unwindDest = unsafe { LLVMSelfhostInvokeGetUnwindDest(oldCall) }
-                newCall = irBuilder.CreateInvoke(callee, calleeType, normalDest, unwindDest, argsVal)
-                let firstInsertionPoint = unsafe { LLVMSelfhostBasicBlockGetFirstInsertionPoint(normalDest) }
-                if (firstInsertionPoint.isNull()) {
-                    irBuilder.SetInsertPoint(normalDest)
+                if (item.isCalleeMutOrCtor) {
+                    let parent = unsafe { LLVMGetBasicBlockParent(LLVMGetInstructionParent(oldCall)) }
+                    writebackEdge = irBuilder.CreateBasicBlockAtEnd(parent, "receiver.writeback")
+                    writebackDestination = normalDest
+                    newCall = irBuilder.CreateInvoke(callee, calleeType, writebackEdge, unwindDest, argsVal)
+                    RedirectReceiverWritebackPHIs(irBuilder, normalDest,
+                        unsafe { LLVMGetInstructionParent(oldCall) }, writebackEdge)
+                    irBuilder.SetInsertPoint(writebackEdge)
                 } else {
-                    irBuilder.SetInsertPointBefore(firstInsertionPoint)
+                    newCall = irBuilder.CreateInvoke(callee, calleeType, normalDest, unwindDest, argsVal)
                 }
             }
             CJC_ASSERT(!newCall.isNull())
@@ -521,6 +569,9 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
                     irBuilder.CallGCReadGenericPayload(load, thisParamWithTI, size32)
                     irBuilder.CopyNoRefOrMemCpy(thisLLVMType, thisParamWithoutTI, load, size64)
                 }
+            }
+            if (!writebackDestination.isNull()) {
+                irBuilder.CreateBr(writebackDestination)
             }
         }
     }

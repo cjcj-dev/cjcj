@@ -135,6 +135,16 @@ private func RepresentationStateFromPtrAnnotation(value: LLVMValueRef): Option<C
     return None
 }
 
+// True for the direct result of the object/array allocation intrinsics: a fresh,
+// non-null managed object whose allocation covers at least one object header.
+func IsFreshHeapAllocation(value: LLVMValueRef): Bool {
+    if (value.isNull() || unsafe { LLVMIsAInstruction(value) }.isNull()) {
+        return false
+    }
+    let calleeName = CalleeNameOfCall(StripBitCastValue(value))
+    return calleeName.startsWith("llvm.cj.malloc.object") || calleeName.startsWith("llvm.cj.malloc.array")
+}
+
 public func InferCGValueRepresentationState(value: LLVMValueRef): CGValueRepresentationState {
     if (value.isNull() || unsafe { LLVMIsAInstruction(value) }.isNull()) {
         return CGValueRepresentationState.UNKNOWN
@@ -243,7 +253,7 @@ public open class CGValue {
         this.representationState = representationState
     }
 
-    public func GetRawValue(): LLVMValueRef { return rawVal }
+    public open func GetRawValue(): LLVMValueRef { return rawVal }
     public func GetCGType(): Option<CGType> { return cgType }
     public func GetLLVMType(): LLVMTypeRef {
         if (let Some(valueType) <- cgType) {
@@ -672,7 +682,7 @@ public class CGModule {
             AddFnAttr(rawFunction, "noinline")
         }
         if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
-            if (functionCGType.HasBasePtr()) {
+            if (functionCGType.ReceiverHasBasePtr()) {
                 AddFnStringAttr(rawFunction, STRUCT_MUT_FUNC_ATTR)
                 AddFnStringAttr(rawFunction, THIS_PARAM_HAS_BP)
             }
@@ -953,7 +963,7 @@ public class CGModule {
             return
         }
         if (let Some(functionCGType) <- (cgFuncType as CGFunctionType)) {
-            if (functionCGType.HasBasePtr()) {
+            if (functionCGType.ReceiverHasBasePtr()) {
                 AddFnStringAttr(rawFunction, STRUCT_MUT_FUNC_ATTR)
                 AddFnStringAttr(rawFunction, THIS_PARAM_HAS_BP)
             }
@@ -1117,7 +1127,23 @@ public class CGModule {
         while (idx < chirFunc.GetNumOfParams()) {
             let param = chirFunc.GetParam(idx)
             let rawArg = cgFunc.GetArgByIndexFromCHIR(idx)
-            let paramCGType = FixedCGTypeOfFuncArg(this, param, rawArg)
+            var mappedArg = rawArg
+            if (idx == 0) {
+                if (let Some(fnType) <- cgFunc.GetCGFunctionType()) {
+                    if (fnType.ReceiverNeedsValueCopy()) {
+                        let entry = chirFunc.GetBody().getOrThrow().GetEntryBlock().getOrThrow()
+                        try (builder = IRBuilder2(this)) {
+                            builder.SetInsertCGFunction(cgFunc)
+                            let block = CreateOrGetMappedBB(builder, cgFunc.GetRawFunction(), entry)
+                            builder.SetInsertPoint(block)
+                            let payload = builder.GetPayloadFromObject(rawArg)
+                            let payloadType = fnType.GetParamType(0).GetLLVMType()
+                            mappedArg = builder.CreateBitCast(payload, payloadType, name: "this.copy.payload")
+                        }
+                    }
+                }
+            }
+            let paramCGType = FixedCGTypeOfFuncArg(this, param, mappedArg)
             let rawArgIdx = if (let Some(functionType) <- cgFunc.GetCGFunctionType()) {
                 let realArgIndices = functionType.GetRealArgIndices()
                 if (idx >= 0 && idx < realArgIndices.size) { realArgIndices[idx] } else if (cgFunc.IsSRet()) { idx + 1 } else { idx }

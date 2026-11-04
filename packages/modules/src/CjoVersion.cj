@@ -1,12 +1,13 @@
 package cjcj::modules
 
 // cangjie_compiler@12883f2b include/cangjie/Modules/CjoVersion.h:151-155.
-// ABI 1: managed class constructors return the current receiver. Old CJO
-// declarations imply Unit/void constructors and must not be mixed with this ABI.
-public const CJO_MAJOR_VERSION: UInt8 = 1u8
-public const CJO_MINOR_VERSION: UInt8 = 1u8
-// Patch 1 appends ImportSpec.isImplicitAdd (false when absent); no receiver ABI change.
-public const CJO_PATCH_VERSION: UInt8 = 1u8
+// ABI 2: unsized non-mut value receivers use a headered fresh owner at
+// $withoutTI entries, replacing ABI 1 headerless byte copies. Retains the
+// ABI 1 current-receiver constructor return convention. Neither ABI 0 nor 1
+// target CJO/objects may be mixed with this ABI; regenerate them together.
+public const CJO_MAJOR_VERSION: UInt8 = 2u8
+public const CJO_MINOR_VERSION: UInt8 = 0u8
+public const CJO_PATCH_VERSION: UInt8 = 0u8
 
 public enum CjoVersionCompat {
     | COMPATIBLE
