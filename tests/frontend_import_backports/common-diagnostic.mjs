@@ -52,7 +52,7 @@ run('dependency-api-change', [dep, '--output-type=staticlib', '-o', depout + '/'
 const diagnostic = run('common-missing-decl', commonArgs, 1);
 check('COMMON_MISSING_DECL_DIAGNOSTIC', () => {
   assert.doesNotMatch(diagnostic, /Exception|stack trace/);
-  assert.equal((diagnostic.match(/can not find.*value.*package.*dependency/g) ?? []).length, 2);
+  assert.equal((diagnostic.match(/'value' is not accessible in package 'dependency'/g) ?? []).length, 2);
 });
 for (const [name, coordinate] of [['a', 'a.cj:2:1'], ['b', 'b.cj:4:5']]) {
   check('COMMON_EXACT_COORDINATE_' + name, () => assert(diagnostic.includes(coordinate), diagnostic));
@@ -66,7 +66,7 @@ run('ordinary-after-decl-change', ordinaryArgs);
 check('ORDINARY_CJO_AFTER_DECL_CHANGE', () => {});
 fs.renameSync(depout + '/dependency.cjo', depout + '/dependency.cjo.hidden');
 const missingPackage = run('common-missing-package', commonArgs, 1);
-check('COMMON_MISSING_PACKAGE_DIAGNOSTIC', () => { assert.match(missingPackage, /can not find package dependency/); assert.doesNotMatch(missingPackage, /Exception/); });
+check('COMMON_MISSING_PACKAGE_DIAGNOSTIC', () => { assert.match(missingPackage, /can not find package 'dependency'/); assert.doesNotMatch(missingPackage, /Exception/); });
 for (const [name, coordinate] of [['a', 'a.cj:2:1'], ['b', 'b.cj:4:5']]) {
   check('COMMON_MISSING_PACKAGE_COORDINATE_' + name, () => assert(missingPackage.includes(coordinate), missingPackage));
 }
