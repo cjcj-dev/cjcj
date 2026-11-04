@@ -3334,6 +3334,10 @@ public class CjoSignatureMaterializer {
                 idx++
             }
         }
+        // SaveImportSpec serializes only the complete spec range, not token
+        // positions. Keep those positions unknown: whitespace, aliases and
+        // desugared multi-imports prevent reconstructing them from the names.
+        // Import diagnostics use the serialized range for IMPORTED specs.
         importSpec.content.identifier = Identifier(identifier, DEFAULT_POSITION, DEFAULT_POSITION)
         importSpec.content.aliasName = Identifier(aliasName, DEFAULT_POSITION, DEFAULT_POSITION)
         importSpec.content.isDecl = reader.U8Field(importTable, 16, 0u8) != 0u8
@@ -8260,7 +8264,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                         continue
                     } else if (!HasVisibleImportedDecl(pkg.fullPackageName, packageValue, importSpec.content.identifier.Val())) {
                         let im = importSpec.content
-                        let nameRange = MakeRange(im.prefixPoses[0], im.identifier.End())
+                        let nameRange = GetImportNameRange(importSpec)
                         diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
                             DiagKindRefactor.package_decl_not_find_in_package,
                             nameRange,
@@ -9051,16 +9055,25 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return false
     }
 
+    private func GetImportNameRange(importSpec: ImportSpec): BasicRange {
+        if (importSpec.TestAttr(Attribute.IMPORTED)) {
+            // The flat CJO has an exact spec range but no per-token positions.
+            // Do not manufacture a prefix/identifier position from its spelling.
+            return MakeRange(importSpec.begin, importSpec.end)
+        }
+        let im = importSpec.content
+        let begin = if (im.prefixPoses.isEmpty()) { im.identifier.Begin() } else { im.prefixPoses[0] }
+        return MakeRange(begin, im.identifier.End())
+    }
+
     private func GetPackageNameRange(importSpec: ImportSpec): BasicRange {
         let im = importSpec.content
         if (importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
             return MakeRange(DEFAULT_POSITION, im.identifier.Val())
         }
-        if (IsPackageImportForCheck(importSpec, im.GetImportedPackageNameWithIsDecl(), sourcePackagesForMembers)) {
-            if (im.prefixPoses.isEmpty()) {
-                return MakeRange(im.identifier.Begin(), im.identifier.End())
-            }
-            return MakeRange(im.prefixPoses[0], im.identifier.End())
+        if (importSpec.TestAttr(Attribute.IMPORTED) ||
+            IsPackageImportForCheck(importSpec, im.GetImportedPackageNameWithIsDecl(), sourcePackagesForMembers)) {
+            return GetImportNameRange(importSpec)
         }
         if (im.prefixPoses.isEmpty() || im.prefixPaths.isEmpty()) {
             return MakeRange(im.identifier.Begin(), im.identifier.End())
