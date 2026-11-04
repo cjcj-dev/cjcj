@@ -117,7 +117,7 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     }
 
     public func RemoveUserOnly(expr: Expression): Unit {
-        RemoveMatchingUsers(expr, removeAll: true)
+        RemoveMatchingUsers(expr, true)
     }
 
     // Ordinary values have one user entry per operand occurrence.  This
@@ -125,7 +125,7 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     // counted bulk replacement, and per-operand erasure.  Block CFG edges
     // continue to use RemovePredecessor and the all-match RemoveUserOnly API.
     public func RemoveUserOccurrenceOnly(expr: Expression): Unit {
-        RemoveMatchingUsers(expr, removeAll: false)
+        RemoveMatchingUsers(expr, false)
     }
 
     private func RemoveMatchingUsers(expr: Expression, removeAll: Bool): Unit {
