@@ -304,7 +304,7 @@ export async function testInstall(root, test, vars = {}, records = []) {
     cwd: expand(step.cwd || root, values), env: Object.fromEntries(Object.entries(step.env || {}).map(([k,v]) => [k,expand(v,values)])), records,
   });
 }
-export async function archiveInstall({install, archive, format = 'tar.gz', test, vars, records=[]}) {
+export async function archiveInstall({install, archive, format = 'tar.gz', test, vars, records=[], readOnlySource=false}) {
   install = path.resolve(install);
   archive = path.resolve(archive);
   if (archive === install || archive.startsWith(install+path.sep)) throw new Error('ARCHIVE_INSIDE_INSTALL');
@@ -313,7 +313,7 @@ export async function archiveInstall({install, archive, format = 'tar.gz', test,
   await fs.mkdir(path.dirname(archive),{recursive:true});
   const pending = path.join(path.dirname(archive),'.'+path.basename(archive)+'.pending-'+crypto.randomUUID()+'.'+format);
   const firstCommand=records.length, commandsFile=pending+'.commands.json';
-  const result={install,archive,pending,status:'WIP',commands:[]};
+  const result={install,archive,pending,readOnlySource,status:'WIP',commands:[]};
   try {
   if (format === 'tar.gz') await command(['tar', '-czf', pending, '-C', path.dirname(install), path.basename(install)], {records});
   else if (format === 'zip') await command(process.platform==='win32'
@@ -324,11 +324,13 @@ export async function archiveInstall({install, archive, format = 'tar.gz', test,
   else await command(process.platform==='win32'?['tar','-xf',pending,'-C',extracted]:['unzip','-q',pending,'-d',extracted],{records});
   // Exercise relocation with the old private installation path unavailable.
   // Keep the original bytes and restore them even when the consumer rejects.
-  const parked=install+'.archive-original-'+crypto.randomUUID();
-  await fs.rename(install,parked);
+  // Read-only producer inputs cannot be renamed. Such callers isolate the
+  // relocated consumer externally (e.g. a mount namespace hiding the input).
+  const parked=readOnlySource?null:install+'.archive-original-'+crypto.randomUUID();
+  if(parked)await fs.rename(install,parked);
   try {
     if(test) await testInstall(path.join(extracted, path.basename(install)), test, {...vars,work:path.join(extracted,'validation')}, records);
-  } finally { await fs.rename(parked,install); }
+  } finally { if(parked)await fs.rename(parked,install); }
   const sha256 = await fileDigest(pending);
   await fs.writeFile(pending+'.sha256', sha256+'  '+path.basename(archive)+'\n');
   await publishPaths(['', '.sha256', '.unpacked'].map(suffix=>({pending:pending+suffix,destination:archive+suffix})));
@@ -526,7 +528,12 @@ async function buildFlowInWork(config, {through, from, packageOutput = true, res
   } finally { await atomicJson(path.join(work, 'build-result.json'), result); }
 }
 export async function main(args = process.argv.slice(2)) {
-  const {values} = parseArgs({args, options: {config: {type: 'string'}, 'install-inputs':{type:'string'},'build-only':{type:'boolean'},'dry-run':{type:'boolean'}, through: {type: 'string'}, from: {type:'string'}, 'no-package': {type: 'boolean'}, 'resume-installed': {type: 'string'}, 'accept-records': {type: 'string'}}});
+  const {values} = parseArgs({args, options: {'archive-inputs':{type:'string'},config: {type: 'string'}, 'install-inputs':{type:'string'},'build-only':{type:'boolean'},'dry-run':{type:'boolean'}, through: {type: 'string'}, from: {type:'string'}, 'no-package': {type: 'boolean'}, 'resume-installed': {type: 'string'}, 'accept-records': {type: 'string'}}});
+  if(values['archive-inputs']) {
+    if(Object.keys(values).length!==1)throw Error('ARCHIVE_ARGUMENT_CONFLICT');
+    const input=await readJson(values['archive-inputs']);
+    return withProcessCancellation(()=>archiveInstall(input));
+  }
   if(values['install-inputs']) {
     if(values.config||values.from||values.through||values['resume-installed'])throw Error('INSTALL_ARGUMENT_CONFLICT');
     return withProcessCancellation(()=>installProducts(readJson(values['install-inputs']),{buildOnly:values['build-only'],dryRun:values['dry-run'],packageOutput:!values['no-package']}));
