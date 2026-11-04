@@ -1,5 +1,7 @@
 package const_switch_full_width
 
+import std.convert.*
+
 const func select16(value: UInt16): Int64 {
     return match (value) {
         case 257 => 12
@@ -44,22 +46,15 @@ func check(name: String, constant: Int64, dynamic: Int64, expected: Int64): Int6
     return if (passed) { 0 } else { 1 }
 }
 
-main(): Int64 {
-    var input16: UInt16 = 256
-    var failures = check("uint16_256", wide256, select16(input16), 11)
-    input16 = 257
-    failures += check("uint16_257", wide257, select16(input16), 12)
-    input16 = 258
-    failures += check("uint16_default", wideDefault, select16(input16), 14)
-    var signedInput: Int16 = -1
-    failures += check("int16_negative", negative, selectSigned(signedInput), 21)
-    var input64: UInt64 = 0x8000000000000000u64
-    failures += check("uint64_high", highBit, select64(input64), 31)
-    input64 = 1
-    failures += check("uint64_low", lowBit, select64(input64), 33)
-    input64 = 0xffffffffffffffffu64
-    failures += check("uint64_max", allBits, select64(input64), 34)
-    input64 = 0x8000000000000001u64
-    failures += check("uint64_default", highDefault, select64(input64), 35)
+main(args: Array<String>): Int64 {
+    if (args.size != 8) { return 2 }
+    var failures = check("uint16_256", wide256, select16(UInt16.parse(args[0])), 11)
+    failures += check("uint16_257", wide257, select16(UInt16.parse(args[1])), 12)
+    failures += check("uint16_default", wideDefault, select16(UInt16.parse(args[2])), 14)
+    failures += check("int16_negative", negative, selectSigned(Int16.parse(args[3])), 21)
+    failures += check("uint64_high", highBit, select64(UInt64.parse(args[4])), 31)
+    failures += check("uint64_low", lowBit, select64(UInt64.parse(args[5])), 33)
+    failures += check("uint64_max", allBits, select64(UInt64.parse(args[6])), 34)
+    failures += check("uint64_default", highDefault, select64(UInt64.parse(args[7])), 35)
     return failures
 }

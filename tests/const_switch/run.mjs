@@ -27,7 +27,9 @@ for (const [name, constants, assertions] of [['control', 4, 1], ['full_width', 8
     result.rc = 1;
     continue;
   }
-  const executed = run(name + '.run', [elf]);
+  const inputs = name === 'control' ? ['true', 'false', '255', '0'] :
+    ['256', '257', '258', '-1', '9223372036854775808', '1', '18446744073709551615', '9223372036854775809'];
+  const executed = run(name + '.run', [elf, ...inputs]);
   console.log(executed.text.trimEnd());
   const passed = (executed.text.match(/^ASSERT .* PASS$/gm) || []).length;
   if (executed.rc !== 0 || passed !== assertions) result.rc = 1;

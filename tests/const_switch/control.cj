@@ -1,5 +1,7 @@
 package const_switch_control
 
+import std.convert.*
+
 const func selectBool(value: Bool): Int64 {
     return match (value) {
         case true => 41
@@ -20,12 +22,15 @@ const boolFalse = selectBool(false)
 const byteMax = select8(255)
 const byteZero = select8(0)
 
-main(): Int64 {
-    var truth = true
-    var byte: UInt8 = 255
+main(args: Array<String>): Int64 {
+    if (args.size != 4) { return 2 }
+    let truth = args[0] == "true"
+    let falsehood = args[1] == "true"
+    let byte = UInt8.parse(args[2])
+    let zero = UInt8.parse(args[3])
     let passed = boolTrue == 41 && boolFalse == 42 && byteMax == 51 && byteZero == 52 &&
-        boolTrue == selectBool(truth) && boolFalse == selectBool(!truth) &&
-        byteMax == select8(byte) && byteZero == select8(byte - 255)
+        boolTrue == selectBool(truth) && boolFalse == selectBool(falsehood) &&
+        byteMax == select8(byte) && byteZero == select8(zero)
     println("ASSERT bool_uint8_control ${if (passed) { "PASS" } else { "FAIL" }}")
     return if (passed) { 0 } else { 1 }
 }
