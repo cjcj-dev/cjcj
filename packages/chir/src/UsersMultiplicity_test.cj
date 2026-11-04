@@ -201,7 +201,7 @@ class UsersMultiplicityTest {
         fn.DestroyFuncBody()
         @Expect(replacement.GetPredecessors().isEmpty(), true)
         @Expect(replacement.GetUsers().isEmpty(), true)
-        @Expect(pkg.GetGlobalFuncsWithBody().size, 1)
+        @Expect(pkg.GetGlobalFuncsWithBody().size, 0)
     }
 
     @TestCase
