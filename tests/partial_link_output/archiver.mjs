@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-const [compiler, output] = process.argv.slice(2);
+const [compiler, output, ...selected] = process.argv.slice(2);
 assert(compiler && path.isAbsolute(compiler) && output && path.isAbsolute(output));
 fs.mkdirSync(output);
 const results = [];
@@ -16,6 +16,7 @@ const run = (name, command, args, env = process.env) => {
 };
 const ok = r => assert.equal(r.status, 0, r.stderr);
 const check = (name, body) => {
+  if (selected.length && !selected.includes(name)) return;
   try { body(); results.push({ name: name + '-assertions', status: 0 }); }
   catch (e) { results.push({ name: name + '-assertions', status: 1, error: e.message }); console.error(name + ': ' + e.message); process.exitCode = 1; }
   record();
@@ -23,7 +24,7 @@ const check = (name, body) => {
 fs.writeFileSync(output + '/pkg.cj', 'package archivecontrol\nprivate var seed: Int64 = 40\npublic func archiveValue(): Int64 { return seed + 1 }\n');
 fs.writeFileSync(output + '/foreign.c', 'int foreign_archive_marker(void) { return 73; }\n');
 fs.writeFileSync(output + '/cmain.c', 'extern int foreign_archive_marker(void); int main(void) { return foreign_archive_marker() != 73; }\n');
-fs.writeFileSync(output + '/main.cj', 'import archivecontrol.*\nforeign { func foreign_archive_marker(): Int32 }\nmain(): Int64 { if (archiveValue() != 41 || foreign_archive_marker() != 73) { return 1 }; println("MIXED_ARCHIVE_CONSUMER_OK"); return 0 }\n');
+fs.writeFileSync(output + '/main.cj', 'import archivecontrol.*\nforeign { func foreign_archive_marker(): Int32 }\nmain(): Int64 { if (archiveValue() != 41 || unsafe { foreign_archive_marker() } != 73) { return 1 }; println("MIXED_ARCHIVE_CONSUMER_OK"); return 0 }\n');
 ok(run('foreign-object', '/usr/bin/cc', ['-c', 'foreign.c', '-o', 'foreign.o']));
 const base = ['pkg.cj', '--output-type=staticlib', '-O0', '--apc=4', '-j8', '-V'];
 for (const [name, extra, hasSource, hasForeign] of [
@@ -79,5 +80,36 @@ check('archiver-failure', () => {
   assert.equal(failed.status, 1); assert.match(failed.stdout + failed.stderr, /fail-tools\/ar' 'crD'/);
   assert.match(failed.stdout + failed.stderr, /command failed with exit code 1/);
   assert(!fs.existsSync(output + '/failed.a'));
+});
+check('missing-bundled', () => {
+  const home = output + '/missing-bundled-home';
+  const bin = home + '/third_party/llvm/bin'; fs.mkdirSync(bin, { recursive: true });
+  // Minimal real tool layout, not an SDK copy: imports/libraries remain the fixed installed inputs.
+  for (const tool of ['opt', 'llc', 'llvm-objcopy']) {
+    fs.copyFileSync(process.env.CANGJIE_HOME + '/.native-tools/third_party/llvm/bin/' + tool, bin + '/' + tool);
+  }
+  assert(!fs.existsSync(bin + '/llvm-ar'));
+  const r = run('missing-bundled', compiler, [...base, '-o=fallback.a'], { ...process.env, CANGJIE_HOME: home }); ok(r);
+  assert.match(r.stdout + r.stderr, /\/usr\/bin\/ar' 'crD'/, 'MISSING_BUNDLED_DID_NOT_USE_SYSTEM_AR');
+  const index = run('fallback-index', '/usr/bin/nm', ['--print-armap', 'fallback.a']); ok(index);
+  assert.match(index.stdout, /archiveValue.* in archivecontrol\.o/);
+  ok(run('fallback-cj-link', compiler, ['main.cj', '--import-path=.', '-j8', '--link-options', output + '/fallback.a ' + output + '/foreign.o', '-o=fallback-main']));
+  const consumed = run('fallback-cj-run', output + '/fallback-main', []); ok(consumed); assert.match(consumed.stdout, /MIXED_ARCHIVE_CONSUMER_OK/);
+});
+check('cross', () => {
+  const bin = output + '/cross-tools'; fs.mkdirSync(bin);
+  fs.copyFileSync('/usr/bin/llvm-ar-14', bin + '/aarch64-linux-gnu-ar');
+  fs.copyFileSync('/usr/bin/ld.lld-14', bin + '/aarch64-linux-gnu-ld');
+  ok(run('cross-object', '/usr/bin/clang-15', ['--target=aarch64-linux-gnu', '-c', 'foreign.c', '-o', 'foreign-aarch64.o']));
+  const r = run('cross', compiler, ['foreign-aarch64.o', '--experimental', '--target=aarch64-linux-gnu', '--output-type=staticlib', '-j8', '-V', '-o=cross.a'],
+    { ...process.env, PATH: bin + ':' + process.env.PATH }); ok(r);
+  assert.match(r.stdout + r.stderr, /cross-tools\/aarch64-linux-gnu-ar' 'crD'/, 'CROSS_PREFIXED_AR_NOT_REACHED');
+  const index = run('cross-index', '/usr/bin/nm', ['--print-armap', 'cross.a']); ok(index);
+  assert.match(index.stdout, /foreign_archive_marker in foreign-aarch64\.o/);
+  ok(run('cross-consumer-object', '/usr/bin/clang-15', ['--target=aarch64-linux-gnu', '-c', 'cmain.c', '-o', 'cross-main.o']));
+  ok(run('cross-consumer-link', '/usr/bin/ld.lld-14', ['-r', 'cross-main.o', 'cross.a', '-o', 'cross-consumed.o']));
+  const symbols = run('cross-consumer-symbols', '/usr/bin/nm', ['--defined-only', 'cross-consumed.o']); ok(symbols);
+  assert.match(symbols.stdout, / T foreign_archive_marker/);
+  const elf = run('cross-consumer-elf', '/usr/bin/readelf', ['-h', 'cross-consumed.o']); ok(elf); assert.match(elf.stdout, /AArch64/);
 });
 if (!process.exitCode) console.log('ARCHIVER_REAL_CONTROLS_OK');
