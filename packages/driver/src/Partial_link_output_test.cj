@@ -220,6 +220,10 @@ class PartialLinkOutputTest {
             chain.llvmArPath = ""
             @Expect(chain.UsesBundledArchiver(objects), false)
             chain.llvmArPath = "llvm-ar"
+            options.inputObjs.add("user.o")
+            @Expect(chain.UsesBundledArchiver(objects), false)
+            options.inputObjs.clear()
+            @Expect(chain.UsesBundledArchiver(objects), true)
             options.target.arch = ArchType.UNKNOWN
             @Expect(chain.UsesBundledArchiver(objects), false)
             options.target.arch = options.host.arch

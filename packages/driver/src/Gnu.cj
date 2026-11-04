@@ -253,7 +253,8 @@ public open class Gnu <: ToolChain {
     // native, non-LTO, no -B tool directory, no foreign or user objects. Everything else keeps `ar`.
     protected func UsesBundledArchiver(objFiles: ArrayList<TempFileInfo>): Bool {
         if (llvmArPath.isEmpty() || objFiles.isEmpty() || driverOptions.IsCrossCompiling() ||
-            driverOptions.IsLTOEnabled() || !driverOptions.toolChainPaths.isEmpty()) {
+            driverOptions.IsLTOEnabled() || !driverOptions.toolChainPaths.isEmpty() ||
+            !driverOptions.inputObjs.isEmpty()) {
             return false
         }
         for (objFile in objFiles) {
@@ -273,14 +274,13 @@ public open class Gnu <: ToolChain {
             return false
         }
         tool.AppendArg(outputFile)
-        if (objFiles.isEmpty()) {
-            for (inputObj in driverOptions.inputObjs) {
-                tool.AppendArg(inputObj)
-            }
-        } else {
-            for (objFile in objFiles) {
-                tool.AppendArg(objFile.filePath)
-            }
+        for (objFile in objFiles) {
+            tool.AppendArg(objFile.filePath)
+        }
+        // User object/archive inputs bypass codegen and package-local partial linking.
+        // They must survive both mixed source+object and object-only archive generation.
+        for (inputObj in driverOptions.inputObjs) {
+            tool.AppendArg(inputObj)
         }
         backendCmds.add(MakeSingleToolBatch(tool))
         return true
