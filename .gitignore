@@ -26,6 +26,7 @@ scripts/__pycache__/
 # lane working notes live outside the repository (agent_scratch)
 .lane-notes.md
 .lane/
+.symhooks/
 
 # Generated source workflow inputs, handoffs and G2 facts
 .srcbuild/
