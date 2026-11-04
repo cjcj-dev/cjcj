@@ -46,7 +46,7 @@ test('ordinary CJPM source-build is an explicit C2 input without fabricated comp
    selection:{targetComponents:{
      compiler:{repository:'https://github.com/cjcj-dev/cjcj.git',commit:f.facts.commit},
      std:{repository:'https://github.com/cjcj-dev/cangjie-runtime.git',commit:f.input.runtime.commit,
-       install:path.join(f.root,'std')}}}
+       install:path.join(f.root,'removed-original-std')}}}
  }));
  await f.write('producer/workspace.command.json',JSON.stringify({
    argv:['cjpm','build','--target-dir',path.join(f.root,'producer/target')],cwd:path.join(f.root,'source')
@@ -54,6 +54,7 @@ test('ordinary CJPM source-build is an explicit C2 input without fabricated comp
  await f.write('producer/workspace.result.json',JSON.stringify({rc:0,signal:null}));
  const row=await stage2Input({
    mode:'ordinary-cjpm',install:path.join(f.root,'sdk'),bootstrapStd:path.join(f.root,'std'),
+   stdSourceInstall:path.join(f.root,'std'),
    buildResult,command,sourceRoot:path.join(f.root,'source'),sourceProduct
  },f.input);
  assert.equal(row.mode,'ordinary-cjpm');
@@ -65,6 +66,7 @@ test('ordinary CJPM source-build is an explicit C2 input without fabricated comp
    install:path.join(f.root,'sdk/libexec/compiler/cjcj-stage1'),file:'libexec/compiler/cjcj-stage1'});
  assert.deepEqual(row.stdSource.repository,'https://github.com/cjcj-dev/cangjie-runtime.git');
  assert.equal(row.stdSourceInstall,path.resolve(path.join(f.root,'std')));
+ assert.deepEqual(await stage2Input(row,f.input),row);
  assert.equal(row.stdSha256,await (await import('../srcbuild/lib/final-compiler.mjs')).stdIdentity(path.join(f.root,'std')));
  const validated={...f.input,ast:f.input.compiler,stage2:row};
  await validateSourceInputs(validated);

@@ -265,15 +265,20 @@ export function createBootstrapTargets(input) {
     stage.reuse={...reused};
     delete stage.commands;
     const compilerFile=reused.compilerFile || 'libexec/compiler/cjcj-stage1'+exe;
-    const recipe=installationRecipe({platform,bootstrapHost:host,
-      compilerExecution:{role:'target',stage:'stage2',platform},
-      targetComponents:{compiler,std:stdlib,runtime,llvm,ast}},
+    const selection={platform,bootstrapHost:host,
+      compilerExecution:{role:'target',stage:'stage2',platform,
+        compiler:{...compiler,install:reused.install,product:path.join(reused.install,compilerFile),platform},
+        std:{...stdlib,install:reused.bootstrapStd,platform},
+        runtime:{...runtime,platform},llvm:{...llvm,platform}},
+      targetComponents:{compiler,std:stdlib,runtime,llvm,ast}};
+    const recipe=installationRecipe(selection,
       {compiler:path.join(reused.install,compilerFile),std:reused.bootstrapStd,bootstrap:true,nativeChecks:path.join(work,'native-check')});
     stage.copies=[...recipe.copies,
       {from:path.join(reused.install,'share/cjcj'),to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
       ...(reused.compilerInputs?[{from:reused.compilerInputs,to:'compiler-inputs.json',owner:'compiler'}]:[])];
-    stage.metadata={...stage.metadata,compilerCommit:reused.compilerCommit,stdSource:reused.bootstrapStd,
-      ...(ordinary?{stdSha256:reused.stdSha256,bootstrapStdIdentity:reused.stdSha256,compilerFile}:{}),
+    stage.metadata={...stage.metadata,selection,compilerCommit:reused.compilerCommit,stdSource:reused.bootstrapStd,
+      ...(ordinary?{stdSha256:reused.stdSha256,bootstrapStdIdentity:reused.stdSha256,
+        compilerFile:'libexec/compiler/cjcj-stage1'+exe}:{}),
       sources:{...stage.metadata.sources,compiler:{repository:reused.compilerSource?.repository ?? compiler.repository,
           commit:reused.compilerSource?.commit ?? reused.compilerCommit},
         std:{repository:reused.stdSource?.repository ?? runtime.repository,

@@ -182,6 +182,26 @@ test('ordinary C2 reuse keeps command, bootstrap std identity, and one compiler 
  assert.doesNotThrow(()=>validateBootstrapTargets(c));
 });
 
+test('ordinary C2 input compiler path is separate from canonical output and execution selection',()=>{
+ for(const compilerFile of ['libexec/compiler/custom','bin/cjcj-stage1']) {
+  const input=inputs('linux_x86_64');
+  input.stage2={mode:'ordinary-cjpm',install:'/fixture/C2',bootstrapStd:'/fixture/bootstrap-std',
+   buildResult:'/fixture/result.json',command:'/fixture/command.json',compilerFile,
+   compilerCommit:input.compiler.commit,llvmCommit:input.llvm.commit,bootstrapRuntimeCommit:input.runtime.commit};
+  const config=createBootstrapTargets(input),stage=config.stages.find(row=>row.id==='stage2');
+  assert.equal(stage.copies.find(row=>row.to==='bin/cjcj-stage1').from,'/fixture/C2/'+compilerFile);
+  assert.equal(stage.metadata.compilerFile,'libexec/compiler/cjcj-stage1');
+  const execution=stage.metadata.selection.compilerExecution;
+  assert.equal(execution.compiler.install,input.stage2.install);
+  assert.equal(execution.compiler.product,'/fixture/C2/'+compilerFile);
+  assert.equal(execution.std.install,input.stage2.bootstrapStd);
+  assert.equal(execution.runtime.install,input.runtime.install);
+  assert.equal(execution.llvm.install,input.llvm.install);
+  assert.ok(!JSON.stringify(execution).includes('stage1-std'));
+  assert.doesNotThrow(()=>validateBootstrapTargets(config));
+ }
+});
+
 test('ordinary C2 reuses the normalized std install in the complete target graph',()=>{
  const input=inputs('linux_x86_64');
  input.stage2={mode:'ordinary-cjpm',install:'/fixture/C2',bootstrapStd:'/fixture/bootstrap-std',
