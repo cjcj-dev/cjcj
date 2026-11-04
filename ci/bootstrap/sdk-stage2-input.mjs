@@ -52,7 +52,11 @@ async function ordinaryCjpmInput(supplied, input) {
   if (!compilerSelection?.repository || compilerSelection.commit !== metadata.compilerCommit
       || compilerSelection.commit !== input.compiler.commit)
     throw new Error('C2_ORDINARY_COMPILER_SOURCE');
-  const selectedStd = metadata.selection?.targetComponents?.std?.install;
+  // A frozen producer may point at the original std install path even when
+  // this C2 handoff deliberately pairs the same bytes from a new private
+  // install.  The handoff must name that replacement explicitly; never
+  // silently search or overlay another std tree.
+  const selectedStd = supplied.stdSourceInstall || metadata.selection?.targetComponents?.std?.install;
   if (selectedStd && await stdIdentity(bootstrapStd) !== await stdIdentity(selectedStd))
     throw new Error('C2_ORDINARY_STD_SOURCE');
   const stdSelection = metadata.selection?.targetComponents?.std;
