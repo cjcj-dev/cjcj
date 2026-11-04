@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 const [compiler, output, ...selected] = process.argv.slice(2);
 assert(compiler && path.isAbsolute(compiler) && output && path.isAbsolute(output));
+const cases = ['default', 'tool-dir', 'foreign', 'foreign-tool-dir', 'object-only', 'mixed-cache', 'lto', 'archiver-failure', 'missing-bundled', 'cross'];
+assert(selected.every(name => cases.includes(name)), 'UNKNOWN_ARCHIVE_CONTROL_SELECTION');
 fs.mkdirSync(output);
 const results = [];
 const record = () => fs.writeFileSync(output + '/result.json', JSON.stringify(results, null, 2));
@@ -60,6 +62,22 @@ for (const [name, extra, hasSource, hasForeign] of [
     const result = run(name + '-cj-run', output + '/' + name + '-main', []); ok(result);
     assert.match(result.stdout, /MIXED_ARCHIVE_CONSUMER_OK/);
   }
+});
+check('mixed-cache', () => {
+  fs.mkdirSync(output + '/mixed-cache');
+  const args = [...base, 'foreign.o', '--experimental', '--incremental-compile', '--output-dir=mixed-cache', '-o=libmixed.a'];
+  ok(run('mixed-cache-cold', compiler, args));
+  const warm = run('mixed-cache-no-change', compiler, args); ok(warm);
+  const log = warm.stdout + warm.stderr;
+  assert(!/\/(?:ld|opt|llc)' /.test(log), 'MIXED_NO_CHANGE_CACHE_REBUILT');
+  assert.match(log, /\/usr\/bin\/ar' 'crD'/, 'MIXED_NO_CHANGE_LOST_USER_ARCHIVER');
+  const members = run('mixed-cache-members', '/usr/bin/ar', ['t', 'mixed-cache/libmixed.a']); ok(members);
+  assert.equal(members.stdout.trim().split('\n').length, 2);
+  assert.match(members.stdout, /foreign\.o/, 'MIXED_NO_CHANGE_LOST_FOREIGN_OBJECT');
+  const index = run('mixed-cache-index', '/usr/bin/nm', ['--print-armap', 'mixed-cache/libmixed.a']); ok(index);
+  assert.match(index.stdout, /archiveValue.* in /); assert.match(index.stdout, /foreign_archive_marker in foreign\.o/);
+  ok(run('mixed-cache-cj-link', compiler, ['main.cj', '--import-path=mixed-cache', '-j8', '--link-options', output + '/mixed-cache/libmixed.a', '-o=mixed-cache-main']));
+  const consumed = run('mixed-cache-cj-run', output + '/mixed-cache-main', []); ok(consumed); assert.match(consumed.stdout, /MIXED_ARCHIVE_CONSUMER_OK/);
 });
 check('lto', () => {
   const r = run('lto', compiler, ['pkg.cj', '--output-type=staticlib', '--lto=full', '-O0', '-j8', '-V', '-o=lto.bc']); ok(r);
