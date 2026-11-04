@@ -58,7 +58,32 @@ try {
   } else assert(links.every(p => !fs.existsSync(p)), 'PARTIAL_NOT_CLEANED');
   if (mode === 'cached') {
     const warm = run('cache-reentry', compiler, args); ok(warm);
-    assert(!/\/ld' '-o' /.test(warm.stdout + warm.stderr), 'NO_CHANGE_CACHE_REBUILT_PARTIAL');
+    // CompilerInstance.ShouldWriteCacheFile deliberately excludes a multi-package invocation.
+    // Its reentry must still produce both correct packages; test actual no-change below with one package.
+    assert(/\/ld' '-o' /.test(warm.stdout + warm.stderr), 'MULTIPACKAGE_REENTRY_DID_NOT_REBUILD');
+    assert.deepEqual(run('reentry-members', '/usr/bin/ar', ['t', archive]).stdout.trim().split('\n'), ['p.o', 'p.partial.o']);
+    const single = path.join(output, 'single'); fs.mkdirSync(single);
+    const singleArgs = ['-p', path.join(output, 'p'), '--no-sub-pkg', '--output-type=staticlib', '--output-dir=' + single,
+      '-o=libsingle.a', '--experimental', '--incremental-compile', '-O0', '--apc=4', '-j8', '-V'];
+    ok(run('single-cold', compiler, singleArgs));
+    const unchanged = run('single-no-change', compiler, singleArgs); ok(unchanged);
+    const unchangedLog = unchanged.stdout + unchanged.stderr;
+    assert(!/\/(?:ld|opt|llc)' /.test(unchangedLog), 'NO_CHANGE_CACHE_REBUILT_PARTIAL');
+    assert.match(unchangedLog, /\/llvm-ar' 'crD'/, 'NO_CHANGE_ARCHIVE_NOT_REACHED');
+    const cache = path.join(single, '.cached');
+    const cachedObjects = fs.readdirSync(cache).filter(n => n.endsWith('.o'));
+    assert.equal(cachedObjects.length, 1, 'SINGLE_PACKAGE_OBJECT_CACHE_MISSING');
+    const cachedObject = path.join(cache, cachedObjects[0]);
+    // Remove only this fixture's known native cache object, preserving the first result/logs.
+    fs.renameSync(cachedObject, cachedObject + '.saved');
+    const recovered = run('single-cache-recovery', compiler, singleArgs); ok(recovered);
+    assert(/\/ld' '-o' /.test(recovered.stdout + recovered.stderr), 'MISSING_CACHE_DID_NOT_REBUILD');
+    assert(fs.existsSync(cachedObject), 'MISSING_CACHE_NOT_RESTORED');
+    const recoveredIndex = run('single-recovery-index', '/usr/bin/nm', ['--print-armap', path.join(single, 'libsingle.a')]); ok(recoveredIndex);
+    assert.match(recoveredIndex.stdout, /parentValue.* in p\.o/);
+    fs.writeFileSync(path.join(single, 'main.cj'), 'import p.*\nmain(): Int64 { return parentValue() - 11 }\n');
+    ok(run('single-consumer-compile', compiler, [path.join(single, 'main.cj'), '--import-path=' + single, '-L' + single, '-lsingle', '-o=' + path.join(single, 'main'), '-j8']));
+    ok(run('single-consumer-run', path.join(single, 'main'), []));
   }
   ok(run('consumer-compile', compiler, ['app/main.cj', '--import-path=lib', '-Llib', '-lpair', '-o=app/main', '-j8']));
   const consumer = run('consumer-run', path.join(output, 'app/main'), []); ok(consumer);
