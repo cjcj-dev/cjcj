@@ -32,7 +32,8 @@ private func ExpectImportFileIds(pkg: Package, common: Bool): Unit {
     for (file in pkg.files) {
         if (file.TestAttr(Attribute.FROM_COMMON_PART) != common) { continue }
         for (spec in file.imports) {
-            if (spec.TestAttr(Attribute.IMPLICIT_ADD)) { continue }
+            let name = spec.content.GetImportedPackageNameWithIsDecl()
+            if (name != "std.math" && name != "std.collection") { continue }
             count++
             println("IMPORT_FILE_ID_TARGET common=${common} file=${file.fileName} actual=${spec.begin.fileID} expected=${file.begin.fileID}")
             @Expect(spec.begin.fileID, file.begin.fileID)

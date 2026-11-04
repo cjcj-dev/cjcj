@@ -49,9 +49,9 @@ run('specific-consumer',commonArgs);console.log('PASS PUBLIC_COMMON_SPECIFIC');
 // Preserve a real missing-import diagnostic from the common AST. The common
 // sources remain available so the diagnostic can resolve both file IDs.
 fs.renameSync(depout+'/dependency.cjo',depout+'/dependency.cjo.hidden');
-const negative=spawnSync(compiler,[...commonArgs,'--diag-format=noColor','--jobs','8'],{cwd:output,encoding:'utf8'});
+const negative=spawnSync(compiler,[...commonArgs,'--diagnostic-format=noColor','--jobs','8'],{cwd:output,encoding:'utf8'});
 fs.writeFileSync(output+'/common-diagnostic.log',(negative.stdout??'')+(negative.stderr??''));
-fs.writeFileSync(output+'/common-diagnostic.json',JSON.stringify({argv:[compiler,...commonArgs,'--diag-format=noColor','--jobs','8'],rc:negative.status,signal:negative.signal},null,2));
+fs.writeFileSync(output+'/common-diagnostic.json',JSON.stringify({argv:[compiler,...commonArgs,'--diagnostic-format=noColor','--jobs','8'],rc:negative.status,signal:negative.signal},null,2));
 assert.notEqual(negative.status,0);assert.notEqual(negative.status,null);
 const diagnostic=(negative.stdout??'')+(negative.stderr??'');
 assert.match(diagnostic,/a\.cj:2:/);assert.match(diagnostic,/b\.cj:2:/);
