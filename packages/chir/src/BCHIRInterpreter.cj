@@ -958,64 +958,65 @@ public class BCHIRInterpreter {
     private func InterpretSwitch(switchPc: Int64): Option<Int64> {
         let selector = interpStack.ArgsPopIVal()
         if (let Some(selectorKind) <- TypeKindFromCell(bchir.GetLinkedByteCode().Get(switchPc + 1))) {
+            let selectorBits = BCHIRSwitchCaseValue(BCHIRUInt64FromCell(selector.GetInt()), selectorKind)
             return match (selectorKind) {
                 case TypeKind.TYPE_UINT8 => if (selector.kind == InterpreterValueKind.IUINT8) {
-                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                    InterpretSwitchWithType(switchPc, selectorBits)
                 } else {
                     None
                 }
                 case TypeKind.TYPE_UINT16 => if (selector.kind == InterpreterValueKind.IUINT16) {
-                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                    InterpretSwitchWithType(switchPc, selectorBits)
                 } else {
                     None
                 }
                 case TypeKind.TYPE_UINT32 => if (selector.kind == InterpreterValueKind.IUINT32) {
-                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                    InterpretSwitchWithType(switchPc, selectorBits)
                 } else {
                     None
                 }
                 case TypeKind.TYPE_UINT64 => if (selector.kind == InterpreterValueKind.IUINT64) {
-                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                    InterpretSwitchWithType(switchPc, selectorBits)
                 } else {
                     None
                 }
                 case TypeKind.TYPE_UINT_NATIVE => if (selector.kind == InterpreterValueKind.IUINTNAT) {
-                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                    InterpretSwitchWithType(switchPc, selectorBits)
                 } else {
                     None
                 }
                 case TypeKind.TYPE_INT8 => if (selector.kind == InterpreterValueKind.IINT8) {
-                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                    InterpretSwitchWithType(switchPc, selectorBits)
                 } else {
                     None
                 }
                 case TypeKind.TYPE_INT16 => if (selector.kind == InterpreterValueKind.IINT16) {
-                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                    InterpretSwitchWithType(switchPc, selectorBits)
                 } else {
                     None
                 }
                 case TypeKind.TYPE_INT32 => if (selector.kind == InterpreterValueKind.IINT32) {
-                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                    InterpretSwitchWithType(switchPc, selectorBits)
                 } else {
                     None
                 }
                 case TypeKind.TYPE_INT64 => if (selector.kind == InterpreterValueKind.IINT64) {
-                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                    InterpretSwitchWithType(switchPc, selectorBits)
                 } else {
                     None
                 }
                 case TypeKind.TYPE_INT_NATIVE => if (selector.kind == InterpreterValueKind.IINTNAT) {
-                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                    InterpretSwitchWithType(switchPc, selectorBits)
                 } else {
                     None
                 }
                 case TypeKind.TYPE_RUNE => if (selector.kind == InterpreterValueKind.IRUNE) {
-                    InterpretSwitchWithType(switchPc, selector.GetInt() & 0xff)
+                    InterpretSwitchWithType(switchPc, selectorBits)
                 } else {
                     None
                 }
                 case TypeKind.TYPE_BOOLEAN => if (selector.kind == InterpreterValueKind.IBOOL) {
-                    InterpretSwitchWithType(switchPc, if (selector.GetBool()) { 1 } else { 0 })
+                    InterpretSwitchWithType(switchPc, if (selector.GetBool()) { 1u64 } else { 0u64 })
                 } else {
                     None
                 }
@@ -1025,7 +1026,7 @@ public class BCHIRInterpreter {
         return None
     }
 
-    private func InterpretSwitchWithType(switchPc: Int64, realValue: Int64): Option<Int64> {
+    private func InterpretSwitchWithType(switchPc: Int64, realValue: UInt64): Option<Int64> {
         let code = bchir.GetLinkedByteCode()
         let caseCount = code.Get(switchPc + 2)
         if (caseCount < 0) {
@@ -1037,15 +1038,15 @@ public class BCHIRInterpreter {
         var left: Int64 = 0
         var right = caseCount
         while (left < right) {
-            let mid = (left + right) / 2
-            let caseValue = code.Get8Bytes(caseStart + mid * 2)
+            let mid = left + (right - left) / 2
+            let caseValue = BCHIRUInt64FromCell(code.Get8Bytes(caseStart + mid * 2))
             if (caseValue < realValue) {
                 left = mid + 1
             } else {
                 right = mid
             }
         }
-        if (left < caseCount && code.Get8Bytes(caseStart + left * 2) == realValue) {
+        if (left < caseCount && BCHIRUInt64FromCell(code.Get8Bytes(caseStart + left * 2)) == realValue) {
             return code.Get(targetStart + left)
         }
         return code.Get(defaultTargetIndex)
