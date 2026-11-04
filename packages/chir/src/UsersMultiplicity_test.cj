@@ -36,10 +36,6 @@ private class UsersMultiplicityFixture {
         newValue = builder.CreateParameter(valueTy, DebugLocation(), fn)
         replacement = builder.CreateParameter(valueTy, DebugLocation(), fn)
         newGlobalValue = builder.CreateParameter(ctx.GetRefTy(valueTy), DebugLocation(), fn)
-        fn.AddParam(oldValue)
-        fn.AddParam(newValue)
-        fn.AddParam(replacement)
-        fn.AddParam(newGlobalValue)
         globalValue = builder.CreateGlobalVar(ctx.GetRefTy(valueTy), "users.global")
     }
 
@@ -100,16 +96,33 @@ class UsersMultiplicityTest {
         let call = f.CreateApply(ArrayList<Value>([f.oldValue, f.oldValue, f.oldValue]))
 
         call.ReplaceOperand(1, f.newValue)
+        @Expect(call.GetOperand(1).nodeId, f.newValue.nodeId)
+        @Expect(call.GetOperand(2).nodeId, f.oldValue.nodeId)
+        @Expect(call.GetOperand(3).nodeId, f.oldValue.nodeId)
         @Expect(f.oldValue.GetUsers().size, 2)
         @Expect(f.newValue.GetUsers().size, 1)
 
-        call.ReplaceOperand(2, f.replacement)
+        call.ReplaceOperand(2, f.newValue)
+        @Expect(call.GetOperand(1).nodeId, f.newValue.nodeId)
+        @Expect(call.GetOperand(2).nodeId, f.newValue.nodeId)
+        @Expect(call.GetOperand(3).nodeId, f.oldValue.nodeId)
         @Expect(f.oldValue.GetUsers().size, 1)
-        @Expect(f.newValue.GetUsers().isEmpty(), true)
+        @Expect(f.newValue.GetUsers().size, 2)
+
+        call.ReplaceOperand(2, f.replacement)
+        @Expect(call.GetOperand(1).nodeId, f.newValue.nodeId)
+        @Expect(call.GetOperand(2).nodeId, f.replacement.nodeId)
+        @Expect(call.GetOperand(3).nodeId, f.oldValue.nodeId)
+        @Expect(f.oldValue.GetUsers().size, 1)
+        @Expect(f.newValue.GetUsers().size, 1)
         @Expect(f.replacement.GetUsers().size, 1)
 
         call.ReplaceOperand(3, f.replacement)
+        @Expect(call.GetOperand(1).nodeId, f.newValue.nodeId)
+        @Expect(call.GetOperand(2).nodeId, f.replacement.nodeId)
+        @Expect(call.GetOperand(3).nodeId, f.replacement.nodeId)
         @Expect(f.oldValue.GetUsers().isEmpty(), true)
+        @Expect(f.newValue.GetUsers().size, 1)
         @Expect(f.replacement.GetUsers().size, 2)
     }
 
@@ -160,7 +173,7 @@ class UsersMultiplicityTest {
             value.GetResult().getOrThrow(), value.GetResult().getOrThrow(), target, target, source)
         source.AppendExpressions(ArrayList<Expression>([value, term]))
         @Expect(target.GetPredecessors().size, 1)
-        @Expect(target.GetUsers().size, 1)
+        @Expect(target.GetUsers().size, 3)
         @Expect(target.GetUsers()[0].nodeId, term.nodeId)
 
         term.ReplaceOperand(target, replacement)
@@ -179,7 +192,7 @@ class UsersMultiplicityTest {
             value.GetResult().getOrThrow(), value.GetResult().getOrThrow(), replacement, replacement, source)
         source.AppendExpression(term2)
         @Expect(replacement.GetPredecessors().size, 1)
-        @Expect(replacement.GetUsers().size, 1)
+        @Expect(replacement.GetUsers().size, 3)
         @Expect(replacement.GetUsers()[0].nodeId, term2.nodeId)
         fn.DestroyFuncBody()
         @Expect(replacement.GetPredecessors().isEmpty(), true)
@@ -193,7 +206,7 @@ class UsersMultiplicityTest {
         let ctx = builder.context
         let pkg = builder.CreatePackage("users.copy_block")
         let ty = ctx.GetInt64Ty()
-        let fn = builder.CreateFunction(ctx.GetFuncTy(ArrayList<Type>(), ctx.GetUnitTy()), "copy.block")
+        let fn = builder.CreateFunction(ctx.GetFuncTy(ArrayList<Type>([ctx.GetBoolTy()]), ctx.GetUnitTy()), "copy.block")
         let body = builder.CreateBlockGroup(fn)
         fn.InitBody(body)
         let entry = builder.CreateBlock(body)
@@ -202,7 +215,6 @@ class UsersMultiplicityTest {
         let join = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
         let condition = builder.CreateParameter(ctx.GetBoolTy(), DebugLocation(), fn)
-        fn.AddParam(condition)
         entry.AppendExpression(builder.CreateBranch(condition, left, right, entry))
         left.AppendExpression(builder.CreateConstant(ty, IntLiteral(1), left))
         left.AppendExpression(builder.CreateGoTo(join, left))
