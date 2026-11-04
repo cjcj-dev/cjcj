@@ -23,15 +23,16 @@ class MergeBlocksParallelTest {
         entry.AppendExpression(loop)
         let groups = ArrayList<BlockGroup>()
         for (_ in 0..3) {
-            let group = builder.CreateBlockGroup(fn)
-            groups.add(group)
+            groups.add(builder.CreateBlockGroup(fn))
+        }
+        loop.InitBlockGroups(groups[0], groups[1], groups[2])
+        for (group in groups) {
             let first = builder.CreateBlock(group)
             let last = builder.CreateBlock(group)
             group.SetEntryBlock(first)
             first.AppendExpression(builder.CreateGoTo(last, first))
             last.AppendExpression(builder.CreateExit(None, last))
         }
-        loop.InitBlockGroups(groups[0], groups[1], groups[2])
         entry.AppendExpression(builder.CreateExit(None, entry))
         @Expect(MergeBlocks().RunOnFunction(fn, builder), 3)
         for (group in groups) {
