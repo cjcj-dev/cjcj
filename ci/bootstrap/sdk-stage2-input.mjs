@@ -64,8 +64,14 @@ async function ordinaryCjpmInput(supplied, input) {
     ?? input.runtime.commit;
   if (!stdSelection?.repository || !sha(stdSelection.commit) || stdSelection.commit !== expectedStdCommit)
     throw new Error('C2_ORDINARY_STD_SOURCE');
+  const compilerHeaders = await (async () => {
+    for (const root of ['include', 'runtime/include']) {
+      try { await fs.access(path.join(install, root, 'RuntimeConfig.h')); return root; } catch {}
+    }
+    throw new Error('C2_ORDINARY_RUNTIME_HEADERS');
+  })();
   for (const header of ['RuntimeConfig.h','Cangjie.h','CangjieRuntimeLayout.h','RuntimeAPI.h','RTInterface.h'])
-    if (!(await fs.readFile(path.join(install, 'include', header))).equals(await fs.readFile(path.join(input.runtime.install, 'include', header))))
+    if (!(await fs.readFile(path.join(install, compilerHeaders, header))).equals(await fs.readFile(path.join(input.runtime.install, 'include', header))))
       throw new Error('C2_ORDINARY_RUNTIME_HEADER ' + header);
   const llvm = path.join('third_party/llvm', native.llvmDirectory, native.llvmLibrary);
   if (await fileDigest(path.join(install, llvm)) !== await fileDigest(path.join(input.llvm.install, llvm)))
