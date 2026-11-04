@@ -64,11 +64,12 @@ private func TranslateMultiBranch(compiler: CHIR2BCHIR, context: CHIR2BCHIRConte
         let blocks = multi.GetNormalBlocks()
         var idx: Int64 = 0
         while (idx < cases.size && idx < blocks.size) {
+            let caseValue = BCHIRSwitchCaseValue(cases[idx], selectorKind)
             var insertAt: Int64 = 0
-            while (insertAt < sortedCases.size && sortedCases[insertAt] < cases[idx]) {
+            while (insertAt < sortedCases.size && sortedCases[insertAt] < caseValue) {
                 insertAt++
             }
-            sortedCases.add(cases[idx])
+            sortedCases.add(caseValue)
             sortedBlocks.add(blocks[idx])
             var moveIdx = sortedCases.size - 1
             while (moveIdx > insertAt) {
@@ -76,7 +77,7 @@ private func TranslateMultiBranch(compiler: CHIR2BCHIR, context: CHIR2BCHIRConte
                 sortedBlocks[moveIdx] = sortedBlocks[moveIdx - 1]
                 moveIdx--
             }
-            sortedCases[insertAt] = cases[idx]
+            sortedCases[insertAt] = caseValue
             sortedBlocks[insertAt] = blocks[idx]
             idx++
         }

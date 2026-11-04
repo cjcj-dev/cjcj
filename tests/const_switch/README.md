@@ -1,0 +1,9 @@
+Run `zx tests/const_switch/run.mjs /absolute/installed/compiler /absolute/matching/sdk /absolute/fresh-output`.
+
+The installed compiler's public driver compiles the programs with `-O2 --fno-chir-function-inlining --dump-chir`. O2 enables integer match-to-SWITCH lowering; disabling function inlining preserves the constant initializer calls for the bytecode interpreter. All these options are public. Hidden optimizer diagnostics and frontend aliases are not used.
+
+The runner inspects the real CHIR dumps immediately before constant evaluation (`ClosureConversion`) and after replacement (`CFFIFuncWrapper`). Each named constant must have an initializer function containing an Apply before evaluation, then a literal global initializer with its old function removed. The integer selector functions must still contain MultiBranch before evaluation. These structural checks establish that the subsequent language assertions consume evaluated constants; they do not require correct literal values before running those assertions, so a broken interpreter reaches the semantic failure.
+
+The generated programs compare constants with explicit expected values and calls using the same inputs parsed from runtime arguments. A separate Bool/UInt8 program controls the truncation failure. The full-width program covers UInt16 256/257, Int16 -1, UInt64 cases on both sides of the sign bit, and defaults. Ordinary integer matches are lowered through UInt64 selectors, so this is public language coverage, not dynamic coverage of every internal declared-type branch.
+
+Compiler and program exits, signals, CHIR observations, logs and generated ELF hashes are retained under OUTPUT. Use a fresh directory for each arm. For a compiler built by a different bootstrap host, set `COMPILER_LD_LIBRARY_PATH` to that host's execution libraries. SDK selects the target CJO/native libraries, and generated programs use that SDK's runtime.

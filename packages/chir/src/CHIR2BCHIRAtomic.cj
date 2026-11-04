@@ -122,6 +122,25 @@ public func BCHIRCellFromUInt64(value: UInt64): Int64 {
     return -Int64(UInt64.Max - value) - 1
 }
 
+// SWITCH cases use unsigned, zero-extended bit patterns in ascending order.
+// Keep the producer and interpreter on the same declared-width representation.
+public func BCHIRSwitchCaseValue(value: UInt64, kind: TypeKind): UInt64 {
+    let width: Int64 = match (kind) {
+        case TypeKind.TYPE_INT8 | TypeKind.TYPE_UINT8 => 8
+        case TypeKind.TYPE_INT16 | TypeKind.TYPE_UINT16 => 16
+        case TypeKind.TYPE_INT32 | TypeKind.TYPE_UINT32 | TypeKind.TYPE_RUNE => 32
+        case TypeKind.TYPE_INT_NATIVE | TypeKind.TYPE_UINT_NATIVE =>
+            IValUtils.SizeOf(InterpreterValueKind.IUINTNAT)
+        case _ => 64
+    }
+    return if (width == 64) { value } else { value & ((1u64 << width) - 1u64) }
+}
+
+public func BCHIRUInt64FromCell(value: Int64): UInt64 {
+    // Avoid checked signed-to-unsigned conversion and negating Int64.Min.
+    return if (value >= 0) { UInt64(value) } else { UInt64.Max - UInt64(-(value + 1)) }
+}
+
 public func BCHIRIsWideIntegerOp(opCode: OpCode): Bool {
     return opCode == OpCode.INT64 || opCode == OpCode.INTNAT || opCode == OpCode.UINT64 ||
         opCode == OpCode.UINTNAT
