@@ -114,7 +114,8 @@ class RedundantFutureRemovalTest {
                 @Expect(f.block.GetTerminator().getOrThrow().GetExprKind(), ExprKind.GOTO)
                 @Expect(initialize.GetTerminator().getOrThrow().GetExprKind(), ExprKind.GOTO)
                 @Expect(debug.GetOperand(0).nodeId, f.closure.nodeId)
-                @Expect(spawnExpr.GetClosure().nodeId, f.closure.nodeId)
+                // Inspect the operand even when a product cut leaves future mode active.
+                @Expect(spawnExpr.GetObject().nodeId, f.closure.nodeId)
                 @Expect(error.GetPredecessors()[0].nodeId, start.nodeId)
             }
         }
