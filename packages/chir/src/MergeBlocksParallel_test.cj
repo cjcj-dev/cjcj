@@ -7,6 +7,41 @@ import std.unittest.testmacro.*
 @Test
 class MergeBlocksParallelTest {
     @TestCase
+    func mergesBlocksInsideStructuredForInGroups(): Unit {
+        let ctx = CHIRContext()
+        let builder = CHIRBuilder(ctx)
+        let fn = builder.CreateFunction(ctx.GetFuncTy(ArrayList<Type>(), ctx.GetUnitTy()), "nestedForIn")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let entry = builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        let induction = builder.CreateConstant(ctx.GetInt64Ty(), IntLiteral(0), entry)
+        let condition = builder.CreateConstant(ctx.GetBoolTy(), BoolLiteral(true), entry)
+        entry.AppendExpressions(ArrayList<Expression>([induction, condition]))
+        let loop = builder.CreateForInRange(ctx.GetUnitTy(), induction.GetResult().getOrThrow(),
+            condition.GetResult().getOrThrow(), entry)
+        entry.AppendExpression(loop)
+        let groups = ArrayList<BlockGroup>()
+        for (_ in 0..3) {
+            let group = builder.CreateBlockGroup(fn)
+            groups.add(group)
+            let first = builder.CreateBlock(group)
+            let last = builder.CreateBlock(group)
+            group.SetEntryBlock(first)
+            first.AppendExpression(builder.CreateGoTo(last, first))
+            last.AppendExpression(builder.CreateExit(None, last))
+        }
+        loop.InitBlockGroups(groups[0], groups[1], groups[2])
+        entry.AppendExpression(builder.CreateExit(None, entry))
+        @Expect(MergeBlocks().RunOnFunction(fn, builder), 3)
+        for (group in groups) {
+            @Expect(group.GetBlocks().size, 1)
+            @Expect(group.GetEntryBlock().getOrThrow().GetTerminator().getOrThrow().GetExprKind(), ExprKind.EXIT)
+        }
+        @Expect(MergeBlocks().RunOnFunction(fn, builder), 0)
+    }
+
+    @TestCase
     func clonedLoopBlocksKeepGlobalUsersInTheirOwnFunctions(): Unit {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)
