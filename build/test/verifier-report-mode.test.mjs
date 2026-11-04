@@ -19,7 +19,7 @@ import {
 } from '../../scripts/verifier_artifact_gate.mjs';
 
 const repoRoot = path.resolve('.');
-const srcbuildPath = path.join(repoRoot, 'tools', 'srcbuild-kkk2.mjs');
+const sdkFlowPath = path.join(repoRoot, 'ci', 'bootstrap', 'sdk-flow.mjs');
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'verifier-report-mode-'));
@@ -87,10 +87,9 @@ function reportPath(root) {
   return path.join(root, 'verifier.tsv');
 }
 
-test('removed diagnostic step options reject at the public launcher and diagnostic workspaces cannot package', t => {
+test('removed diagnostic step options reject at the public native entry and diagnostic workspaces cannot package', t => {
   const root=fixture(t),report=path.join(root,'rejects.tsv');
-  const rejected=spawnSync(process.execPath,[srcbuildPath,'--lane','finite-test',
-    '--source','/root/finite-test/source','--config','/root/finite-test/config.json',
+  const rejected=spawnSync(process.execPath,[sdkFlowPath,'--config',path.join(root,'config.json'),
     '--verifier-report',report,'--to','19'],{encoding:'utf8'});
   assert.equal(rejected.status,1);assert.match(rejected.stderr,/Unknown option '--verifier-report'/);
   assert.equal(shouldRunGcUnitLanguageTests({}),true);
