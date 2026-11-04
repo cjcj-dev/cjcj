@@ -9,36 +9,49 @@ private class UsersMultiplicityFixture {
     public let fn: Function
     public let block: Block
     public let callee: Function
-    public let oldValue: Value
-    public let newValue: Value
-    public let replacement: Value
+    public let oldValue: Parameter
+    public let newValue: Parameter
+    public let replacement: Parameter
     public let globalValue: GlobalVar
+    public let newGlobalValue: Parameter
+    public let globalCallee: Function
 
     public init() {
         builder = CHIRBuilder(CHIRContext())
         let ctx = builder.context
         let valueTy = ctx.GetInt64Ty()
         let _ = builder.CreatePackage("users.multiplicity")
-        fn = builder.CreateFunction(ctx.GetFuncTy(ArrayList<Type>(), ctx.GetUnitTy()), "users.fixture")
+        fn = builder.CreateFunction(ctx.GetFuncTy(
+            ArrayList<Type>([valueTy, valueTy, valueTy, ctx.GetRefTy(valueTy)]), ctx.GetUnitTy()), "users.fixture")
         let body = builder.CreateBlockGroup(fn)
         fn.InitBody(body)
         block = builder.CreateBlock(body)
         body.SetEntryBlock(block)
         callee = builder.CreateFunction(ctx.GetFuncTy(
-            ArrayList<Type>([valueTy, valueTy, valueTy, ctx.GetRefTy(valueTy)]), ctx.GetUnitTy()), "users.callee")
+            ArrayList<Type>([valueTy, valueTy, valueTy]), ctx.GetUnitTy()), "users.callee")
+        globalCallee = builder.CreateFunction(ctx.GetFuncTy(
+            ArrayList<Type>([ctx.GetRefTy(valueTy), ctx.GetRefTy(valueTy), ctx.GetRefTy(valueTy)]),
+            ctx.GetUnitTy()), "users.global.callee")
         oldValue = builder.CreateParameter(valueTy, DebugLocation(), fn)
         newValue = builder.CreateParameter(valueTy, DebugLocation(), fn)
         replacement = builder.CreateParameter(valueTy, DebugLocation(), fn)
+        newGlobalValue = builder.CreateParameter(ctx.GetRefTy(valueTy), DebugLocation(), fn)
+        fn.AddParam(oldValue)
+        fn.AddParam(newValue)
+        fn.AddParam(replacement)
+        fn.AddParam(newGlobalValue)
         globalValue = builder.CreateGlobalVar(ctx.GetRefTy(valueTy), "users.global")
     }
 
     public func CreateApply(args: ArrayList<Value>): Apply {
-        let callArgs = ArrayList<Value>()
-        for (arg in args) { callArgs.add(arg) }
-        // Match the callee's reference-typed global formal in every fixture call.
-        callArgs.add(globalValue)
-        let call = builder.CreateApply(builder.context.GetUnitTy(), callee,
-            FuncCallContext(args: callArgs), block)
+        let call = builder.CreateApply(builder.context.GetUnitTy(), callee, FuncCallContext(args: args), block)
+        block.AppendExpression(call)
+        return call
+    }
+
+    public func CreateGlobalApply(args: ArrayList<Value>): Apply {
+        let call = builder.CreateApply(builder.context.GetUnitTy(), globalCallee,
+            FuncCallContext(args: args), block)
         block.AppendExpression(call)
         return call
     }
@@ -49,19 +62,20 @@ class UsersMultiplicityTest {
     @TestCase
     func bulkReplaceCountsEveryRepeatedValueOccurrence(): Unit {
         let f = UsersMultiplicityFixture()
-        let call = f.CreateApply(ArrayList<Value>([f.oldValue, f.oldValue]))
-        @Expect(f.oldValue.GetUsers().size, 2)
+        let call = f.CreateApply(ArrayList<Value>([f.oldValue, f.oldValue, f.oldValue]))
+        @Expect(f.oldValue.GetUsers().size, 3)
 
         call.ReplaceOperand(f.oldValue, f.newValue)
 
         @Expect(f.oldValue.GetUsers().isEmpty(), true)
-        @Expect(f.newValue.GetUsers().size, 2)
+        @Expect(f.newValue.GetUsers().size, 3)
         @Expect(call.GetOperand(1).nodeId, f.newValue.nodeId)
         @Expect(call.GetOperand(2).nodeId, f.newValue.nodeId)
+        @Expect(call.GetOperand(3).nodeId, f.newValue.nodeId)
 
         f.newValue.ReplaceWith(f.replacement)
         @Expect(f.newValue.GetUsers().isEmpty(), true)
-        @Expect(f.replacement.GetUsers().size, 2)
+        @Expect(f.replacement.GetUsers().size, 3)
     }
 
     @TestCase
@@ -83,18 +97,18 @@ class UsersMultiplicityTest {
     @TestCase
     func indexReplaceRemovesExactlyOneRepeatedOccurrence(): Unit {
         let f = UsersMultiplicityFixture()
-        let call = f.CreateApply(ArrayList<Value>([f.oldValue, f.oldValue]))
+        let call = f.CreateApply(ArrayList<Value>([f.oldValue, f.oldValue, f.oldValue]))
 
         call.ReplaceOperand(1, f.newValue)
-        @Expect(f.oldValue.GetUsers().size, 1)
+        @Expect(f.oldValue.GetUsers().size, 2)
         @Expect(f.newValue.GetUsers().size, 1)
 
-        call.ReplaceOperand(1, f.replacement)
+        call.ReplaceOperand(2, f.replacement)
         @Expect(f.oldValue.GetUsers().size, 1)
         @Expect(f.newValue.GetUsers().isEmpty(), true)
         @Expect(f.replacement.GetUsers().size, 1)
 
-        call.ReplaceOperand(2, f.replacement)
+        call.ReplaceOperand(3, f.replacement)
         @Expect(f.oldValue.GetUsers().isEmpty(), true)
         @Expect(f.replacement.GetUsers().size, 2)
     }
@@ -102,12 +116,12 @@ class UsersMultiplicityTest {
     @TestCase
     func sameValueAndMissingValueAreNoOps(): Unit {
         let f = UsersMultiplicityFixture()
-        let call = f.CreateApply(ArrayList<Value>([f.oldValue, f.oldValue]))
+        let call = f.CreateApply(ArrayList<Value>([f.oldValue, f.oldValue, f.oldValue]))
 
         call.ReplaceOperand(f.oldValue, f.oldValue)
-        @Expect(f.oldValue.GetUsers().size, 2)
+        @Expect(f.oldValue.GetUsers().size, 3)
         call.ReplaceOperand(f.newValue, f.replacement)
-        @Expect(f.oldValue.GetUsers().size, 2)
+        @Expect(f.oldValue.GetUsers().size, 3)
         @Expect(f.newValue.GetUsers().isEmpty(), true)
         @Expect(f.replacement.GetUsers().isEmpty(), true)
     }
@@ -117,15 +131,15 @@ class UsersMultiplicityTest {
         let f = UsersMultiplicityFixture()
         @Expect(f.globalValue.GetType().getOrThrow().nodeId,
             f.builder.context.GetRefTy(f.builder.context.GetInt64Ty()).nodeId)
-        let call = f.CreateApply(ArrayList<Value>([f.globalValue, f.globalValue]))
+        let call = f.CreateGlobalApply(ArrayList<Value>([f.globalValue, f.globalValue, f.globalValue]))
         @Expect(f.globalValue.GetUsers().size, 3)
 
-        call.ReplaceOperand(1, f.newValue)
+        call.ReplaceOperand(1, f.newGlobalValue)
         @Expect(f.globalValue.GetUsers().size, 2)
-        @Expect(f.newValue.GetUsers().size, 1)
+        @Expect(f.newGlobalValue.GetUsers().size, 1)
         call.EraseOperands()
         @Expect(f.globalValue.GetUsers().isEmpty(), true)
-        @Expect(f.newValue.GetUsers().isEmpty(), true)
+        @Expect(f.newGlobalValue.GetUsers().isEmpty(), true)
     }
 
     @TestCase
@@ -146,12 +160,18 @@ class UsersMultiplicityTest {
             value.GetResult().getOrThrow(), value.GetResult().getOrThrow(), target, target, source)
         source.AppendExpressions(ArrayList<Expression>([value, term]))
         @Expect(target.GetPredecessors().size, 1)
+        @Expect(target.GetUsers().size, 1)
+        @Expect(target.GetUsers()[0].nodeId, term.nodeId)
 
         term.ReplaceOperand(target, replacement)
         @Expect(target.GetPredecessors().isEmpty(), true)
+        @Expect(target.GetUsers().isEmpty(), true)
         @Expect(replacement.GetPredecessors().size, 1)
+        @Expect(replacement.GetUsers().size, 1)
+        @Expect(replacement.GetUsers()[0].nodeId, term.nodeId)
         term.DetachFromBlockOnly()
         @Expect(replacement.GetPredecessors().isEmpty(), true)
+        @Expect(replacement.GetUsers().isEmpty(), true)
         term.EraseOperands()
         @Expect(replacement.GetPredecessors().isEmpty(), true)
         @Expect(term.GetNumOfOperands(), 0)
@@ -159,8 +179,11 @@ class UsersMultiplicityTest {
             value.GetResult().getOrThrow(), value.GetResult().getOrThrow(), replacement, replacement, source)
         source.AppendExpression(term2)
         @Expect(replacement.GetPredecessors().size, 1)
+        @Expect(replacement.GetUsers().size, 1)
+        @Expect(replacement.GetUsers()[0].nodeId, term2.nodeId)
         fn.DestroyFuncBody()
         @Expect(replacement.GetPredecessors().isEmpty(), true)
+        @Expect(replacement.GetUsers().isEmpty(), true)
         @Expect(pkg.GetGlobalFuncsWithBody().size, 1)
     }
 
@@ -179,6 +202,7 @@ class UsersMultiplicityTest {
         let join = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
         let condition = builder.CreateParameter(ctx.GetBoolTy(), DebugLocation(), fn)
+        fn.AddParam(condition)
         entry.AppendExpression(builder.CreateBranch(condition, left, right, entry))
         left.AppendExpression(builder.CreateConstant(ty, IntLiteral(1), left))
         left.AppendExpression(builder.CreateGoTo(join, left))
