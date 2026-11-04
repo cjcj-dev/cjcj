@@ -22,13 +22,12 @@ function metadata(cjo){
 }
 const a=source('input/a.cj','package orderfixture\nimport dependency.*\npublic func a(): Int64 { 1 }\n');
 const z=source('input/z.cj','package orderfixture\nimport dependency.*\npublic func z(): Int64 { 2 }\n');
-const scans=[];
-for(const [name,files]of [['za',[z,a]],['az',[a,z]]]){
- const text=run('scan-'+name,[...files,'--scan-dependency']);const info=JSON.parse(text.trim());
- const dep=info.dependencies.find(d=>d.package==='dependency');assert.equal(dep.imports.length,2);
- assert.deepEqual(dep.imports.map(i=>i.file),[a,z]);scans.push(text.trim());
-}
-assert.equal(scans[0],scans[1]);console.log('PASS SCAN_CANONICAL_INPUT_ORDER');
+// Source scans use the public package-directory form. Explicit source-file
+// permutations are exercised by the two CJO producers below.
+const scan=JSON.parse(run('scan-package',['-p',path.dirname(a),'--scan-dependency']).trim());
+const scanned=scan.dependencies.find(d=>d.package==='dependency');
+assert.equal(scanned.imports.length,2);assert.deepEqual(scanned.imports.map(i=>i.file),[a,z]);
+console.log('PASS SOURCE_PACKAGE_SCAN_CANONICAL');
 const dep=source('dependency/dep.cj','package dependency\npublic func value(): Int64 { 1 }\n');
 const depout=directory('depout');run('dependency',[dep,'--output-type=staticlib','-o',depout+'/']);
 const descriptors=[];
@@ -39,6 +38,9 @@ for(const [name,files]of [['za',[z,a]],['az',[a,z]]]){
  assert.equal(run('read-cjo-'+name,[out+'/orderfixture.cjo','--scan-dependency']).trim(),embedded);
 }
 assert.equal(descriptors[0],descriptors[1]);console.log('PASS CJO_PKG_DEP_BYTES_AND_PUBLIC_READER');
+const ordinary=source('ordinary-use/main.cj','package ordinaryuse\nimport orderfixture.*\npublic func use(): Int64 { a() + z() }\n');
+run('ordinary-cjo-consumer',[ordinary,'--experimental','--output-type=chir','-I',output+'/cjo-za','-I',depout,'-o',directory('ordinaryout')+'/']);
+console.log('PASS PUBLIC_ORDINARY_CJO_CONTROL');
 const commonA=source('common/a.cj','package commonfixture\nimport dependency.*\npublic common func left(): Int64\n');
 const commonB=source('common/b.cj','package commonfixture\nimport dependency.*\npublic common func right(): Int64\n');
 const commonout=directory('commonout');run('common-producer',[commonA,commonB,'--experimental','--output-type=chir','-I',depout,'-o',commonout+'/']);
