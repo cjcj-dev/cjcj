@@ -29,7 +29,7 @@ test('runtime change with unchanged std sources is explicit; changed std sources
 });
 test('missing C2 source inputs fail rather than selecting an active HEAD',async()=>{
  const f=await stage2Fixture();await assert.rejects(stage2Input({...f.supplied,buildResult:undefined},f.input),/C2_REUSE_LOCATIONS_REQUIRED/);
- await fs.rm(path.join(f.supplied.install,'share/cjcj/runtime_shim/cjc_runtime_config.o'));
+ await fs.rm(path.join(f.supplied.install,'share/cjcj'),{recursive:true});
  await assert.rejects(stage2Input(f.supplied,f.input),/ENOENT/);
 });
 test('ordinary CJPM source-build is an explicit C2 input without fabricated compiler-inputs',async()=>{

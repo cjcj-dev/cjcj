@@ -76,9 +76,11 @@ async function ordinaryCjpmInput(supplied, input) {
   const llvm = path.join('third_party/llvm', native.llvmDirectory, native.llvmLibrary);
   if (await fileDigest(path.join(install, llvm)) !== await fileDigest(path.join(input.llvm.install, llvm)))
     throw new Error('C2_ORDINARY_LLVM_IDENTITY');
-  await fs.access(path.join(install, 'share/cjcj/runtime_shim/cjselfhost_llvmshim.o'));
-  await fs.access(path.join(install, 'share/cjcj/runtime_shim/cjc_runtime_config.o'));
-  await fs.access(path.join(install, 'share/cjcj/cjo'));
+  // A normal source-build install carries the runtime/LLVM payloads through
+  // their component roots; runtime_shim and the historical C2 cjo directory
+  // belong only to the stage2 producer.  Do not require those absent legacy
+  // paths or invent them in this ordinary handoff.
+  await fs.access(path.join(install, 'share/cjcj'));
   const stdCore = path.join(bootstrapStd, 'lib', tuple, 'libcangjie-std-core.a');
   const stdSha256 = await stdIdentity(bootstrapStd);
   return {
