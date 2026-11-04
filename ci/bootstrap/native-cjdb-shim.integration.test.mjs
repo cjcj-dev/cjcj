@@ -89,7 +89,7 @@ test('public native-stage selects independent source-owned shim and links the re
  assert(packages.some(p=>p.archives.some(a=>a.endsWith('/libmacro_pkg@cjcj.a'))));
  const compile='-O0 '+packages.map(p=>'--import-path '+p.dir).join(' ');
  const link='--export-dynamic --trace-symbol=CJSelfhostCheckMacroRuntimeBinding --start-group '+packages.flatMap(p=>p.archives).join(' ')+' --end-group runtime_shim/cjselfhost_llvmshim.o '+sdk+'/third_party/llvm/lib/libLLVM-15.so -lstdc++ -ldl';
- const manifest='[package]\nname = "cjc"\norganization = "cjcj"\nversion = "0.0.1"\nsrc-dir = "src"\noutput-type = "executable"\ncompile-option = '+JSON.stringify(compile)+'\nlink-option = '+JSON.stringify(link)+'\n';
+ const manifest='[package]\ncjc-version = "1.1.0"\nname = "cjc"\norganization = "cjcj"\nversion = "0.0.1"\nsrc-dir = "src"\noutput-type = "executable"\ncompile-option = '+JSON.stringify(compile)+'\nlink-option = '+JSON.stringify(link)+'\n';
  await fs.writeFile(path.join(source,'cjpm.toml'),manifest);
  await fs.mkdir(path.join(source,'src'));
  await fs.writeFile(path.join(source,'src/main.cj'),'package cjcj::cjc\nimport cjcj::macro_pkg.*\nmain(): Int64 {\n    let handle = OpenMacroLibrary("/nonexistent-shim-consumer")\n    println("MACRO_LINK_CONSUMER_REACHED")\n    return 0\n}\n');
