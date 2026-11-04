@@ -206,7 +206,7 @@ export function createBootstrapTargets(input) {
   function composed(id,depends,product,std,hostObjects=false,commands=[]) {
     const transitional=['stage0-run','stage1-initial','stage1-std'].includes(id);
     const executionSource=id==='stage2-target-sdk'?out('stage2'):transitional?host.install:null;
-    const execution={role:id==='stage2-target-sdk'?'separate':transitional?'bootstrap-host':'target',stage:id,
+    const execution={role:id==='stage2-target-sdk'?'separate':transitional?'bootstrap-host':'target',stage:id,platform,
       ...Object.fromEntries(['compiler','runtime','std','llvm'].map(name=>[name,{install:executionSource||(name==='runtime'?runtime.install:name==='llvm'?llvm.install:std),platform}]))};
     const selection={platform,bootstrapHost:host,compilerExecution:execution,targetComponents:{compiler,std:stdlib,runtime,llvm,ast}};
     const recipe=installationRecipe(selection,{compiler:product,std,hostObjects,final:['stage3','stage2-target-sdk'].includes(id),bootstrap:true,nativeChecks:path.join(work,'native-check')});
