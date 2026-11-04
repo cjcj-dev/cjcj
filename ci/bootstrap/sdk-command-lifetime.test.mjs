@@ -107,11 +107,11 @@ test('symlink CLI cancellation reaches owned child', async () => {
 test('host guardian preserves payload environment despite Python launcher on PATH', () => {
   const label='host-python', bin=path.join(root,'sdk-bin'), marker=path.join(root,'launcher-used');
   fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin,'python3'), `#!${process.execPath}
-const fs=require('fs'),cp=require('child_process');
-fs.appendFileSync(${JSON.stringify(marker)},'SDK_PYTHON\\n');
-const p=cp.spawnSync('/usr/bin/python3',process.argv.slice(2),{stdio:'inherit',env:{...process.env,LD_LIBRARY_PATH:'sdk-rewritten',CANGJIE_HOME:'sdk-rewritten'}});
-process.exit(p.status??1);
+  fs.writeFileSync(path.join(bin,'python3'), `#!/usr/bin/python3 -I
+import os,sys
+with open(${JSON.stringify(marker)},'a') as f:f.write('SDK_PYTHON\\n')
+os.environ.update(LD_LIBRARY_PATH='sdk-rewritten',CANGJIE_HOME='sdk-rewritten')
+os.execv('/usr/bin/python3',['/usr/bin/python3',*sys.argv[1:]])
 `, {mode:0o755});
   const env={...environment(label),PATH:bin+':'+process.env.PATH,
     LD_LIBRARY_PATH:'/host-runtime',CANGJIE_HOME:'/target-sdk',PYTHONPATH:bin,PYTHONHOME:bin};
