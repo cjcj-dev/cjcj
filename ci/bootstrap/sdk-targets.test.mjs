@@ -159,6 +159,11 @@ test('C2 import removes completed producers but preserves native and installed c
  assert.notEqual(input.stage2.compilerCommit,input.compiler.commit);
  assert.equal(stage.metadata.selection.compilerExecution.compiler.commit,input.stage2.compilerCommit);
  assert.equal(stage.metadata.selection.targetComponents.compiler.commit,input.compiler.commit);
+ assert.deepEqual(stage.metadata.selection.compilerExecution.compiler,{
+  repository:input.compiler.repository,commit:input.stage2.compilerCommit,
+  install:input.stage2.install,product:'/fixture/C2/libexec/compiler/cjcj-stage1',platform:input.platform,
+ });
+ assert.deepEqual(stage.metadata.selection.targetComponents.compiler,input.compiler);
  assert.equal(stage.metadata.stdSource,'/fixture/bootstrap-std');
  assert.equal(stage.copies.find(row=>row.to==='bin/cjcj-stage1').from,'/fixture/C2/libexec/compiler/cjcj-stage1');
  assert.ok(stage.entries.length);assert.equal(stage.links['libexec/runtime'],'../runtime');

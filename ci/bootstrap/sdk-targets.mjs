@@ -269,7 +269,8 @@ export function createBootstrapTargets(input) {
     const compilerFile=reused.compilerFile || 'libexec/compiler/cjcj-stage1'+exe;
     const selection={platform,bootstrapHost:host,
       compilerExecution:{role:'target',stage:'stage2',platform,
-        compiler:{...compiler,commit:reused.compilerCommit,install:reused.install,product:path.join(reused.install,compilerFile),platform},
+        compiler:{repository:reused.compilerSource?.repository??compiler.repository,
+          commit:reused.compilerCommit,install:reused.install,product:path.join(reused.install,compilerFile),platform},
         std:{...stdlib,install:reused.bootstrapStd,platform},
         runtime:{...runtime,platform},llvm:{...llvm,platform}},
       targetComponents:{compiler,std:stdlib,runtime,llvm,ast}};
