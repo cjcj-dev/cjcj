@@ -36,7 +36,7 @@ public class CjoVersionTest {
         let offset = VersionOffset(data)
         @Expect(data[offset], 1u8)
         @Expect(data[offset + 1], 1u8)
-        @Expect(data[offset + 2], 0u8)
+        @Expect(data[offset + 2], 1u8)
         for (minor in [0u8, 1u8]) {
             let copy = data.clone()
             copy[offset + 1] = minor

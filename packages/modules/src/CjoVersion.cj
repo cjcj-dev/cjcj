@@ -5,7 +5,8 @@ package cjcj::modules
 // declarations imply Unit/void constructors and must not be mixed with this ABI.
 public const CJO_MAJOR_VERSION: UInt8 = 1u8
 public const CJO_MINOR_VERSION: UInt8 = 1u8
-public const CJO_PATCH_VERSION: UInt8 = 0u8
+// Patch 1 appends ImportSpec.isImplicitAdd (false when absent); no receiver ABI change.
+public const CJO_PATCH_VERSION: UInt8 = 1u8
 
 public enum CjoVersionCompat {
     | COMPATIBLE

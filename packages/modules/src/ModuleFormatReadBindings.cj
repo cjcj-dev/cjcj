@@ -1393,6 +1393,7 @@ class PackageFormat_ImportSpec <: Table {
     func GetIsDecl(): Bool { return GetField(MF_IMPORT_SPEC_VT_ISDECL, false) }
     func GetHasDoubleColon(): Bool { return GetField(MF_IMPORT_SPEC_VT_HASDOUBLECOLON, false) }
     func GetWithImplicitExport(): Bool { return GetField(MF_IMPORT_SPEC_VT_WITHIMPLICITEXPORT, true) }
+    func GetIsImplicitAdd(): Bool { return GetField(MF_IMPORT_SPEC_VT_ISIMPLICITADD, false) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -1409,6 +1410,7 @@ class PackageFormat_ImportSpec <: Table {
             VerifyField<Bool>(verifier, MF_IMPORT_SPEC_VT_ISDECL, 1) &&
             VerifyField<Bool>(verifier, MF_IMPORT_SPEC_VT_HASDOUBLECOLON, 1) &&
             VerifyField<Bool>(verifier, MF_IMPORT_SPEC_VT_WITHIMPLICITEXPORT, 1) &&
+            VerifyImportSpecImplicitAdd(data, pos) &&
             verifier.EndTable()
     }
 }
