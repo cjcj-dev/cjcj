@@ -192,8 +192,12 @@ public open class Gnu <: ToolChain {
         // such a replacing rename; on a busy disk that blocks the package tail. The package
         // object keeps its path, bytes and the mode objcopy copies from ld's fresh output.
         let linkOutput = if (needsPartialLink && needsLocalization) {
-            TempFileManager.Instance().CreateNewFileInfo(TempFileInfo(fileName: pkgName + ".partial"),
-                TempFileKind.T_OBJ).filePath
+            try {
+                TempFileManager.Instance().CreateUniqueTempFileInfo(TempFileKind.T_OBJ).filePath
+            } catch (e: Exception) {
+                eprintln("error: failed to create partial-link temporary: " + e.message)
+                return false
+            }
         } else {
             outputFile
         }
