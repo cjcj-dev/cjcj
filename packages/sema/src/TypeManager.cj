@@ -862,78 +862,99 @@ public class TypeManager {
         if (typeMapping.IsEmpty() || !Ty.IsTyCorrect(ty)) {
             return ty
         }
-        if (let Some(gen) <- (ty as GenericsTy)) {
-            return getInstantiatedGenericTy(gen, typeMapping)
-        }
-        if (let Some(arrayTy) <- (ty as ArrayTy)) {
-            if (arrayTy.typeArgs.size == 1) {
-                return GetArrayTy(GetInstantiatedTy(arrayTy.typeArgs[0], typeMapping), arrayTy.dims)
-            }
-        }
-        if (let Some(varrayTy) <- (ty as VArrayTy)) {
-            if (varrayTy.typeArgs.size == 1) {
-                return GetVArrayTy(GetInstantiatedTy(varrayTy.typeArgs[0], typeMapping), varrayTy.size)
-            }
-        }
-        if (let Some(pointerTy) <- (ty as PointerTy)) {
-            if (pointerTy.typeArgs.size == 1) {
-                return GetPointerTy(GetInstantiatedTy(pointerTy.typeArgs[0], typeMapping))
-            }
-        }
-        if (let Some(tupleTy) <- (ty as TupleTy)) {
-            let args = instantiateArgs(tupleTy.typeArgs, typeMapping)
-            return GetTupleTy(args, isClosureTy: tupleTy.isClosureTy)
-        }
-        if (let Some(funcTy) <- (ty as FuncTy)) {
-            let params = instantiateArgs(funcTy.paramTys, typeMapping)
-            let ret = GetInstantiatedTy(funcTy.retTy, typeMapping)
-            let cfg = FuncTyConfig()
-            cfg.isC = funcTy.isC
-            cfg.isClosureTy = funcTy.isClosureTy
-            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
-            cfg.noCast = funcTy.noCast
-            return GetFunctionTy(params, ret, cfg: cfg)
-        }
-        if (let Some(classTy) <- (ty as ClassThisTy)) {
-            if (let Some(decl) <- classTy.declPtr) {
-                return GetClassThisTy(decl, instantiateArgs(classTy.typeArgs, typeMapping))
-            }
-        }
-        if (let Some(classTy) <- (ty as ClassTy)) {
-            if (let Some(decl) <- classTy.declPtr) {
-                return GetClassTy(decl, instantiateArgs(classTy.typeArgs, typeMapping))
-            }
-        }
-        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
-            if (let Some(decl) <- interfaceTy.declPtr) {
-                return GetInterfaceTy(decl, instantiateArgs(interfaceTy.typeArgs, typeMapping))
-            }
-        }
-        if (let Some(structTy) <- (ty as StructTy)) {
-            if (let Some(decl) <- structTy.declPtr) {
-                return GetStructTy(decl, instantiateArgs(structTy.typeArgs, typeMapping))
-            }
-        }
-        if (let Some(refEnumTy) <- (ty as RefEnumTy)) {
-            if (let Some(decl) <- refEnumTy.declPtr) {
-                return GetRefEnumTy(decl, instantiateArgs(refEnumTy.typeArgs, typeMapping))
-            }
-        }
-        if (let Some(enumTy) <- (ty as EnumTy)) {
-            if (let Some(decl) <- enumTy.declPtr) {
-                return GetEnumTy(decl, typeArgs: instantiateArgs(enumTy.typeArgs, typeMapping))
-            }
-        }
-        if (let Some(aliasTy) <- (ty as TypeAliasTy)) {
-            if (let Some(decl) <- aliasTy.declPtr) {
-                return GetTypeAliasTy(decl, instantiateArgs(aliasTy.typeArgs, typeMapping))
-            }
-        }
-        if (let Some(unionTy) <- (ty as UnionTy)) {
-            return GetUnionTy(instantiateArgs(unionTy.tys, typeMapping))
-        }
-        if (let Some(intersectionTy) <- (ty as IntersectionTy)) {
-            return GetIntersectionTy(instantiateArgs(intersectionTy.tys, typeMapping))
+        // C++ TypeManager.cpp:309-358 TyInstantiator::Instantiate dispatches by kind.
+        // Types.cj constructors fix kind for every family below. Dispatch before
+        // the checked cast: recursive substitution otherwise probes every earlier
+        // family, including on primitive leaves. ClassThisTy and RefEnumTy share
+        // their base kind, so keep their more-specific casts first within it.
+        match (ty.kind) {
+            case TypeKind.TYPE_GENERICS =>
+                if (let Some(gen) <- (ty as GenericsTy)) {
+                    return getInstantiatedGenericTy(gen, typeMapping)
+                }
+            case TypeKind.TYPE_ARRAY =>
+                if (let Some(arrayTy) <- (ty as ArrayTy)) {
+                    if (arrayTy.typeArgs.size == 1) {
+                        return GetArrayTy(GetInstantiatedTy(arrayTy.typeArgs[0], typeMapping), arrayTy.dims)
+                    }
+                }
+            case TypeKind.TYPE_VARRAY =>
+                if (let Some(varrayTy) <- (ty as VArrayTy)) {
+                    if (varrayTy.typeArgs.size == 1) {
+                        return GetVArrayTy(GetInstantiatedTy(varrayTy.typeArgs[0], typeMapping), varrayTy.size)
+                    }
+                }
+            case TypeKind.TYPE_POINTER =>
+                if (let Some(pointerTy) <- (ty as PointerTy)) {
+                    if (pointerTy.typeArgs.size == 1) {
+                        return GetPointerTy(GetInstantiatedTy(pointerTy.typeArgs[0], typeMapping))
+                    }
+                }
+            case TypeKind.TYPE_TUPLE =>
+                if (let Some(tupleTy) <- (ty as TupleTy)) {
+                    let args = instantiateArgs(tupleTy.typeArgs, typeMapping)
+                    return GetTupleTy(args, isClosureTy: tupleTy.isClosureTy)
+                }
+            case TypeKind.TYPE_FUNC =>
+                if (let Some(funcTy) <- (ty as FuncTy)) {
+                    let params = instantiateArgs(funcTy.paramTys, typeMapping)
+                    let ret = GetInstantiatedTy(funcTy.retTy, typeMapping)
+                    let cfg = FuncTyConfig()
+                    cfg.isC = funcTy.isC
+                    cfg.isClosureTy = funcTy.isClosureTy
+                    cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+                    cfg.noCast = funcTy.noCast
+                    return GetFunctionTy(params, ret, cfg: cfg)
+                }
+            case TypeKind.TYPE_CLASS =>
+                if (let Some(classTy) <- (ty as ClassThisTy)) {
+                    if (let Some(decl) <- classTy.declPtr) {
+                        return GetClassThisTy(decl, instantiateArgs(classTy.typeArgs, typeMapping))
+                    }
+                }
+                if (let Some(classTy) <- (ty as ClassTy)) {
+                    if (let Some(decl) <- classTy.declPtr) {
+                        return GetClassTy(decl, instantiateArgs(classTy.typeArgs, typeMapping))
+                    }
+                }
+            case TypeKind.TYPE_INTERFACE =>
+                if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+                    if (let Some(decl) <- interfaceTy.declPtr) {
+                        return GetInterfaceTy(decl, instantiateArgs(interfaceTy.typeArgs, typeMapping))
+                    }
+                }
+            case TypeKind.TYPE_STRUCT =>
+                if (let Some(structTy) <- (ty as StructTy)) {
+                    if (let Some(decl) <- structTy.declPtr) {
+                        return GetStructTy(decl, instantiateArgs(structTy.typeArgs, typeMapping))
+                    }
+                }
+            case TypeKind.TYPE_ENUM =>
+                if (let Some(refEnumTy) <- (ty as RefEnumTy)) {
+                    if (let Some(decl) <- refEnumTy.declPtr) {
+                        return GetRefEnumTy(decl, instantiateArgs(refEnumTy.typeArgs, typeMapping))
+                    }
+                }
+                if (let Some(enumTy) <- (ty as EnumTy)) {
+                    if (let Some(decl) <- enumTy.declPtr) {
+                        return GetEnumTy(decl, typeArgs: instantiateArgs(enumTy.typeArgs, typeMapping))
+                    }
+                }
+            case TypeKind.TYPE =>
+                if (let Some(aliasTy) <- (ty as TypeAliasTy)) {
+                    if (let Some(decl) <- aliasTy.declPtr) {
+                        return GetTypeAliasTy(decl, instantiateArgs(aliasTy.typeArgs, typeMapping))
+                    }
+                }
+            case TypeKind.TYPE_UNION =>
+                if (let Some(unionTy) <- (ty as UnionTy)) {
+                    return GetUnionTy(instantiateArgs(unionTy.tys, typeMapping))
+                }
+            case TypeKind.TYPE_INTERSECTION =>
+                if (let Some(intersectionTy) <- (ty as IntersectionTy)) {
+                    return GetIntersectionTy(instantiateArgs(intersectionTy.tys, typeMapping))
+                }
+            case _ => ()
         }
         return ty
     }
