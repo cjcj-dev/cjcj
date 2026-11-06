@@ -3580,7 +3580,6 @@ public class TypeManager {
 
     private func getInstantiatedGenericTy(ty: GenericsTy, typeMapping: TypeSubst): Ty {
         var current: Ty = ty
-        let mapping = typeMapping.Clone()
         let visited = ArrayList<GenericsTy>()
         var searching = true
         while (searching) {
@@ -3590,15 +3589,24 @@ public class TypeManager {
                     return current
                 }
                 visited.add(currentGen)
-                if (let Some(mapped) <- mapping.Get(currentGen)) {
+                if (let Some(mapped) <- typeMapping.Get(currentGen)) {
                     current = mapped
-                    removeTypeSubst(mapping, currentGen)
                     searching = true
                 }
             }
         }
-        if (!mapping.IsEmpty() && !current.IsGeneric() && current.HasGeneric()) {
-            return GetInstantiatedTy(current, mapping)
+        // The visited guard already terminates generic chains and cycles. Only
+        // recursive substitution into a composite consumes the reduced mapping;
+        // direct, unmapped and cyclic results need no copy of the whole table.
+        // Keep every followed key excluded from that recursive substitution.
+        if (!current.IsGeneric() && current.HasGeneric()) {
+            let mapping = typeMapping.Clone()
+            for (genericTy in visited) {
+                removeTypeSubst(mapping, genericTy)
+            }
+            if (!mapping.IsEmpty()) {
+                return GetInstantiatedTy(current, mapping)
+            }
         }
         return current
     }
