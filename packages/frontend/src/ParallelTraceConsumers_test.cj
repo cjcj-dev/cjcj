@@ -49,6 +49,7 @@ class ParallelTraceConsumersTest {
             @Expect(diag.GetErrorCount(), 0u64)
             @Expect(instance.GetSourcePackages().size, 1)
             @Expect(!instance.GetSourcePackages()[0].genericInstantiatedDecls.isEmpty())
+            @Expect(!instance.ExportAST(false, instance.GetSourcePackages()[0]).isEmpty())
             passed = true
         } finally {
             if (passed) { let _ = removeIfExists(root, recursive: true) }
