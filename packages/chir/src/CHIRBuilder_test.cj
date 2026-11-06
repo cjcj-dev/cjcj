@@ -281,3 +281,86 @@ public class ExpressionFamilyEdgesTest {
         @Expect(other.GetPredecessors().size, 1)
     }
 }
+
+@Test
+public class ExpressionSuccessorsTest {
+    @TestCase
+    public func EmptyAndOrdinaryOperandsHaveNoSuccessors(): Unit {
+        let context = CHIRContext()
+        let empty = Expression(ExprKind.ADD, ArrayList<Value>(), None)
+        let ordinary = Expression(ExprKind.ADD,
+            ArrayList<Value>([IntLiteral(context.GetInt64Ty(), 1), IntLiteral(context.GetInt64Ty(), 2)]), None)
+        @Expect(empty.GetSuccessors().size, 0)
+        @Expect(ordinary.GetSuccessors().size, 0)
+        @Expect(ordinary.GetOperands().size, 2)
+    }
+
+    @TestCase
+    public func MixedOperandsPreserveOrderDuplicatesAndOwnership(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "successors")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let source = builder.CreateBlock(body)
+        let first = builder.CreateBlock(body)
+        let second = builder.CreateBlock(body)
+        let control = builder.CreateBlock(body)
+        body.SetEntryBlock(source)
+        let literal = IntLiteral(context.GetInt64Ty(), 7)
+        let inputs = ArrayList<Value>([literal, second, literal, first, second, literal])
+        let expr = Expression(ExprKind.ADD, inputs, Some(source))
+        inputs.clear()
+        let successors = expr.GetSuccessors()
+        @Expect(successors.size, 3)
+        if (successors.size == 3) {
+            @Expect(successors[0].nodeId, second.nodeId)
+            @Expect(successors[1].nodeId, first.nodeId)
+            @Expect(successors[2].nodeId, second.nodeId)
+        }
+        successors.clear()
+        @Expect(expr.GetSuccessors().size, 3)
+        @Expect(expr.GetOperands().size, 6)
+        source.AppendExpression(expr)
+        expr.SyncSuccessorPredecessors()
+        @Expect(first.GetPredecessors().contains(source), true)
+        @Expect(second.GetPredecessors().contains(source), true)
+        @Expect(second.GetPredecessors().size, 1)
+        @Expect(control.GetPredecessors().size, 0)
+        expr.DetachFromBlockOnly()
+        @Expect(first.GetPredecessors().size, 0)
+        @Expect(second.GetPredecessors().size, 0)
+        @Expect(source.GetExpressions().size, 0)
+        @Expect(expr.GetParentBlock().isNone(), true)
+        @Expect(expr.GetOperands().size, 6)
+    }
+
+    @TestCase
+    public func ThrowingTerminatorMaintainsBothEdgesThroughInsertionAndDetach(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "throw-successors")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let source = builder.CreateBlock(body)
+        let normal = builder.CreateBlock(body)
+        let error = builder.CreateBlock(body)
+        body.SetEntryBlock(source)
+        let value = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(7), source).GetResult().getOrThrow()
+        let expr = builder.CreateTryNumericCast(context.GetInt32Ty(), value, normal, error, source)
+        let successors = expr.GetSuccessors()
+        @Expect(successors.size, 2)
+        if (successors.size == 2) {
+            @Expect(successors[0].nodeId, normal.nodeId)
+            @Expect(successors[1].nodeId, error.nodeId)
+        }
+        source.AppendExpression(expr)
+        @Expect(normal.GetPredecessors().contains(source), true)
+        @Expect(error.GetPredecessors().contains(source), true)
+        @Expect(source.GetTerminator().getOrThrow().nodeId, expr.nodeId)
+        expr.DetachFromBlockOnly()
+        @Expect(normal.GetPredecessors().size, 0)
+        @Expect(error.GetPredecessors().size, 0)
+        @Expect(source.GetExpressions().size, 0)
+    }
+}

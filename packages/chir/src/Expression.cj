@@ -255,8 +255,10 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
 
     public func GetSuccessors(): ArrayList<Block> {
         let out = ArrayList<Block>()
-        for (operand in operands) {
-            if (let Some(block) <- (operand as Block)) { out.add(block) }
+        var index: Int64 = 0
+        while (index < operands.size) {
+            if (let Some(block) <- (operands[index] as Block)) { out.add(block) }
+            index++
         }
         return out
     }
