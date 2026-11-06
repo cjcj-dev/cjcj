@@ -134,6 +134,15 @@ readTest('public compiler execution cannot differ from the recorded retained com
   const result=publicRead(f.root);
   assert.equal(result.cjpm.ready,false);assert.match(result.cjpm.reason,/installed bytes differ: libexec\/other-compiler/);
 });
+readTest('ordinary tool runtime remains distinct from its producing compiler process runtime',async t=>{
+  const f=await fixture(t),p=f.input.files['tools/bin/cjpm'].producer;
+  const processRuntime=await f.write('.compiler-exec/runtime/lib/old-process-runtime.so','producer compiler process runtime');
+  p.build.inputs.artifacts.executionRuntime={sdkRelative:processRuntime.path,sha256:processRuntime.sha256};await f.save();
+  await f.write(processRuntime.path,'current compiler process runtime');
+  assert.equal(publicRead(f.root).cjpm.ready,true);
+  await f.write(p.build.inputs.artifacts.runtime.sdkRelative,'actual produced tool runtime changed');
+  assert.match(publicRead(f.root).cjpm.reason,/installed bytes differ: runtime\/lib/);
+});
 readTest('HLE validates its separately installed dependency input without inventing build history',async t=>{
   const f=await fixture(t),row=structuredClone(f.input.files['tools/bin/cjpm']),p=row.producer;
   const native=await fs.readFile('/usr/bin/true'),rel='tools/bin/hle',retained='.target-tools/'+rel;
