@@ -305,12 +305,29 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     }
 }
 
+private func ParseLinkageTypeString(linkageTypeStr: String): LLVMLinkage {
+    return match (linkageTypeStr) {
+        case "ExternalLinkage" => LLVMLinkage.External
+        case "AvailableExternallyLinkage" => LLVMLinkage.AvailableExternally
+        case "LinkOnceAnyLinkage" => LLVMLinkage.LinkOnceAny
+        case "LinkOnceODRLinkage" => LLVMLinkage.LinkOnceODR
+        case "WeakAnyLinkage" => LLVMLinkage.WeakAny
+        case "WeakODRLinkage" => LLVMLinkage.WeakODR
+        case "AppendingLinkage" => LLVMLinkage.Appending
+        case "InternalLinkage" => LLVMLinkage.Internal
+        case "PrivateLinkage" => LLVMLinkage.Private
+        case "ExternalWeakLinkage" => LLVMLinkage.ExternalWeak
+        case "CommonLinkage" => LLVMLinkage.Common
+        case _ => throw IllegalArgumentException("unexpected LinkageType metadata: " + linkageTypeStr)
+    }
+}
+
 private func SetSymbolLinkageType(cgMod: CGModule): Unit {
     let moduleHandle = cgMod.GetLLVMModule() ?? return
     let linkageTypeKind = LLVMGetMDKindID(cgMod.GetLLVMContext(), "LinkageType")
     var globalObject = unsafe { LLVMGetFirstGlobal(moduleHandle.raw) }
     while (!globalObject.isNull()) {
-        var hasLinkageType = false
+        var resolvedLinkage: Option<LLVMLinkage> = None
         if (linkageTypeKind != 0u32) {
             try (countPtr = LibC.malloc<UIntNative>().asResource()) {
                 unsafe { countPtr.value.write(UIntNative(0)) }
@@ -320,7 +337,14 @@ private func SetSymbolLinkageType(cgMod: CGModule): Unit {
                     var idx: UInt32 = 0u32
                     while (idx < UInt32(count)) {
                         if (unsafe { LLVMValueMetadataEntriesGetKind(entries, idx) } == linkageTypeKind) {
-                            hasLinkageType = true
+                            let md = unsafe { LLVMValueMetadataEntriesGetMetadata(entries, idx) }
+                            let mdVal = LLVMMetadataToValue(LLVMContextHandle(unsafe { LLVMGetTypeContext(LLVMTypeOf(globalObject)) }, owned: false), md)
+                            let ops = LLVMGetMDNodeOperands(mdVal)
+                            if (!ops.isEmpty()) {
+                                if (let Some(s) <- LLVMGetMDStringValue(ops[0])) {
+                                    resolvedLinkage = Some(ParseLinkageTypeString(s))
+                                }
+                            }
                             break
                         }
                         idx++
@@ -329,8 +353,7 @@ private func SetSymbolLinkageType(cgMod: CGModule): Unit {
                 }
             }
         }
-        if (hasLinkageType) {
-            let linkageType = GetLinkageTypeOfGlobalObject(globalObject)
+        if (let Some(linkageType) <- resolvedLinkage) {
             LLVMEraseGlobalMetadata(cgMod.GetLLVMContext(), globalObject, "LinkageType")
             if (unsafe { LLVMIsDeclaration(globalObject) } == 0) {
                 if (LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.WeakODR) ||
@@ -357,7 +380,7 @@ private func SetSymbolLinkageType(cgMod: CGModule): Unit {
     }
     var functionObject = unsafe { LLVMGetFirstFunction(moduleHandle.raw) }
     while (!functionObject.isNull()) {
-        var hasLinkageType = false
+        var resolvedLinkage: Option<LLVMLinkage> = None
         if (linkageTypeKind != 0u32) {
             try (countPtr = LibC.malloc<UIntNative>().asResource()) {
                 unsafe { countPtr.value.write(UIntNative(0)) }
@@ -367,7 +390,14 @@ private func SetSymbolLinkageType(cgMod: CGModule): Unit {
                     var idx: UInt32 = 0u32
                     while (idx < UInt32(count)) {
                         if (unsafe { LLVMValueMetadataEntriesGetKind(entries, idx) } == linkageTypeKind) {
-                            hasLinkageType = true
+                            let md = unsafe { LLVMValueMetadataEntriesGetMetadata(entries, idx) }
+                            let mdVal = LLVMMetadataToValue(LLVMContextHandle(unsafe { LLVMGetTypeContext(LLVMTypeOf(functionObject)) }, owned: false), md)
+                            let ops = LLVMGetMDNodeOperands(mdVal)
+                            if (!ops.isEmpty()) {
+                                if (let Some(s) <- LLVMGetMDStringValue(ops[0])) {
+                                    resolvedLinkage = Some(ParseLinkageTypeString(s))
+                                }
+                            }
                             break
                         }
                         idx++
@@ -376,8 +406,7 @@ private func SetSymbolLinkageType(cgMod: CGModule): Unit {
                 }
             }
         }
-        if (hasLinkageType) {
-            let linkageType = GetLinkageTypeOfGlobalObject(functionObject)
+        if (let Some(linkageType) <- resolvedLinkage) {
             LLVMEraseGlobalMetadata(cgMod.GetLLVMContext(), functionObject, "LinkageType")
             if (unsafe { LLVMIsDeclaration(functionObject) } == 0) {
                 if (LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.WeakODR) ||
