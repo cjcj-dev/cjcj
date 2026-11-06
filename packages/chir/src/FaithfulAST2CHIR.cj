@@ -67,7 +67,7 @@ import cjcj::sema.GenericInstantiation.GenericInstantiationManager
 import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, FileUtil,
     MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR, TaskQueue, TaskResult}
 import std.runtime.gc
-import std.process.Process
+import std.env.getVariable
 
 foreign {
     func CJSelfhostStrtoldToFloat32(value: CString): Float64
@@ -2309,7 +2309,7 @@ public class FaithfulAST2CHIR {
                     maybeUnreachable: work.unreachable, isComputingAnnos: isComputingAnnos,
                     initFuncsForAnnoFactory: work.annotationInits)
                 trans.SetTopLevel(work.decl)
-                let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+                let trace = (getVariable("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
                 let workerId = Thread.currentThread.id
                 if (trace) { eprintln("lowering-worker begin ${work.decl.mangledName} thread=${workerId}") }
                 try {

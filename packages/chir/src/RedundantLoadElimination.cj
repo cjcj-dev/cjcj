@@ -2,7 +2,7 @@ package cjcj::chir
 
 import cjcj::utils.{CJC_NULLPTR_CHECK, TaskQueue, TaskResult}
 import std.collection.*
-import std.process.Process
+import std.env.getVariable
 
 // Runs a function-local pass over funcs. A task may only write the body it was given and global-user
 // lists (AddUserOnly/RemoveUserOnly lock those); all results are drained before the first failure is rethrown.
@@ -12,7 +12,7 @@ func RunFunctionLocalPass<T>(funcs: Collection<Function>, threadNum: Int64, pass
     let results = ArrayList<TaskResult<T>>()
     for (fn in funcs) {
         results.add(taskQueue.AddTask<T>({ =>
-            let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+            let trace = (getVariable("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
             let worker = Thread.currentThread.id
             if (trace) { eprintln("CHIR_FUNCTION_TASK begin pass=${passName} function=${fn.GetIdentifier()} worker=${worker}") }
             try { return pass(fn) } finally {
