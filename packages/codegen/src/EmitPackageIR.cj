@@ -335,21 +335,29 @@ private func SetSymbolLinkageType(cgMod: CGModule): Unit {
                 let count = unsafe { countPtr.value.read() }
                 if (!entries.isNull()) {
                     var idx: UInt32 = 0u32
+                    var foundKind = false
+                    var tagStr: Option<String> = None
                     while (idx < UInt32(count)) {
                         if (unsafe { LLVMValueMetadataEntriesGetKind(entries, idx) } == linkageTypeKind) {
+                            foundKind = true
                             let md = unsafe { LLVMValueMetadataEntriesGetMetadata(entries, idx) }
                             let mdVal = LLVMMetadataToValue(LLVMContextHandle(unsafe { LLVMGetTypeContext(LLVMTypeOf(globalObject)) }, owned: false), md)
                             let ops = LLVMGetMDNodeOperands(mdVal)
                             if (!ops.isEmpty()) {
-                                if (let Some(s) <- LLVMGetMDStringValue(ops[0])) {
-                                    resolvedLinkage = Some(ParseLinkageTypeString(s))
-                                }
+                                tagStr = LLVMGetMDStringValue(ops[0])
                             }
                             break
                         }
                         idx++
                     }
                     unsafe { LLVMDisposeValueMetadataEntries(entries) }
+                    if (foundKind) {
+                        if (let Some(s) <- tagStr) {
+                            resolvedLinkage = Some(ParseLinkageTypeString(s))
+                        } else {
+                            throw IllegalArgumentException("unexpected LinkageType metadata")
+                        }
+                    }
                 }
             }
         }
@@ -388,21 +396,29 @@ private func SetSymbolLinkageType(cgMod: CGModule): Unit {
                 let count = unsafe { countPtr.value.read() }
                 if (!entries.isNull()) {
                     var idx: UInt32 = 0u32
+                    var foundKind = false
+                    var tagStr: Option<String> = None
                     while (idx < UInt32(count)) {
                         if (unsafe { LLVMValueMetadataEntriesGetKind(entries, idx) } == linkageTypeKind) {
+                            foundKind = true
                             let md = unsafe { LLVMValueMetadataEntriesGetMetadata(entries, idx) }
                             let mdVal = LLVMMetadataToValue(LLVMContextHandle(unsafe { LLVMGetTypeContext(LLVMTypeOf(functionObject)) }, owned: false), md)
                             let ops = LLVMGetMDNodeOperands(mdVal)
                             if (!ops.isEmpty()) {
-                                if (let Some(s) <- LLVMGetMDStringValue(ops[0])) {
-                                    resolvedLinkage = Some(ParseLinkageTypeString(s))
-                                }
+                                tagStr = LLVMGetMDStringValue(ops[0])
                             }
                             break
                         }
                         idx++
                     }
                     unsafe { LLVMDisposeValueMetadataEntries(entries) }
+                    if (foundKind) {
+                        if (let Some(s) <- tagStr) {
+                            resolvedLinkage = Some(ParseLinkageTypeString(s))
+                        } else {
+                            throw IllegalArgumentException("unexpected LinkageType metadata")
+                        }
+                    }
                 }
             }
         }
