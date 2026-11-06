@@ -63,6 +63,8 @@ export async function toolReadiness(root) {
       }
       const changed=[];
       let compilerUnknown=false;
+      const compilerFile=await fs.realpath(compilerExecutionPath(path.join(sdk,'bin','cjc'+native.exe)));
+      const compilerRelative=path.relative(sdk,compilerFile);
       if(installed)for(const key of ['platform','compilerFile','compilerCommit','runtimeCommit']) {
         if(installed.stage?.[key]!==stage[key])throw Error('installed SDK selection differs: '+key);
       }
@@ -88,7 +90,9 @@ export async function toolReadiness(root) {
           catch(error) { if(error.code!=='ENOENT')throw error; }
           compilerUnknown=physical!==undefined&&await fs.realpath(compilerExecutionPath(original))!==physical;
           if(compilerUnknown)await bytes(sdk,built.sdkRelative,built.sha256);
-          else if(!installed)input={sdkRelative:stage.compilerFile,sha256:built.sha256};
+          else if(!installed)input={sdkRelative:compilerRelative,sha256:built.sha256};
+          if(installed&&await fs.realpath(path.join(sdk,input.sdkRelative))!==compilerFile)
+            throw Error('installed compiler differs from public entry');
         }
         if(!input?.sdkRelative)throw Error('installed SDK input missing: '+key);
         await bytes(sdk,input.sdkRelative,input.sha256);
@@ -96,7 +100,7 @@ export async function toolReadiness(root) {
           // Older no-stage producers recorded the generic launcher, not the
           // compiler it exec'd. Checking today's retained bytes cannot recover
           // that missing build-time identity. Keep the historical fact intact.
-          if(compilerUnknown&&stage.compilerSha256)await bytes(sdk,stage.compilerFile,stage.compilerSha256);
+          if(compilerUnknown&&stage.compilerSha256)await bytes(sdk,compilerRelative,stage.compilerSha256);
         }
         if(!compilerUnknown||key!=='compiler')if(input.sha256!==built.sha256)changed.push(key);
       }

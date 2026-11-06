@@ -22,6 +22,7 @@ async function fixture(t) {
   for(const [name,rel]of [['compiler','libexec/compiler'],['stdCore','lib/linux_x86_64_cjnative/libcangjie-std-core.a'],['runtime','runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so']]) {
     const row=await write(rel,native);artifacts[name]={...row,sdkRelative:rel};
   }
+  await fs.mkdir(path.join(root,'bin'));await fs.symlink('../libexec/compiler',path.join(root,'bin/cjc'));
   const input={files:{},payloadFiles:{}};
   for(const name of ['cjpm','cjprof']) {
     const rel='tools/bin/'+name,retained='.target-tools/'+rel;
@@ -107,7 +108,7 @@ readTest('no-stage producer records the executed compiler; historical launcher-o
   const f=await fixture(t),native=await fs.readFile('/usr/bin/true');
   const launcher=await f.write('bin/cjcj-stage1',Buffer.concat([native,Buffer.from('launcher')]));
   const recipe=await f.write('bin/cjcj-stage1.entry','cjcj-sdk-entry-v1\n1\nlibexec/compiler\nlinux\nnative-target:x64\nruntime/lib/linux_x86_64_cjnative\n');
-  await fs.symlink('cjcj-stage1',path.join(f.root,'bin/cjc'));
+  await fs.unlink(path.join(f.root,'bin/cjc'));await fs.symlink('cjcj-stage1',path.join(f.root,'bin/cjc'));
   const config={target:{runtimeLibSubdir:()=> 'linux_x86_64_cjnative',spec:{exeSuffix:'',os:'linux'}}};
   const withStage=await sdkInputs(config,f.root);
   await fs.unlink(path.join(f.root,'STAGE-INPUTS.json'));
@@ -125,6 +126,13 @@ readTest('no-stage producer records the executed compiler; historical launcher-o
   p.build.inputs=noStage;await f.save();assert.equal(publicRead(f.root).cjpm.ready,true);
   await f.write('libexec/compiler','actual compiler changed');
   assert.match(publicRead(f.root).cjpm.reason,/installed bytes differ/);
+});
+readTest('public compiler execution cannot differ from the recorded retained compiler',async t=>{
+  const f=await fixture(t);
+  await f.write('libexec/other-compiler','different compiler');
+  await fs.unlink(path.join(f.root,'bin/cjc'));await fs.symlink('../libexec/other-compiler',path.join(f.root,'bin/cjc'));
+  const result=publicRead(f.root);
+  assert.equal(result.cjpm.ready,false);assert.match(result.cjpm.reason,/installed bytes differ: libexec\/other-compiler/);
 });
 readTest('HLE validates its separately installed dependency input without inventing build history',async t=>{
   const f=await fixture(t),row=structuredClone(f.input.files['tools/bin/cjpm']),p=row.producer;
