@@ -9,7 +9,7 @@ import cjcj::option.OptimizationLevel
 import cjcj::option.OutputMode
 import cjcj::option.enumIndex
 import cjcj::utils.{CJC_ASSERT, TaskQueue, TaskResult}
-import std.process.Process
+import std.env.getVariable
 
 private var currentOptLevel: OptimizationLevel = OptimizationLevel.O0
 private var currentOutputMode: OutputMode = OutputMode.EXECUTABLE
@@ -1655,7 +1655,7 @@ public class PartialInstantiation {
                 results.add(queue.AddTask<(Node, ArrayList<(Node, Node)>)>({ =>
                     let pairs = ArrayList<(Node, Node)>()
                     let worker = PartialInstantiation(deferRegistration: true)
-                    let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+                    let trace = (getVariable("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
                     let id = Thread.currentThread.id
                     if (trace) { eprintln("generic-clone-worker begin thread=${id}") }
                     try {

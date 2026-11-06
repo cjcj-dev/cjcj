@@ -13,7 +13,7 @@ import cjcj::mangle.{GetOptPkgName, MANGLE_CANGJIE_PREFIX, MANGLE_FUNC_PARAM_TYP
     MANGLE_GLOBAL_PACKAGE_INIT_PREFIX, MANGLE_VOID_TY_SUFFIX, SPECIAL_NAME_FOR_INIT_RESET_FUNCTION}
 import cjcj::utils.{CJC_ASSERT, FileUtil, TaskQueue, TaskResult}
 import std.collection.*
-import std.process.Process
+import std.env.getVariable
 
 private func appendTokens(target: ArrayList<Token>, source: ArrayList<Token>): Unit {
     for (token in source) {
@@ -1347,7 +1347,7 @@ public class MacroEvaluation {
             call.reportsForServer = !flushReports
             call.isDataReady = false
             results.add(queue.AddTask<Unit>({ =>
-                let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+                let trace = (getVariable("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
                 let worker = Thread.currentThread.id
                 if (trace) { eprintln("macro-worker begin ${call.GetFullName()} thread=${worker}") }
                 try { EvalOneMacroCall(call) } finally {

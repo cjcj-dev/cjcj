@@ -10,7 +10,7 @@ import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::sema.*
 import cjcj::sema.FFI.*
 import cjcj::utils.{TaskQueue, TaskResult}
-import std.process.Process
+import std.env.getVariable
 
 private class BoolBox {
     public var value: Bool
@@ -339,7 +339,7 @@ private func RunLegalityChecks<T>(roots: ArrayList<Node>, threadNum: Int64,
     let results = ArrayList<TaskResult<ArrayList<T>>>()
     for (root in roots) {
         results.add(queue.AddTask<ArrayList<T>>({ =>
-            let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+            let trace = (getVariable("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
             let worker = Thread.currentThread.id
             if (trace) { eprintln("sema-legality-worker begin thread=${worker}") }
             try { return check(root) } finally {

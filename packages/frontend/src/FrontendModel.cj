@@ -59,7 +59,7 @@ import cjcj::utils.{ProfileRecorder, TaskQueue, TaskResult}
 import cjcj::utils.STANDARD_LIBS
 import std.collection.*
 import std.sort.*
-import std.process.Process
+import std.env.getVariable
 import std.fs.File as CjoPrefetchFile
 import std.fs.OpenMode
 
@@ -3230,7 +3230,7 @@ public class CjoSignatureMaterializer {
             let queue = TaskQueue(recordDecodeJobs)
             let results = ArrayList<TaskResult<ArrayList<CjoFlatDecl>>>()
             let chunk = (declCount + recordDecodeJobs - 1) / recordDecodeJobs
-            let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+            let trace = (getVariable("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
             var begin: Int64 = 0
             while (begin < declCount) {
                 let start = begin
@@ -8897,7 +8897,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 
     private func TracePrefetchedCjoBytes(event: String): Unit {
-        if ((Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
+        if ((getVariable("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
             eprintln("CJCJ_CJO_PREFETCH ${event} pending=${prefetchedCjoBytes} peak=${peakPrefetchedCjoBytes} limit=${IMPORTED_CJO_PREFETCH_BYTES}")
         }
     }

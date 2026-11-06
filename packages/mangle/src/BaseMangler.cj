@@ -1,7 +1,7 @@
 package cjcj::mangle
 
 import std.collection.*
-import std.process.Process
+import std.env.getVariable
 import cjcj::ast.*
 import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK, TaskQueue, TaskResult}
 
@@ -969,7 +969,7 @@ public open class BaseMangler {
             worker.exportIdMode = true
             for ((name, context) in manglerCtxTable) { worker.manglerCtxTable[name] = context }
             results.add(queue.AddTask<Unit>({ =>
-                let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+                let trace = (getVariable("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
                 let id = Thread.currentThread.id
                 let first = group.entries[0][0]
                 if (trace) { eprintln("export-id-worker begin group=${first} thread=${id}") }
