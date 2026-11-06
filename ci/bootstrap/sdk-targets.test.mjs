@@ -411,3 +411,19 @@ test('component install carries root assets and the tool consumer preserves them
  for(const name of names)assert.equal(await fs.readFile(root+'/consumer/'+name,'utf8'),name+' selected producer bytes');
  console.log('ROOT_ASSETS_NORMAL_INSTALL_CONSUMER_REACHED finite=true');
 });
+
+
+test('explicit std policy reaches every native std producer; historical release-labelled inputs stay unchanged',()=>{
+ for(const platform of Object.keys(PLATFORMS))for(const type of ['debug','release','relwithdebinfo']){
+  const input=inputs(platform);input.stdBuildType=type;
+  const config=createBootstrapTargets(input);validateBootstrapTargets(config);
+  for(const stage of config.stages)for(const command of stage.commands||[]){
+   const argv=command.argv;
+   if(argv.includes('--kind'))assert.equal(argv.includes('--build-type'),argv[argv.indexOf('--kind')+1]==='std');
+   if(argv[argv.indexOf('--kind')+1]==='std')assert.equal(argv[argv.indexOf('--build-type')+1],type);
+  }
+ }
+ const input=inputs('linux_x86_64');input.buildType='release';
+ assert.ok(!JSON.stringify(createBootstrapTargets(input).stages).includes('--build-type'));
+ for(const type of ['Release','minsizerel','',null])assert.throws(()=>createBootstrapTargets({...input,stdBuildType:type}),/STD_BUILD_TYPE/);
+});

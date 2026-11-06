@@ -19,6 +19,7 @@ import {runtimeSourceRepository} from '../../build/lib/runtime-source-inputs.mjs
 import {readInstalledNativeAst} from './installed-native-ast.mjs';
 import {installPath as mingwInstallPath} from '../../build/toolchain/mingw.mjs';
 import {installationSelection,resolveSources} from './native-source-selection.mjs';
+import {stdBuildType,flag} from './sdk-std-resume.mjs';
 const execute = promisify(execFile);
 
 export async function gitInput(repository, commit) {
@@ -48,6 +49,9 @@ export async function installedFinalStd(supplied, input) {
     && row.argv.includes('install') && row.argv[row.argv.indexOf('--prefix') + 1] === install
     && row.cwd === rows[built]?.cwd && row.rc === 0 && !row.signal);
   if (built < 0 || installed < 0) throw Error('FINAL_STD_REUSE_PRODUCER');
+  const producedType = flag(rows[built].argv,'-t') ?? flag(rows[built].argv,'--build-type');
+  if (producedType === undefined || stdBuildType(producedType) !== stdBuildType(input.stdBuildType))
+    throw Error('FINAL_STD_REUSE_BUILD_TYPE');
   const provenance = await fs.readFile(path.join(install, 'PROVENANCE.txt'), 'utf8');
   const field = name => provenance.split('\n').find(line => line.startsWith(name+' = '))?.slice(name.length+3).trim();
   if (field('STD_SOURCE_COMMIT') !== input.stdlib.commit
@@ -221,6 +225,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   for (const rel of installations.stage2 ? [] : ['cjcj-stage1.mjs', 'stage1-transform.mjs'])
     await fs.stat(path.join(tools.privateRoot, 'ts/src/sharedbuild', rel));
   const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,
+    ...(descriptor.stdBuildType === undefined ? {} : {stdBuildType:stdBuildType(descriptor.stdBuildType)}),
     ...(descriptor.nativePair ? {nativePair:descriptor.nativePair} : {}), ...rows, stdlib:stdlib??rows.runtime,
     ...(separateStd?{stdlibCommit:stdlib.commit}:{}), sourceSelection, tools,
     archive:descriptor.archive, finalStd:descriptor.finalStd, deliveryStage:descriptor.deliveryStage};

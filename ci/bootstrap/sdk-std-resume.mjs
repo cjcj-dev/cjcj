@@ -8,10 +8,17 @@ export function flag(argv, name) {
 const sameCommand = (a, b) => a.cwd === b.cwd && JSON.stringify(a.argv) === JSON.stringify(b.argv);
 const nativeStd = row => Array.isArray(row.argv) && path.basename(row.argv[1] || '') === 'sdk-native-stage.mjs'
   && flag(row.argv, '--kind') === 'std';
+// No policy in an old native configuration means its historical debug build,
+// even if an unrelated outer source-build invocation was called "release".
+export function stdBuildType(value = 'relwithdebinfo') {
+  if (!['debug','release','relwithdebinfo'].includes(value)) throw new Error('STD_BUILD_TYPE '+value);
+  return value;
+}
 export async function acceptInstalledStd({file, source, output, commit, sdk, runtime, link, platform,
-  compilerRuntime, heap, previous, expected}) {
+  compilerRuntime, heap, previous, expected, buildType}) {
   if (!file) throw new Error('STD_RESUME_RECORD missing');
   if (!previous || !expected) throw new Error('WORK_INPUTS_MISSING');
+  const selectedType = stdBuildType(buildType === undefined ? flag(expected.argv, '--build-type') : buildType);
   if (compilerRuntime !== 'target') throw new Error('STD_RESUME_RECORD compiler-runtime');
   let text;
   try { text = await fs.readFile(file, 'utf8'); }
@@ -28,6 +35,7 @@ export async function acceptInstalledStd({file, source, output, commit, sdk, run
   const required = {source, output, commit, sdk, runtime, platform, 'compiler-runtime': compilerRuntime};
   if (!identity || !sameCommand(identity, expected)
       || Object.entries(required).some(([k,v]) => flag(identity.argv, '--'+k) !== v)
+      || stdBuildType(flag(identity.argv, '--build-type')) !== selectedType
       || flag(identity.argv, '--heap') !== heap
       || identity.argv.includes('--resume-installed')) throw new Error('STD_RESUME_RECORD identity');
   const last = previous.commands?.filter(row => nativeStd(row)
@@ -44,7 +52,7 @@ export async function acceptInstalledStd({file, source, output, commit, sdk, run
   const stdlib = path.join(source, 'stdlib');
   const actions = after.slice(0, end).filter(row => row.cwd === stdlib && Array.isArray(row.argv)
     && row.argv.includes('build.py'));
-  const buildArgv = ['python3','-I','build.py','build','-t','relwithdebinfo','--jobs'];
+  const buildArgv = ['python3','-I','build.py','build','-t',selectedType,'--jobs'];
   const buildCommand = actions[0], build = actions[1], installCommand = actions[2], install = actions[3];
   const successful = (command, result) => command?.event === 'target-command'
     && result?.event === 'target-result' && sameCommand(command, result)

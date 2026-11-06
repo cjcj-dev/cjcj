@@ -6,6 +6,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
+import {stdBuildType} from './sdk-std-resume.mjs';
 export const BOOTSTRAP_PHASES=Object.freeze(['stage0','stage0-run','std-bootstrap','stage1-initial','stage1-std','stage2','stage3-std','stage3']);
 import {readSourcePins} from '../native-llvm-inputs.mjs';
 import {retainedToolPath,toolExecutionLibraries} from '../../build/srcbuild/tool-layout.mjs';
@@ -177,6 +178,7 @@ export function bootstrapPhases(input) {
 }
 export function createBootstrapTargets(input) {
   const {work,install,platform,host,llvm,runtime,ast,h1,compiler,stdlib,tools}=input;
+  stdBuildType(input.stdBuildType);
   const finalStage=input.deliveryStage??'stage3';
   if(!['stage3','stage2-target-sdk'].includes(finalStage))throw new Error('TARGET_DELIVERY_STAGE');
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
@@ -203,6 +205,7 @@ export function createBootstrapTargets(input) {
   const stageArg=(kind,source,sdk,output,phase,compilerRuntime)=>({argv:[process.execPath,stageEntry,'--kind',kind,'--source',source,
     '--sdk',sdk,'--runtime',runtime.install,'--output',output,'--platform',platform,
     '--commit',kind==='h1'?h1.commit:kind==='std'?stdlib.commit:compiler.commit,
+    ...(kind==='std' && input.stdBuildType !== undefined ? ['--build-type',input.stdBuildType] : []),
     ...(phase?['--phase',phase,'--std-input',phase==='stage3'?out('stage3-std'):path.join(work,'build/stage1-std/std')]:[]),...(compilerRuntime?['--compiler-runtime',compilerRuntime]:[]),
     ...(kind==='h1'?['--host',host.install,'--private-tools',tools.privateRoot,...(tools.cc?['--cc',tools.cc]:[])]:[]),...(tools.zx?['--zx',tools.zx]:[])]});
   const compilerName='bin/cjcj-stage1'+exe;

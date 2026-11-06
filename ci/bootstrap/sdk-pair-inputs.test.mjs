@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {validateSourceInputs} from './sdk-inputs.mjs';
+import {validateSourceInputs, installedFinalStd} from './sdk-inputs.mjs';
 import {buildFlow} from './sdk-flow.mjs';
 
 const gitEnv = {...process.env, GIT_AUTHOR_NAME: 'Zxilly', GIT_AUTHOR_EMAIL: 'zxilly@outlook.com',
@@ -46,4 +46,25 @@ test('resume without a recorded result is refused before the later command', asy
       {id: 'b', depends: ['a'], commands: [{argv: [process.execPath, '-e', 'process.exit(98)']}]}]};
   await assert.rejects(buildFlow(config, {from: 'b', through: 'b', packageOutput: false}), /WORK_INPUTS_MISSING/);
   assert.equal(await fs.stat(path.join(root, 'work', 'build-result.json')).then(() => true, () => false), false);
+});
+
+
+test('explicit final std reuse must retain the actual producer build type',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'std-policy-reuse-'));
+ const install=root+'/install',commands=root+'/commands.json';
+ for(const rel of ['modules/linux_x86_64_cjnative/std/std.core.cjo','lib/linux_x86_64_cjnative/libcangjie-std-core.a']){
+  await fs.mkdir(path.dirname(install+'/'+rel),{recursive:true});await fs.writeFile(install+'/'+rel,'fixture');
+ }
+ const commit='a'.repeat(40),compiler='b'.repeat(40);
+ await fs.writeFile(install+'/PROVENANCE.txt',`STD_SOURCE_COMMIT = ${commit}\nBUILT_BY_CJC = ${compiler}\nCOLOURED = true\n`);
+ const input={platform:'linux_x86_64',stdlib:{commit},stage2:{compilerCommit:compiler}};
+ for(const type of ['debug','release','relwithdebinfo']){
+  await fs.writeFile(commands,JSON.stringify([
+   {cwd:root,argv:['python3','-I','build.py','build','-t',type],rc:0},
+   {cwd:root,argv:['python3','-I','build.py','install','--prefix',install],rc:0}]));
+  assert.deepEqual(await installedFinalStd({install,commands},{...input,stdBuildType:type}),{install,commands});
+  await assert.rejects(installedFinalStd({install,commands},{...input,stdBuildType:type==='debug'?'release':'debug'}),/FINAL_STD_REUSE_BUILD_TYPE/);
+  if(type==='relwithdebinfo')await installedFinalStd({install,commands},input);
+  else await assert.rejects(installedFinalStd({install,commands},input),/FINAL_STD_REUSE_BUILD_TYPE/);
+ }
 });

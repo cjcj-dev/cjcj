@@ -39,10 +39,11 @@ async function git(repo, ...args) {
   assert.equal(r.rc, 0, r.text);
   return r.stdout.trim();
 }
-async function prepare(name, explicit) {
+async function prepare(name, explicit, stdBuildType) {
   const directory = path.join(root, name), descriptor = structuredClone(original);
   descriptor.work = path.join(directory, 'work');
   descriptor.install = path.join(directory, 'install');
+  if (stdBuildType !== undefined) descriptor.stdBuildType = stdBuildType;
   descriptor.sources.compiler = process.env.SDK_STDLIB_COMPILER_REPOSITORY
     || fileURLToPath(new URL('../../', import.meta.url));
   delete descriptor.stdlibCommit; delete descriptor.sources.stdlib;
@@ -187,4 +188,17 @@ test('public bootstrap and both stage3 wrappers consume real full or C2 phase co
     const plan=await read(f.configFile);plan.stages=plan.stages.filter(s=>s.id!=='stage2');await write(f.configFile,plan);
     r=await run([process.execPath,bootstrap,'--config',f.configFile,'--stage','all','--dry-run']);assert.equal(r.rc,1,r.text);assert.match(r.text,/BOOTSTRAP_PHASE_MISSING stage2/);
   }
+});
+
+
+test('formal descriptor carries explicit std build policy into every producer',async()=>{
+ for(const type of ['release','debug','relwithdebinfo']){
+  const f=await prepare('policy-'+type,true,type);
+  assert.equal(f.config.bootstrapInputs.stdBuildType,type);
+  for(const stage of f.config.stages)for(const {argv}of stage.commands||[]){
+   if(argv[argv.indexOf('--kind')+1]==='std')assert.equal(argv[argv.indexOf('--build-type')+1],type);
+  }
+  const repeat=await run([process.execPath,entry],{CJCJ_SDK_TARGETS:f.configFile});
+  assert.equal(repeat.rc,0,repeat.text);
+ }
 });
