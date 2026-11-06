@@ -65,7 +65,7 @@ class ParallelTraceConsumersTest {
         for (_ in 0..2) { calls.add(MacroCall(MacroExpandExpr())) }
         var failed = false
         try {
-            MacroEvaluation(instance, MacroCollector(), false).EvaluateReadyNativeCalls(calls, flushReports: false)
+            MacroEvaluation(MacroHostAdapter(instance), MacroCollector(), false).EvaluateReadyNativeCalls(calls, flushReports: false)
         } catch (e: IllegalStateException) {
             @Expect(e.message, "macro task submitted to an unavailable runtime")
             failed = true
