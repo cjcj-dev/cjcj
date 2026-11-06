@@ -9,7 +9,7 @@ import {execFile} from 'node:child_process';
 import {promisify, isDeepStrictEqual} from 'node:util';
 import {randomUUID} from 'node:crypto';
 import {atomicJson, readJson, privateRoot, fileDigest} from './sdk-flow.mjs';
-import {FIXED_INPUTS} from './sdk-targets.mjs';
+import {FIXED_INPUTS, compilerExecutionRoot} from './sdk-targets.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {stage2Input} from './sdk-stage2-input.mjs';
 import {receiveNativeRuntime} from './native-runtime-input.mjs';
@@ -302,29 +302,55 @@ export async function prepareSourceBuildInputs(config, env=process.env, startSta
 // without constructing the bootstrap graph or requiring private stage1 tools.
 export async function prepareInstallInputs(descriptor) {
   const selection=installationSelection(descriptor.selection);
-  const {platform,targetComponents:target,compilerExecution:execution}=selection,native=sdkPlatform(platform),execNative=sdkPlatform(execution.platform);
+  const {platform,targetComponents:target,compilerExecution:execution}=selection,native=sdkPlatform(platform);
   const work=await privateRoot(descriptor.work),install=await privateRoot(descriptor.install);
+  let dependencyRoot,executionPlatform=platform;
+  if(descriptor.layout==='native-output') {
+    // build.py installs the compiler and its linked inputs into one native
+    // output. An install-only caller cannot replace just that compiler.
+    const product=path.join(target.compiler.install,'bin','cjc'+native.exe);
+    if(await fs.realpath(product)!==await fs.realpath(target.compiler.product))throw Error('INSTALL_NATIVE_COMPILER_PRODUCT');
+    dependencyRoot=target.compiler.install;
+  } else {
+    const facts=await readJson(path.join(target.compiler.install,'compiler-inputs.json')).catch(error=>{
+      if(error.code!=='ENOENT')throw error;return null;
+    });
+    if(facts) {
+      if(facts.commit!==target.compiler.commit||await fileDigest(target.compiler.product)!==facts.compilerSha256)
+        throw Error('INSTALL_COMPILER_PRODUCT');
+      dependencyRoot=path.join(target.compiler.install,'.compiler-exec');
+      if(await fileDigest(path.join(dependencyRoot,'lib',native.tuple,'libcangjie-std-core.a'))!==facts.stdCoreSha256)
+        throw Error('INSTALL_COMPILER_STD_INPUT');
+    } else {
+      // Reinstall an existing installed compiler with the execution inputs it
+      // actually uses. Read the existing stage/entry layout, never manufacture
+      // historical native-stage facts for a completed raw compiler output.
+      const stage=await readJson(path.join(target.compiler.install,'STAGE-INPUTS.json'));
+      if(stage.compilerCommit!==target.compiler.commit||await fileDigest(target.compiler.product)!==stage.compilerSha256)
+        throw Error('INSTALL_COMPILER_PRODUCT');
+      dependencyRoot=compilerExecutionRoot(target.compiler.install,stage.selection);
+      executionPlatform=stage.selection.compilerExecution.platform;
+    }
+  }
+  // Dependency locations belong to the compiler producer. The target program
+  // and the package-manager host retain their independent selections. In
+  // particular, an explicit old-but-existing execution tuple cannot override
+  // these produced inputs.
+  Object.assign(execution,{role:'separate',platform:executionPlatform,compiler:{...target.compiler},
+    ...Object.fromEntries(['runtime','std','llvm'].map(name=>[name,{install:dependencyRoot,platform:executionPlatform}]))});
+  const execNative=sdkPlatform(executionPlatform);
   const required=[
     target.compiler.product,
     target.std.install+'/modules/'+native.tuple+'/std/std.core.cjo',
     target.std.install+'/lib/'+native.tuple+'/libcangjie-std-core.a',
     target.runtime.install+'/runtime/lib/'+native.tuple+'/libcangjie-runtime'+native.shared,
     target.llvm.install+'/third_party/llvm/bin/llc'+native.exe,
-    ...['runtime','std','llvm'].map(name=>execution[name].install+(name==='runtime'
+    ...['runtime','std','llvm'].map(name=>dependencyRoot+(name==='runtime'
       ?'/runtime/lib/'+execNative.tuple+'/libcangjie-runtime'+execNative.shared:name==='std'
         ?'/lib/'+execNative.tuple+'/libcangjie-std-core.a':'/third_party/llvm/'+execNative.llvmDirectory+'/'+execNative.llvmLibrary)),
   ];
   for(const file of required)if(!(await fs.stat(file)).isFile())throw Error('INSTALL_INPUT_FILE '+file);
-  // build.py's native output carries its own dependency graph. A separately
-  // produced self-host compiler instead records the std archive it linked;
-  // selecting an existing std directory independently must not change it.
-  if(descriptor.layout!=='native-output') {
-    const facts=await readJson(path.join(target.compiler.install,'compiler-inputs.json'));
-    if(facts.commit!==target.compiler.commit||await fileDigest(target.compiler.product)!==facts.compilerSha256)
-      throw Error('INSTALL_COMPILER_PRODUCT');
-    if(await fileDigest(path.join(execution.std.install,'lib',execNative.tuple,'libcangjie-std-core.a'))!==facts.stdCoreSha256)
-      throw Error('INSTALL_COMPILER_STD_INPUT');
-  }
+  console.log('INSTALL_COMPILER_EXECUTION_FROM_PRODUCER '+JSON.stringify({compiler:target.compiler.product,dependencyRoot,platform:executionPlatform}));
   // Cross installation is allowed, execution belongs to its native runner.
   const cross=platform!==hostPlatform();
   return {...descriptor,work,install,platform,selection,cross};
