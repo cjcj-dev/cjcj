@@ -18,6 +18,9 @@ test('native compiler build/install, source restoration and repeated publication
  const compile=run('cc',[source+'/main.c','-o',root+'/parent']);assert.equal(compile.status,0,compile.stderr);
  await write(sdk+'/STAGE-INPUTS.json',JSON.stringify({compilerFile:'bin/parent'}));await fs.mkdir(sdk+'/bin',{recursive:true});await fs.copyFile(root+'/parent',sdk+'/bin/parent');
  await write(sdk+'/PROVENANCE.txt','finite C fixture; not production std\n');await write(sdk+'/lib/linux_x86_64_cjnative/libcangjie-std-core.a','finite fixture identity\n');
+ await write(sdk+'/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','produced compiler runtime input');
+ await write(sdk+'/third_party/llvm/lib/libLLVM-15.so','produced compiler LLVM input');
+ await write(sdk+'/.host/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','older build-process runtime');
  await write(sdk+'/.host/tools/bin/cjpm',`#!${process.execPath}\nconst fs=require('fs'),cp=require('child_process');fs.appendFileSync(${JSON.stringify(root+'/calls')},'build\\n');if(process.env.SDK_COMPILER_FIXTURE_FAIL)process.exit(7);fs.mkdirSync('target/release/bin',{recursive:true});cp.execFileSync('cc',['main.c','-o','target/release/bin/cjcj::cjc']);`,0o755);
  for(const args of [['init','-q',source],['-C',source,'add','.'],['-C',source,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','test: finite native compiler adapter']]){const p=run('git',args);assert.equal(p.status,0,p.stderr);}
  const commit=run('git',['-C',source,'rev-parse','HEAD']).stdout.trim(),tree=run('git',['-C',source,'rev-parse','HEAD^{tree}']).stdout.trim();
@@ -33,7 +36,12 @@ test('native compiler build/install, source restoration and repeated publication
   await write(root+'/'+name+'.stdout',p.stdout||'');await write(root+'/'+name+'.stderr',p.stderr||'');results.push({name,rc:p.status,signal:p.signal});await write(root+'/results.json',JSON.stringify(results));
   assert.equal(p.status,expected,p.stderr);assert.equal(await fs.readFile(source+'/cjpm.toml','utf8'),'compile-option = "-O1"\n');
   assert.equal(run('git',['-C',source,'status','--porcelain','--untracked-files=no']).stdout,'');
-  if(expected===0){const value=run(output+'/bin/cjcj-stage1',[]);assert.equal(value.status,0);assert.equal(value.stdout.trim(),'42');}
+  if(expected===0){const value=run(output+'/bin/cjcj-stage1',[]);assert.equal(value.status,0);assert.equal(value.stdout.trim(),'42');
+   console.log('COMPILER_PRODUCED_DEPENDENCIES_ASSERTION_REACHED '+name);
+   for(const relative of ['runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
+    'lib/linux_x86_64_cjnative/libcangjie-std-core.a','third_party/llvm/lib/libLLVM-15.so'])
+    assert.deepEqual(await fs.readFile(output+'/.compiler-exec/'+relative),await fs.readFile(sdk+'/'+relative));
+  }
  }
  assert.equal((await fs.readFile(root+'/calls','utf8')).trim().split('\n').length,3);
  assert((await fs.readdir(root)).some(n=>n.startsWith('output.previous-')));

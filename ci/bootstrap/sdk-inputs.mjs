@@ -315,6 +315,16 @@ export async function prepareInstallInputs(descriptor) {
         ?'/lib/'+execNative.tuple+'/libcangjie-std-core.a':'/third_party/llvm/'+execNative.llvmDirectory+'/'+execNative.llvmLibrary)),
   ];
   for(const file of required)if(!(await fs.stat(file)).isFile())throw Error('INSTALL_INPUT_FILE '+file);
+  // build.py's native output carries its own dependency graph. A separately
+  // produced self-host compiler instead records the std archive it linked;
+  // selecting an existing std directory independently must not change it.
+  if(descriptor.layout!=='native-output') {
+    const facts=await readJson(path.join(target.compiler.install,'compiler-inputs.json'));
+    if(facts.commit!==target.compiler.commit||await fileDigest(target.compiler.product)!==facts.compilerSha256)
+      throw Error('INSTALL_COMPILER_PRODUCT');
+    if(await fileDigest(path.join(execution.std.install,'lib',execNative.tuple,'libcangjie-std-core.a'))!==facts.stdCoreSha256)
+      throw Error('INSTALL_COMPILER_STD_INPUT');
+  }
   // Cross installation is allowed, execution belongs to its native runner.
   const cross=platform!==hostPlatform();
   return {...descriptor,work,install,platform,selection,cross};

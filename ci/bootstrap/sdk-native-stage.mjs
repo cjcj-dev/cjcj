@@ -133,6 +133,13 @@ export async function nativeStage(options, {signal} = {}) {
     const product=await resolveProductBinary(path.join(target,'release/bin'),options.phase||'stage2',{windows:native.os==='win32'});
     await assembleDirectory(output, async destination => {
     await copyOutputs(destination,[{from:product,to:'bin/cjcj-stage1'+native.exe},
+      // These are the new compiler's link inputs. The package manager's host
+      // execution libraries can belong to an older compiler and must not travel
+      // with this output. Carry dependencies as normal producer artifacts so an
+      // independent installer need not select them again.
+      {from:path.join(sdk,'runtime/lib',native.tuple),to:'.compiler-exec/runtime/lib/'+native.tuple},
+      {from:path.join(sdk,'lib',native.tuple),to:'.compiler-exec/lib/'+native.tuple},
+      {from:path.join(sdk,'third_party/llvm',native.llvmDirectory),to:'.compiler-exec/third_party/llvm/'+native.llvmDirectory},
       // runtime_shim/build_shim.mjs links the host runtime into the source tree as
       // ${repo}/target/release/runtime for the compiler's relative lookup. That is
       // a build-tree facility, not a package member: copying it would carry an
