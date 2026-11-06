@@ -135,12 +135,15 @@ readTest('HLE validates its separately installed dependency input without invent
   const node=await f.write('tools/bin/node',native),cjbind=await f.write('tools/dtsparser/node_modules/.bin/cjbind',native);
   await f.write('tools/dtsparser/package.json',JSON.stringify({dependencies:{typescript:'4.9.5'}}));
   await f.write('tools/dtsparser/node_modules/typescript/package.json',JSON.stringify({name:'typescript',version:'4.9.5'}));
-  const dependency=await f.write('tools/dtsparser/DEPENDENCIES.json',JSON.stringify({platform:'linux_x86_64',node:{source:'fixture://node',version:'fixture',sha256:node.sha256},cjbind:{source:'fixture://cjbind',version:'fixture',sha256:cjbind.sha256}}));
+  const dependency=await f.write('tools/dtsparser/DEPENDENCIES.json',JSON.stringify({platform:'linux_x86_64',modules:{source:'fixture://modules',version:'4.9.5'},node:{source:'fixture://node',version:'fixture',sha256:node.sha256},cjbind:{source:'fixture://cjbind',version:'fixture',sha256:cjbind.sha256}}));
   f.input.installationInputs={artifacts:{hleDependencies:{sdkRelative:dependency.path,sha256:dependency.sha256}}};
   f.input.files[rel]=row;await f.save();const before=JSON.stringify(p);
   assert.equal(publicRead(f.root).hle.ready,true,publicRead(f.root).hle.reason);
   assert.equal(JSON.stringify(p),before);assert.equal(p.build.inputs.artifacts.hleDependencies,undefined);
-  delete f.input.installationInputs;await f.save();assert.match(publicRead(f.root).hle.reason,/installed SDK input missing: hleDependencies/);
+  delete f.input.installationInputs;await f.save();assert.equal(publicRead(f.root).hle.ready,true,'separate producer record does not require compiler build history');
+  const bytes=await fs.readFile(path.join(f.root,dependency.path));await fs.unlink(path.join(f.root,dependency.path));
+  assert.match(publicRead(f.root).hle.reason,/DEPENDENCIES.json/);
+  await f.write(dependency.path,bytes);
   f.input.installationInputs={artifacts:{hleDependencies:{sdkRelative:dependency.path,sha256:dependency.sha256}}};await f.save();
   await f.write(node.path,'changed Node');assert.match(publicRead(f.root).hle.reason,/installed bytes differ: tools\/bin\/node/);
   assert.equal(publicRead(f.root).cjpm.ready,true,'independent compiler/tool control');

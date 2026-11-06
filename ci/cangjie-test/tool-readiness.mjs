@@ -70,11 +70,11 @@ export async function toolReadiness(root) {
         const built=facts.build.inputs?.artifacts?.[key];
         if(key==='hleDependencies'&&!built) {
           // Node/parser/cjbind are separately produced and installed after HLE
-          // compilation. Bind their existing installation input, then verify
-          // its producer record and payloads below; do not invent a build fact.
+          // compilation. If captured, check the installation input as well.
+          // Always verify their own producer record and payloads below; the
+          // compiler's SDK capture need not predate this separate installation.
           const dependency=inputs.installationInputs?.artifacts?.[key];
-          if(!dependency?.sdkRelative)throw Error('installed SDK input missing: '+key);
-          await bytes(sdk,dependency.sdkRelative,dependency.sha256);
+          if(dependency)await bytes(sdk,dependency.sdkRelative,dependency.sha256);
           continue;
         }
         if(!built?.sdkRelative)throw Error('producer SDK input missing: '+key);
@@ -157,6 +157,7 @@ export async function toolReadiness(root) {
       if(name==='hle') {
         const deps=await readJson(path.join(sdk,'tools/dtsparser/DEPENDENCIES.json'));
         if(deps.platform!==stage.platform)throw Error('HLE dependency platform differs');
+        if(!deps.modules?.source||!deps.modules.version)throw Error('HLE dependency source missing: modules');
         for(const [key,rel]of [['node','tools/bin/node'+native.exe],['cjbind','tools/dtsparser/node_modules/.bin/cjbind'+native.exe]]) {
           if(!deps[key]?.source||!deps[key]?.version)throw Error('HLE dependency source missing: '+key);
           await bytes(sdk,rel,deps[key].sha256);
