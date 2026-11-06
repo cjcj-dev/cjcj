@@ -214,18 +214,35 @@ public class CHIRBuilder {
         let parentGroup = block1.GetParentBlockGroup() ??
             throw IllegalArgumentException("split block has no parent block group")
         let block2 = CreateBlock(parentGroup)
-        var needMove: Bool = false
-        for (expr in block1.GetExpressions()) {
-            if (refEq(expr, separator)) {
-                needMove = true
-                expr.RemoveSelfFromBlock()
-                let goTo = CreateGoTo(block2, block1)
-                block1.AppendExpression(goTo)
-                continue
+        let expressions = block1.GetExpressions()
+        var separatorIdx: Int64 = 0
+        while (separatorIdx < expressions.size && !refEq(expressions[separatorIdx], separator)) {
+            separatorIdx++
+        }
+        if (separatorIdx == expressions.size) {
+            return (block1, block2)
+        }
+        separator.RemoveSelfFromBlock()
+        // Unlike the C++ intrusive list, ArrayList removal shifts the suffix.
+        // Detach that suffix once, then perform MoveTo's parent/CFG updates in
+        // order without rescanning and shifting the old block for each member.
+        let sourceExpressions = block1.GetExpressionsRef()
+        sourceExpressions.remove(separatorIdx..sourceExpressions.size)
+        let goTo = CreateGoTo(block2, block1)
+        block1.AppendExpression(goTo)
+        var idx = separatorIdx + 1
+        while (idx < expressions.size) {
+            let expr = expressions[idx]
+            if (let Some(term) <- expr.AsTerminator()) {
+                for (successor in term.GetSuccessors()) {
+                    successor.RemovePredecessor(block1)
+                }
+                block2.AppendTerminator(term)
+            } else {
+                block2.AppendExprOnly(expr)
+                expr.SetParent(block2)
             }
-            if (needMove) {
-                expr.MoveTo(block2)
-            }
+            idx++
         }
         return (block1, block2)
     }

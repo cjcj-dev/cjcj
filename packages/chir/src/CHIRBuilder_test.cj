@@ -116,6 +116,77 @@ public class CHIRBuilderTest {
         @Expect(after.GetPredecessors().size, 1)
     }
 
+    @TestCase
+    public func SplitLongSuffixPreservesOrderParentsUsersAndEdges(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "split-long")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let block = builder.CreateBlock(body)
+        let target = builder.CreateBlock(body)
+        let control = builder.CreateBlock(body)
+        body.SetEntryBlock(block)
+        let prefix = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(7), block)
+        let separatorLiteral = IntLiteral(context.GetInt64Ty(), 11)
+        let separator = builder.CreateConstant(context.GetInt64Ty(), separatorLiteral, block)
+        block.AppendExpressions(ArrayList<Expression>([prefix, separator]))
+        let sharedLiteral = IntLiteral(context.GetInt64Ty(), 42)
+        let suffix = ArrayList<Expression>()
+        for (_ in 0..2048) {
+            let expr = builder.CreateConstant(context.GetInt64Ty(), sharedLiteral, block)
+            block.AppendExpression(expr)
+            suffix.add(expr)
+        }
+        let outgoing = builder.CreateGoTo(target, block)
+        block.AppendExpression(outgoing)
+        let controlEdge = builder.CreateGoTo(target, control)
+        control.AppendExpression(controlEdge)
+        let (before, after) = builder.SplitBlock(separator)
+        @Expect(before.GetExpressionsRef().size, 2)
+        @Expect(before.GetExpressionByIdx(0).nodeId, prefix.nodeId)
+        @Expect(before.GetTerminator().getOrThrow().GetSuccessor(0).nodeId, after.nodeId)
+        @Expect(after.GetExpressionsRef().size, suffix.size + 1)
+        for (idx in 0..suffix.size) {
+            @Expect(after.GetExpressionByIdx(idx).nodeId, suffix[idx].nodeId)
+            @Expect(suffix[idx].GetParentBlock().getOrThrow().nodeId, after.nodeId)
+        }
+        @Expect(after.GetTerminator().getOrThrow().nodeId, outgoing.nodeId)
+        @Expect(outgoing.GetParentBlock().getOrThrow().nodeId, after.nodeId)
+        @Expect(after.GetPredecessors().size, 1)
+        @Expect(after.GetPredecessors()[0].nodeId, before.nodeId)
+        @Expect(target.GetPredecessors().size, 2)
+        @Expect(target.GetPredecessors().contains(after), true)
+        @Expect(target.GetPredecessors().contains(control), true)
+        @Expect(target.GetPredecessors().contains(before), false)
+        @Expect(sharedLiteral.GetUsers().size, suffix.size)
+        @Expect(separatorLiteral.GetUsers().isEmpty(), true)
+        @Expect(separator.GetParentBlock().isNone(), true)
+        @Expect(separator.GetNumOfOperands(), 0)
+        @Expect(control.GetTerminator().getOrThrow().nodeId, controlEdge.nodeId)
+    }
+
+    @TestCase
+    public func SplitUninsertedSeparatorLeavesExistingBlockUnchanged(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "split-absent")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let block = builder.CreateBlock(body)
+        body.SetEntryBlock(block)
+        let separator = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(11), block)
+        let exit = builder.CreateExit(None, block)
+        block.AppendExpression(exit)
+        let (before, after) = builder.SplitBlock(separator)
+        @Expect(before.GetExpressionsRef().size, 1)
+        @Expect(before.GetTerminator().getOrThrow().nodeId, exit.nodeId)
+        @Expect(exit.GetParentBlock().getOrThrow().nodeId, before.nodeId)
+        @Expect(after.GetExpressionsRef().isEmpty(), true)
+        @Expect(after.GetPredecessors().isEmpty(), true)
+        @Expect(separator.GetNumOfOperands(), 1)
+    }
+
 }
 
 @Test
