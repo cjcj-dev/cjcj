@@ -424,7 +424,12 @@ async function buildFlowInWork(config, {through, from, packageOutput = true, res
   const records = [], outputs = {}, result = {configuration,status: 'WIP',
     stages: (previous?.stages || []).filter(stage => predecessorIds.has(stage.id)), commands: records};
   await fs.mkdir(work, {recursive: true});
-  if(previous?.status==='COMPLETE')await fs.rename(path.join(work,'build-result.json'),path.join(work,'build-result.json.previous-'+crypto.randomUUID()));
+  let resumeState = path.join(work,'build-result.json');
+  if(previous?.status==='COMPLETE') {
+    const retained = path.join(work,'build-result.json.previous-'+crypto.randomUUID());
+    await fs.rename(resumeState,retained);
+    resumeState = retained;
+  }
   try {
     let resumeRan = false;
     const needed=new Set();
@@ -483,7 +488,7 @@ async function buildFlowInWork(config, {through, from, packageOutput = true, res
         let argv = bindNativeSource(step.argv.map(v => expand(v, local)),config.repos);
         if (resumeInstalled && stage.id === resumeInstalled) {
           resumeRan = true;
-          argv = argv.concat(['--resume-installed', '--accept-records', acceptRecords, '--resume-state', path.join(work,'build-result.json'), '--resume-stage', stage.id]);
+          argv = argv.concat(['--resume-installed', '--accept-records', acceptRecords, '--resume-state', resumeState, '--resume-stage', stage.id]);
         }
         await command(argv, {
         resumeOf: resumeInstalled === stage.id ? resumedProduction.terminal : undefined,
