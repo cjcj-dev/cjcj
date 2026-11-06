@@ -51,6 +51,11 @@ function descriptor(name,wrong){
  if(!wrong)input.archive=path.join(root,'matched-sdk.tar.gz');
  return input;
 }
+test('matched normal installation runs installed and fresh-unpack consumers',async()=>{
+ const matched=await invoke('matched',descriptor('matched',false));
+ assert.equal(matched.status,0,matched.stderr);
+ console.log('SDK_PAIRING_MATCHED_INSTALL_USE_UNPACK_ASSERTION_REACHED');
+});
 test('normal installation cannot choose an existing old execution tuple for this compiler',async()=>{
  for(const [name,rel]of Object.entries({runtime:'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
   std:'lib/linux_x86_64_cjnative/libcangjie-std-core.a',llvm:'third_party/llvm/lib/libLLVM-15.so'})){
@@ -58,9 +63,6 @@ test('normal installation cannot choose an existing old execution tuple for this
   assert.ok(!(await fs.readFile(path.join(request.old[name].install,rel))).equals(await fs.readFile(path.join(producer,'.compiler-exec',rel))),name+' must actually differ');
  }
  console.log('SDK_PAIRING_WRONG_BUT_EXISTING_INPUT_ASSERTION_REACHED');
- const matched=await invoke('matched',descriptor('matched',false));
- assert.equal(matched.status,0,matched.stderr);
- console.log('SDK_PAIRING_MATCHED_INSTALL_USE_UNPACK_ASSERTION_REACHED');
  const wrong=await invoke('wrong-existing',descriptor('wrong-existing',true));
  console.log('SDK_PAIRING_WRONG_EXISTING_RESULT_ASSERTION_REACHED '+JSON.stringify({rc:wrong.status,signal:wrong.signal}));
  assert.equal(wrong.status,0,wrong.stderr);
