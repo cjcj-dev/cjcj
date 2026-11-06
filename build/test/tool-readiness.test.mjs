@@ -7,6 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {fileDigest} from '../../ci/bootstrap/sdk-flow.mjs';
 import {toolReadiness} from '../../ci/cangjie-test/tool-readiness.mjs';
+import {sdkInputs} from '../srcbuild/tool-build-inputs.mjs';
 // Reader-contract fixture only. The executable bytes are a real native system
 // binary, not a Cangjie tool; no language/ABI or SDK qualification is asserted.
 const readTest=(name,fn)=>test(name,{skip:process.platform!=='linux'},fn);
@@ -15,7 +16,7 @@ async function fixture(t) {
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   async function write(rel,value){await fs.mkdir(path.dirname(path.join(root,rel)),{recursive:true});await fs.writeFile(path.join(root,rel),value);return {path:rel,sha256:await fileDigest(path.join(root,rel))};}
   const native=await fs.readFile('/usr/bin/true');
-  const stage={platform:'linux_x86_64',compilerFile:'libexec/compiler',fixture:'reader only'};
+  const stage={platform:'linux_x86_64',compilerFile:'libexec/compiler',compilerCommit:'a'.repeat(40),runtimeCommit:'b'.repeat(40),fixture:'reader only'};
   await write('STAGE-INPUTS.json',JSON.stringify(stage));
   const artifacts={};
   for(const [name,rel]of [['compiler','libexec/compiler'],['stdCore','lib/linux_x86_64_cjnative/libcangjie-std-core.a'],['runtime','runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so']]) {
@@ -90,6 +91,41 @@ function publicRead(root) {
   const r=spawnSync(process.execPath,[fileURLToPath(new URL('../../ci/cangjie-test/tool-readiness.mjs',import.meta.url)),root],{encoding:'utf8'});
   assert.equal(r.status,0,r.stderr);return JSON.parse(r.stdout);
 }
+readTest('public readiness compares compiler bytes across packaging paths and optional stage history',async t=>{
+  const f=await fixture(t),p=f.input.files['tools/bin/cjpm'].producer;
+  p.build.inputs=structuredClone(p.build.inputs);delete p.build.inputs.stage;
+  p.build.inputs.artifacts.compiler.sdkRelative='old-layout/compiler';
+  const before=JSON.stringify(p);
+  await f.write('STAGE-INPUTS.json',JSON.stringify({...f.input.files['tools/bin/cjprof'].producer.build.inputs.stage,fixture:'new packaging'}));
+  await f.save();let r=publicRead(f.root);
+  assert.equal(r.cjpm.ready,true,r.cjpm.reason);assert.equal(r.cjprof.ready,true,r.cjprof.reason);
+  assert.equal(JSON.stringify(p),before,'historical stage is not filled in');
+  await f.write('libexec/compiler','different compiler');r=publicRead(f.root);
+  assert.equal(r.cjpm.available,false);assert.match(r.cjpm.reason,/installed bytes differ: libexec\/compiler/);
+});
+readTest('no-stage producer records the executed compiler; historical launcher-only identity remains unknown',async t=>{
+  const f=await fixture(t),native=await fs.readFile('/usr/bin/true');
+  const launcher=await f.write('bin/cjcj-stage1',Buffer.concat([native,Buffer.from('launcher')]));
+  const recipe=await f.write('bin/cjcj-stage1.entry','cjcj-sdk-entry-v1\n1\nlibexec/compiler\nlinux\nnative-target:x64\nruntime/lib/linux_x86_64_cjnative\n');
+  await fs.symlink('cjcj-stage1',path.join(f.root,'bin/cjc'));
+  const config={target:{runtimeLibSubdir:()=> 'linux_x86_64_cjnative',spec:{exeSuffix:'',os:'linux'}}};
+  const withStage=await sdkInputs(config,f.root);
+  await fs.unlink(path.join(f.root,'STAGE-INPUTS.json'));
+  const noStage=await sdkInputs(config,f.root);
+  assert.equal(noStage.stage,undefined);assert.deepEqual(noStage.artifacts,withStage.artifacts);
+  assert.equal(noStage.artifacts.compiler.sdkRelative,'libexec/compiler');
+  assert.notEqual(noStage.artifacts.compiler.sha256,launcher.sha256);
+  const p=f.input.files['tools/bin/cjpm'].producer;
+  p.build.inputs={artifacts:{...noStage.artifacts,compiler:{sdkRelative:'bin/cjc',sha256:launcher.sha256},compilerEntry:{sdkRelative:recipe.path,sha256:recipe.sha256}}};
+  await f.write('STAGE-INPUTS.json',JSON.stringify(withStage.stage));await f.save();
+  const before=JSON.stringify(p),r=publicRead(f.root);
+  assert.equal(r.cjpm.available,true,r.cjpm.reason);assert.equal(r.cjpm.ready,false);
+  assert.equal(r.cjpm.applicability.status,'BUILD_COMPILER_UNKNOWN');assert.match(r.cjpm.reason,/compiler bytes unknown/);
+  assert.equal(r.cjprof.ready,true,r.cjprof.reason);assert.equal(JSON.stringify(p),before);
+  p.build.inputs=noStage;await f.save();assert.equal(publicRead(f.root).cjpm.ready,true);
+  await f.write('libexec/compiler','actual compiler changed');
+  assert.match(publicRead(f.root).cjpm.reason,/installed bytes differ/);
+});
 readTest('public readiness rejects changed SDK pairing for Cangjie cjprof and cjpm',async t=>{
   const f=await fixture(t),before=JSON.stringify(f.input.files['tools/bin/cjprof'].producer);
   await f.write('STAGE-INPUTS.json',JSON.stringify({platform:'linux_x86_64',compilerFile:'libexec/compiler',fixture:'another stage'}));
@@ -148,7 +184,7 @@ readTest('public Cangjie LSP binds its normal frontend payload and selected SDK 
   const frontend=selected.frontendPackages;delete selected.frontendPackages;await f.save();
   assert.match(publicRead(f.root).LSPServer.reason,/Cangjie LSP input missing: frontendPackages/);
   selected.frontendPackages=frontend;await f.save();assert.equal(publicRead(f.root).LSPServer.ready,true);
-  await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,fixture:'different analysis SDK'}));
+  await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,compilerCommit:'c'.repeat(40)}));
   assert.match(publicRead(f.root).LSPServer.reason,/producer SDK selection differs/);
 });
 readTest('public LSP readiness retains separately installed compiler execution dependencies',async t=>{
@@ -191,7 +227,7 @@ readTest('Cangjie lint requires explicit analysis facts, bundled modules and hos
  const module=retain+'modules/linux_x86_64_cjnative/std.core.cjo';await f.write(module,'changed');
  assert.match(publicRead(f.root).cjlint.reason,/installed bytes differ/);
  await f.write(module,'selected modules/linux_x86_64_cjnative/std.core.cjo');assert.equal(publicRead(f.root).cjlint.ready,true);
- await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,fixture:'different target SDK'}));
+ await f.write('STAGE-INPUTS.json',JSON.stringify({...p.build.inputs.stage,runtimeCommit:'c'.repeat(40)}));
  assert.match(publicRead(f.root).cjlint.reason,/producer SDK selection differs/,'host analysis evidence does not grant target SDK readiness');
 });
 

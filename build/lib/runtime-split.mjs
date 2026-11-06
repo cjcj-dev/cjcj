@@ -77,6 +77,13 @@ function launcherRecipe(executable) {
     libraries: lines.slice(5).map(relative => recipeMemberLabel(relative, `${physical}.entry`))};
 }
 
+// Resolve the same retained executable the installed native entry will exec.
+// This does not need bootstrap metadata (official/plain compilers have none).
+export function compilerExecutionPath(executable) {
+  const recipe = launcherRecipe(executable);
+  return recipe ? requireCompiler(path.join(recipe.root, recipe.retained)) : requireCompiler(executable);
+}
+
 // The native entry forwards to the ordinary installed compiler. Read its
 // execution path for symbol checks; the build manifest never controls execution.
 function packagedCompiler(sdk, target) {

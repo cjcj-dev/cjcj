@@ -8,6 +8,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {fileDigest,readJson,relative} from '../bootstrap/sdk-flow.mjs';
 import {sdkPlatform,entryPlatformName} from '../bootstrap/sdk-platform.mjs';
 import {TOOL_NAMES,TOOL_PUBLIC_NAMES,TOOL_DIRECTORIES,nativeToolLibraries,toolName,retainedToolPath} from '../../build/srcbuild/tool-layout.mjs';
+import {compilerExecutionPath} from '../../build/lib/runtime-split.mjs';
 // Every selected tool is now a Cangjie producer. LSP's analysis/runtime
 // selection remains distinct from its compiler execution dependencies.
 export const toolRuntimeInputs=name=>toolName(name)==='lsp'
@@ -46,31 +47,55 @@ export async function toolReadiness(root) {
       if(!nativeLsp&&facts.build.directory!==TOOL_DIRECTORIES[name])throw Error('producer directory differs');
       if(nativeLsp&&(nativeLsp.values?.rc!==0||nativeLsp.values.signal||nativeLsp.values.error))throw Error('native protocol build failed');
       const sdkInputs=toolSdkInputs(name);
-      const compilerLoads=name==='lsp'?['compilerEntry','executionRuntime'].filter(key=>facts.build.inputs?.artifacts?.[key]):[];
+      const compilerLoads=['compilerEntry','executionRuntime'].filter(key=>facts.build.inputs?.artifacts?.[key]);
       const runtimeInputs=toolRuntimeInputs(name),installed=runtimeInputs.length?inputs.installationInputs:undefined;
       // A recorded LSP installation may select different analysis inputs.
       // Validate that selection and its bytes below, without relabelling the
       // original producer or qualifying the unexecuted semantic consumer.
       if(nativeLsp&&(stage.platform!=='linux_x86_64'||!installed))throw Error('native LSP installation selection missing');
       if(nativeLsp)for(const key of sdkInputs)if(!installed.artifacts?.[key]?.sdkRelative)throw Error('installed SDK input missing: '+key);
-      if(!installed&&!isDeepStrictEqual(facts.build.inputs?.stage,stage))throw Error('producer SDK selection differs');
+      // Packaging paths and the presence of a stage record do not identify
+      // compiler inputs. Compare recorded source selections when available and
+      // always verify the individual producer bytes below.
+      if(!installed)for(const key of ['platform','compilerCommit','runtimeCommit']) {
+        const built=facts.build.inputs?.stage?.[key];
+        if(built!==undefined&&built!==stage[key])throw Error('producer SDK selection differs: '+key);
+      }
       const changed=[];
+      let compilerUnknown=false;
       if(installed)for(const key of ['platform','compilerFile','compilerCommit','runtimeCommit']) {
         if(installed.stage?.[key]!==stage[key])throw Error('installed SDK selection differs: '+key);
       }
       for(const key of nativeLsp?[]:[...sdkInputs,...compilerLoads]) {
         const built=facts.build.inputs?.artifacts?.[key];
         if(!built?.sdkRelative)throw Error('producer SDK input missing: '+key);
-        const input=installed&&runtimeInputs.includes(key)?installed.artifacts?.[key]:built;
+        let input=installed&&runtimeInputs.includes(key)?installed.artifacts?.[key]:built;
+        if(key==='compiler') {
+          // The historical compiler path can still name a launcher in the
+          // installation. Its digest proves only that launcher, never its body.
+          const original=path.join(sdk,built.sdkRelative);
+          let physical;
+          try { physical=await fs.realpath(original); }
+          catch(error) { if(error.code!=='ENOENT')throw error; }
+          compilerUnknown=physical!==undefined&&await fs.realpath(compilerExecutionPath(original))!==physical;
+          if(compilerUnknown)await bytes(sdk,built.sdkRelative,built.sha256);
+          else if(!installed)input={sdkRelative:stage.compilerFile,sha256:built.sha256};
+        }
         if(!input?.sdkRelative)throw Error('installed SDK input missing: '+key);
         await bytes(sdk,input.sdkRelative,input.sha256);
-        if(input.sdkRelative!==built.sdkRelative||input.sha256!==built.sha256)changed.push(key);
+        if(key==='compiler') {
+          // Older no-stage producers recorded the generic launcher, not the
+          // compiler it exec'd. Checking today's retained bytes cannot recover
+          // that missing build-time identity. Keep the historical fact intact.
+          if(compilerUnknown&&stage.compilerSha256)await bytes(sdk,stage.compilerFile,stage.compilerSha256);
+        }
+        if(!compilerUnknown||key!=='compiler')if(input.sha256!==built.sha256)changed.push(key);
       }
       if(installed)for(const key of runtimeInputs.filter(key=>(nativeLsp||!sdkInputs.includes(key)&&!compilerLoads.includes(key))&&installed.artifacts?.[key])) {
         const input=installed.artifacts[key];await bytes(sdk,input.sdkRelative,input.sha256);changed.push(key);
       }
       applicability={build:facts.build.inputs?.stage,installation:installed?.stage??facts.build.inputs?.stage,
-        changedRuntimeInputs:nativeLsp?undefined:changed,status:nativeLsp||changed.length?'NOT_CONSUMED':'BUILD_INPUTS_MATCH'};
+        changedRuntimeInputs:nativeLsp?undefined:changed,status:compilerUnknown?'BUILD_COMPILER_UNKNOWN':nativeLsp||changed.length?'NOT_CONSUMED':'BUILD_INPUTS_MATCH'};
       const retained=retainedToolPath({producer:name,name:publicName+native.exe,to:rel});
       if(row.artifact?.path!==retained||row.entry?.path!==rel||row.entry.recipe?.path!==rel+'.entry'
         ||row.artifact.sha256!==row.sha256||facts.install.artifact?.sha256!==row.sha256)throw Error('target body/entry binding differs');
@@ -133,8 +158,8 @@ export async function toolReadiness(root) {
           if(actual.name!==name||actual.version!==version.replace(/^npm:[^@]+@/,''))throw Error('HLE module differs: '+name);
         }
       }
-      result[publicName]={ready:!nativeLsp&&!changed.length,available:true,
-        reason:nativeLsp?'native root installation available; build-time SDK bytes unrecorded; semantic probe still required':changed.length?'current native SDK consumer not run: '+changed.join(','):'actual target producer/install inputs and bytes match; semantic probe still required',
+      result[publicName]={ready:!nativeLsp&&!compilerUnknown&&!changed.length,available:true,
+        reason:compilerUnknown?'installation available; producer recorded compiler launcher only; build-time compiler bytes unknown':nativeLsp?'native root installation available; build-time SDK bytes unrecorded; semantic probe still required':changed.length?'current native SDK consumer not run: '+changed.join(','):'actual target producer/install inputs and bytes match; semantic probe still required',
         source:facts.source,applicability};
     }catch(error){result[publicName]={ready:false,available:false,reason:error.message,...(applicability?{applicability}:{})};}
   }

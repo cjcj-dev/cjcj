@@ -6,6 +6,7 @@ import {execFile} from 'node:child_process';
 import {promisify, isDeepStrictEqual} from 'node:util';
 import {atomicJson, fileDigest, readJson} from '../../ci/bootstrap/sdk-flow.mjs';
 import {compilerProducer} from '../../ci/bootstrap/compiler_identity.mjs';
+import {compilerExecutionPath} from '../lib/runtime-split.mjs';
 import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,toolProducerDirectory,toolProducerWorkspace,toolSourceRoot,toolInstallRoot} from './tool-layout.mjs';
 import {assertSourceIdentity} from '../lib/git.mjs';
 import {assertLauncherFormat} from '../../ci/bootstrap/sdk-install-entries.mjs';
@@ -84,7 +85,10 @@ export async function sdkInputs(config, sdk) {
   try { stage = await readJson(path.join(sdk,'STAGE-INPUTS.json')); }
   catch(error) { if(error.code!=='ENOENT')throw error; }
   const tuple = config.target.runtimeLibSubdir(config.buildType);
-  const files = {compiler:stage===undefined?path.join(sdk,'bin','cjc'+config.target.spec.exeSuffix):await compilerProducer(sdk),
+  const compiler=compilerExecutionPath(path.join(sdk,'bin','cjc'+config.target.spec.exeSuffix));
+  if(stage!==undefined&&await fs.realpath(compiler)!==await fs.realpath(await compilerProducer(sdk)))
+    throw Error('TOOL_COMPILER_ENTRY_SELECTION');
+  const files = {compiler,
     stdCore:path.join(sdk,'lib',tuple,'libcangjie-std-core.a'),
     runtime:path.join(sdk,'runtime/lib',tuple,'libcangjie-runtime'+(config.target.spec.os==='windows'?'.dll':config.target.spec.os==='darwin'?'.dylib':'.so'))};
   for(const [name,rel]of Object.entries({stdProvenance:'PROVENANCE.txt',compilerEntry:'bin/cjcj-stage1'+config.target.spec.exeSuffix+'.entry',
