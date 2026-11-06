@@ -46,7 +46,7 @@ export async function toolExecutionPayloads(config,name,facts) {
     if(!llvm||!path.isAbsolute(llvm))throw Error('TOOL_EXECUTION_LLVM_UNKNOWN '+name);
     const recorded=facts.build.inputs.artifacts.toolLlvm;
     if(recorded&&(recorded.path!==llvm||await fileDigest(llvm)!==recorded.sha256))throw Error('TOOL_EXECUTION_LLVM_CHANGED '+name);
-    rows.push({producer:name,from:await fs.realpath(llvm),to:'.target-tools/tools/'+name+'/lib/'+path.basename(llvm)});
+    rows.push({producer:name,from:await fs.realpath(llvm),to:'.target-tools/tools/'+name+'/lib/'+sdkPlatform(facts.build.platform).llvmLibrary});
   }
   return rows;
 }

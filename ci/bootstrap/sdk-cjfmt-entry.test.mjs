@@ -5,7 +5,8 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {installEntries} from './sdk-install-entries.mjs';
 import {installationRecipe} from './sdk-targets.mjs';
-import {fileDigest} from './sdk-flow.mjs';
+import {fileDigest,copyOutputs} from './sdk-flow.mjs';
+import {toolExecutionPayloads} from '../../build/srcbuild/tool-build-inputs.mjs';
 
 // Integration input: an already installed, source-built cjfmt. Never rebuild it.
 const input=process.env.CJCJ_CJFMT_TEST_SDK;
@@ -15,14 +16,15 @@ test('installed cjfmt keeps configuration home and isolates execution libraries'
   assert(parent,'RELEASE_EVIDENCE_TEST_ROOT required');
   await fs.mkdir(parent,{recursive:true});
   const work=await fs.mkdtemp(path.join(parent,'cjfmt-entry-')),root=path.join(work,'SDK with spaces');
-  const home=path.join(work,'caller home'),runtime='runtime/lib/linux_x86_64_cjnative';
+  const home=path.join(work,'caller home'),runtime='.target-tools/tools/cjfmt/lib';
   await fs.mkdir(path.join(root,'tools/bin'),{recursive:true});
   await fs.mkdir(path.join(root,'tools/config'),{recursive:true});
   await fs.mkdir(path.join(home,'tools/config'),{recursive:true});
   await fs.mkdir(path.join(home,runtime),{recursive:true});
   const raw=path.join(input,'.target-tools/tools/bin/cjfmt');
   await fs.copyFile(raw,path.join(root,'tools/bin/cjfmt'));
-  await fs.cp(path.join(input,runtime),path.join(root,runtime),{recursive:true});
+  const facts=JSON.parse(await fs.readFile(path.join(input,'TOOLS-INPUTS.json'),'utf8')).files['tools/bin/cjfmt'].producer;
+  await copyOutputs(root,await toolExecutionPayloads(null,'cjfmt',facts));
   const config=await fs.readFile(path.join(input,'tools/config/cangjie-format.toml'),'utf8');
   assert.match(config,/indentWidth = 4/);
   await fs.writeFile(path.join(root,'tools/config/cangjie-format.toml'),config);
@@ -70,7 +72,7 @@ test('installed cjfmt keeps configuration home and isolates execution libraries'
   const fields=Object.fromEntries(control.stdout.trim().split('\n').map(line=>{const n=line.indexOf('=');return [line.slice(0,n),line.slice(n+1)];}));
   const failures=[];
   try{assert.equal(control.status,0,control.stderr);assert.equal(fields.CANGJIE_HOME,root);
-   assert.equal(fields.LD_LIBRARY_PATH,recipe.entries[0].libraries.map(rel=>path.join(root,rel)).join(':'));
+   assert.equal(fields.LD_LIBRARY_PATH,recipe.entries.find(row=>row.names.includes('environment-control')).libraries.map(rel=>path.join(root,rel)).join(':'));
    assert.equal(fields.LD_PRELOAD,undefined);assert.equal(fields.LD_AUDIT,undefined);
   }catch(error){failures.push(error.message);}
   results.push({name:'ordinary-entry-control',rc:control.status,signal:control.signal,stdout:control.stdout,stderr:control.stderr,failures});

@@ -50,6 +50,7 @@ export async function toolReadiness(root) {
       const executionDirectory='.target-tools/tools/'+name+'/lib/';
       const executionRuntime=executionDirectory+'libcangjie-runtime'+native.shared;
       const execution=!privateToolPayload(name)&&inputs.payloadFiles?.[executionRuntime]?.producers?.includes(name);
+      const llvmUnknown=execution&&name==='cjcompat'&&!facts.build.inputs.artifacts.toolLlvm;
       const compilerLoads=name==='lsp'?['compilerEntry','executionRuntime'].filter(key=>facts.build.inputs?.artifacts?.[key]):[];
       const runtimeInputs=toolRuntimeInputs(name),installed=runtimeInputs.length?inputs.installationInputs:undefined;
       // A recorded LSP installation may select different analysis inputs.
@@ -112,7 +113,7 @@ export async function toolReadiness(root) {
         const input=installed.artifacts[key];await bytes(sdk,input.sdkRelative,input.sha256);changed.push(key);
       }
       applicability={build:facts.build.inputs?.stage,installation:installed?.stage??facts.build.inputs?.stage,
-        changedRuntimeInputs:nativeLsp?undefined:changed,status:compilerUnknown?'BUILD_COMPILER_UNKNOWN':nativeLsp||changed.length?'NOT_CONSUMED':'BUILD_INPUTS_MATCH'};
+        changedRuntimeInputs:nativeLsp?undefined:changed,status:compilerUnknown?'BUILD_COMPILER_UNKNOWN':llvmUnknown?'BUILD_LLVM_UNKNOWN':nativeLsp||changed.length?'NOT_CONSUMED':'BUILD_INPUTS_MATCH'};
       const retained=!execution&&!privateToolPayload(name)?'.target-tools/'+rel:retainedToolPath({producer:name,name:publicName+native.exe,to:rel});
       if(row.artifact?.path!==retained||row.entry?.path!==rel||row.entry.recipe?.path!==rel+'.entry'
         ||row.artifact.sha256!==row.sha256||facts.install.artifact?.sha256!==row.sha256)throw Error('target body/entry binding differs');
@@ -126,7 +127,7 @@ export async function toolReadiness(root) {
           await bytes(sdk,rel,payload.sha256);
         }
         const llvm=facts.build.inputs.artifacts.toolLlvm;
-        if(llvm)await bytes(sdk,executionDirectory+path.basename(llvm.path),llvm.sha256);
+        if(llvm)await bytes(sdk,executionDirectory+native.llvmLibrary,llvm.sha256);
       }
       const payloads=facts.install.payloads;
       if(!payloads||typeof payloads!=='object')throw Error('install payload facts missing');
@@ -184,8 +185,8 @@ export async function toolReadiness(root) {
           if(actual.name!==name||actual.version!==version.replace(/^npm:[^@]+@/,''))throw Error('HLE module differs: '+name);
         }
       }
-      result[publicName]={ready:!nativeLsp&&!compilerUnknown&&!changed.length,available:true,
-        reason:compilerUnknown?'installation available; producer recorded compiler launcher only; build-time compiler bytes unknown':nativeLsp?'native root installation available; build-time SDK bytes unrecorded; semantic probe still required':changed.length?'current native SDK consumer not run: '+changed.join(','):'actual target producer/install inputs and bytes match; semantic probe still required',
+      result[publicName]={ready:!nativeLsp&&!compilerUnknown&&!llvmUnknown&&!changed.length,available:true,
+        reason:compilerUnknown?'installation available; producer recorded compiler launcher only; build-time compiler bytes unknown':llvmUnknown?'installation available; selected LLVM path recorded; build-time LLVM bytes unknown':nativeLsp?'native root installation available; build-time SDK bytes unrecorded; semantic probe still required':changed.length?'current native SDK consumer not run: '+changed.join(','):'actual target producer/install inputs and bytes match; semantic probe still required',
         source:facts.source,applicability};
     }catch(error){result[publicName]={ready:false,available:false,reason:error.message,...(applicability?{applicability}:{})};}
   }
