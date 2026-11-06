@@ -47,7 +47,7 @@ export async function toolReadiness(root) {
       if(!nativeLsp&&facts.build.directory!==TOOL_DIRECTORIES[name])throw Error('producer directory differs');
       if(nativeLsp&&(nativeLsp.values?.rc!==0||nativeLsp.values.signal||nativeLsp.values.error))throw Error('native protocol build failed');
       const sdkInputs=toolSdkInputs(name);
-      const compilerLoads=['compilerEntry','executionRuntime'].filter(key=>facts.build.inputs?.artifacts?.[key]);
+      const compilerLoads=name==='lsp'?['compilerEntry','executionRuntime'].filter(key=>facts.build.inputs?.artifacts?.[key]):[];
       const runtimeInputs=toolRuntimeInputs(name),installed=runtimeInputs.length?inputs.installationInputs:undefined;
       // A recorded LSP installation may select different analysis inputs.
       // Validate that selection and its bytes below, without relabelling the
