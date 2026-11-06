@@ -8,6 +8,7 @@ import {installationRecipe} from '../../ci/bootstrap/sdk-targets.mjs';
 import {installEntries} from '../../ci/bootstrap/sdk-install-entries.mjs';
 import {sdkPlatform} from '../../ci/bootstrap/sdk-platform.mjs';
 import {assertLauncherFormat} from '../../ci/bootstrap/sdk-install-entries.mjs';
+import {toolExecutionPayloads} from './tool-build-inputs.mjs';
 export async function installHleDependencies({toolsRoot,sdk,platform,input,prepareOnly=false}) {
   if(!input)throw new Error('HLE_DEPENDENCIES_REQUIRED: target Node, npm dependency tree and cjbind input');
   const native=sdkPlatform(platform);
@@ -46,10 +47,10 @@ export async function installHleDependencies({toolsRoot,sdk,platform,input,prepa
 
 // Standalone host-tool installation uses the same relative launcher recipe as
 // the SDK. Preserve the selected runtime layout; do not install into shared H.
-export async function installIndependentHle({toolsRoot,prefix,sdk,platform,build,input}) {
+export async function installIndependentHle({toolsRoot,prefix,sdk,platform,build,input,producer}) {
   const native=sdkPlatform(platform);
   await installHleDependencies({toolsRoot,sdk:prefix,platform,input});
-  await copyOutputs(prefix,[{from:path.join(sdk,'runtime/lib',native.tuple),to:'runtime/lib/'+native.tuple,owner:'selected HLE runtime'}]);
+  await copyOutputs(prefix,await toolExecutionPayloads(null,'hle',producer));
   const rows=[{producer:'hle',name:'hle'+native.exe,to:'tools/bin/hle'+native.exe}];
   const recipe=installationRecipe({platform},{tools:{rows,payloads:[]}}),records=[];
   await installEntries({root:prefix,build,groups:recipe.entries,records,platform});

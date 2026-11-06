@@ -7,10 +7,22 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {fileDigest} from '../../ci/bootstrap/sdk-flow.mjs';
 import {toolReadiness} from '../../ci/cangjie-test/tool-readiness.mjs';
-import {sdkInputs} from '../srcbuild/tool-build-inputs.mjs';
+import {sdkInputs,toolExecutionPayloads} from '../srcbuild/tool-build-inputs.mjs';
 // Reader-contract fixture only. The executable bytes are a real native system
 // binary, not a Cangjie tool; no language/ABI or SDK qualification is asserted.
 const readTest=(name,fn)=>test(name,{skip:process.platform!=='linux'},fn);
+readTest('producer runtime payload rejects changed existing input and materializes local library links',async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'tool-execution-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const runtime=path.join(root,'libcangjie-runtime.so');await fs.writeFile(runtime,'produced runtime');
+  await fs.symlink('libcangjie-runtime.so',path.join(root,'alias.so'));
+  const facts={build:{inputs:{artifacts:{runtime:{path:runtime,sha256:await fileDigest(runtime)}}}}};
+  const rows=await toolExecutionPayloads(null,'cjpm',facts);
+  assert.equal(rows.length,2);assert.ok(rows.every(row=>row.from===runtime&&row.to.startsWith('.target-tools/tools/cjpm/lib/')));
+  await fs.writeFile(runtime,'old but existing runtime');
+  await assert.rejects(toolExecutionPayloads(null,'cjpm',facts),/TOOL_EXECUTION_RUNTIME_CHANGED cjpm/);
+  await assert.rejects(toolExecutionPayloads(null,'cjpm',{}),/TOOL_EXECUTION_RUNTIME_UNKNOWN cjpm/);
+  assert.deepEqual(await toolExecutionPayloads(null,'lsp',{}),[],'native LSP retains its own producer payload');
+});
 async function fixture(t) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'tool-reader-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
@@ -142,6 +154,18 @@ readTest('ordinary tool runtime remains distinct from its producing compiler pro
   assert.equal(publicRead(f.root).cjpm.ready,true);
   await f.write(p.build.inputs.artifacts.runtime.sdkRelative,'actual produced tool runtime changed');
   assert.match(publicRead(f.root).cjpm.reason,/installed bytes differ: runtime\/lib/);
+});
+readTest('new generic tool execution payload is independent of target runtime and still rejects changed tool runtime',async t=>{
+  const f=await fixture(t),row=f.input.files['tools/bin/cjpm'],built=row.producer.build.inputs.artifacts.runtime;
+  const rel='.target-tools/tools/cjpm/lib/libcangjie-runtime.so';
+  await f.write(rel,await fs.readFile(path.join(f.root,built.sdkRelative)));
+  f.input.payloadFiles[rel]={sha256:built.sha256,producers:['cjpm']};
+  row.entry.recipe=await f.write('tools/bin/cjpm.entry','cjcj-sdk-entry-v1\n2\n.target-tools/tools/bin/cjpm\nlinux\nnative-target:x64\n.target-tools/tools/cjpm/lib\ntools/lib\n');
+  await f.save();assert.equal(publicRead(f.root).cjpm.ready,true);
+  await f.write(built.sdkRelative,'different target runtime');
+  let r=publicRead(f.root);assert.equal(r.cjpm.ready,true,r.cjpm.reason);assert.equal(r.cjprof.available,false,'legacy runtime binding remains strict');
+  await f.write(rel,'different tool execution runtime');r=publicRead(f.root);
+  assert.equal(r.cjpm.available,false);assert.match(r.cjpm.reason,/installed bytes differ: .target-tools\/tools\/cjpm\/lib/);
 });
 readTest('HLE validates its separately installed dependency input without inventing build history',async t=>{
   const f=await fixture(t),row=structuredClone(f.input.files['tools/bin/cjpm']),p=row.producer;

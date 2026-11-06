@@ -7,7 +7,7 @@ import {promisify, isDeepStrictEqual} from 'node:util';
 import {atomicJson, fileDigest, readJson} from '../../ci/bootstrap/sdk-flow.mjs';
 import {compilerProducer} from '../../ci/bootstrap/compiler_identity.mjs';
 import {compilerExecutionPath} from '../lib/runtime-split.mjs';
-import {TOOL_DIRECTORIES,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,toolProducerDirectory,toolProducerWorkspace,toolSourceRoot,toolInstallRoot} from './tool-layout.mjs';
+import {TOOL_DIRECTORIES,privateToolPayload,toolPayloads,nativeToolBuildPayloads,toolBuildProduct,cjprofBuildDirectory,cjlintBuildDirectory,toolProducerDirectory,toolProducerWorkspace,toolSourceRoot,toolInstallRoot} from './tool-layout.mjs';
 import {assertSourceIdentity} from '../lib/git.mjs';
 import {assertLauncherFormat} from '../../ci/bootstrap/sdk-install-entries.mjs';
 import {sdkPlatform} from '../../ci/bootstrap/sdk-platform.mjs';
@@ -17,12 +17,54 @@ const execute = promisify(execFile);
 const directories = TOOL_DIRECTORIES;
 const recordPath = (config, name) => path.join(toolProducerWorkspace(config,name),'build','tools',name,'build-inputs.json');
 const dry = () => process.env.CANGJIE_BUILD_DRY_RUN === '1';
+// Reuse the producing SDK's actual library payload, not the destination SDK's
+// target libraries or the compiler process's execution runtime. Historical
+// records remain untouched; a missing/changed producer input is not admission.
+export async function toolExecutionPayloads(config,name,facts) {
+  if(privateToolPayload(name))return []; // Their normal native installs own lib/.
+  const runtime=facts.build?.inputs?.artifacts?.runtime;
+  if(!runtime?.path||!path.isAbsolute(runtime.path)||!(/^[0-9a-f]{64}$/).test(runtime.sha256??''))
+    throw Error('TOOL_EXECUTION_RUNTIME_UNKNOWN '+name);
+  if(await fileDigest(runtime.path)!==runtime.sha256)throw Error('TOOL_EXECUTION_RUNTIME_CHANGED '+name);
+  const root=await fs.realpath(path.dirname(runtime.path)),rows=[];
+  async function walk(directory,tail='') {
+    for(const entry of (await fs.readdir(directory,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {
+      const source=path.join(directory,entry.name),rel=tail+entry.name;
+      if(entry.isDirectory())await walk(source,rel+'/');
+      else {
+        const from=await fs.realpath(source);
+        if(!from.startsWith(root+path.sep)||!(await fs.stat(from)).isFile())throw Error('TOOL_EXECUTION_PAYLOAD '+source);
+        // Materialize producer-local library aliases; never export a link to
+        // an uninstalled sibling or to the original producing SDK.
+        rows.push({producer:name,from,to:'.target-tools/tools/'+name+'/lib/'+rel});
+      }
+    }
+  }
+  await walk(root);
+  if(name==='cjcompat') {
+    const llvm=facts.build?.nativeConfiguration?.cangjie?.values?.llvm;
+    if(!llvm||!path.isAbsolute(llvm))throw Error('TOOL_EXECUTION_LLVM_UNKNOWN '+name);
+    const recorded=facts.build.inputs.artifacts.toolLlvm;
+    if(recorded&&(recorded.path!==llvm||await fileDigest(llvm)!==recorded.sha256))throw Error('TOOL_EXECUTION_LLVM_CHANGED '+name);
+    rows.push({producer:name,from:await fs.realpath(llvm),to:'.target-tools/tools/'+name+'/lib/'+path.basename(llvm)});
+  }
+  return rows;
+}
+async function buildSdkInputs(config,name,sdk) {
+  const inputs=await sdkInputs(config,sdk);
+  if(name==='cjcompat') {
+    const file=config.toolsLlvmLibrary??path.join(sdk,'third_party/llvm/lib',config.target.spec.hostLlvmLibrary);
+    inputs.artifacts.toolLlvm={path:file,sha256:await fileDigest(file)};
+  }
+  return inputs;
+}
 // Install reuses each successful public producer's actual directory. Today's
 // build selector cannot relocate an earlier producer or its native inputs.
 export async function toolInstallConfig(config, names) {
   if(dry())return config;
   const roots={...config.toolsProducerBuildRoots},producerDirectories={...config.toolsProducerDirectories};
   const sources={...config.toolsProducerSources};
+  const installs={...config.toolsInstallRoots};
   let analysisSdk=config.toolsAnalysisSdk;
   const checkedSources=new Set();
   for(const name of names) {
@@ -65,8 +107,16 @@ export async function toolInstallConfig(config, names) {
       if(!path.isAbsolute(analysisSdk)||path.resolve(analysisSdk)!==analysisSdk)reject();
     }
     roots[name]=root;producerDirectories[name]=directory;
+    if(config.toolsProducerWorkspaces?.[name]) {
+      const prefix=path.join(toolProducerWorkspace(config,name),'build/tools',name,'install');
+      try {
+        const installed=await readJson(path.join(prefix,'build-inputs.json'));
+        if(installed.install?.rc!==0)throw Error('TOOL_INSTALL_INPUTS_MISSING '+name);
+        installs[name]=prefix;
+      } catch(error) { if(error.code!=='ENOENT')throw error; }
+    }
   }
-  return {...config,toolsAnalysisSdk:analysisSdk,toolsProducerBuildRoots:roots,toolsProducerDirectories:producerDirectories,toolsProducerSources:sources};
+  return {...config,toolsAnalysisSdk:analysisSdk,toolsProducerBuildRoots:roots,toolsProducerDirectories:producerDirectories,toolsProducerSources:sources,toolsInstallRoots:installs};
 }
 
 async function sourceState(root, directory, revision) {
@@ -117,7 +167,7 @@ export async function beginToolBuild(config, name, {argv, env, sdk}) {
   return {source:{status:'resolved',repository,commit:state.commit},
     build:{directory,dependencies,source_changes_sha256:state.changes_sha256,argv,
       platform:config.target.spec.llvmPlatform,buildType:['cjprof','cjlint','lsp','cjhead'].includes(name)?'producer-default':argv[argv.indexOf(name==='cjcompat'?'--type':'-t')+1],requestedBuildType:config.buildType,
-      mode:config.toolsBuildMode??'clean',version:config.cangjieVersion,environment,inputs:await sdkInputs(config,sdk)}};
+      mode:config.toolsBuildMode??'clean',version:config.cangjieVersion,environment,inputs:await buildSdkInputs(config,name,sdk)}};
 }
 async function nativeConfigurationInputs(config,name) {
   const nativeConfiguration={};
@@ -160,7 +210,7 @@ export async function finishToolBuild(config, name, facts, product) {
     const current=await sourceState(row.path,'.','HEAD');
     if(!isDeepStrictEqual(current,{commit:row.commit,changes_sha256:row.changes_sha256}))throw Error('TOOL_DEPENDENCY_CHANGED_DURING_BUILD '+name);
   }
-  const landed=await sdkInputs(config,facts.build.environment.CANGJIE_HOME);
+  const landed=await buildSdkInputs(config,name,facts.build.environment.CANGJIE_HOME);
   if(!isDeepStrictEqual(landed,facts.build.inputs))throw new Error('TOOL_SDK_CHANGED_DURING_BUILD '+name);
   const nativeConfiguration=await nativeConfigurationInputs(config,name);
   const payloads={};

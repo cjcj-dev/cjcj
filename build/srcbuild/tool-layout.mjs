@@ -17,7 +17,11 @@ export const toolProducerDirectory = (config,name) => config.toolsProducerDirect
 export const TOOL_PUBLIC_NAMES = {lsp:'LSPServer'};
 export const toolName = name => { const plain=name.replace(/\.exe$/,''); return plain==='LSPServer'?'lsp':plain; };
 export const cjlintBuildDirectory = config => toolProducerDirectory(config,'cjlint');
-export const retainedToolPath = row => ['cjlint','lsp','cjhead'].includes(row.producer)?'.target-tools/tools/'+row.producer+'/bin/'+row.name:'.target-tools/'+row.to;
+// CJTRACE's old SDK RPATH climbs three parents. Retain it inside its own
+// directory so that path cannot select the containing SDK's target runtime.
+export const retainedToolPath = row => ['cjlint','lsp','cjhead','cjtrace-recover'].includes(row.producer)?'.target-tools/tools/'+row.producer+'/bin/'+row.name:'.target-tools/'+row.to;
+export const privateToolPayload = name => ['cjlint','lsp','cjhead'].includes(name);
+export const toolExecutionLibraries = name => ['.target-tools/tools/'+name+'/lib',...(privateToolPayload(name)?[]:['tools/lib'])];
 export const hleBuildDirectory = config => toolProducerDirectory(config,'hle');
 export const cjprofBuildDirectory = config => toolProducerDirectory(config,'cjprof');
 export function requireToolProducer(name) {

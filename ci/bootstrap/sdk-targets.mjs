@@ -8,6 +8,7 @@ import {sdkPlatform} from './sdk-platform.mjs';
 import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
 export const BOOTSTRAP_PHASES=Object.freeze(['stage0','stage0-run','std-bootstrap','stage1-initial','stage1-std','stage2','stage3-std','stage3']);
 import {readSourcePins} from '../native-llvm-inputs.mjs';
+import {retainedToolPath,toolExecutionLibraries} from '../../build/srcbuild/tool-layout.mjs';
 // SDK defaults consume the same source pins as the workflow producers.
 const pins=readSourcePins();
 export const FIXED_INPUTS=Object.freeze({llvm:pins.llvm.LLVM_SHA,
@@ -58,8 +59,8 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
   const nLib=['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+tuple,'lib/'+tuple,'tools/lib'];
   if(tools)return {copies:[...tools.rows,...tools.payloads].map(row=>({...row,owner:'source-built tools'})),
-    entries:[{directory:'tools/bin',retain:'.target-tools/tools/bin',names:tools.rows.filter(row=>!['cjlint','lsp','cjhead'].includes(row.producer)).map(row=>row.name),libraries:nLib},
-      ...tools.rows.filter(row=>['cjlint','lsp','cjhead'].includes(row.producer)).map(row=>({directory:'tools/bin',retain:'.target-tools/tools/'+row.producer+'/bin',names:[row.name],libraries:['.target-tools/tools/'+row.producer+'/lib']}))],links:{}};
+    entries:tools.rows.map(row=>({directory:'tools/bin',retain:path.posix.dirname(retainedToolPath(row)),
+      names:[row.name],libraries:toolExecutionLibraries(row.producer)})),links:{}};
   const {llvm,runtime,ast}=target;
   product??=target.compiler.product;std??=target.std.install;
   const compilerName='bin/cjcj-stage1'+exe;

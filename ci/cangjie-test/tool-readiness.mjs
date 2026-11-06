@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import {fileDigest,readJson,relative} from '../bootstrap/sdk-flow.mjs';
 import {sdkPlatform,entryPlatformName} from '../bootstrap/sdk-platform.mjs';
-import {TOOL_NAMES,TOOL_PUBLIC_NAMES,TOOL_DIRECTORIES,nativeToolLibraries,toolName,retainedToolPath} from '../../build/srcbuild/tool-layout.mjs';
+import {TOOL_NAMES,TOOL_PUBLIC_NAMES,TOOL_DIRECTORIES,nativeToolLibraries,toolName,retainedToolPath,privateToolPayload,toolExecutionLibraries} from '../../build/srcbuild/tool-layout.mjs';
 import {compilerExecutionPath} from '../../build/lib/runtime-split.mjs';
 // Every selected tool is now a Cangjie producer. LSP's analysis/runtime
 // selection remains distinct from its compiler execution dependencies.
@@ -47,6 +47,9 @@ export async function toolReadiness(root) {
       if(!nativeLsp&&facts.build.directory!==TOOL_DIRECTORIES[name])throw Error('producer directory differs');
       if(nativeLsp&&(nativeLsp.values?.rc!==0||nativeLsp.values.signal||nativeLsp.values.error))throw Error('native protocol build failed');
       const sdkInputs=toolSdkInputs(name);
+      const executionDirectory='.target-tools/tools/'+name+'/lib/';
+      const executionRuntime=executionDirectory+'libcangjie-runtime'+native.shared;
+      const execution=!privateToolPayload(name)&&inputs.payloadFiles?.[executionRuntime]?.producers?.includes(name);
       const compilerLoads=name==='lsp'?['compilerEntry','executionRuntime'].filter(key=>facts.build.inputs?.artifacts?.[key]):[];
       const runtimeInputs=toolRuntimeInputs(name),installed=runtimeInputs.length?inputs.installationInputs:undefined;
       // A recorded LSP installation may select different analysis inputs.
@@ -57,7 +60,7 @@ export async function toolReadiness(root) {
       // Packaging paths and the presence of a stage record do not identify
       // compiler inputs. Compare recorded source selections when available and
       // always verify the individual producer bytes below.
-      if(!installed)for(const key of ['platform','compilerCommit','runtimeCommit']) {
+      if(!installed)for(const key of ['platform','compilerCommit',...(execution?[]:['runtimeCommit'])]) {
         const built=facts.build.inputs?.stage?.[key];
         if(built!==undefined&&built!==stage[key])throw Error('producer SDK selection differs: '+key);
       }
@@ -81,6 +84,7 @@ export async function toolReadiness(root) {
         }
         if(!built?.sdkRelative)throw Error('producer SDK input missing: '+key);
         let input=installed&&runtimeInputs.includes(key)?installed.artifacts?.[key]:built;
+        if(execution&&key==='runtime')input={sdkRelative:executionRuntime,sha256:built.sha256};
         if(key==='compiler') {
           // The historical compiler path can still name a launcher in the
           // installation. Its digest proves only that launcher, never its body.
@@ -109,13 +113,21 @@ export async function toolReadiness(root) {
       }
       applicability={build:facts.build.inputs?.stage,installation:installed?.stage??facts.build.inputs?.stage,
         changedRuntimeInputs:nativeLsp?undefined:changed,status:compilerUnknown?'BUILD_COMPILER_UNKNOWN':nativeLsp||changed.length?'NOT_CONSUMED':'BUILD_INPUTS_MATCH'};
-      const retained=retainedToolPath({producer:name,name:publicName+native.exe,to:rel});
+      const retained=!execution&&!privateToolPayload(name)?'.target-tools/'+rel:retainedToolPath({producer:name,name:publicName+native.exe,to:rel});
       if(row.artifact?.path!==retained||row.entry?.path!==rel||row.entry.recipe?.path!==rel+'.entry'
         ||row.artifact.sha256!==row.sha256||facts.install.artifact?.sha256!==row.sha256)throw Error('target body/entry binding differs');
       await bytes(sdk,retained,row.sha256);await bytes(sdk,rel,row.entry.sha256);await bytes(sdk,rel+'.entry',row.entry.recipe.sha256);
       const recipe=(await fs.readFile(path.join(sdk,rel+'.entry'),'utf8')).trimEnd().split('\n');
-      const libraries=['cjlint','lsp','cjhead'].includes(name)?['.target-tools/tools/'+name+'/lib']:['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+native.tuple,'lib/'+native.tuple,'tools/lib'];
+      const libraries=execution||privateToolPayload(name)?toolExecutionLibraries(name):['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+native.tuple,'lib/'+native.tuple,'tools/lib'];
       if(!isDeepStrictEqual(recipe,['cjcj-sdk-entry-v1','2',retained,entryPlatformName(stage.platform),'native-target:'+native.arch,...libraries]))throw Error('target loader recipe differs');
+      if(execution) {
+        for(const [rel,payload]of Object.entries(inputs.payloadFiles).filter(([rel])=>rel.startsWith(executionDirectory))) {
+          if(!payload.producers?.includes(name))throw Error('execution payload producer differs: '+rel);
+          await bytes(sdk,rel,payload.sha256);
+        }
+        const llvm=facts.build.inputs.artifacts.toolLlvm;
+        if(llvm)await bytes(sdk,executionDirectory+path.basename(llvm.path),llvm.sha256);
+      }
       const payloads=facts.install.payloads;
       if(!payloads||typeof payloads!=='object')throw Error('install payload facts missing');
       const required=name==='cjpm'?['tools/config/cangjie-repo.toml']:name==='cjfmt'?['tools/config/cangjie-format.toml']:[];

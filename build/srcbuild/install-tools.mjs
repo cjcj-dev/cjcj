@@ -8,8 +8,8 @@ import {installationRecipe} from '../../ci/bootstrap/sdk-targets.mjs';
 import {installEntries} from '../../ci/bootstrap/sdk-install-entries.mjs';
 import {sdkPlatform} from '../../ci/bootstrap/sdk-platform.mjs';
 import {installPath as mingwInstallPath} from '../toolchain/mingw.mjs';
-import {installedToolBuildInputs,sdkInputs} from './tool-build-inputs.mjs';
-import {TOOL_NAMES,requireToolProducer,toolOutputs,toolPayloads,retainedToolPath} from './tool-layout.mjs';
+import {installedToolBuildInputs,sdkInputs,toolExecutionPayloads} from './tool-build-inputs.mjs';
+import {TOOL_NAMES,privateToolPayload,requireToolProducer,toolOutputs,toolPayloads,retainedToolPath} from './tool-layout.mjs';
 
 export const sourceToolOutputs=toolOutputs;
 export async function installSourceTools(config, installRoot=path.join(config.softwareDir,'cangjie'), {consume,dependencies}={}) {
@@ -26,6 +26,7 @@ export async function installSourceTools(config, installRoot=path.join(config.so
     files[row.to]={source:row.from,sha256:await fileDigest(row.from),producer:await installedToolBuildInputs(config,name,row.from)};
   }
   const payloads=(await Promise.all(rows.map(row=>toolPayloads(config,row.producer)))).flat();
+  for(const row of rows)payloads.push(...await toolExecutionPayloads(config,row.producer,files[row.to].producer));
   const payloadFiles={};
   for(const row of payloads){
     const sha256=await fileDigest(row.from),previous=payloadFiles[row.to];
@@ -61,7 +62,7 @@ export async function installSourceTools(config, installRoot=path.join(config.so
   // cjprof owns these static subtrees. A normal source update may delete or
   // rename a page; copying only today's members leaves yesterday's pages live.
   // Other tools share tools/config, so replace only the two owned subtrees.
-  for(const relative of ['tools/config/static','.target-tools/tools/config/static','.target-tools/tools/cjlint','.target-tools/tools/lsp','.target-tools/tools/cjhead']) {
+  for(const relative of ['tools/config/static','.target-tools/tools/config/static',...rows.map(row=>'.target-tools/tools/'+row.producer+(privateToolPayload(row.producer)?'':'/lib'))]) {
     const directory=await privateRoot(path.join(sdk,relative));
     await fs.rm(directory,{recursive:true,force:true});
   }

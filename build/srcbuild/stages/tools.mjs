@@ -81,8 +81,8 @@ function buildArgsFor(name, config, jobs) {
     // source input is explicit; no native demangler or Python fallback.
     const origin=config.target.spec.rpathOrigin;
     // Standalone install keeps the producer's CJTRACE_BUNDLE_RUNTIME=ON lib/.
-    // The SDK recipe already supplies its selected target runtime; the retained
-    // tool body can also resolve that runtime without copying an official H.
+    // The SDK recipe carries the producer's runtime in a private tool lib/;
+    // it must not select the containing SDK's independently built target runtime.
     const rpath=origin ? `${origin}/../lib`+(config.target.spec.os==='linux'?`:${origin}/../../../runtime/lib/${config.target.runtimeLibSubdir(config.buildType)}`:'') : '';
     return ['build','--build-dir',toolProducerDirectory(config,name),'-t',config.buildType==='relwithdebinfo'?'release':config.buildType,
       '--cangjie-sdk',consumerSdk(config),'--mangle-source',config.toolsMangleSource,
@@ -222,7 +222,7 @@ export async function run(config) {
         }
         const argv=installArgsFor(name,producerRoot,config,destination);
         await runTool(config,name,path.join(producerRoot,subpath),argv,{stageName:'tools.'+name+'.install',extraEnv:env});
-        if(name==='hle'&&process.env.CANGJIE_BUILD_DRY_RUN!=='1')await installIndependentHle({toolsRoot:producerRoot,prefix,sdk:consumerSdk(config),platform:config.target.spec.llvmPlatform,build:path.join(config.buildRoot,'hle-entries'),input:await readHleDependencies(process.env.CJCJ_HLE_DEPENDENCIES,config.target.spec.llvmPlatform)});
+        if(name==='hle'&&process.env.CANGJIE_BUILD_DRY_RUN!=='1')await installIndependentHle({toolsRoot:producerRoot,prefix,sdk:consumerSdk(config),platform:config.target.spec.llvmPlatform,build:path.join(config.buildRoot,'hle-entries'),input:await readHleDependencies(process.env.CJCJ_HLE_DEPENDENCIES,config.target.spec.llvmPlatform),producer:await toolBuildInputs(config,name,toolBuildProduct(config,name))});
         await finishToolInstall(config,name,path.join(prefix,name==='hle'?'tools/bin':'bin',(name==='lsp'?'cangjie-lsp':name)+suffix),
           toolArgv(config,name,argv),{prefix});
       }
@@ -290,7 +290,8 @@ export async function run(config) {
     config=await toolInstallConfig(config,allTools.map(([name])=>name));
     // Normal installs own their output tree. Reading a producer workspace must
     // not rewrite its facts or dist, even when several workspaces are selected.
-    config={...config,toolsInstallRoots:Object.fromEntries(allTools.map(([name])=>[name,path.join(config.workspace,'build/tools',name,'install')]))};
+    const reusedInstalls=config.toolsInstallRoots??{};
+    config={...config,toolsInstallRoots:Object.fromEntries(allTools.map(([name])=>[name,reusedInstalls[name]??path.join(config.workspace,'build/tools',name,'install')]))};
     outputs=sourceToolOutputs(config);
     // Validate reused outputs before any shared install. Their recorded source
     // may legitimately differ from this invocation's selectors.
@@ -299,6 +300,10 @@ export async function run(config) {
       await toolBuildInputs(config,name,product);
     }
     for (const [name, subpath] of allTools) {
+      // An explicitly reused producer may already have a successful independent
+      // install. Consume and validate it below; do not rerun an install command
+      // in that read-only producer's build tree or rewrite its original facts.
+      if(reusedInstalls[name])continue;
       const producerRoot=toolSourceRoot(config,name);
       const argv=installArgsFor(name,producerRoot,config,toolInstallRoot(config,name));
       // Native install reads the build tree; preserve old dist separately so
