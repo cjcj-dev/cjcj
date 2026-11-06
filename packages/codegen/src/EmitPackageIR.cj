@@ -342,7 +342,13 @@ private func SetSymbolLinkageType(cgMod: CGModule): Unit {
                     let symName = LLVMCStringToString(unsafe { LLVMGetValueName(globalObject) }) ?? ""
                     cgMod.GetCGContext().AddLocalizedSymbol(symName)
                     if (!cgMod.GetCGContext().GetCGPkgContext().IsCrossModuleReferenced(symName)) {
-                        unsafe { LLVMSetLinkage(globalObject, LLVMLinkageValue(linkageType)) }
+                        let curLinkage = unsafe { LLVMGetLinkage(globalObject) }
+                        if (curLinkage != LLVMLinkageValue(LLVMLinkage.LinkOnceODR) &&
+                            curLinkage != LLVMLinkageValue(LLVMLinkage.WeakODR) &&
+                            curLinkage != LLVMLinkageValue(LLVMLinkage.LinkOnceAny) &&
+                            curLinkage != LLVMLinkageValue(LLVMLinkage.WeakAny)) {
+                            unsafe { LLVMSetLinkage(globalObject, LLVMLinkageValue(linkageType)) }
+                        }
                     }
                 }
             }
@@ -383,7 +389,13 @@ private func SetSymbolLinkageType(cgMod: CGModule): Unit {
                     let symName = LLVMCStringToString(unsafe { LLVMGetValueName(functionObject) }) ?? ""
                     cgMod.GetCGContext().AddLocalizedSymbol(symName)
                     if (!cgMod.GetCGContext().GetCGPkgContext().IsCrossModuleReferenced(symName)) {
-                        unsafe { LLVMSetLinkage(functionObject, LLVMLinkageValue(linkageType)) }
+                        let curLinkage = unsafe { LLVMGetLinkage(functionObject) }
+                        if (curLinkage != LLVMLinkageValue(LLVMLinkage.LinkOnceODR) &&
+                            curLinkage != LLVMLinkageValue(LLVMLinkage.WeakODR) &&
+                            curLinkage != LLVMLinkageValue(LLVMLinkage.LinkOnceAny) &&
+                            curLinkage != LLVMLinkageValue(LLVMLinkage.WeakAny)) {
+                            unsafe { LLVMSetLinkage(functionObject, LLVMLinkageValue(linkageType)) }
+                        }
                     }
                 }
             }
