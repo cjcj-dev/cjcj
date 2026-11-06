@@ -19,7 +19,7 @@ export const toolName = name => { const plain=name.replace(/\.exe$/,''); return 
 export const cjlintBuildDirectory = config => toolProducerDirectory(config,'cjlint');
 // CJTRACE's old SDK RPATH climbs three parents. Retain it inside its own
 // directory so that path cannot select the containing SDK's target runtime.
-export const retainedToolPath = row => ['cjlint','lsp','cjhead','cjtrace-recover'].includes(row.producer)?'.target-tools/tools/'+row.producer+'/bin/'+row.name:'.target-tools/'+row.to;
+export const retainedToolPath = row => ['cjlint','lsp','cjhead','cjtrace-recover'].includes(row.producer)?'.target-tools/tools/'+row.producer+'/bin/'+row.name:'.target-tools/'+(row.to??'tools/bin/'+row.name);
 export const privateToolPayload = name => ['cjlint','lsp','cjhead'].includes(name);
 export const toolExecutionLibraries = name => ['.target-tools/tools/'+name+'/lib',...(privateToolPayload(name)?[]:['tools/lib'])];
 export const hleBuildDirectory = config => toolProducerDirectory(config,'hle');
