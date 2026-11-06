@@ -92,7 +92,8 @@ for(const [label,type]of [['release','release'],['debug','debug'],['relwithdebin
   const resume=[process.execPath,cli,'--config',file,'--no-package','--resume-installed',stage.id,'--accept-records',root+'/'+label+'-first.stdout'];
   await run('release-resume',resume,0,/resume-accepted/);
   const cache=await fs.readFile(cacheDir+'/CMakeCache.txt','utf8');
-  await fs.writeFile(cacheDir+'/CMakeCache.txt',cache.replace('CMAKE_BUILD_TYPE:STRING=Release','CMAKE_BUILD_TYPE:STRING=Debug'));
+  const stale=cache.replace(/^(CMAKE_BUILD_TYPE:[^=]+=)Release$/m,'$1Debug');assert.notEqual(stale,cache);
+  await fs.writeFile(cacheDir+'/CMakeCache.txt',stale);
   try{await run('release-resume-stale',resume,1,/STD_RESUME_BUILD_CONFIGURATION/);}
   finally{await fs.writeFile(cacheDir+'/CMakeCache.txt',cache);}
   await run('release-resume-restored',resume,0,/resume-accepted/);
