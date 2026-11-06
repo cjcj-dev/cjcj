@@ -68,6 +68,15 @@ export async function toolReadiness(root) {
       }
       for(const key of nativeLsp?[]:[...sdkInputs,...compilerLoads]) {
         const built=facts.build.inputs?.artifacts?.[key];
+        if(key==='hleDependencies'&&!built) {
+          // Node/parser/cjbind are separately produced and installed after HLE
+          // compilation. Bind their existing installation input, then verify
+          // its producer record and payloads below; do not invent a build fact.
+          const dependency=inputs.installationInputs?.artifacts?.[key];
+          if(!dependency?.sdkRelative)throw Error('installed SDK input missing: '+key);
+          await bytes(sdk,dependency.sdkRelative,dependency.sha256);
+          continue;
+        }
         if(!built?.sdkRelative)throw Error('producer SDK input missing: '+key);
         let input=installed&&runtimeInputs.includes(key)?installed.artifacts?.[key]:built;
         if(key==='compiler') {

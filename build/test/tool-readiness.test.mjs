@@ -126,6 +126,25 @@ readTest('no-stage producer records the executed compiler; historical launcher-o
   await f.write('libexec/compiler','actual compiler changed');
   assert.match(publicRead(f.root).cjpm.reason,/installed bytes differ/);
 });
+readTest('HLE validates its separately installed dependency input without inventing build history',async t=>{
+  const f=await fixture(t),row=structuredClone(f.input.files['tools/bin/cjpm']),p=row.producer;
+  const native=await fs.readFile('/usr/bin/true'),rel='tools/bin/hle',retained='.target-tools/'+rel;
+  row.artifact=await f.write(retained,native);row.entry=await f.write(rel,native);
+  row.entry.recipe=await f.write(rel+'.entry','cjcj-sdk-entry-v1\n2\n'+retained+'\nlinux\nnative-target:x64\nthird_party/llvm/lib\nruntime/lib/linux_x86_64_cjnative\nlib/linux_x86_64_cjnative\ntools/lib\n');
+  p.build.directory='packages/hle';p.install.payloads={};
+  const node=await f.write('tools/bin/node',native),cjbind=await f.write('tools/dtsparser/node_modules/.bin/cjbind',native);
+  await f.write('tools/dtsparser/package.json',JSON.stringify({dependencies:{typescript:'4.9.5'}}));
+  await f.write('tools/dtsparser/node_modules/typescript/package.json',JSON.stringify({name:'typescript',version:'4.9.5'}));
+  const dependency=await f.write('tools/dtsparser/DEPENDENCIES.json',JSON.stringify({platform:'linux_x86_64',node:{source:'fixture://node',version:'fixture',sha256:node.sha256},cjbind:{source:'fixture://cjbind',version:'fixture',sha256:cjbind.sha256}}));
+  f.input.installationInputs={artifacts:{hleDependencies:{sdkRelative:dependency.path,sha256:dependency.sha256}}};
+  f.input.files[rel]=row;await f.save();const before=JSON.stringify(p);
+  assert.equal(publicRead(f.root).hle.ready,true,publicRead(f.root).hle.reason);
+  assert.equal(JSON.stringify(p),before);assert.equal(p.build.inputs.artifacts.hleDependencies,undefined);
+  delete f.input.installationInputs;await f.save();assert.match(publicRead(f.root).hle.reason,/installed SDK input missing: hleDependencies/);
+  f.input.installationInputs={artifacts:{hleDependencies:{sdkRelative:dependency.path,sha256:dependency.sha256}}};await f.save();
+  await f.write(node.path,'changed Node');assert.match(publicRead(f.root).hle.reason,/installed bytes differ: tools\/bin\/node/);
+  assert.equal(publicRead(f.root).cjpm.ready,true,'independent compiler/tool control');
+});
 readTest('public readiness rejects changed SDK pairing for Cangjie cjprof and cjpm',async t=>{
   const f=await fixture(t),before=JSON.stringify(f.input.files['tools/bin/cjprof'].producer);
   await f.write('STAGE-INPUTS.json',JSON.stringify({platform:'linux_x86_64',compilerFile:'libexec/compiler',fixture:'another stage'}));
