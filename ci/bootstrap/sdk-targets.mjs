@@ -95,12 +95,12 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     ...(!bootstrap&&prefix?[
       {from:execution.runtime.install+'/runtime/lib/'+execTuple,to:prefix+'/runtime/lib/'+execTuple,owner:'compiler execution runtime'},
       {from:execution.std.install+'/lib/'+execTuple,to:prefix+'/lib/'+execTuple,owner:'compiler execution std'},
-      {from:execution.llvm.install+'/third_party/llvm/'+executionNative.llvmDirectory,to:prefix+'/third_party/llvm/'+executionNative.llvmDirectory,owner:'compiler execution LLVM'},
+      {from:execution.llvm.install+'/third_party/llvm/'+executionNative.llvmDirectory+'/'+executionNative.llvmLibrary,to:prefix+'/third_party/llvm/'+executionNative.llvmDirectory+'/'+executionNative.llvmLibrary,owner:'compiler execution LLVM'},
     ]:[]),
     ...(bootstrap&&execution.role==='separate'?[
       {from:execution.runtime.install+'/runtime',to:prefix+'/runtime',owner:'compiler execution runtime'},
       {from:execution.std.install+'/lib',to:prefix+'/lib',owner:'compiler execution std'},
-      {from:execution.llvm.install+'/third_party/llvm/'+native.llvmDirectory,to:prefix+'/third_party/llvm/'+native.llvmDirectory,owner:'compiler execution LLVM'},
+      {from:execution.llvm.install+'/third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,to:prefix+'/third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,owner:'compiler execution LLVM'},
     ]:[]),
     {from:product,to:compilerName,owner:'compiler'},
   ];
@@ -114,7 +114,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
       ...(!prefix?[]:[
         {from:execution.runtime.install+'/runtime/lib/'+execTuple,to:prefix+'/runtime/lib/'+execTuple,owner:'compiler execution runtime'},
         {from:execution.std.install+'/lib/'+execTuple,to:prefix+'/lib/'+execTuple,owner:'compiler execution std'},
-        {from:execution.llvm.install+'/third_party/llvm/'+executionNative.llvmDirectory,to:prefix+'/third_party/llvm/'+executionNative.llvmDirectory,owner:'compiler execution LLVM'}]),
+        {from:execution.llvm.install+'/third_party/llvm/'+executionNative.llvmDirectory+'/'+executionNative.llvmLibrary,to:prefix+'/third_party/llvm/'+executionNative.llvmDirectory+'/'+executionNative.llvmLibrary,owner:'compiler execution LLVM'}]),
       {from:host.install+'/runtime/lib/'+sdkPlatform(host.platform??platform).tuple,to:'.host/runtime/lib/'+sdkPlatform(host.platform??platform).tuple,owner:'bootstrap host comparison runtime'},
       {from:product,to:compilerName,owner:'compiler'});
   }

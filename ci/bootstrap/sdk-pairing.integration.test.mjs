@@ -40,7 +40,7 @@ function descriptor(name,wrong){
  const input=structuredClone(original);
  input.work=path.join(root,name+'-work');input.install=path.join(root,name+'-sdk');
  input.selection.targetComponents.compiler={...input.selection.targetComponents.compiler,
-  install:producer,product:path.join(producer,'libexec/compiler/cjcj-stage1')};
+  install:producer,product:path.join(producer,request.compilerProduct??'libexec/compiler/cjcj-stage1')};
  input.selection.compilerExecution.compiler={...input.selection.targetComponents.compiler};
  if(wrong)for(const name of ['runtime','std','llvm'])input.selection.compilerExecution[name]=request.old[name];
  else for(const name of ['runtime','std','llvm'])input.selection.compilerExecution[name]={install:producer+'/.compiler-exec',platform:'linux_x86_64'};
@@ -48,7 +48,7 @@ function descriptor(name,wrong){
   {argv:[process.execPath,path.join(here,'compiler_identity.mjs'),'${install}']},
   {argv:[process.execPath,path.join(here,'sdk-hello.mjs'),'--sdk','${install}','--work','${work}/hello','--platform','linux_x86_64','--compiler-only',
    '--source',path.resolve(here,'../smoke/01_hello.cj'),'--expected','hello from cjcj']}]};
- if(!wrong)input.archive=path.join(root,'matched-sdk.tar.gz');
+ if(!wrong&&request.archive!==false)input.archive=path.join(root,'matched-sdk.tar.gz');
  return input;
 }
 test('matched normal installation runs installed and fresh-unpack consumers',async()=>{

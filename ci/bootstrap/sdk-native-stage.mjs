@@ -139,7 +139,7 @@ export async function nativeStage(options, {signal} = {}) {
       // independent installer need not select them again.
       {from:path.join(sdk,'runtime/lib',native.tuple),to:'.compiler-exec/runtime/lib/'+native.tuple},
       {from:path.join(sdk,'lib',native.tuple),to:'.compiler-exec/lib/'+native.tuple},
-      {from:path.join(sdk,'third_party/llvm',native.llvmDirectory),to:'.compiler-exec/third_party/llvm/'+native.llvmDirectory},
+      {from:await fs.realpath(path.join(sdk,'third_party/llvm',native.llvmDirectory,native.llvmLibrary)),to:'.compiler-exec/third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary},
       // runtime_shim/build_shim.mjs links the host runtime into the source tree as
       // ${repo}/target/release/runtime for the compiler's relative lookup. That is
       // a build-tree facility, not a package member: copying it would carry an
