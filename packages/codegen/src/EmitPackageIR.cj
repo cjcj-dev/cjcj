@@ -157,8 +157,6 @@ private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
     KeepSomeTypesManually(cgMod)
     cgMod.EraseUselessInstsAndDeclarations()
     cgMod.GenIncremental()
-    SetSymbolLinkageType(cgMod)
-    cgMod.EraseUselessGVAndFunctions()
     subDirNum = DumpIRIfNeeded(cgMod, "GenIncremental", subDirNum)
     EmitStaticGenericTIsAndLLVMUsed(cgMod)
     if (options.cjcjOptimization) {
@@ -225,6 +223,11 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
             }
             taskQueueFinalize.RunAndWaitForAllTasksCompleted()
             ConsumeModuleGenerationResults(results)
+        }
+        cgPkgContext.CollectCrossModuleReferences()
+        for (cgModule in cgModules) {
+            SetSymbolLinkageType(cgModule)
+            cgModule.EraseUselessGVAndFunctions()
         }
         if (options.NeedDumpIRToScreen()) {
             for (cgModule in cgModules) {
@@ -336,8 +339,11 @@ private func SetSymbolLinkageType(cgMod: CGModule): Unit {
                     unsafe { LLVMSetLinkage(globalObject, LLVMLinkageValue(linkageType)) }
                 } else if (LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.Internal) ||
                     LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.Private)) {
-                    cgMod.GetCGContext().AddLocalizedSymbol(
-                        LLVMCStringToString(unsafe { LLVMGetValueName(globalObject) }) ?? "")
+                    let symName = LLVMCStringToString(unsafe { LLVMGetValueName(globalObject) }) ?? ""
+                    cgMod.GetCGContext().AddLocalizedSymbol(symName)
+                    if (!cgMod.GetCGContext().GetCGPkgContext().IsCrossModuleReferenced(symName)) {
+                        unsafe { LLVMSetLinkage(globalObject, LLVMLinkageValue(linkageType)) }
+                    }
                 }
             }
         }
@@ -374,8 +380,11 @@ private func SetSymbolLinkageType(cgMod: CGModule): Unit {
                     unsafe { LLVMSetLinkage(functionObject, LLVMLinkageValue(linkageType)) }
                 } else if (LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.Internal) ||
                     LLVMLinkageValue(linkageType) == LLVMLinkageValue(LLVMLinkage.Private)) {
-                    cgMod.GetCGContext().AddLocalizedSymbol(
-                        LLVMCStringToString(unsafe { LLVMGetValueName(functionObject) }) ?? "")
+                    let symName = LLVMCStringToString(unsafe { LLVMGetValueName(functionObject) }) ?? ""
+                    cgMod.GetCGContext().AddLocalizedSymbol(symName)
+                    if (!cgMod.GetCGContext().GetCGPkgContext().IsCrossModuleReferenced(symName)) {
+                        unsafe { LLVMSetLinkage(functionObject, LLVMLinkageValue(linkageType)) }
+                    }
                 }
             }
         }

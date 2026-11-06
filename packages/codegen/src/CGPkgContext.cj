@@ -68,6 +68,7 @@ public class CGPkgContext {
         ObjectLocker<HashMap<String, GlobalValue>>(HashMap<String, GlobalValue>())
     private let localizedSymbols: ObjectLocker<HashSet<String>> =
         ObjectLocker<HashSet<String>>(HashSet<String>())
+    private var crossModuleRefs: HashSet<String> = HashSet<String>()
 
     public init(chirData: CHIRData, options: GlobalOptions, enableIncrement: Bool,
         noHeapAllocChecker: NoHeapAllocChecker, noWriteBarrierRecChecker: NoWriteBarrierRecChecker,
@@ -101,6 +102,7 @@ public class CGPkgContext {
         correctedCachedMangleMap.Clear()
         quickCHIRValues.Do({ object => object.clear() })
         localizedSymbols.Do({ object => object.clear() })
+        crossModuleRefs.clear()
         cgMods.clear()
         if (let Some(e) <- failure) { throw e }
     }
@@ -183,6 +185,37 @@ public class CGPkgContext {
             for (symbol in object) { out.add(symbol) }
             out
         })
+    }
+
+    public func CollectCrossModuleReferences(): Unit {
+        let refs = HashSet<String>()
+        for (cgMod in cgMods) {
+            if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+                var fn = unsafe { LLVMGetFirstFunction(moduleHandle.raw) }
+                while (!fn.isNull()) {
+                    if (unsafe { LLVMIsDeclaration(fn) } != 0) {
+                        if (let Some(n) <- LLVMCStringToString(unsafe { LLVMGetValueName(fn) })) {
+                            refs.add(n)
+                        }
+                    }
+                    fn = unsafe { LLVMGetNextFunction(fn) }
+                }
+                var gv = unsafe { LLVMGetFirstGlobal(moduleHandle.raw) }
+                while (!gv.isNull()) {
+                    if (unsafe { LLVMIsDeclaration(gv) } != 0) {
+                        if (let Some(n) <- LLVMCStringToString(unsafe { LLVMGetValueName(gv) })) {
+                            refs.add(n)
+                        }
+                    }
+                    gv = unsafe { LLVMGetNextGlobal(gv) }
+                }
+            }
+        }
+        crossModuleRefs = refs
+    }
+
+    public func IsCrossModuleReferenced(name: String): Bool {
+        return crossModuleRefs.contains(name)
     }
 
     public func CollectSubTypeMap(): Unit {
