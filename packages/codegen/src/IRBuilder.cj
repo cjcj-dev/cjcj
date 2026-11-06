@@ -778,7 +778,7 @@ public class IRBuilder2 <: Resource {
                     }
                     // A boxed value's payload is always in managed address space (1).
                     // Reference aggregates use the typed GC read; non-reference
-                    // aggregates use llvm.cj.copy.no.ref.struct (Intrinsics.td:472).
+                    // aggregates retain their managed addresses through typed copies.
                     if (IsTypeContainsRef(elementType)) {
                         CallGCReadAgg(elementType,
                             ArrayList<LLVMValueRef>([temp, boxedValue, castedPtr, size]))
@@ -3973,6 +3973,16 @@ public class IRBuilder2 <: Resource {
         // aggregate therefore has no bytes to transfer, while skipping only the
         // copy here preserves any operand-evaluation side effects.
         if (!IsTypeContainsRef(aggregateType) && cgMod.GetTypeSize(aggregateType) == 0u64) {
+            return LLVMNullValue()
+        }
+        // A heap-derived address must stay in AS1 so statepoint rewriting can
+        // replace it after a moving safepoint. The native no-ref intrinsic
+        // converts its operands to AS0; CSE can then retain an entry address
+        // across a call even when the managed base has been relocated.
+        if ((GetPointerAddressSpace(source) ?? 0u32) == 1u32 ||
+            (GetPointerAddressSpace(dest) ?? 0u32) == 1u32) {
+            CJC_ASSERT(!IsTypeContainsRef(aggregateType))
+            CopyNativeAggregate(aggregateType, source, dest)
             return LLVMNullValue()
         }
         let kind = unsafe { LLVMGetTypeKind(aggregateType) }
