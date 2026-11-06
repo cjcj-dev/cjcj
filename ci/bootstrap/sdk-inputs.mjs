@@ -9,7 +9,7 @@ import {execFile} from 'node:child_process';
 import {promisify, isDeepStrictEqual} from 'node:util';
 import {randomUUID} from 'node:crypto';
 import {atomicJson, readJson, privateRoot, fileDigest} from './sdk-flow.mjs';
-import {FIXED_INPUTS, compilerExecutionRoot} from './sdk-targets.mjs';
+import {FIXED_INPUTS} from './sdk-targets.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {stage2Input} from './sdk-stage2-input.mjs';
 import {receiveNativeRuntime} from './native-runtime-input.mjs';
@@ -304,7 +304,8 @@ export async function prepareInstallInputs(descriptor) {
   const selection=installationSelection(descriptor.selection);
   const {platform,targetComponents:target,compilerExecution:execution}=selection,native=sdkPlatform(platform);
   const work=await privateRoot(descriptor.work),install=await privateRoot(descriptor.install);
-  let dependencyRoot,executionPlatform=platform;
+  let dependencyRoot;
+  const executionPlatform=platform;
   if(descriptor.layout==='native-output') {
     // build.py installs the compiler and its linked inputs into one native
     // output. An install-only caller cannot replace just that compiler.
@@ -312,25 +313,12 @@ export async function prepareInstallInputs(descriptor) {
     if(await fs.realpath(product)!==await fs.realpath(target.compiler.product))throw Error('INSTALL_NATIVE_COMPILER_PRODUCT');
     dependencyRoot=target.compiler.install;
   } else {
-    const facts=await readJson(path.join(target.compiler.install,'compiler-inputs.json')).catch(error=>{
-      if(error.code!=='ENOENT')throw error;return null;
-    });
-    if(facts) {
-      if(facts.commit!==target.compiler.commit||await fileDigest(target.compiler.product)!==facts.compilerSha256)
-        throw Error('INSTALL_COMPILER_PRODUCT');
-      dependencyRoot=path.join(target.compiler.install,'.compiler-exec');
-      if(await fileDigest(path.join(dependencyRoot,'lib',native.tuple,'libcangjie-std-core.a'))!==facts.stdCoreSha256)
-        throw Error('INSTALL_COMPILER_STD_INPUT');
-    } else {
-      // Reinstall an existing installed compiler with the execution inputs it
-      // actually uses. Read the existing stage/entry layout, never manufacture
-      // historical native-stage facts for a completed raw compiler output.
-      const stage=await readJson(path.join(target.compiler.install,'STAGE-INPUTS.json'));
-      if(stage.compilerCommit!==target.compiler.commit||await fileDigest(target.compiler.product)!==stage.compilerSha256)
-        throw Error('INSTALL_COMPILER_PRODUCT');
-      dependencyRoot=compilerExecutionRoot(target.compiler.install,stage.selection);
-      executionPlatform=stage.selection.compilerExecution.platform;
-    }
+    const facts=await readJson(path.join(target.compiler.install,'compiler-inputs.json'));
+    if(facts.commit!==target.compiler.commit||await fileDigest(target.compiler.product)!==facts.compilerSha256)
+      throw Error('INSTALL_COMPILER_PRODUCT');
+    dependencyRoot=path.join(target.compiler.install,'.compiler-exec');
+    if(await fileDigest(path.join(dependencyRoot,'lib',native.tuple,'libcangjie-std-core.a'))!==facts.stdCoreSha256)
+      throw Error('INSTALL_COMPILER_STD_INPUT');
   }
   // Dependency locations belong to the compiler producer. The target program
   // and the package-manager host retain their independent selections. In
