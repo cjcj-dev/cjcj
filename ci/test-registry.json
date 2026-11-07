@@ -1081,5 +1081,80 @@
     "file": "packages/chir/src/InlineLiteralIsolation_test.cj",
     "executor": "cjpm",
     "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/RefMapJoin_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/chir/src/UsersMultiplicity_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/compiler_unittest/src/FullStatePoolSemantics_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/compiler_unittest/src/TypeManagerUsedExtendIndex_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/driver/src/Partial_link_output_test.cj",
+    "executor": "cjpm",
+    "member": "packages/driver"
+  },
+  {
+    "file": "packages/frontend/src/CommonImportFileId_test.cj",
+    "executor": "cjpm",
+    "member": "packages/frontend"
+  },
+  {
+    "file": "packages/frontend/src/ParallelTraceConsumers_test.cj",
+    "executor": "cjpm",
+    "member": "packages/frontend"
+  },
+  {
+    "file": "packages/frontend/src/PkgDepInfo_test.cj",
+    "executor": "cjpm",
+    "member": "packages/frontend"
+  },
+  {
+    "file": "packages/modules/src/ImportSpecImplicit_test.cj",
+    "executor": "cjpm",
+    "member": "packages/modules"
+  },
+  {
+    "file": "packages/sema/src/TypeInstantiationDispatch_test.cj",
+    "executor": "cjpm",
+    "member": "packages/sema"
+  },
+  {
+    "file": "packages/sema/src/TypeInstantiationSubstitution_test.cj",
+    "executor": "cjpm",
+    "member": "packages/sema"
+  },
+  {
+    "file": "packages/sema/src/backport_tests/NumericAlias_test.cj",
+    "executor": "cjpm",
+    "member": "packages/sema"
+  },
+  {
+    "file": "ci/bootstrap/sdk-pairing.integration.test.mjs",
+    "executor": "manual",
+    "reason": "Requires real completed linux_x86_64 SDK components named by SDK_PAIRING_INPUTS: a JSON request with work (owned directory), inputs (an existing sdk_build.sh install descriptor), compiler (a producer install with .compiler-exec runtime/std/LLVM) and old runtime/std/llvm installs whose bytes differ from that producer. Run SDK_PAIRING_INPUTS=<request.json> npx --yes zx@8 ci/bootstrap/sdk-pairing.integration.test.mjs. It drives ci/bootstrap/sdk_build.sh --install-inputs for a matched install plus archive/fresh-unpack consumers and for the wrong-but-existing execution tuple, then asserts installed bytes come from the compiler producer. Generic GATING provisions none of these SDK inputs."
+  },
+  {
+    "file": "ci/bootstrap/sdk-std-debug-policy.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires an installed linux_x86_64 SDK with STAGE-INPUTS.json and existing std payload archives (SDK_STD_POLICY_SDK), the real standard library build.py (SDK_STD_BUILD_PY) and CMakeLists.txt (SDK_STD_CMAKE_LISTS), a new owned work directory (SDK_STD_POLICY_WORK), git and CMake. Run those variables with npx --yes zx@8 ci/bootstrap/sdk-std-debug-policy.integration.mjs; SDK_STD_POLICY_CASES may select release,debug,relwithdebinfo,legacy. It runs ci/bootstrap/sdk-build.mjs over a committed fixture to check std build-type selection, install and resume without compiling std. Generic GATING provisions none of these inputs."
+  },
+  {
+    "file": "tests/sema_backports_1105/mock_test.cj",
+    "executor": "manual",
+    "reason": "Input fixture for tests/sema_backports_1105/run.mjs mock case (compiled with --test --mock=on), not a workspace package. Run npx --yes zx@8 tests/sema_backports_1105/run.mjs <compiler> <sdk> <out> mock with a built compiler and matching SDK; no workflow provisions those inputs."
   }
 ]

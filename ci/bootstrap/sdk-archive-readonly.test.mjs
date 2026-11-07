@@ -4,8 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-const parent=process.env.SDK_FLOW_TEST_ROOT;
-if(!parent)throw Error('SDK_FLOW_TEST_ROOT required');
+const parent=process.env.SDK_FLOW_TEST_ROOT||(process.env.RELEASE_EVIDENCE_TEST_ROOT&&path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT,'sdk-archive-readonly'));
+if(!parent)throw Error('SDK_FLOW_TEST_ROOT or RELEASE_EVIDENCE_TEST_ROOT required');
 await fs.mkdir(parent,{recursive:true});
 for(const readOnlySource of [false,true])test(`archive CLI readOnlySource=${readOnlySource} preserves source and exercises relocation`,async()=>{
  const root=await fs.mkdtemp(path.join(parent,'archive-')),install=path.join(root,'sdk'),archive=path.join(root,'sdk.tar.gz');
