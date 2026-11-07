@@ -563,6 +563,10 @@ public class IRBuilder2 <: Resource {
     private let cgMod: CGModule
     private let builder: LLVMBuilderHandle
     private var chirExpr: Option<CHIRExprWrapper> = None
+    // Outer TypeInfo already produced by a fused interface lookup
+    // (llvm.cj.get.mtable.func.outertype) for one Invoke/TryInvoke. It is
+    // consumed once, by CreateOuterTypeInfo for that same CHIR expression.
+    private var fusedOuterTypeInfo: Option<(Expression, LLVMValueRef)> = None
     private var cgFunction: Option<CGFunction> = None
     private let basePtrs: HashMap<UIntNative, LLVMValueRef> = HashMap<UIntNative, LLVMValueRef>()
     private var closed: Bool = false
@@ -2677,6 +2681,14 @@ public class IRBuilder2 <: Resource {
         if (DeRef(invokeWrapper.GetObject().GetType().getOrThrow()).IsAutoEnv()) {
             return GetTypeInfoFromObject(cgMod.GetMappedCGValue(callExprWrapper.GetThisParam().getOrThrow()).GetRawValue())
         } else if (GetCGContext().GetCGPkgContext().NeedOuterTypeInfo(outerCHIRClassType)) {
+            if (let Some((fusedExpr, fusedOuter)) <- fusedOuterTypeInfo) {
+                if (refEq(fusedExpr, callExpression)) {
+                    // Same receiver TypeInfo, interface and method offset as the
+                    // cj.get.method.outertype call below; already looked up.
+                    fusedOuterTypeInfo = None
+                    return CreateBitCast(fusedOuter, typeInfoPtrType)
+                }
+            }
             let backupBB = GetInsertBlock()
             let prepForVirtualCallBB = invokeWrapper.GetPrepForVirtualCallBB()
             if (!prepForVirtualCallBB.isNull()) {
@@ -5954,6 +5966,27 @@ public class IRBuilder2 <: Resource {
         args.add(CreateBitCast(parameters[1], i8PtrType))
         args.add(parameters[2])
         return CreateIntrinsicCallNoInvoke("llvm.cj.get.mtable.func", ArrayList<LLVMTypeRef>(), args)
+    }
+
+    // {method pointer, outer TypeInfo} of one interface dispatch in a single
+    // runtime lookup. Operands are those of CallIntrinsicMTable.
+    public func CallIntrinsicMTableAndOuterType(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
+        CJC_ASSERT(parameters.size == 3)
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreateBitCast(parameters[0], i8PtrType))
+        args.add(CreateBitCast(parameters[1], i8PtrType))
+        args.add(parameters[2])
+        return CreateIntrinsicCallNoInvoke("llvm.cj.get.mtable.func.outertype", ArrayList<LLVMTypeRef>(), args)
+    }
+
+    public func SetFusedOuterTypeInfo(expr: Expression, outerTypeInfo: LLVMValueRef): Unit {
+        CJC_ASSERT(fusedOuterTypeInfo.isNone())
+        fusedOuterTypeInfo = Some((expr, outerTypeInfo))
+    }
+
+    public func HasFusedOuterTypeInfo(): Bool {
+        return fusedOuterTypeInfo.isSome()
     }
 
     public func CallIntrinsicMethodOuterType(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
