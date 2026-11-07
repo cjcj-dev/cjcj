@@ -66,7 +66,7 @@ test('official H reaches the public tools producer without a synthetic stage rec
   const command=JSON.parse(fs.readFileSync(path.join(f.root,'buildtools/lsp/server-build-command.json')));
   assert.equal(command.argv[command.argv.indexOf('--cjpm')+1],path.join(host,'tools/bin/cjpm'));
   assert.equal(command.argv[command.argv.indexOf('--sdk')+1],host);
-  assert.equal(f.ok(f.run([facts.artifact.path])).stdout.trim(),'42');
+  assert.equal(f.ok(f.run([facts.artifact.path],{env:{...f.env,LD_LIBRARY_PATH:[path.join(f.host,'runtime/lib/linux_x86_64_cjnative'),path.join(f.host,'lib/linux_x86_64_cjnative')].join(path.delimiter)}})).stdout.trim(),'42');
   assert(!fs.existsSync(path.join(host,'STAGE-INPUTS.json')));
 });
 test('removed tools GCC flag is an ordinary unknown option before any producer runs',()=>{
@@ -121,6 +121,8 @@ for(const explicit of [false,true])test('cjcompat fixed frontend caller '+(expli
  if(explicit){f.write(path.join(frontend,'selected.txt'),'explicit frontend\n');f.ok(f.run(['git','-C',frontend,'add','.']));f.ok(f.run(['git','-C',frontend,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','test: distinct explicit frontend']));}
  const sha=f.ok(f.run(['git','-C',frontend,'rev-parse','HEAD'])).stdout.trim();
  const selected=explicit?frontend:path.join(f.workspace,'cangjie_compiler');
+ // This bounded producer exits before linking; supply the preflight's hashed input.
+ f.write(path.join(f.root,'libLLVM.so'),'bounded argv fixture; no native LLVM execution\n');
  const r=f.build('cjcompat',explicit?['--tools-frontend-source',frontend,'--tools-frontend-ref',sha]:[]);
  assert.equal(r.status,1,r.stdout+'\n'+r.stderr);
  const row=JSON.parse(fs.readFileSync(path.join(f.root,'buildtools/cjcompat-command.json'))),arg=k=>row.argv[row.argv.indexOf(k)+1];
