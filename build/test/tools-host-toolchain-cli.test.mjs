@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {buildConfig} from '../lib/config.mjs';
+import {buildConfig,withBuildType} from '../lib/config.mjs';
 import {toolBuildInputs} from '../srcbuild/tool-build-inputs.mjs';
 const host=process.env.CJCJ_TOOLS_TEST_HOST,base=process.env.RELEASE_EVIDENCE_TEST_ROOT;
 function fixture(name) {
@@ -34,7 +34,7 @@ function fixture(name) {
   for(const name of ['lsp','cjlint','cjcompat'])write(path.join(tools,'packages',name,'build/build.mjs'),'// controlled root producer below\n');
   write(path.join(tools,'build.mjs'),`import fs from 'node:fs';import path from 'node:path';import {spawnSync} from 'node:child_process';
 const a=process.argv.slice(2),value=k=>a[a.indexOf(k)+1];
-if(a[0]==='build'&&value('--tool')==='cjcompat'){fs.mkdirSync(value('--build-root'),{recursive:true});fs.writeFileSync(path.join(value('--build-root'),'cjcompat-command.json'),JSON.stringify({argv:a}));process.exit(73);}
+if(a[0]==='build'&&['cjcompat','cjlint'].includes(value('--tool'))){fs.mkdirSync(value('--build-root'),{recursive:true});fs.writeFileSync(path.join(value('--build-root'),value('--tool')+'-command.json'),JSON.stringify({argv:a}));process.exit(73);}
 if(a[0]!=='build'||value('--tool')!=='lsp')throw Error('PUBLIC_ROOT_PRODUCER');
 const out=path.join(value('--build-root'),'lsp/server/target/release/bin/main');fs.mkdirSync(path.dirname(out),{recursive:true});
 const p=spawnSync(path.join(process.env.CANGJIE_HOME,'bin/cjc'),[new URL('./packages/lsp/main.cj',import.meta.url).pathname,'-o',out],{stdio:'inherit'});
@@ -44,7 +44,7 @@ if(p.error)throw p.error;if(p.signal)throw Error(p.signal);process.exitCode=p.st
   const commit=freeze(tools);
   write(path.join(workspace,'.source-selection.json'),JSON.stringify({tools:{url:'file://'+tools,tag:commit}}));
   const env={...process.env,CJCJ_SRCBUILD_CONSUMER_SDK:host,CJCJ_OFFICIAL_SDK_ROOT:host};
-  for(const key of ['CANGJIE_BUILD_DRY_RUN','CJCJ_TOOLS_GCC_TOOLCHAIN','CJCJ_SRCBUILD_SOURCE_MIRRORS','CJCJ_SRCBUILD_REQUIRE_MIRRORS'])delete env[key];
+  for(const key of ['CANGJIE_BUILD_DRY_RUN','CJCJ_SRCBUILD_SOURCE_MIRRORS','CJCJ_SRCBUILD_REQUIRE_MIRRORS'])delete env[key];
   function build(tool,extra=[]) {
     return run([process.execPath,new URL('../cli.mjs',import.meta.url).pathname,'--workspace',workspace,
       '--build-root',path.join(root,'buildtools'),'--official-sdk-root',host,'--host-profile','kkk2',
@@ -54,7 +54,7 @@ if(p.error)throw p.error;if(p.signal)throw Error(p.signal);process.exitCode=p.st
       '--tools-llvm-shim',path.join(root,'shim.o'),'--tools-llvm-library',path.join(root,'libLLVM.so'),...extra,'build','tools'],{env});
   }
   const facts=tool=>JSON.parse(fs.readFileSync(path.join(workspace,'build/tools',tool,'build-inputs.json')));
-  return {root,workspace,tools,write,run,ok,build,facts,host};
+  return {root,workspace,tools,write,run,ok,build,facts,host,env};
 }
 test('official H reaches the public tools producer without a synthetic stage record',()=>{
   const f=fixture('host');f.ok(f.build('lsp'));
@@ -69,9 +69,46 @@ test('official H reaches the public tools producer without a synthetic stage rec
   assert.equal(f.ok(f.run([facts.artifact.path])).stdout.trim(),'42');
   assert(!fs.existsSync(path.join(host,'STAGE-INPUTS.json')));
 });
-test('retired C++ cjlint GCC selection is rejected rather than silently changing the new frontend',()=>{
- const f=fixture('retired-gcc'),r=f.build('cjlint',['--tools-gcc-toolchain','/usr']);
- assert.equal(r.status,2);assert.match(r.stderr,/retired C\+\+ cjlint/);
+test('removed tools GCC flag is an ordinary unknown option before any producer runs',()=>{
+ const f=fixture('removed-gcc');
+ for(const extra of [['--tools-gcc-toolchain','/usr'],['--tools-gcc-toolchain=/usr']]) {
+  const r=f.build('cjlint',extra);
+  assert.equal(r.status,2);assert.match(r.stderr,/unknown global option: --tools-gcc-toolchain/);
+  assert(!fs.existsSync(path.join(f.root,'buildtools')),'unknown option must stop before producer preparation');
+ }
+ const help=f.ok(f.run([process.execPath,new URL('../cli.mjs',import.meta.url).pathname,'--help']));
+ assert.doesNotMatch(help.stdout,/tools-gcc-toolchain/);assert.match(help.stdout,/stdx-gcc-toolchain/);
+ console.log('REMOVED_GCC_UNKNOWN_OPTION_ASSERTION_REACHED');
+});
+
+test('unsupported tools GCC environment has no config field or build-type propagation',()=>{
+ const f=fixture('gcc-env'),saved=process.env.CJCJ_TOOLS_GCC_TOOLCHAIN;
+ try {
+  for(const value of ['', 'relative-unused', '/unused/gcc']) {
+   process.env.CJCJ_TOOLS_GCC_TOOLCHAIN=value;
+   const config=buildConfig({workspace:f.workspace,targetKey:'linux-x64',stdxGccToolchain:'/real-stdx-gcc'});
+   for(const row of [config,withBuildType(config,'debug')]) {
+    assert(!Object.hasOwn(row,'toolsGccToolchain'));assert.equal(row.stdxGccToolchain,'/real-stdx-gcc');
+   }
+  }
+ } finally {if(saved===undefined)delete process.env.CJCJ_TOOLS_GCC_TOOLCHAIN;else process.env.CJCJ_TOOLS_GCC_TOOLCHAIN=saved;}
+ console.log('REMOVED_GCC_CONFIG_ASSERTION_REACHED');
+});
+
+for(const mode of ['clean','incremental'])test('public cjlint '+mode+' reaches its producer with frontend inputs despite unsupported GCC environment',()=>{
+ const f=fixture('lint-'+mode);
+ f.env.CJCJ_TOOLS_GCC_TOOLCHAIN='relative-unused';
+ const frontendRef='b'.repeat(40),analysis=path.join(f.root,'analysis'),frontend=path.join(f.root,'frontend');
+ const options=['--tools-analysis-sdk',analysis,'--tools-frontend-source',frontend,'--tools-frontend-ref',frontendRef,'--tools-build-mode',mode];
+ const missing=f.build('cjlint',['--tools-build-mode',mode]);
+ assert.equal(missing.status,1);assert.match(missing.stderr,/toolsAnalysisSdk is required/);
+ assert(!fs.existsSync(path.join(f.root,'buildtools/cjlint-command.json')));
+ const r=f.build('cjlint',options);
+ assert.equal(r.status,1,r.stdout+'\n'+r.stderr);assert.match(r.stderr,/73/,'actual producer failure must remain visible');
+ const row=JSON.parse(fs.readFileSync(path.join(f.root,'buildtools/cjlint-command.json'))),arg=k=>row.argv[row.argv.indexOf(k)+1];
+ console.log('CJLINT_DEFAULT_PRODUCER_ARGV_ASSERTION_REACHED '+mode);
+ for(const [flag,value]of [['--tool','cjlint'],['--sdk',f.host],['--cjpm-sdk',f.host],['--analysis-sdk',analysis],['--frontend-source',frontend],['--frontend-ref',frontendRef],['--frontend-artifacts',path.join(f.root,'json')],['--frontend-runtime-object',path.join(f.root,'runtime.o')],['--llvm-shim',path.join(f.root,'shim.o')],['--llvm-library',path.join(f.root,'libLLVM.so')]])assert.equal(arg(flag),value,flag);
+ assert(!row.argv.some(value=>/gcc-toolchain/.test(value)));
 });
 
 for(const explicit of [false,true])test('cjcompat fixed frontend caller '+(explicit?'explicit':'default'),()=>{

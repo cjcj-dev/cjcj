@@ -435,7 +435,7 @@ test('public Cangjie lint separates host execution and explicit/default analysis
  await fs.mkdir(executionSdk);await fs.mkdir(managerSdk);
  const args=[cli,'--workspace',root,'--official-sdk-root',managerSdk,'--build-root',root+'/output','--tools-build-set','cjlint','--tools-phase','build','--jobs','1'];
  const env={...process.env,CANGJIE_BUILD_DRY_RUN:'1',CJCJ_SRCBUILD_CONSUMER_SDK:executionSdk};
- for(const key of ['CJLINT_ANALYSIS_SDK','CJLINT_FRONTEND_SOURCE','CJLINT_FRONTEND_REF','CJCJ_TOOLS_GCC_TOOLCHAIN'])delete env[key];
+ for(const key of ['CJLINT_ANALYSIS_SDK','CJLINT_FRONTEND_SOURCE','CJLINT_FRONTEND_REF'])delete env[key];
  const invoke=(extra=[],overlay={})=>spawnSync(process.execPath,[...args,...extra,'build','tools'],{env:{...env,...overlay},encoding:'utf8'});
  const missing=invoke();assert.equal(missing.status,1);assert.match(missing.stderr,/toolsAnalysisSdk is required/);
  const explicit=invoke(profOptions);assert.equal(explicit.status,0,explicit.stderr);

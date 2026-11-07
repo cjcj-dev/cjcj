@@ -54,7 +54,6 @@ function usage() {
     + '  --stdx-gcc-toolchain PATH (native Clang GCC headers/libraries prefix)\n'
     + '  --tools-build-mode clean|incremental (default: clean)\n'
     + '  --tools-analysis-sdk PATH --tools-frontend-source PATH --tools-frontend-ref SHA (Cangjie cjlint analysis and fixed shared frontend)\n'
-    + '  --tools-gcc-toolchain PATH (retired C++ cjlint option; rejected)\n'
     + '  --tools-dependencies PATH (legacy native dependency description; not a Cangjie tool input)\n'
     + '  --tools-build-set all|NAME,... (default: all; omitted tools reuse existing outputs)\n'
     + '  --tools-mangle-source DIR (compiler Cangjie demangler source for cjtrace-recover)\n'
@@ -117,7 +116,7 @@ function parseGlobal(args) {
       ['--build-type', 'buildType'], ['--cangjie-version', 'cangjieVersion'],
       ['--stdx-version', 'stdxVersion'], ['--stdx-profile', 'stdxProfile'], ['--log-level', 'logLevel'],
       ['--stdx-build-mode', 'stdxBuildMode'], ['--stdx-gcc-toolchain', 'stdxGccToolchain'], ['--tools-build-mode','toolsBuildMode'], ['--tools-build-set','toolsBuildSet'],
-      ['--tools-producer-build-dir','toolsProducerBuildDir'], ['--tools-json-build','toolsJsonBuild'], ['--tools-phase','toolsPhase'], ['--tools-install-prefix','toolsInstallPrefix'], ['--tools-dependencies','toolsDependencies'], ['--tools-gcc-toolchain','toolsGccToolchain'], ['--tools-mangle-source','toolsMangleSource'], ['--tools-jni-home','toolsJniHome'], ['--tools-runtime-header','toolsRuntimeHeader'], ['--tools-lombok-jar','toolsLombokJar'], ['--tools-analysis-sdk','toolsAnalysisSdk'], ['--tools-frontend-source','toolsFrontendSource'], ['--tools-frontend-ref','toolsFrontendRef'], ['--tools-compiler-libs','toolsCompilerLibs'], ['--tools-runtime-config','toolsRuntimeConfig'], ['--tools-llvm-shim','toolsLlvmShim'], ['--tools-llvm-library','toolsLlvmLibrary'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
+      ['--tools-producer-build-dir','toolsProducerBuildDir'], ['--tools-json-build','toolsJsonBuild'], ['--tools-phase','toolsPhase'], ['--tools-install-prefix','toolsInstallPrefix'], ['--tools-dependencies','toolsDependencies'], ['--tools-mangle-source','toolsMangleSource'], ['--tools-jni-home','toolsJniHome'], ['--tools-runtime-header','toolsRuntimeHeader'], ['--tools-lombok-jar','toolsLombokJar'], ['--tools-analysis-sdk','toolsAnalysisSdk'], ['--tools-frontend-source','toolsFrontendSource'], ['--tools-frontend-ref','toolsFrontendRef'], ['--tools-compiler-libs','toolsCompilerLibs'], ['--tools-runtime-config','toolsRuntimeConfig'], ['--tools-llvm-shim','toolsLlvmShim'], ['--tools-llvm-library','toolsLlvmLibrary'], ['--jobs','jobs'], ['--tools-package-jobs','toolsPackageJobs'],
     ]) {
       parsed = optionValue(args, index, flag);
       if (parsed) {
@@ -258,7 +257,6 @@ async function dispatch(config, command, args) {
       toolsBuildMode: config.toolsBuildMode,
       toolsBuildSet: config.toolsBuildSet,
       toolsDependencies: config.toolsDependencies,
-      toolsGccToolchain: config.toolsGccToolchain,
       toolsMangleSource: config.toolsMangleSource,
       toolsJniHome: config.toolsJniHome,
       toolsRuntimeHeader: config.toolsRuntimeHeader,

@@ -133,7 +133,6 @@ export function buildConfig({
   toolsBuildMode = 'clean',
   toolsBuildSet = 'all',
   toolsDependencies = process.env.CJCJ_NATIVE_TOOL_DEPENDENCIES,
-  toolsGccToolchain = process.env.CJCJ_TOOLS_GCC_TOOLCHAIN,
   toolsMangleSource = process.env.CANGJIE_MANGLE_SOURCE_DIR,
   toolsJniHome = process.env.JAVA_HOME,
   toolsRuntimeHeader,
@@ -192,7 +191,6 @@ export function buildConfig({
       throw new ConfigError('stdx-gcc-toolchain: expected an absolute GCC headers/libraries prefix');
     if (target.spec.crossCompile) throw new ConfigError('stdx-gcc-toolchain is only supported for native stdx builds');
   }
-  if(toolsGccToolchain!=null)throw new ConfigError('tools-gcc-toolchain: retired C++ cjlint producer option');
   if (toolsMangleSource != null && (typeof toolsMangleSource !== 'string' || !path.isAbsolute(toolsMangleSource)))
     throw new ConfigError('tools-mangle-source: expected an absolute compiler packages/mangle/src path');
   for(const [name,value]of Object.entries({toolsAnalysisSdk,toolsFrontendSource,toolsJniHome,toolsRuntimeHeader,toolsLombokJar,toolsCompilerLibs,toolsRuntimeConfig,toolsLlvmShim,toolsLlvmLibrary,toolsProducerBuildDir,toolsJsonBuild}))if(value!=null&&(typeof value!=='string'||!path.isAbsolute(value)))throw new ConfigError(name+': expected an absolute frontend input path');
@@ -225,7 +223,6 @@ export function buildConfig({
     toolsBuildMode,
     toolsBuildSet,
     toolsDependencies: toolsDependencies ? absolute(toolsDependencies) : null,
-    toolsGccToolchain: toolsGccToolchain == null ? null : absolute(toolsGccToolchain),
     toolsMangleSource: toolsMangleSource == null ? null : absolute(toolsMangleSource),
     toolsJniHome: toolsJniHome == null ? null : absolute(toolsJniHome),
     toolsRuntimeHeader: toolsRuntimeHeader == null ? null : absolute(toolsRuntimeHeader),
@@ -279,7 +276,6 @@ export function withBuildType(config, buildType) {
     toolsBuildMode: config.toolsBuildMode,
     toolsBuildSet: config.toolsBuildSet,
     toolsDependencies: config.toolsDependencies,
-    toolsGccToolchain: config.toolsGccToolchain,
     toolsMangleSource: config.toolsMangleSource,
     toolsJniHome: config.toolsJniHome,
     toolsRuntimeHeader: config.toolsRuntimeHeader,
