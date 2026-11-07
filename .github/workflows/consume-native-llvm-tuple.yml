@@ -50,7 +50,7 @@ jobs:
         with:
           component: llvm-headers
           platform: ${{ matrix.platform }}
-          pin: 57537222f0b42b9f4e750e57e7684f2574ca0462
+          pin: ba518962f0cda46ea71cad033214e8fe1ea83249
           cache-size: 2G
       - uses: actions/download-artifact@v8
         with:
