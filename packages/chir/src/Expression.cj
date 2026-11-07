@@ -30,6 +30,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     private var parent: Option<Block> = None
     private var result: Option<LocalVar> = None
     private var operandsAndGroupsConnected: Bool = false
+    private let countOperandVersion = AtomicInt64(0)
 
     public init(kind: ExprKind, operands: ArrayList<Value>, blockGroups: ArrayList<BlockGroup>,
         parent: Option<Block>) {
@@ -97,7 +98,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
             kind == ExprKind.TRY_INVOKESTATIC || kind == ExprKind.TRY_SPAWN ||
             kind == ExprKind.TRY_NUMERIC_CAST || kind == ExprKind.TRY_INTRINSIC ||
             kind == ExprKind.TRY_ALLOCATE || kind == ExprKind.TRY_RAW_ARRAY_ALLOCATE) {
-            return (Some(GetSuccessor(0)), Some(GetSuccessor(1)))
+            return (Some(GetSuccessor(0, countSite: 109)), Some(GetSuccessor(1, countSite: 110)))
         }
         return (None, None)
     }
@@ -239,17 +240,20 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         return None
     }
 
-    public func GetSuccessorIndex(index: Int64): Int64 {
+    public func GetSuccessorIndex(index: Int64, countSite!: Int64 = 0, countScope!: Option<ChirCountTraversal> = None): Int64 {
         var first: Int64 = 0
         while (first < operands.size && !(operands[first] as Block).isSome()) { first++ }
+        let tests = first + if (first < operands.size) { 1 } else { 0 }
+        ChirCountScan(countSite, operands.size, tests, first < operands.size, first)
+        if (let Some(scope) <- countScope) { scope.Query(tests, countOperandVersion.load()) }
         return first + index
     }
 
-    public func GetNumOfNonSuccessorOperands(): Int64 { return GetSuccessorIndex(0) }
+    public func GetNumOfNonSuccessorOperands(countSite!: Int64 = 0, countScope!: Option<ChirCountTraversal> = None): Int64 { return GetSuccessorIndex(0, countSite: countSite, countScope: countScope) }
 
-    public func GetNonSuccessorOperands(): ArrayList<Value> {
+    public func GetNonSuccessorOperands(countSite!: Int64 = 0, countScope!: Option<ChirCountTraversal> = None): ArrayList<Value> {
         let out = ArrayList<Value>()
-        for (i in 0..GetNumOfNonSuccessorOperands()) { out.add(operands[i]) }
+        for (i in 0..GetNumOfNonSuccessorOperands(countSite: countSite, countScope: countScope)) { out.add(operands[i]) }
         return out
     }
 
@@ -263,17 +267,18 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         return out
     }
 
-    public func GetNumOfSuccessor(): Int64 { return operands.size - GetSuccessorIndex(0) }
-    public func GetSuccessor(index: Int64): Block { return (operands[GetSuccessorIndex(index)] as Block).getOrThrow() }
+    public func GetNumOfSuccessor(countSite!: Int64 = 0, countScope!: Option<ChirCountTraversal> = None): Int64 { return operands.size - GetSuccessorIndex(0, countSite: countSite, countScope: countScope) }
+    public func GetSuccessor(index: Int64, countSite!: Int64 = 0, countScope!: Option<ChirCountTraversal> = None): Block { return (operands[GetSuccessorIndex(index, countSite: countSite, countScope: countScope)] as Block).getOrThrow() }
 
     public func ReplaceSuccessor(oldBlock: Block, newBlock: Block): Unit {
-        for (index in 0..GetNumOfSuccessor()) {
-            if (GetSuccessor(index).nodeId == oldBlock.nodeId) { ReplaceSuccessor(index, newBlock) }
+        let countTraversal = ChirCountTraversal(113)
+        for (index in 0..GetNumOfSuccessor(countSite: 114, countScope: Some(countTraversal))) {
+            if (GetSuccessor(index, countSite: 115, countScope: Some(countTraversal)).nodeId == oldBlock.nodeId) { ReplaceSuccessor(index, newBlock) }
         }
     }
 
     public func ReplaceSuccessor(index: Int64, newBlock: Block): Unit {
-        ReplaceOperand(GetSuccessorIndex(index), newBlock)
+        ReplaceOperand(GetSuccessorIndex(index, countSite: 111), newBlock)
     }
 
     public func SyncSuccessorPredecessors(): Unit {
@@ -287,7 +292,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     }
 
     public open func GetOperand(idx: Int64): Value {
-        CJC_ASSERT(idx < GetNumOfNonSuccessorOperands())
+        CJC_ASSERT(idx < GetNumOfNonSuccessorOperands(countSite: 112))
         return operands[idx]
     }
 
@@ -300,6 +305,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         if (oldOperand.nodeId == newOperand.nodeId) {
             return
         }
+        countOperandVersion.fetchAdd(1)
         operands[idx] = newOperand
         if (let Some(newBlock) <- (newOperand as Block)) {
             newBlock.AddPredecessor(parent.getOrThrow())
@@ -335,6 +341,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         var idx: Int64 = 0
         while (idx < operands.size) {
             if (operands[idx].nodeId == oldOperand.nodeId) {
+                countOperandVersion.fetchAdd(1)
                 operands[idx] = newOperand
                 found = true
                 replacedCount++
@@ -365,6 +372,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     }
 
     public func AppendOperand(op: Value): Unit {
+        countOperandVersion.fetchAdd(1)
         operands.add(op)
         op.AddUserOnly(this)
     }
@@ -379,6 +387,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
                 operand.RemoveUserOccurrenceOnly(this)
             }
         }
+        if (!operands.isEmpty()) { countOperandVersion.fetchAdd(1) }
         operands.clear()
     }
 
@@ -422,7 +431,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     public func MoveTo(block: Block): Unit {
         let parentBlock = parent ?? throw IllegalStateException("expression has no parent block")
         CJC_ASSERT(refEq(GetParentBlockGroup().getOrThrow(), block.GetParentBlockGroup().getOrThrow()))
-        parentBlock.RemoveExprOnly(this)
+        parentBlock.RemoveExprOnly(this, countSite: 1)
         if (let Some(term) <- AsTerminator()) {
             for (successor in term.GetSuccessors()) {
                 successor.RemovePredecessor(parentBlock)
@@ -434,7 +443,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     public open func DetachFromBlockOnly(): Unit {
         if (let Some(parentBlock) <- parent) {
             for (successor in GetSuccessors()) { successor.RemovePredecessor(parentBlock) }
-            parentBlock.RemoveExprOnly(this)
+            parentBlock.RemoveExprOnly(this, countSite: 2)
         }
         parent = None
     }
@@ -446,7 +455,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
 
     public open func ReplaceWith(newExpr: Expression): Unit {
         if (let Some(newParent) <- newExpr.GetParentBlock()) {
-            newParent.RemoveExprOnly(newExpr)
+            newParent.RemoveExprOnly(newExpr, countSite: 3)
             newExpr.ClearParent()
         }
         let oldParent = parent

@@ -19,7 +19,7 @@ public open class ExpressionBase {
     }
 
     public func GetOperands(): ArrayList<Value> {
-        return expr.GetNonSuccessorOperands()
+        return expr.GetNonSuccessorOperands(countSite: 28)
     }
 }
 

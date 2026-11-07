@@ -506,7 +506,7 @@ public class Block <: Value & Hashable & Equatable<Block> {
     public func AppendNonTerminatorExpression(expression: Expression): Unit {
         CJC_ASSERT(!expression.IsTerminator())
         CJC_ASSERT(refEq(expression.GetParentBlockGroup().getOrThrow(), GetParentBlockGroup().getOrThrow()))
-        expression.GetParentBlock().getOrThrow().RemoveExprOnly(expression)
+        expression.GetParentBlock().getOrThrow().RemoveExprOnly(expression, countSite: 4)
         expression.SetParent(this)
         AppendExprOnly(expression)
     }
@@ -532,7 +532,7 @@ public class Block <: Value & Hashable & Equatable<Block> {
         CJC_ASSERT(refEq(expr.GetParentBlockGroup().getOrThrow(), GetParentBlockGroup().getOrThrow()))
         CJC_ASSERT(!expr.IsTerminator())
         if (let Some(parentBlock) <- expr.GetParentBlock()) {
-            parentBlock.RemoveExprOnly(expr)
+            parentBlock.RemoveExprOnly(expr, countSite: 5)
         }
         exprs.add(expr, at: 0)
         expr.SetParent(this)
@@ -631,15 +631,18 @@ public class Block <: Value & Hashable & Equatable<Block> {
         ClearExprsOnly()
     }
 
-    public func RemoveExprOnly(expr: Expression): Unit {
+    public func RemoveExprOnly(expr: Expression, countSite!: Int64 = 0): Unit {
+        let countSize = exprs.size
         var idx: Int64 = 0
         while (idx < exprs.size) {
             if (refEq(exprs[idx], expr)) {
+                ChirCountScan(countSite, countSize, idx + 1, true, countSize - idx - 1)
                 exprs.remove(at: idx)
-                break
+                return
             }
             idx++
         }
+        ChirCountScan(countSite, countSize, idx, false, 0)
     }
 
     public func AddPredecessor(block: Block): Unit {
