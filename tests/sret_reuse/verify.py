@@ -45,12 +45,68 @@ def call_slot(body, callee):
     return tokens[-1], calls[0]
 
 
+# Some-forwarding eligibility of SomeForward.nextSome per level. This follows the dc51 rule
+# (TupleExprImpl.cj FindForwardableSRetDestination) and the retained frontend IR, not the level:
+#   O0  the rule is disabled outright;
+#   O1  CHIR keeps the local `var v`, so the Some's only user is Store(result, v), not the
+#       return value: the rule declines and the ordinary box + whole-value copy is correct;
+#   O2  CHIR drops the local; the only user is Store(result, ret) in the same block after the
+#       non-throwing `pos++` window, so the Some is built directly in %0.
+SOME_FORWARDED = {'O0': False, 'O1': False, 'O2': True}
+
+
+def observe_some(items, level, check):
+    forwarded = SOME_FORWARDED[level]
+    lines = find_function(items, 'nextSome')['ir'].splitlines()
+    boxes = {m.group(1) for line in lines
+             for m in [re.match(r'\s*(%[-\w.]+) = call i8 addrspace\(1\)\* @llvm\.cj\.alloca\.generic\(', line)] if m}
+    copies = [re.search(r'assign\.generic\(i8 addrspace\(1\)\* %0, i8 addrspace\(1\)\* (%[-\w.]+),', line).group(1)
+              for line in lines if '@llvm.cj.assign.generic(i8 addrspace(1)* %0, ' in line]
+    self_copies = [line.strip() for line in lines
+                   if re.search(r'@llvm\.cj\.assign\.generic\(i8 addrspace\(1\)\* [^,]+, i8 addrspace\(1\)\* %0,', line)]
+    sret_writes = [line.strip() for line in lines
+                   if re.search(r'@llvm\.cj\.gcwrite\.ref\(i8 addrspace\(1\)\* [^,]+, i8 addrspace\(1\)\* %0,', line)
+                   or '@llvm.cj.gcwrite.generic(i8 addrspace(1)* %0, ' in line]
+    # Box payload writes: a non-null ref payload or a generic payload written into a fresh box.
+    # Only the Some arm writes such a payload; the None arm writes a null ref payload.
+    none_boxes, some_box_writes = set(), []
+    for line in lines:
+        ref = re.search(r'@llvm\.cj\.gcwrite\.ref\(i8 addrspace\(1\)\* ([^,]+), i8 addrspace\(1\)\* (%[-\w.]+),', line)
+        generic = re.search(r'@llvm\.cj\.gcwrite\.generic\(i8 addrspace\(1\)\* (%[-\w.]+),', line)
+        if ref and ref.group(2) in boxes:
+            if ref.group(1) == 'null':
+                none_boxes.add(ref.group(2))
+            else:
+                some_box_writes.append(line.strip())
+        elif generic and generic.group(1) in boxes:
+            some_box_writes.append(line.strip())
+    detail = {'forwarded_expected': forwarded, 'copies_into_sret': copies, 'sret_based_writes': sret_writes,
+              'some_box_writes': some_box_writes, 'none_boxes': sorted(none_boxes), 'boxes': sorted(boxes)}
+    if forwarded:
+        # Some writes %0 through the existing ref/generic barriers (one per runtime arm) and has
+        # no box or copy; the only remaining copy into %0 is the None arm's fresh box.
+        check('some_written_in_own_sret', len(copies) == 1 and copies[0] in boxes and len(sret_writes) == 2
+              and not some_box_writes, detail)
+    else:
+        # Ineligible: Some is built in a fresh box and reaches %0 by whole-value copy, like None.
+        check(level.lower() + '_some_keeps_box_copy', len(copies) == 2 and all(source in boxes for source in copies)
+              and not sret_writes and len(some_box_writes) == 2, detail)
+    check('none_keeps_box_copy', sum(source in none_boxes for source in copies) == 1
+          and all(source in boxes for source in copies), detail)
+    check('no_sret_self_copy', not self_copies, self_copies)
+
+
 def observe(items, level):
     checks = []
     observations = {}
     def check(name, condition, detail):
         checks.append({'name': name, 'passed': bool(condition), 'detail': detail})
 
+    if level == 'O2':
+        # The O2 arm exists for the eligible Some positive only. The tail/slot checks below
+        # are calibrated on O0/O1 output and are not asserted at O2.
+        observe_some(items, level, check)
+        return checks, observations
     for name, callee in [('tailLarge', 'makeLarge'), ('tailGeneric', 'identity'), ('tailBox', 'makeBox'),
                          ('nonTailLarge', 'makeLarge'), ('tailUnit', 'unitLeaf')]:
         item = find_function(items, name)
@@ -90,22 +146,7 @@ def observe(items, level):
     register_slot, register_call = call_slot(register['ir'], 'identity')
     check('non_sret_caller_keeps_callee_slot', 'sret(' not in register['ir'].splitlines()[0]
           and 'alloca i8 addrspace(1)*' in register['ir'] and register_slot != '%value', register_call)
-    some = find_function(items, 'nextSome')
-    lines = some['ir'].splitlines()
-    boxes = {m.group(1) for line in lines
-             for m in [re.match(r'\s*(%[-\w.]+) = call i8 addrspace\(1\)\* @llvm\.cj\.alloca\.generic\(', line)] if m}
-    copies = [re.search(r'assign\.generic\(i8 addrspace\(1\)\* %0, i8 addrspace\(1\)\* (%[-\w.]+),', line).group(1)
-              for line in lines if '@llvm.cj.assign.generic(i8 addrspace(1)* %0, ' in line]
-    sret_writes = [line.strip() for line in lines
-                   if re.search(r'@llvm\.cj\.gcwrite\.ref\(i8 addrspace\(1\)\* [^,]+, i8 addrspace\(1\)\* %0,', line)
-                   or '@llvm.cj.gcwrite.generic(i8 addrspace(1)* %0, ' in line]
-    forwarded = level != 'O0'
-    # The Some arm writes %0 through the existing ref/generic barriers and loses its box and copy;
-    # the None arm still copies from its own fresh box. No copy may name %0 as its source.
-    check('some_written_in_own_sret' if forwarded else 'o0_some_keeps_box_copy',
-          len(copies) == (1 if forwarded else 2) and len(sret_writes) == (2 if forwarded else 0)
-          and all(source in boxes for source in copies),
-          {'copies_into_sret': copies, 'sret_based_writes': sret_writes, 'boxes': sorted(boxes)})
+    observe_some(items, level, check)
     scalar = find_function(items, 'scalar')
     check('scalar_return_unchanged', 'sret(' not in scalar['ir'].splitlines()[0]
           and 'ret i64' in scalar['ir'], scalar['ir'])
@@ -161,7 +202,7 @@ def main():
               'affinity': sorted(os.sched_getaffinity(0)), 'jobs': args.jobs, 'parallel_arms': 4}
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         jobs = {level: pool.submit(compile_case, args.compiler, source, args.out / level, level, args.jobs)
-                for level in ('O0', 'O1')}
+                for level in ('O0', 'O1', 'O2')}
         jobs.update({f'main-{level}': pool.submit(compile_case, args.compiler,
                      Path(__file__).with_name('main.cj'), args.out / f'main-{level}', level,
                      args.jobs, True) for level in ('O0', 'O1')})
