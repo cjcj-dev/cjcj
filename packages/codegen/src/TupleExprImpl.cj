@@ -1,6 +1,7 @@
 package cjcj::codegen
 
 import std.collection.*
+import cjcj::chir.BinaryExpressionBase
 import cjcj::chir.Constant
 import cjcj::chir.EnumType
 import cjcj::chir.ExprKind
@@ -8,7 +9,8 @@ import cjcj::chir.Expression
 import cjcj::chir.LocalVar
 import cjcj::chir.Tuple
 import cjcj::chir.Type
-import cjcj::utils.StaticCast
+import cjcj::option.OptimizationLevel
+import cjcj::utils.{OverflowStrategy, StaticCast}
 
 public func GenerateTupleOrAggregateExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(resultTy) <- chirExpr.GetResultType()) {
@@ -287,7 +289,10 @@ private func GenerateOptionLikeTEnum(irBuilder: IRBuilder2, chirExpr: Expression
     let i8Ty = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
     let i8PtrTy = unsafe { LLVMPointerType(i8Ty, 1u32) }
     let enumTypeInfo = irBuilder.CreateTypeInfo(enumTy)
-    let enumValue = irBuilder.CallAllocaGeneric(enumTy)
+    // A complete Some whose only use is the store to this function's own sret slot is built
+    // directly in that slot. Every other construction keeps the Option box plus whole-value copy.
+    let forwardedDest = FindForwardableSRetDestination(irBuilder, chirExpr, enumTy, i8PtrTy)
+    let enumValue = forwardedDest ?? irBuilder.CallAllocaGeneric(enumTy)
     let payload = irBuilder.GetPayloadFromObject(enumValue)
     let castedPayload = irBuilder.CreateBitCast(payload, i8PtrTy)
     let typeArgs = enumTy.GetTypeArgs()
@@ -317,6 +322,25 @@ private func GenerateOptionLikeTEnum(irBuilder: IRBuilder2, chirExpr: Expression
     irBuilder.CreateBr(blocks[2])
 
     irBuilder.SetInsertPoint(blocks[1])
+    if (forwardedDest.isSome()) {
+        // The destination may hold an older value and is visible to GC: write the payload
+        // through the existing generic barrier first, then the tag, both from the sret base.
+        let associatedOffset = irBuilder.CallGetFieldOffset(enumTypeInfo, 1u64, 0u64)
+        let indices = ArrayList<LLVMValueRef>()
+        indices.add(associatedOffset)
+        let associatedPtr = irBuilder.CreateInBoundsGEP(i8Ty, castedPayload, indices)
+        let associatedValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(1))
+        let associatedCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), associatedType)
+        let associatedTypeSize = irBuilder.GetLayoutSize32(associatedType, associatedCGType)
+        irBuilder.CallGCWriteGeneric(enumValue, associatedPtr, associatedValue.GetRawValue(), associatedTypeSize)
+        let selectorValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0)).GetRawValue()
+        let selectorPtr = irBuilder.CreateBitCast(irBuilder.GetPayloadFromObject(enumValue),
+            unsafe { LLVMPointerType(i1Ty, 1u32) })
+        irBuilder.CreateStore(selectorValue, selectorPtr)
+        irBuilder.CreateBr(blocks[2])
+        irBuilder.SetInsertPoint(blocks[2])
+        return enumValue
+    }
     let selectorValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0)).GetRawValue()
     let selectorPtr = irBuilder.CreateBitCast(payload, unsafe { LLVMPointerType(i1Ty, 1u32) })
     irBuilder.CreateStore(selectorValue, selectorPtr)
@@ -334,6 +358,127 @@ private func GenerateOptionLikeTEnum(irBuilder: IRBuilder2, chirExpr: Expression
 
     irBuilder.SetInsertPoint(blocks[2])
     return enumValue
+}
+
+// Some-only sret destination forwarding for an option-like generic enum.
+//
+// The caller's sret slot is a headered AS1 object (possibly a stack-lowered alloca.generic)
+// whose header already carries this Option's TypeInfo. A Some writes the tag and the whole
+// associated payload, so it needs no zeroed destination; a None writes only the tag and stays
+// on the fresh box. The CHIR result must flow only into Store(result, ret) in the same block,
+// and nothing between the construction and that store may throw or touch the return slot:
+// otherwise the destination would change earlier than the original single final copy.
+private func FindForwardableSRetDestination(irBuilder: IRBuilder2, chirExpr: Expression, enumTy: EnumType,
+    expectedPtrTy: LLVMTypeRef): Option<LLVMValueRef> {
+    let cgMod = irBuilder.GetCGModule()
+    if (cgMod.GetCGContext().GetCompileOptions().optimizationLevel == OptimizationLevel.O0) {
+        return None
+    }
+    if (chirExpr.GetNumOfOperands() <= 1 || enumTy.GetTypeArgs().isEmpty()) {
+        return None
+    }
+    let result = chirExpr.GetResult() ?? return None
+    let parentFunc = chirExpr.GetTopLevelFunc() ?? return None
+    let retValue = parentFunc.GetReturnValue() ?? return None
+    let retSlotTy = retValue.GetType() ?? return None
+    if (!retSlotTy.StripAllRefs().IsEqual(enumTy)) {
+        return None
+    }
+    let users = result.GetUsers()
+    if (users.size != 1) {
+        return None
+    }
+    let retStore = users[0]
+    if (retStore.GetExprKind() != ExprKind.STORE || retStore.GetNumOfOperands() < 2 ||
+        retStore.GetOperand(0) != result || retStore.GetOperand(1) != retValue) {
+        return None
+    }
+    let block = chirExpr.GetParentBlock() ?? return None
+    let storeBlock = retStore.GetParentBlock() ?? return None
+    if (!refEq(block, storeBlock)) {
+        return None
+    }
+    let exprs = block.GetExpressionsRef()
+    var idx = 0
+    while (idx < exprs.size && !refEq(exprs[idx], chirExpr)) {
+        idx++
+    }
+    idx++
+    var reachedStore = false
+    while (idx < exprs.size) {
+        let expr = exprs[idx]
+        if (refEq(expr, retStore)) {
+            reachedStore = true
+            break
+        }
+        if (!IsNonThrowingWithoutRetAccess(cgMod, expr, retValue)) {
+            return None
+        }
+        idx++
+    }
+    if (!reachedStore) {
+        return None
+    }
+    // The real return slot: this function's own noalias sret parameter 0, mapped by Allocate(ret).
+    let cgFunc = irBuilder.GetInsertCGFunction() ?? return None
+    if (!cgFunc.IsSRet()) {
+        return None
+    }
+    let llvmFunc = cgFunc.GetRawFunction()
+    if (!HasAttributeAtIndex(llvmFunc, 1u32, "sret")) {
+        return None
+    }
+    let retSlot = cgMod.GetMappedValue(retValue) ?? return None
+    let sretArg = unsafe { LLVMGetParam(llvmFunc, 0u32) }
+    let rawSlot = retSlot.GetRawValue()
+    if (rawSlot.toUIntNative() != sretArg.toUIntNative() ||
+        unsafe { LLVMTypeOf(sretArg) }.toUIntNative() != expectedPtrTy.toUIntNative()) {
+        return None
+    }
+    return Some(sretArg)
+}
+
+private func IsNonThrowingWithoutRetAccess(cgMod: CGModule, expr: Expression, retValue: LocalVar): Bool {
+    var operandIdx = 0
+    while (operandIdx < expr.GetNumOfOperands()) {
+        if (expr.GetOperand(operandIdx) == retValue) {
+            return false
+        }
+        operandIdx++
+    }
+    let kind = expr.GetExprKind()
+    if (kind == ExprKind.CONSTANT || kind == ExprKind.DEBUGEXPR || kind == ExprKind.GET_ELEMENT_REF) {
+        return true
+    }
+    if (kind == ExprKind.STORE || kind == ExprKind.STORE_ELEMENT_REF) {
+        // Known-size stores use plain/barrier writes; a generic store may allocate a temporary box.
+        if (expr.GetNumOfOperands() < 1) {
+            return false
+        }
+        let storedTy = expr.GetOperand(0).GetType() ?? return false
+        return IsKnownSizeNonGeneric(cgMod, storedTy)
+    }
+    if (kind == ExprKind.LT || kind == ExprKind.GT || kind == ExprKind.LE || kind == ExprKind.GE ||
+        kind == ExprKind.EQUAL || kind == ExprKind.NOTEQUAL) {
+        return true
+    }
+    if (kind == ExprKind.ADD || kind == ExprKind.SUB || kind == ExprKind.MUL) {
+        // Mirrors BinaryExprDispatcher: NA/WRAPPING add/sub/mul lower without an overflow throw.
+        let binary = (expr as BinaryExpressionBase) ?? return false
+        let strategy = binary.GetOverflowStrategy()
+        return strategy == OverflowStrategy.NA || strategy == OverflowStrategy.WRAPPING
+    }
+    if (kind == ExprKind.LOAD || kind == ExprKind.FIELD) {
+        // Known-size loads are plain; generic/unknown-size loads allocate a box and can throw.
+        let resultValue = expr.GetResult() ?? return false
+        let resultTy = resultValue.GetType() ?? return false
+        return IsKnownSizeNonGeneric(cgMod, resultTy)
+    }
+    return false
+}
+
+private func IsKnownSizeNonGeneric(cgMod: CGModule, ty: Type): Bool {
+    return !ty.IsGeneric() && CGType.GetOrCreate(cgMod, ty).GetSize().isSome()
 }
 
 private func GenerateOptionLikeRefEnum(irBuilder: IRBuilder2, chirExpr: Expression, _: Type): LLVMValueRef {

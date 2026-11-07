@@ -90,6 +90,22 @@ def observe(items, level):
     register_slot, register_call = call_slot(register['ir'], 'identity')
     check('non_sret_caller_keeps_callee_slot', 'sret(' not in register['ir'].splitlines()[0]
           and 'alloca i8 addrspace(1)*' in register['ir'] and register_slot != '%value', register_call)
+    some = find_function(items, 'nextSome')
+    lines = some['ir'].splitlines()
+    boxes = {m.group(1) for line in lines
+             for m in [re.match(r'\s*(%[-\w.]+) = call i8 addrspace\(1\)\* @llvm\.cj\.alloca\.generic\(', line)] if m}
+    copies = [re.search(r'assign\.generic\(i8 addrspace\(1\)\* %0, i8 addrspace\(1\)\* (%[-\w.]+),', line).group(1)
+              for line in lines if '@llvm.cj.assign.generic(i8 addrspace(1)* %0, ' in line]
+    sret_writes = [line.strip() for line in lines
+                   if re.search(r'@llvm\.cj\.gcwrite\.ref\(i8 addrspace\(1\)\* [^,]+, i8 addrspace\(1\)\* %0,', line)
+                   or '@llvm.cj.gcwrite.generic(i8 addrspace(1)* %0, ' in line]
+    forwarded = level != 'O0'
+    # The Some arm writes %0 through the existing ref/generic barriers and loses its box and copy;
+    # the None arm still copies from its own fresh box. No copy may name %0 as its source.
+    check('some_written_in_own_sret' if forwarded else 'o0_some_keeps_box_copy',
+          len(copies) == (1 if forwarded else 2) and len(sret_writes) == (2 if forwarded else 0)
+          and all(source in boxes for source in copies),
+          {'copies_into_sret': copies, 'sret_based_writes': sret_writes, 'boxes': sorted(boxes)})
     scalar = find_function(items, 'scalar')
     check('scalar_return_unchanged', 'sret(' not in scalar['ir'].splitlines()[0]
           and 'ret i64' in scalar['ir'], scalar['ir'])

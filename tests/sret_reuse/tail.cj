@@ -31,3 +31,19 @@ public struct GenericBox<T> {
 }
 public func makeBox<T>(value: T): GenericBox<T> { GenericBox<T>(value) }
 public func tailBox<T>(value: T): GenericBox<T> { makeBox<T>(value) }
+// Iterator-shaped generic Option return: only the complete Some is built in the
+// function's own sret slot; the None arm keeps its box and whole-value copy.
+public class SomeForward<T> {
+    private var pos: Int64 = 0
+    private let data: Array<T>
+    public init(data: Array<T>) { this.data = data }
+    @OverflowWrapping
+    public func nextSome(): Option<T> {
+        if (pos < data.size) {
+            var v: Option<T> = Some(data[pos])
+            this.pos++
+            return v
+        }
+        return None
+    }
+}
