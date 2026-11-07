@@ -54,7 +54,7 @@ await entry(async () => {
       [fetch, 'ci/platform_tuples/fetch_sources.mjs'], [helper, 'build/lib/srcbuild_git.sh'],
       ...['ci/platform_tuples/entry.mjs', 'ci/entry-common.mjs', 'ci/fetch-llvm-runtime.mjs',
         'ci/native-llvm-inputs.mjs','ci/source_pin.env','ci/llvm_pin.env','ci/host_sdk_pin.env',
-        'ci/host-toolchain-pin.mjs','ci/build-resources.mjs',
+        'ci/host-toolchain-pin.mjs','ci/build-resources.mjs','build/srcbuild/tool-layout.mjs',
         ...['native-source-selection','sdk-targets','sdk-flow','sdk-io','sdk-platform',
           'sdk-command-lifetime','sdk-std-resume','sdk-install-entries','sdk-source'].map(name=>'ci/bootstrap/'+name+'.mjs')]
         .map(file => [path.join(repo, file), file]),
