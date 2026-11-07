@@ -2,7 +2,6 @@ package cjcj::chir
 
 import cjcj::utils.CJC_ASSERT
 import std.collection.*
-import std.sync.AtomicInt64
 
 func IsInstanceOfValue<VD, Pool>(): Bool where VD <: AbstractDomain<VD> & ValueDomainAccess<VD>,
     Pool <: ValueStatePool<VD, Pool> {
@@ -451,7 +450,6 @@ public enum RefMapValue {
 }
 
 public class RefMap {
-    private let countKeyVersion = AtomicInt64(0)
     private let keys: ArrayList<Ref> = ArrayList<Ref>()
     private let values: ArrayList<RefMapValue> = ArrayList<RefMapValue>()
 
@@ -484,21 +482,18 @@ public class RefMap {
         while (idx < rhs.keys.size) {
             if (idx < keys.size) {
                 if (!refEq(keys[idx], rhs.keys[idx])) {
-                    countKeyVersion.fetchAdd(1)
                     keys[idx] = rhs.keys[idx]
                 }
                 if (!RefMapValuesAreSame(values[idx], rhs.values[idx])) {
                     values[idx] = rhs.values[idx]
                 }
             } else {
-                countKeyVersion.fetchAdd(1)
                 keys.add(rhs.keys[idx])
                 values.add(rhs.values[idx])
             }
             idx++
         }
         while (keys.size > rhs.keys.size) {
-            countKeyVersion.fetchAdd(1)
             keys.remove(at: keys.size - 1)
             values.remove(at: values.size - 1)
         }
@@ -517,28 +512,23 @@ public class RefMap {
     }
 
     public func Clear(): Unit {
-        if (!keys.isEmpty()) { countKeyVersion.fetchAdd(1) }
         keys.clear()
         values.clear()
     }
 
-    public func Find(key: Ref, countSite!: Int64 = 0, countScope!: Option<ChirCountTraversal> = None): Option<Int64> {
+    public func Find(key: Ref): Option<Int64> {
         var idx: Int64 = 0
         while (idx < keys.size) {
             if (refEq(keys[idx], key)) {
-                ChirCountScan(countSite, keys.size, idx + 1, true, 0)
-                if (let Some(scope) <- countScope) { scope.Query(idx + 1, countKeyVersion.load()) }
                 return idx
             }
             idx++
         }
-        ChirCountScan(countSite, keys.size, idx, false, 0)
-        if (let Some(scope) <- countScope) { scope.Query(idx, countKeyVersion.load()) }
         return None
     }
 
-    public func Get(key: Ref, countSite!: Int64 = 0, countScope!: Option<ChirCountTraversal> = None): Option<RefMapValue> {
-        if (let Some(idx) <- Find(key, countSite: countSite, countScope: countScope)) {
+    public func Get(key: Ref): Option<RefMapValue> {
+        if (let Some(idx) <- Find(key)) {
             return values[idx]
         }
         return None
@@ -548,14 +538,24 @@ public class RefMap {
         return (keys[index], values[index])
     }
 
-    public func Set(key: Ref, value: RefMapValue, countSite!: Int64 = 0, countScope!: Option<ChirCountTraversal> = None): Unit {
-        if (let Some(idx) <- Find(key, countSite: countSite, countScope: countScope)) {
+    public func Set(key: Ref, value: RefMapValue): Unit {
+        if (let Some(idx) <- Find(key)) {
             values[idx] = value
             return
         }
-        countKeyVersion.fetchAdd(1)
         keys.add(key)
         values.add(value)
+    }
+
+    // Return an existing entry for the caller to join, or append a missing one.
+    // Unlike Set, a hit must retain its current value until JoinRefMapValue runs.
+    internal func FindOrInsert(key: Ref, value: RefMapValue): Option<Int64> {
+        if (let Some(idx) <- Find(key)) {
+            return idx
+        }
+        keys.add(key)
+        values.add(value)
+        return None
     }
 
     public func SetAt(index: Int64, value: RefMapValue): Unit {
@@ -817,12 +817,12 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
         if (let Some(domain) <- CheckAbstractValueWithTopBottom(address)) {
             if (let Some(refValue) <- domain.GetRef()) {
                 if (refValue.IsTopRefInstance()) { return }
-                if (let Some(target) <- refMap.Get(refValue, countSite: 93)) {
+                if (let Some(target) <- refMap.Get(refValue)) {
                     match (target) {
                         case RefMapValue.RefTarget(_) =>
-                            refMap.Set(refValue, RefMapValue.RefTarget(Ref.GetTopRefInstance()), countSite: 94)
+                            refMap.Set(refValue, RefMapValue.RefTarget(Ref.GetTopRefInstance()))
                         case RefMapValue.ObjectTarget(_) =>
-                            refMap.Set(refValue, RefMapValue.ObjectTarget(AbstractObject.GetTopObjInstance()), countSite: 95)
+                            refMap.Set(refValue, RefMapValue.ObjectTarget(AbstractObject.GetTopObjInstance()))
                     }
                 }
             }
@@ -879,11 +879,11 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
         if (let Some(domain) <- CheckAbstractValueWithTopBottom(refVal)) {
             CJC_ASSERT(domain.GetKind() == ValueDomainKind.REF)
             if (let Some(refValue) <- domain.GetRef()) {
-                if (let Some(target) <- refMap.Get(refValue, countSite: 96)) {
+                if (let Some(target) <- refMap.Get(refValue)) {
                     match (target) {
                         case RefMapValue.ObjectTarget(obj) => return obj
                         case RefMapValue.RefTarget(innerRef) =>
-                            if (let Some(innerTarget) <- refMap.Get(innerRef, countSite: 97)) {
+                            if (let Some(innerTarget) <- refMap.Get(innerRef)) {
                                 match (innerTarget) {
                                     case RefMapValue.ObjectTarget(obj) => return obj
                                     case RefMapValue.RefTarget(_) => return None
@@ -903,7 +903,7 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
         if (let Some(domain) <- CheckAbstractValueWithTopBottom(obj)) {
             if (domain.GetKind() == ValueDomainKind.REF) {
                 if (let Some(refValue) <- domain.GetRef()) {
-                    if (let Some(target) <- refMap.Get(refValue, countSite: 98)) {
+                    if (let Some(target) <- refMap.Get(refValue)) {
                         match (target) {
                             case RefMapValue.ObjectTarget(innerObj) => return GetChildren(innerObj)
                             case RefMapValue.RefTarget(_) => return ArrayList<AbstractObject>()
@@ -931,7 +931,7 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
         Update(dest, refValue)
         let obj = CreateNewObject(GetObjName(absObjPool.size), expr: expr)
         SetToBound(obj, true)
-        refMap.Set(refValue, RefMapValue.ObjectTarget(obj), countSite: 99)
+        refMap.Set(refValue, RefMapValue.ObjectTarget(obj))
         return obj
     }
 
@@ -942,9 +942,9 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
         let refOuter = CreateNewRef(expr: Some(expr))
         Update(dest, refOuter)
         let refInner = CreateNewRef(expr: Some(expr), createTwoLevelRef: true)
-        refMap.Set(refOuter, RefMapValue.RefTarget(refInner), countSite: 100)
+        refMap.Set(refOuter, RefMapValue.RefTarget(refInner))
         let obj = CreateNewObject(GetObjName(absObjPool.size), expr: Some(expr))
-        refMap.Set(refInner, RefMapValue.ObjectTarget(obj), countSite: 101)
+        refMap.Set(refInner, RefMapValue.ObjectTarget(obj))
         SetToBound(obj, true)
         return obj
     }
@@ -1122,9 +1122,9 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
             programState.Insert(child, srcState)
             if (srcState.GetKind() == ValueDomainKind.REF) {
                 if (let Some(refValue) <- srcState.GetRef()) {
-                    if (!refValue.IsTopRefInstance() && refMap.Get(refValue, countSite: 102).isNone()) {
-                        if (let Some(target) <- globalState.refMap.Get(refValue, countSite: 103)) {
-                            refMap.Set(refValue, target, countSite: 104)
+                    if (!refValue.IsTopRefInstance() && refMap.Get(refValue).isNone()) {
+                        if (let Some(target) <- globalState.refMap.Get(refValue)) {
+                            refMap.Set(refValue, target)
                             match (target) {
                                 case RefMapValue.ObjectTarget(obj) =>
                                     programState.Insert(obj, globalState.programState.At(obj))
@@ -1152,11 +1152,9 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
         var idx: Int64 = 0
         while (idx < rhs.refMap.Size()) {
             let rhsEntry = rhs.refMap.GetAt(idx)
-            let countTraversal = ChirCountTraversal(118)
-            if (let Some(lhsIdx) <- refMap.Find(rhsEntry[0], countSite: 105, countScope: Some(countTraversal))) {
+            if (let Some(lhsIdx) <- refMap.FindOrInsert(rhsEntry[0], rhsEntry[1])) {
                 changed = JoinRefMapValue(lhsIdx, rhsEntry[1], rhs) || changed
             } else {
-                refMap.Set(rhsEntry[0], rhsEntry[1], countSite: 106, countScope: Some(countTraversal))
                 changed = true
             }
             idx++
@@ -1216,12 +1214,12 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
         let newAbsVal = programState.At(lhsObj.getOrThrow()).Clone()
         newAbsVal.Join(rhsProgramState.At(rhsObj.getOrThrow()))
         programState.Insert(newObj, newAbsVal)
-        refMap.Set(newRef, RefMapValue.ObjectTarget(newObj), countSite: 107)
+        refMap.Set(newRef, RefMapValue.ObjectTarget(newObj))
         return newRef
     }
 
     private static func GetAbsObject(refMap: RefMap, refValue: Ref): Option<AbstractObject> {
-        if (let Some(target) <- refMap.Get(refValue, countSite: 108)) {
+        if (let Some(target) <- refMap.Get(refValue)) {
             match (target) {
                 case RefMapValue.ObjectTarget(obj) => return obj
                 case RefMapValue.RefTarget(_) => return None

@@ -61,7 +61,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
                 } else {
                     false
                 }
-                if (isInout && expr.GetNumOfNonSuccessorOperands(countSite: 78) == 1) {
+                if (isInout && expr.GetNumOfNonSuccessorOperands() == 1) {
                     locations.add(expr.GetOperand(0))
                 }
                 for (group in expr.GetBlockGroups()) {
@@ -139,9 +139,9 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
                 let refValue = globalState.CreateNewRef()
                 globalState.programState.SetRef(gv, refValue)
                 let oRef = globalState.CreateNewRef()
-                globalState.refMap.Set(refValue, RefMapValue.RefTarget(oRef), countSite: 79)
+                globalState.refMap.Set(refValue, RefMapValue.RefTarget(oRef))
                 let obj = globalState.CreateNewObject(GetObjName(globals.globalAllocatedObjMap.Size()))
-                globalState.refMap.Set(oRef, RefMapValue.ObjectTarget(obj), countSite: 80)
+                globalState.refMap.Set(oRef, RefMapValue.ObjectTarget(obj))
                 globalState.programState.SetBound(obj, true)
             } else {
                 let obj = globalState.GetReferencedObjAndSetToTop(gv)
@@ -237,13 +237,13 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
             state.programState.At(dest).GetRef().getOrThrow().IsTopRefInstance()) {
             let destRef = state.CreateNewRef(expr: Some(getElemRef))
             state.programState.SetRef(dest, destRef)
-            state.refMap.Set(destRef, RefMapValue.ObjectTarget(FindTargetElement(state, getElemRef)), countSite: 81)
+            state.refMap.Set(destRef, RefMapValue.ObjectTarget(FindTargetElement(state, getElemRef)))
         } else {
             let domain = state.programState.At(dest)
             CJC_ASSERT(domain.GetKind() == ValueDomainKind.REF)
             let destRef = domain.GetRef().getOrThrow()
-            CJC_ASSERT(state.refMap.Get(destRef, countSite: 82).isSome())
-            state.refMap.Set(destRef, RefMapValue.ObjectTarget(FindTargetElement(state, getElemRef)), countSite: 83)
+            CJC_ASSERT(state.refMap.Get(destRef).isSome())
+            state.refMap.Set(destRef, RefMapValue.ObjectTarget(FindTargetElement(state, getElemRef)))
         }
     }
 
@@ -365,7 +365,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         if (locRef.IsTopRefInstance()) {
             return AbstractObject.GetTopObjInstance()
         }
-        let refValue = state.refMap.Get(locRef, countSite: 84).getOrThrow()
+        let refValue = state.refMap.Get(locRef).getOrThrow()
         let rootObj = match (refValue) {
             case RefMapValue.ObjectTarget(obj) => obj
             case RefMapValue.RefTarget(_) => throw IllegalStateException("ValueAnalysis expected object ref target")
@@ -401,7 +401,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
             InvalidateEscapedStorage(state)
             return
         }
-        if (let Some(locRefVal) <- state.refMap.Get(locRef, countSite: 85)) {
+        if (let Some(locRefVal) <- state.refMap.Get(locRef)) {
             match (locRefVal) {
                 case RefMapValue.ObjectTarget(dest) =>
                     if (dest.IsTopObjInstance()) {
@@ -416,11 +416,11 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
                     }
                 case RefMapValue.RefTarget(_) =>
                     CJC_ASSERT(valDomain.GetKind() == ValueDomainKind.REF)
-                    state.refMap.Set(locRef, RefMapValue.RefTarget(valDomain.GetRef().getOrThrow()), countSite: 86)
+                    state.refMap.Set(locRef, RefMapValue.RefTarget(valDomain.GetRef().getOrThrow()))
             }
         } else {
             CJC_ASSERT(valDomain.GetKind() == ValueDomainKind.REF)
-            state.refMap.Set(locRef, RefMapValue.RefTarget(valDomain.GetRef().getOrThrow()), countSite: 87)
+            state.refMap.Set(locRef, RefMapValue.RefTarget(valDomain.GetRef().getOrThrow()))
         }
     }
 
@@ -465,7 +465,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
             state.SetToTopOrTopRef(dest, dest.GetType().getOrThrow().IsRef())
             return
         }
-        let refValOpt = state.refMap.Get(locRef, countSite: 88)
+        let refValOpt = state.refMap.Get(locRef)
         if (refValOpt.isNone()) {
             if (isDebug) {
                 println("Value Analysis: use-before-initialization detected")
@@ -511,16 +511,16 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
                 return
             }
             let gRef = gvDomain.getOrThrow().GetRef().getOrThrow()
-            let gRefVal = globalState.refMap.Get(gRef, countSite: 89).getOrThrow()
+            let gRefVal = globalState.refMap.Get(gRef).getOrThrow()
             match (gRefVal) {
                 case RefMapValue.RefTarget(oRef) =>
                     state.programState.SetRef(dest, oRef)
-                    let obj = match (globalState.refMap.Get(oRef, countSite: 90).getOrThrow()) {
+                    let obj = match (globalState.refMap.Get(oRef).getOrThrow()) {
                         case RefMapValue.ObjectTarget(value) => value
                         case RefMapValue.RefTarget(_) =>
                             throw IllegalStateException("ValueAnalysis global ref expected object")
                     }
-                    state.refMap.Set(oRef, RefMapValue.ObjectTarget(obj), countSite: 91)
+                    state.refMap.Set(oRef, RefMapValue.ObjectTarget(obj))
                     state.programState.Insert(obj, globalState.programState.At(obj))
                 case RefMapValue.ObjectTarget(obj) =>
                     globalState.PropagateWithoutChildren(obj, dest, targetProgramState: Some(state.programState))

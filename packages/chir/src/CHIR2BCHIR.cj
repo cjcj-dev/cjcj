@@ -304,12 +304,12 @@ public class CHIR2BCHIR {
             expr.GetExprKind() == ExprKind.INVOKESTATIC ||
             expr.GetExprKind() == ExprKind.TRY_INVOKESTATIC) {
             var operandIdx: Int64 = 1
-            while (operandIdx < expr.GetNumOfNonSuccessorOperands(countSite: 6)) {
+            while (operandIdx < expr.GetNumOfNonSuccessorOperands()) {
                 TranslateValue(this, context, expr.GetOperand(operandIdx))
                 operandIdx++
             }
         } else {
-            for (operand in expr.GetNonSuccessorOperands(countSite: 7)) {
+            for (operand in expr.GetNonSuccessorOperands()) {
                 TranslateValue(this, context, operand)
             }
         }

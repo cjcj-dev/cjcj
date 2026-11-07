@@ -29,7 +29,7 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
         case ExprKind.CONSTANT => ()
         case ExprKind.TUPLE =>
             context.definition.PushOp(OpCode.TUPLE)
-            context.definition.PushCell(expr.GetNumOfNonSuccessorOperands(countSite: 62))
+            context.definition.PushCell(expr.GetNumOfNonSuccessorOperands())
         case ExprKind.FIELD => TranslateField(context, expr)
         case ExprKind.APPLY => TranslateApplyExpression(compiler, context, expr)
         case ExprKind.INVOKE => TranslateInvokeExpression(compiler, context, expr, false)
@@ -40,11 +40,11 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
         case ExprKind.RAW_ARRAY_ALLOCATE => context.definition.PushOp(OpCode.ALLOCATE_RAW_ARRAY)
         case ExprKind.RAW_ARRAY_LITERAL_INIT =>
             context.definition.PushOp(OpCode.RAW_ARRAY_LITERAL_INIT)
-            context.definition.PushCell(if (expr.GetNumOfNonSuccessorOperands(countSite: 63) > 0) { expr.GetNumOfNonSuccessorOperands(countSite: 64) - 1 } else { 0 })
+            context.definition.PushCell(if (expr.GetNumOfNonSuccessorOperands() > 0) { expr.GetNumOfNonSuccessorOperands() - 1 } else { 0 })
         case ExprKind.RAW_ARRAY_INIT_BY_VALUE => context.definition.PushOp(OpCode.RAW_ARRAY_INIT_BY_VALUE)
         case ExprKind.VARRAY =>
             context.definition.PushOp(OpCode.VARRAY)
-            context.definition.PushCell(expr.GetNumOfNonSuccessorOperands(countSite: 65))
+            context.definition.PushCell(expr.GetNumOfNonSuccessorOperands())
         case ExprKind.BOX => TranslateBox(context, expr)
         case ExprKind.UNBOX_TO_VALUE => context.definition.PushOp(OpCode.UNBOX)
         case ExprKind.UNBOX_TO_REF => context.definition.PushOp(OpCode.UNBOX_REF)
@@ -57,7 +57,7 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
 
 private func TranslateCApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     apply: Apply, funcTy: FuncType): Unit {
-    let numberArgs = apply.GetNumOfNonSuccessorOperands(countSite: 66) - 1
+    let numberArgs = apply.GetNumOfNonSuccessorOperands() - 1
     CJC_ASSERT(numberArgs == funcTy.GetParamTypes().size)
     compiler.PushOpCodeWithAnnotations(context, OpCode.CAPPLY, apply,
         args: ArrayList<Int64>([funcTy.GetParamTypes().size]), storeCodePos: true)
@@ -70,7 +70,7 @@ private func TranslateCApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIR
 private func TranslateApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     let apply = (expr as Apply).getOrThrow()
-    let operands = apply.GetNonSuccessorOperands(countSite: 67)
+    let operands = apply.GetNonSuccessorOperands()
     let callee = operands[0]
     let calleeName = callee.GetSrcCodeIdentifier()
     if ((callee.IsImportedFunc() && callee.GetAttributeInfo().Test(Attribute.FOREIGN)) ||
@@ -82,7 +82,7 @@ private func TranslateApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRC
             return
         }
         let stringIndex = compiler.GetStringIdx(calleeName)
-        let numberArgs = apply.GetNumOfNonSuccessorOperands(countSite: 68) - 1
+        let numberArgs = apply.GetNumOfNonSuccessorOperands() - 1
         compiler.PushOpCodeWithAnnotations(context, OpCode.SYSCALL, apply,
             args: ArrayList<Int64>([stringIndex, numberArgs]), storeCodePos: true)
         context.definition.PushCell(compiler.GetTypeIdx(apply.GetResult().getOrThrow().GetType().getOrThrow()))
@@ -99,7 +99,7 @@ private func TranslateApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRC
         return
     }
     compiler.PushOpCodeWithAnnotations(context, OpCode.APPLY, apply,
-        args: ArrayList<Int64>([apply.GetNumOfNonSuccessorOperands(countSite: 69)]), storeCodePos: true)
+        args: ArrayList<Int64>([apply.GetNumOfNonSuccessorOperands()]), storeCodePos: true)
 }
 
 private func TranslateField(context: CHIR2BCHIRContext, expr: Expression): Unit {

@@ -16,7 +16,7 @@ public class GoTo <: Terminator {
     }
 
     public func GetDestination(): Block {
-        return GetSuccessor(0, countSite: 33)
+        return GetSuccessor(0)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
@@ -37,11 +37,11 @@ public class Branch <: Terminator {
     }
 
     public func GetTrueBlock(): Block {
-        return GetSuccessor(0, countSite: 34)
+        return GetSuccessor(0)
     }
 
     public func GetFalseBlock(): Block {
-        return GetSuccessor(1, countSite: 35)
+        return GetSuccessor(1)
     }
 
     public func SetSourceExpr(srcExpr: SourceExpr): Unit {
@@ -101,19 +101,18 @@ public class MultiBranch <: Terminator {
     }
 
     public func GetCaseBlockByIndex(index: Int64): Block {
-        return GetSuccessor(index + 1, countSite: 36)
+        return GetSuccessor(index + 1)
     }
 
     public func GetDefaultBlock(): Block {
-        return GetSuccessor(0, countSite: 37)
+        return GetSuccessor(0)
     }
 
     public func GetNormalBlocks(): ArrayList<Block> {
         let out = ArrayList<Block>()
-        let countTraversal = ChirCountTraversal(116)
         var idx: Int64 = 1
-        while (idx < GetNumOfSuccessor(countSite: 38, countScope: Some(countTraversal))) {
-            out.add(GetSuccessor(idx, countSite: 39, countScope: Some(countTraversal)))
+        while (idx < GetNumOfSuccessor()) {
+            out.add(GetSuccessor(idx))
             idx++
         }
         return out
@@ -146,7 +145,7 @@ public class Exit <: Terminator {
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         var exitValue: Option<Value> = None
-        if (GetNumOfNonSuccessorOperands(countSite: 40) > 0) {
+        if (GetNumOfNonSuccessorOperands() > 0) {
             exitValue = GetOperand(0)
         }
         let cloned = builder.CreateExit(exitValue, parent)
@@ -168,10 +167,10 @@ public class RaiseException <: Terminator {
     }
 
     public func GetExceptionBlock(): Option<Block> {
-        if (GetNumOfSuccessor(countSite: 41) == 0) {
+        if (GetNumOfSuccessor() == 0) {
             return None
         }
-        return GetSuccessor(0, countSite: 42)
+        return GetSuccessor(0)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
@@ -191,11 +190,11 @@ public open class ExpressionWithException <: Terminator {
     }
 
     public func GetSuccessBlock(): Block {
-        return GetSuccessor(0, countSite: 43)
+        return GetSuccessor(0)
     }
 
     public func GetErrorBlock(): Block {
-        return GetSuccessor(1, countSite: 44)
+        return GetSuccessor(1)
     }
 }
 
@@ -272,7 +271,7 @@ public class TryApply <: FuncCallWithException {
     public override func GetArgs(): ArrayList<Value> {
         let out = ArrayList<Value>()
         var idx: Int64 = 1
-        while (idx < GetNumOfNonSuccessorOperands(countSite: 45)) {
+        while (idx < GetNumOfNonSuccessorOperands()) {
             out.add(GetOperand(idx))
             idx++
         }
@@ -370,7 +369,7 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
     public override func OperandsToString(): String {
         let parts = ArrayList<String>()
         parts.add(CallTargetPrefix() + GetCallee().GetIdentifier() + InstantiatedTypeArgsToString())
-        let operands = GetNonSuccessorOperands(countSite: 46)
+        let operands = GetNonSuccessorOperands()
         operands.remove(at: 0)
         parts.add(TerminatorValueIdsToString(operands))
         return JoinStrings(parts, ", ")
@@ -394,7 +393,7 @@ public class TryInvoke <: DynamicDispatchWithException {
     }
 
     public override func GetArgs(): ArrayList<Value> {
-        let operands = GetNonSuccessorOperands(countSite: 47)
+        let operands = GetNonSuccessorOperands()
         operands.remove(at: 0)
         return operands
     }
@@ -427,7 +426,7 @@ public class TryInvokeStatic <: DynamicDispatchWithException {
     public override func GetArgs(): ArrayList<Value> {
         let out = ArrayList<Value>()
         var idx: Int64 = 2
-        while (idx < GetNumOfNonSuccessorOperands(countSite: 48)) {
+        while (idx < GetNumOfNonSuccessorOperands()) {
             out.add(GetOperand(idx))
             idx++
         }
@@ -456,8 +455,8 @@ public class TryUnaryExpression <: UnaryExpressionBase {
             isTry: true)
     }
 
-    public func GetSuccessBlock(): Block { return GetSuccessor(0, countSite: 49) }
-    public func GetErrorBlock(): Block { return GetSuccessor(1, countSite: 50) }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateTryUnaryExpression(GetResult().getOrThrow().GetType().getOrThrow(),
@@ -475,8 +474,8 @@ public class TryBinaryExpression <: BinaryExpressionBase {
             overflowStrategy: overflowStrategy, isTry: true)
     }
 
-    public func GetSuccessBlock(): Block { return GetSuccessor(0, countSite: 51) }
-    public func GetErrorBlock(): Block { return GetSuccessor(1, countSite: 52) }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateTryBinaryExpression(GetResult().getOrThrow().GetType().getOrThrow(),
@@ -491,8 +490,8 @@ public class TryNumericCast <: NumericCastBase {
     public init(source: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
         super(ExprKind.TRY_NUMERIC_CAST, source, MakeTwoSuccessors(successBlock, errorBlock), parent, OverflowStrategy.THROWING)
     }
-    public func GetSuccessBlock(): Block { return GetSuccessor(0, countSite: 53) }
-    public func GetErrorBlock(): Block { return GetSuccessor(1, countSite: 54) }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateTryNumericCast(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(),
@@ -530,7 +529,7 @@ public class TryIntrinsic <: ExpressionWithException {
     }
 
     public func GetArgs(): ArrayList<Value> {
-        return GetNonSuccessorOperands(countSite: 55)
+        return GetNonSuccessorOperands()
     }
 
     public override func OperandsToString(): String {
@@ -554,8 +553,8 @@ public class TryAllocate <: AllocateBase {
     public init(ty: Type, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
         super(ExprKind.TRY_ALLOCATE, ty, MakeTwoSuccessors(successBlock, errorBlock), parent)
     }
-    public func GetSuccessBlock(): Block { return GetSuccessor(0, countSite: 56) }
-    public func GetErrorBlock(): Block { return GetSuccessor(1, countSite: 57) }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateTryAllocate(GetResult().getOrThrow().GetType().getOrThrow(), GetType(), GetSuccessBlock(),
@@ -569,8 +568,8 @@ public class TryRawArrayAllocate <: RawArrayAllocateBase {
     public init(elementTy: Type, size: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
         super(ExprKind.TRY_RAW_ARRAY_ALLOCATE, elementTy, size, MakeTwoSuccessors(successBlock, errorBlock), parent)
     }
-    public func GetSuccessBlock(): Block { return GetSuccessor(0, countSite: 58) }
-    public func GetErrorBlock(): Block { return GetSuccessor(1, countSite: 59) }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateTryRawArrayAllocate(GetResult().getOrThrow().GetType().getOrThrow(), GetElementType(), GetSize(),
@@ -587,8 +586,8 @@ public class TrySpawn <: SpawnBase {
     public init(value: Value, arg: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
         super(ExprKind.TRY_SPAWN, MakeBinaryTermOperands(value, arg), MakeTwoSuccessors(successBlock, errorBlock), parent)
     }
-    public func GetSuccessBlock(): Block { return GetSuccessor(0, countSite: 60) }
-    public func GetErrorBlock(): Block { return GetSuccessor(1, countSite: 61) }
+    public func GetSuccessBlock(): Block { return GetSuccessor(0) }
+    public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = if (let Some(spawnArg) <- GetSpawnArg()) {

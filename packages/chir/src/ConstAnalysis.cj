@@ -114,9 +114,9 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
         }
         if (res == ConstExceptionKind.SUCCESS) {
             MarkExpressionAsMustNotOverflow(terminator)
-            return terminator.GetSuccessor(0, countSite: 17)
+            return terminator.GetSuccessor(0)
         } else if (res == ConstExceptionKind.FAIL) {
-            return terminator.GetSuccessor(1, countSite: 18)
+            return terminator.GetSuccessor(1)
         }
         return None
     }
@@ -895,7 +895,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
     }
 
     private func HandleVArrayGet(state: State<ConstValueDomain, Pool>, intrinsic: Expression): ConstExceptionKind {
-        if (intrinsic.GetNumOfNonSuccessorOperands(countSite: 19) != 2) {
+        if (intrinsic.GetNumOfNonSuccessorOperands() != 2) {
             return ConstExceptionKind.NA
         }
         let arrNode = intrinsic.GetOperand(0)
@@ -910,7 +910,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
 
     private func HandleVArraySet(state: State<ConstValueDomain, Pool>, intrinsic: Expression): ConstExceptionKind {
         let _ = state
-        CJC_ASSERT(intrinsic.GetNumOfNonSuccessorOperands(countSite: 20) == 3)
+        CJC_ASSERT(intrinsic.GetNumOfNonSuccessorOperands() == 3)
         let arrRefNode = intrinsic.GetOperand(0)
         let indexNode = intrinsic.GetOperand(2)
         let indexVal = state.CheckAbstractValue(indexNode) ?? return ConstExceptionKind.NA

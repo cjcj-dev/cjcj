@@ -160,7 +160,7 @@ private func AnalyzeBody(body: BlockGroup): ArrayList<UnreachableBlockRegion> {
 private func AllUsersIsExprKind(users: ArrayList<Expression>, kind: ExprKind): Bool {
     for (user in users) {
         var hasNothing = false
-        for (arg in user.GetNonSuccessorOperands(countSite: 76)) {
+        for (arg in user.GetNonSuccessorOperands()) {
             if (arg.GetType().getOrThrow().IsNothing()) { hasNothing = true }
         }
         if (user.GetExprKind() != kind || !hasNothing) { return false }
@@ -201,7 +201,7 @@ private func TryGetWarningExpression(expression: Expression, result: Unreachable
         expression.IsTryBinaryExpression()) {
         var hasNothing = false
         var index: Int64 = 0
-        while (index < expression.GetNumOfNonSuccessorOperands(countSite: 77)) {
+        while (index < expression.GetNumOfNonSuccessorOperands()) {
             if (expression.GetOperand(index).GetType().getOrThrow().IsNothing()) {
                 hasNothing = true
                 break

@@ -1815,7 +1815,7 @@ public class CHIRChecker {
     }
 
     private func CheckEnumTuple(expr: Expression, resultTy: Type, topLevelFunc: Function): Unit {
-        let operandsNum = expr.GetNumOfNonSuccessorOperands(countSite: 8)
+        let operandsNum = expr.GetNumOfNonSuccessorOperands()
         if (operandsNum == 0) {
             Errorln("in function ${topLevelFunc.GetIdentifier()}, must have one operand in `" +
                 GetExpressionString(expr) + "` at least, and the 1st operand's type is UInt32 or Bool.")
@@ -1885,7 +1885,7 @@ public class CHIRChecker {
     private func CheckNormalTuple(expr: Expression, resultTy: Type, topLevelFunc: Function): Unit {
         if (let Some(tupleTy) <- (resultTy as TupleType)) {
             let elementTypes = tupleTy.GetTypeArgsRef()
-            let operandsNum = expr.GetNumOfNonSuccessorOperands(countSite: 9)
+            let operandsNum = expr.GetNumOfNonSuccessorOperands()
             if (operandsNum != elementTypes.size) {
                 Errorln("in function ${topLevelFunc.GetIdentifier()}, size mismatched, there are " +
                     "${elementTypes.size} element(s) in the tuple type `${resultTy.ToString()}`, but ${operandsNum} " +
@@ -1913,7 +1913,7 @@ public class CHIRChecker {
         if (let Some(structTy) <- (resultTy as StructType)) {
             if (let Some(structDef) <- (structTy.GetCustomTypeDef() as StructDef)) {
                 let memberVars = structDef.GetInstanceVars()
-                let operandsNum = expr.GetNumOfNonSuccessorOperands(countSite: 10)
+                let operandsNum = expr.GetNumOfNonSuccessorOperands()
                 if (operandsNum != memberVars.size) {
                     Errorln("in function ${topLevelFunc.GetIdentifier()}, size mismatched, there are " +
                         "${memberVars.size} instance member var(s) in the struct ${structDef.GetIdentifier()}, but " +
@@ -1952,7 +1952,7 @@ public class CHIRChecker {
                         "Nothing, CPointer, CString, CFunc and Struct.")
                     return
                 }
-                for (operand in expr.GetNonSuccessorOperands(countSite: 11)) {
+                for (operand in expr.GetNonSuccessorOperands()) {
                     if (let Some(operandTy) <- operand.GetType()) {
                         if (!TypeIsExpected(operandTy, elementTy)) {
                             TypeCheckError(expr, operand, elementTy.ToString(), topLevelFunc)
@@ -3092,7 +3092,7 @@ public class CHIRChecker {
     }
 
     private func OperandNumIsEqual(expectedNum: Int64, expr: Expression, topLevelFunc: Function): Bool {
-        let realNum = expr.GetNumOfNonSuccessorOperands(countSite: 12)
+        let realNum = expr.GetNumOfNonSuccessorOperands()
         if (expectedNum != realNum) {
             ErrorInExpr(topLevelFunc, expr,
                 "expect ${expectedNum} operand(s), but there are ${realNum} in fact.")
@@ -3102,7 +3102,7 @@ public class CHIRChecker {
     }
 
     private func OperandNumAtLeast(expectedNum: Int64, expr: Expression, topLevelFunc: Function): Bool {
-        let realNum = expr.GetNumOfNonSuccessorOperands(countSite: 13)
+        let realNum = expr.GetNumOfNonSuccessorOperands()
         if (expectedNum > realNum) {
             ErrorInExpr(topLevelFunc, expr,
                 "expect at least ${expectedNum} operand(s), but there are ${realNum} in fact.")
@@ -3113,7 +3113,7 @@ public class CHIRChecker {
 
     private func OperandNumIsEqual(expectedNums: Array<Int64>, expr: Expression, topLevelFunc: Function): Bool {
         CJC_ASSERT(!expectedNums.isEmpty())
-        let realNum = expr.GetNumOfNonSuccessorOperands(countSite: 14)
+        let realNum = expr.GetNumOfNonSuccessorOperands()
         for (expected in expectedNums) {
             if (expected == realNum) {
                 return true
@@ -3286,7 +3286,7 @@ public class CHIRChecker {
     }
 
     private func CheckUnreachableOperandInExpr(expr: Expression, reachableValues: ArrayList<Value>): Unit {
-        for (operand in expr.GetNonSuccessorOperands(countSite: 15)) {
+        for (operand in expr.GetNonSuccessorOperands()) {
             if (operand.IsLiteral() || operand.IsGlobal()) {
                 continue
             }

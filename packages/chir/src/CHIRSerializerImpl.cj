@@ -1858,7 +1858,7 @@ class CHIRSerializerImpl {
         fields.add(if (let Some(result) <- expr.GetResult()) { CHIRValueId(result) } else { "" })
         fields.add(if (let Some(result) <- expr.GetResult()) { result.GetIdentifier() } else { "" })
         fields.add(if (let Some(resultTy) <- expr.GetResultType()) { CHIRSerializeType(resultTy) } else { "" })
-        fields.add(serializeValueRefs(expr.GetNonSuccessorOperands(countSite: 16)))
+        fields.add(serializeValueRefs(expr.GetNonSuccessorOperands()))
         fields.add(serializeBlockRefs(if (let Some(term) <- expr.AsTerminator()) {
             term.GetSuccessors()
         } else {

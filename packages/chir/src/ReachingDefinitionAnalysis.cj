@@ -365,7 +365,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
     }
 
     private func HandleStoreExpr(state: ReachingDefinitionDomain, store: Expression): Unit {
-        if (store.GetNumOfNonSuccessorOperands(countSite: 29) >= 2) {
+        if (store.GetNumOfNonSuccessorOperands() >= 2) {
             if (!allocateIdxMap.contains(store.GetOperand(1).nodeId)) {
                 InvalidateAliasedAllocations(state)
             }
@@ -374,7 +374,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
     }
 
     private func HandleLoadExpr(state: ReachingDefinitionDomain, load: Expression): Unit {
-        if (load.GetNumOfNonSuccessorOperands(countSite: 30) >= 1) {
+        if (load.GetNumOfNonSuccessorOperands() >= 1) {
             state.UpdateLoad(load.GetOperand(0), load)
         }
     }
@@ -449,7 +449,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
         InvalidateAliasedAllocations(state)
         if (let Some(callee) <- (apply.GetOperand(0) as Function)) {
             if (callee.IsMemberFunc() && !callee.TestAttr(Attribute.STATIC)) {
-                CJC_ASSERT(apply.GetNumOfNonSuccessorOperands(countSite: 31) > 1)
+                CJC_ASSERT(apply.GetNumOfNonSuccessorOperands() > 1)
                 KillTrackedStructReachingDefs(state, GetRootRefLocation(apply.GetOperand(1)))
             }
         }
@@ -458,7 +458,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
     private func HandleIntrinsicExpr(state: ReachingDefinitionDomain, intrinsic: Expression): Unit {
         InvalidateAliasedAllocations(state)
         if (GetIntrinsicKind(intrinsic) == IntrinsicKind.INOUT_PARAM) {
-            CJC_ASSERT(intrinsic.GetNumOfNonSuccessorOperands(countSite: 32) == 1)
+            CJC_ASSERT(intrinsic.GetNumOfNonSuccessorOperands() == 1)
             state.Invalidate(GetRootRefLocation(intrinsic.GetOperand(0)))
         }
     }

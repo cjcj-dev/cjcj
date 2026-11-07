@@ -24,7 +24,7 @@ private func AllUsersIsExprKind(users: ArrayList<Expression>, kind: ExprKind): B
         }
         var hasNothingOperand = false
         var index: Int64 = 0
-        while (index < user.GetNumOfNonSuccessorOperands(countSite: 21)) {
+        while (index < user.GetNumOfNonSuccessorOperands()) {
             if (user.GetOperand(index).GetType().getOrThrow().IsNothing()) {
                 hasNothingOperand = true
                 break
@@ -144,7 +144,7 @@ public class DeadCodeElimination {
                 workIdx++
                 workListSet.remove(expr.nodeId)
 
-                let operands = expr.GetNonSuccessorOperands(countSite: 22)
+                let operands = expr.GetNonSuccessorOperands()
                 expr.RemoveSelfFromBlock()
                 removed++
 
@@ -648,10 +648,9 @@ public class DeadCodeElimination {
             }
 
             let updatedTerminator = block.GetTerminator().getOrThrow()
-            let countTraversal = ChirCountTraversal(117)
             var succIdx: Int64 = 0
-            while (succIdx < updatedTerminator.GetNumOfSuccessor(countSite: 23, countScope: Some(countTraversal))) {
-                let successor = updatedTerminator.GetSuccessor(succIdx, countSite: 24, countScope: Some(countTraversal))
+            while (succIdx < updatedTerminator.GetNumOfSuccessor()) {
+                let successor = updatedTerminator.GetSuccessor(succIdx)
                 var removed = false
                 var idx: Int64 = 0
                 while (idx < unreachable.size) {
@@ -749,7 +748,7 @@ public class DeadCodeElimination {
                 if (expression.IsBinaryExpr() || expression.IsTryBinaryExpression()) {
                     var hasNothingOperand = false
                     var index: Int64 = 0
-                    while (index < expression.GetNumOfNonSuccessorOperands(countSite: 25)) {
+                    while (index < expression.GetNumOfNonSuccessorOperands()) {
                         if (expression.GetOperand(index).GetType().getOrThrow().IsNothing()) {
                             hasNothingOperand = true
                             break
@@ -889,7 +888,7 @@ public class DeadCodeElimination {
                 if (block.nodeId != multi.GetDefaultBlock().nodeId) {
                     InternalError("Unexpected multibranch connection")
                 }
-                multi.ReplaceSuccessor(0, multi.GetSuccessor(1, countSite: 26))
+                multi.ReplaceSuccessor(0, multi.GetSuccessor(1))
             }
         }
     }
@@ -1104,7 +1103,7 @@ private func GetMultiBranchTargetSucc(branch: MultiBranch): Option<Block> {
     var idx: Int64 = 0
     while (idx < cases.size) {
         if (condVal == cases[idx]) {
-            return branch.GetSuccessor(idx + 1, countSite: 27)
+            return branch.GetSuccessor(idx + 1)
         }
         idx++
     }

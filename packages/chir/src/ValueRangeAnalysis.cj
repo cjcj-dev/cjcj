@@ -452,7 +452,7 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
         var idx: Int64 = 0
         while (idx < cases.size) {
             if (value == cases[idx]) {
-                return multi.GetSuccessor(idx + 1, countSite: 92)
+                return multi.GetSuccessor(idx + 1)
             }
             idx++
         }

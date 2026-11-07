@@ -48,7 +48,7 @@ private func TranslateBranchTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIR
 private func TranslateMultiBranch(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     if (let Some(multi) <- (expr as MultiBranch)) {
-        let selectorTy: Option<Type> = if (expr.GetNumOfNonSuccessorOperands(countSite: 70) > 0) {
+        let selectorTy: Option<Type> = if (expr.GetNumOfNonSuccessorOperands() > 0) {
             expr.GetOperand(0).GetType()
         } else {
             None
@@ -116,12 +116,12 @@ private func TranslateExitTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRCo
 
 private func TranslateRaiseTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext, expr: Expression): Unit {
     if (let Some(raiseTerminator) <- expr.AsTerminator()) {
-        if (raiseTerminator.GetNumOfSuccessor(countSite: 71) == 0) {
+        if (raiseTerminator.GetNumOfSuccessor() == 0) {
             context.definition.PushOp(OpCode.RAISE)
         } else {
             context.definition.PushOp(OpCode.RAISE_EXC)
             let raisePlaceholder = context.definition.NextIndex()
-            context.definition.PushCell(compiler.BlockIndex(context, raiseTerminator.GetSuccessor(0, countSite: 72), raisePlaceholder))
+            context.definition.PushCell(compiler.BlockIndex(context, raiseTerminator.GetSuccessor(0), raisePlaceholder))
         }
     } else {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)
@@ -131,7 +131,7 @@ private func TranslateRaiseTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRC
 private func TranslateTryApplyTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     compiler.PushOpCodeWithAnnotations(context, OpCode.APPLY_EXC, expr,
-        args: ArrayList<Int64>([expr.GetNumOfNonSuccessorOperands(countSite: 73)]), storeCodePos: true)
+        args: ArrayList<Int64>([expr.GetNumOfNonSuccessorOperands()]), storeCodePos: true)
     TranslateTryTerminatorJumps(compiler, context, expr.AsTerminator().getOrThrow())
 }
 
@@ -171,10 +171,10 @@ private func TranslateTryAllocateTerminator(compiler: CHIR2BCHIR, context: CHIR2
 
 private func TranslateTryTerminatorJumps(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext, expr: Expression): Unit {
     let exceptionPlaceholder = context.definition.NextIndex()
-    context.definition.PushCell(compiler.BlockIndex(context, expr.GetSuccessor(1, countSite: 74), exceptionPlaceholder))
+    context.definition.PushCell(compiler.BlockIndex(context, expr.GetSuccessor(1), exceptionPlaceholder))
     context.definition.PushOp(OpCode.LVAR_SET)
     context.definition.PushCell(compiler.LVarId(context, expr.GetResult().getOrThrow()))
     context.definition.PushOp(OpCode.JUMP)
     let normalPlaceholder = context.definition.NextIndex()
-    context.definition.PushCell(compiler.BlockIndex(context, expr.GetSuccessor(0, countSite: 75), normalPlaceholder))
+    context.definition.PushCell(compiler.BlockIndex(context, expr.GetSuccessor(0), normalPlaceholder))
 }
