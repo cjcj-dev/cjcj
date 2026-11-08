@@ -452,10 +452,17 @@ public enum RefMapValue {
 public class RefMap {
     private let keys: ArrayList<Ref> = ArrayList<Ref>()
     private let values: ArrayList<RefMapValue> = ArrayList<RefMapValue>()
+    // Ref.GetIdentity() -> slot in keys/values, the lookup half of C++ ValueAnalysis.h:50
+    // unordered_map<const Ref*, ...>. keys/values still own insertion order and GetAt; this holds
+    // integers only. Invariant: exactly one entry keys[i].GetIdentity() -> i per slot.
+    private let slots: HashMap<Int64, Int64>
 
-    public init() {}
+    public init() {
+        slots = HashMap<Int64, Int64>()
+    }
 
     public init(other: RefMap) {
+        slots = other.slots.clone()
         // RefMap is cloned once per State.Clone (fixpoint hot path). keys/values are
         // insertion-ordered ArrayLists, so reserving capacity only preallocates the
         // backing storage (no order/content change) and avoids realloc churn while
@@ -478,24 +485,40 @@ public class RefMap {
     public func CopyFrom(rhs: RefMap): Unit {
         // RefMap is insertion ordered; overwrite the two parallel buffers in
         // place so CopyFrom is byte-equivalent to Clone without new buffers.
+        // Only replaced or truncated slots touch the index; unchanged slots keep their entry.
         var idx: Int64 = 0
         while (idx < rhs.keys.size) {
             if (idx < keys.size) {
                 if (!refEq(keys[idx], rhs.keys[idx])) {
+                    ReleaseSlot(keys[idx], idx)
                     keys[idx] = rhs.keys[idx]
+                    slots[rhs.keys[idx].GetIdentity()] = idx
                 }
                 if (!RefMapValuesAreSame(values[idx], rhs.values[idx])) {
                     values[idx] = rhs.values[idx]
                 }
             } else {
+                slots[rhs.keys[idx].GetIdentity()] = idx
                 keys.add(rhs.keys[idx])
                 values.add(rhs.values[idx])
             }
             idx++
         }
         while (keys.size > rhs.keys.size) {
+            ReleaseSlot(keys[keys.size - 1], keys.size - 1)
             keys.remove(at: keys.size - 1)
             values.remove(at: values.size - 1)
+        }
+    }
+
+    // A key leaving `slot` may already have been re-registered at an earlier slot by this
+    // CopyFrom (rhs reorders keys), so drop its entry only while it still names `slot`.
+    private func ReleaseSlot(key: Ref, slot: Int64): Unit {
+        let identity = key.GetIdentity()
+        if (let Some(current) <- slots.get(identity)) {
+            if (current == slot) {
+                slots.remove(identity)
+            }
         }
     }
 
@@ -514,17 +537,11 @@ public class RefMap {
     public func Clear(): Unit {
         keys.clear()
         values.clear()
+        slots.clear()
     }
 
     public func Find(key: Ref): Option<Int64> {
-        var idx: Int64 = 0
-        while (idx < keys.size) {
-            if (refEq(keys[idx], key)) {
-                return idx
-            }
-            idx++
-        }
-        return None
+        return slots.get(key.GetIdentity())
     }
 
     public func Get(key: Ref): Option<RefMapValue> {
@@ -543,8 +560,7 @@ public class RefMap {
             values[idx] = value
             return
         }
-        keys.add(key)
-        values.add(value)
+        Append(key, value)
     }
 
     // Return an existing entry for the caller to join, or append a missing one.
@@ -553,13 +569,18 @@ public class RefMap {
         if (let Some(idx) <- Find(key)) {
             return idx
         }
-        keys.add(key)
-        values.add(value)
+        Append(key, value)
         return None
     }
 
     public func SetAt(index: Int64, value: RefMapValue): Unit {
         values[index] = value
+    }
+
+    private func Append(key: Ref, value: RefMapValue): Unit {
+        slots[key.GetIdentity()] = keys.size
+        keys.add(key)
+        values.add(value)
     }
 }
 

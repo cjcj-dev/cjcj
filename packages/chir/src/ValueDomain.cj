@@ -54,10 +54,16 @@ public class AbstractObject <: Value {
 }
 
 public class Ref {
+    // Process-local identity for RefMap's slot index; declared before `ins` so the
+    // TopRef static draws from an initialized counter.
+    private static let nextIdentity = AtomicInt64(1)
     private static let ins = Ref("TopRef", false)
 
     private let isStaticRef: Bool
     private let uniqueID: String
+    // Distinct for every constructed Ref and fixed for its lifetime, so equal identity is exactly
+    // refEq even when the GC moves the object. Not part of GetUniqueID or any printed text.
+    private let identity: Int64
     private let roots: ArrayList<Ref> = ArrayList<Ref>()
     private let cacheKeys: ArrayList<Ref> = ArrayList<Ref>()
     private let cacheValues: ArrayList<Bool> = ArrayList<Bool>()
@@ -66,6 +72,16 @@ public class Ref {
     public init(uniqueID: String, isStatic: Bool) {
         this.uniqueID = uniqueID
         isStaticRef = isStatic
+        identity = nextIdentity.fetchAdd(1)
+        // fetchAdd returns each value once across threads; only a wrap past Int64.Max could
+        // repeat one, so refuse it instead of aliasing two Refs (release builds drop CJC_ASSERT).
+        if (identity <= 0) {
+            throw IllegalStateException("Ref identity counter exhausted")
+        }
+    }
+
+    internal func GetIdentity(): Int64 {
+        return identity
     }
 
     public func GetUniqueID(): String {

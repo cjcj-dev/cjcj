@@ -94,4 +94,69 @@ public class RefMapJoinTest {
         @Expect(refEq(lhs.refMap.GetAt(0)[0], key), true)
         @Expect(lhs.Join(rhs), false)
     }
+
+    @TestCase
+    public func IdentityIndexFollowsInsertCloneCopyClearAndJoin(): Unit {
+        let a = Ref("same-id", false)
+        let b = Ref("same-id", false)
+        let c = Ref("c", false)
+        let top = Ref.GetTopRefInstance()
+        let map = RefMap()
+        map.Set(a, RefMapValue.RefTarget(c))
+        map.Set(b, RefMapValue.RefTarget(c))
+        map.Set(c, RefMapValue.RefTarget(c))
+        // Hit overwrites in place; FindOrInsert hit keeps the value; equal names stay distinct keys.
+        map.Set(b, RefMapValue.RefTarget(top))
+        @Expect(map.FindOrInsert(a, RefMapValue.RefTarget(top)), Some(0))
+        @Expect(map.Size(), 3)
+        @Expect(map.Find(a), Some(0))
+        @Expect(map.Find(b), Some(1))
+        @Expect(map.Find(c), Some(2))
+        @Expect(refEq(map.GetAt(1)[0], b), true)
+        @Expect(IsRefTarget(map.Get(a), c), true)
+        @Expect(IsRefTarget(map.Get(b), top), true)
+        // Clone owns its index: appends to the clone are invisible to the source.
+        let clone = map.Clone()
+        let d = Ref("d", false)
+        @Expect(clone.FindOrInsert(d, RefMapValue.RefTarget(top)), Option<Int64>.None)
+        @Expect(clone.Find(d), Some(3))
+        @Expect(map.Find(d), Option<Int64>.None)
+        @Expect(clone.Find(b), Some(1))
+        // CopyFrom that permutes and truncates: [a, b, c] <- [c, a].
+        let src = RefMap()
+        src.Set(c, RefMapValue.RefTarget(top))
+        src.Set(a, RefMapValue.RefTarget(c))
+        map.CopyFrom(src)
+        @Expect(map.Size(), 2)
+        @Expect(map.Find(c), Some(0))
+        @Expect(map.Find(a), Some(1))
+        @Expect(map.Find(b), Option<Int64>.None)
+        @Expect(refEq(map.GetAt(0)[0], c), true)
+        @Expect(refEq(map.GetAt(1)[0], a), true)
+        map.Set(b, RefMapValue.RefTarget(c))
+        @Expect(map.Find(b), Some(2))
+        // Join into a state whose map came from CopyFrom finds existing keys through the index.
+        let lhs = NewRefMapJoinState()
+        let rhs = NewRefMapJoinState()
+        lhs.refMap.CopyFrom(map)
+        rhs.refMap.Set(a, RefMapValue.RefTarget(top))
+        rhs.refMap.Set(d, RefMapValue.RefTarget(c))
+        @Expect(lhs.Join(rhs), true)
+        @Expect(lhs.refMap.Size(), 4)
+        @Expect(lhs.refMap.Find(a), Some(1))
+        @Expect(IsRefTarget(lhs.refMap.Get(a), top), true)
+        @Expect(lhs.refMap.Find(d), Some(3))
+        map.Clear()
+        @Expect(map.Size(), 0)
+        @Expect(map.Find(a), Option<Int64>.None)
+        map.Set(c, RefMapValue.RefTarget(top))
+        @Expect(map.Find(c), Some(0))
+    }
+}
+
+private func IsRefTarget(value: Option<RefMapValue>, expected: Ref): Bool {
+    return match (value) {
+        case Some(RefMapValue.RefTarget(actual)) => refEq(actual, expected)
+        case _ => false
+    }
 }
