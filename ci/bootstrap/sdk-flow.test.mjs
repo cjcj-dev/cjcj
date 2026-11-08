@@ -207,6 +207,7 @@ test('public source preparation failure preserves predecessors for subsequent no
  const state=JSON.parse(await fs.readFile(work+'/build-result.json'));
  assert.deepEqual(state.stages.map(s=>s.id),['pre','next']);
  const linked={...c,work:work+'/linked',install:work+'/linked/installed',
+  stages:c.stages.map(stage=>stage.id==='next'?{...stage,output:work+'/linked/installed'}:stage),
   repos:{input:{root:source,commit,tree,checkout:work+'/checkout'}}};
  r=await cli(linked,['--no-package']);assert.equal(r.status,0,r.stdout+r.stderr);
  const common=repo=>run('git',['-C',repo,'rev-parse','--path-format=absolute','--git-common-dir']).stdout.trim();
