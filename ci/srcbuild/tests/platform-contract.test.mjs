@@ -19,38 +19,42 @@ const root = path.resolve(import.meta.dirname, '../../..');
 const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
 const llvmWorkflow = name => loadYaml(fsSync.readFileSync(path.join(root, '.github/workflows', name), 'utf8'));
 
-test('native SDK downloads bind the actual packaged producer and read-only run authentication', () => {
-  for (const name of ['ci.yml', 'platform-matrix.yml']) {
+test('native SDK consumers share the persisted selector and accept candidates by exact artifact ID', () => {
+  for (const [name, jobName, target] of [['ci.yml', 'package-tests', 'linux-x64'], ['platform-matrix.yml', 'colour-runtime', '"$NATIVE_SDK_TARGET"']]) {
     const workflow = llvmWorkflow(name);
     assert.deepEqual(workflow.permissions, {contents: 'read', actions: 'read'});
-    const job = workflow.jobs[name === 'ci.yml' ? 'package-tests' : 'colour-runtime'];
-    const download = job.steps.find(step => step.name === 'Receive packaged native SDK');
-    assert.match(download.uses, /^actions\/download-artifact@/);
-    assert.match(download.with.name, /^cjcj-srcbuild-/);
-    assert.equal(download.with['github-token'], '${{ github.token }}');
-    const receive = job.steps.find(step => step.name === 'Verify and select installed native SDK');
-    assert.match(receive.run, /node ci\/release\/receive_native_sdk.mjs/);
-    assert(job.steps.indexOf(download) < job.steps.indexOf(receive));
-    if (name === 'platform-matrix.yml') {
-      assert.equal(download.with['run-id'], '${{ inputs.native_sdk_run_id || vars.CJCJ_NATIVE_SDK_RUN_ID }}');
-      continue;
-    }
-    // ci.yml: persisted registry entry by default, explicit candidate run only
-    // under dispatch; no repository variable and no fallback between the two.
+    const job = workflow.jobs[jobName];
+    // No repository variable and no Actions download by name for any target.
     assert.doesNotMatch(JSON.stringify(job), /vars\.CJCJ_NATIVE_SDK/);
+    assert.deepEqual(job.steps.filter(step => /download-artifact/.test(step.uses || '') && /cjcj-srcbuild-/.test(step.with?.name || '')), []);
+    if (name === 'platform-matrix.yml') {
+      assert.deepEqual(job.strategy.matrix.include.map(cell => cell.target), ['linux-x64', 'linux-aarch64']);
+      assert.equal(job.env?.NATIVE_SDK_TARGET, undefined);
+    }
     const select = job.steps.find(step => step.id === 'native-sdk');
-    assert.equal(select.run, 'node ci/release/persist_native_sdk.mjs select linux-x64 >> "$GITHUB_OUTPUT"');
+    assert.equal(select.run, `node ci/release/persist_native_sdk.mjs select ${target} >> "$GITHUB_OUTPUT"`);
     assert.equal(select.env.CANDIDATE_RUN, '${{ inputs.native_sdk_run_id }}');
     assert.equal(select.env.CANDIDATE_VERSION, '${{ inputs.native_sdk_version }}');
-    assert.equal(download.if, "steps.native-sdk.outputs.mode == 'candidate'");
-    assert.equal(download.with['run-id'], '${{ steps.native-sdk.outputs.run }}');
-    assert.equal(download.with.name, 'cjcj-srcbuild-linux-x64-${{ steps.native-sdk.outputs.version }}');
+    const candidate = job.steps.find(step => step.name === 'Receive packaged native SDK');
+    assert.equal(candidate.id, 'candidate');
+    assert.equal(candidate.uses, undefined);
+    assert.equal(candidate.if, "steps.native-sdk.outputs.mode == 'candidate'");
+    assert.equal(candidate.run, `node ci/release/persist_native_sdk.mjs receive-candidate ${target} "$RUNNER_TEMP/native-sdk-artifact" >> "$GITHUB_OUTPUT"`);
+    assert.equal(candidate.env.CANDIDATE_ARTIFACT, '${{ steps.native-sdk.outputs.artifact }}');
+    assert.equal(candidate.env.CANDIDATE_RUN, '${{ steps.native-sdk.outputs.run }}');
     const persisted = job.steps.find(step => step.name === 'Receive persisted native SDK');
     assert.equal(persisted.if, "steps.native-sdk.outputs.mode == 'persisted'");
+    assert.equal(persisted.env.NATIVE_SDK_ARTIFACT, '${{ steps.native-sdk.outputs.artifact }}');
     assert.equal(persisted.run, 'node ci/release/download_pinned.mjs cjcj-dev/cjcj "$NATIVE_SDK_ARTIFACT" "$RUNNER_TEMP/native-sdk-artifact"');
+    const receive = job.steps.find(step => step.name === 'Verify and select installed native SDK');
+    assert.match(receive.run, /node ci\/release\/receive_native_sdk.mjs/);
     assert.equal(receive.env.CJCJ_NATIVE_SDK_VERSION, '${{ steps.native-sdk.outputs.version }}');
-    assert(job.steps.indexOf(select) < job.steps.indexOf(download) && job.steps.indexOf(persisted) < job.steps.indexOf(receive));
-    // Publication is a separate job gated on acceptance of the same candidate.
+    const order = [select, candidate, persisted, receive].map(step => job.steps.indexOf(step));
+    assert.deepEqual(order, [...order].sort((a, b) => a - b));
+    if (name !== 'ci.yml') continue;
+    // Publication is a separate job gated on acceptance of the same candidate and
+    // bound to the digest of the bytes package-tests accepted.
+    assert.equal(job.outputs.digest, '${{ steps.candidate.outputs.digest }}');
     const persist = workflow.jobs['persist-native-sdk'];
     assert.equal(persist.needs, 'package-tests');
     assert.equal(persist.if, "${{ github.event_name == 'workflow_dispatch' && inputs.persist_native_sdk && needs.package-tests.result == 'success' && needs.package-tests.outputs.mode == 'candidate' }}");
@@ -58,11 +62,22 @@ test('native SDK downloads bind the actual packaged producer and read-only run a
     assert.equal(workflow.on.workflow_dispatch.inputs.persist_native_sdk.default, false);
     const publish = persist.steps.find(step => /persist_native_sdk\.mjs publish/.test(step.run || ''));
     assert.equal(publish.env.NATIVE_SDK_ARTIFACT_ID, '${{ needs.package-tests.outputs.artifact }}');
+    assert.equal(publish.env.NATIVE_SDK_ACCEPTED_DIGEST, '${{ needs.package-tests.outputs.digest }}');
     assert.equal(publish.shell, 'bash');
     const keep = persist.steps.find(step => step.name === 'Preserve persistence provenance and log');
     assert.equal(keep.if, 'always()');
     assert(persist.steps.indexOf(publish) < persist.steps.indexOf(keep));
   }
+  // No other public workflow consumes the full SDK through a repository variable
+  // or a by-name Actions artifact. srcbuild-target.yml uploads it and
+  // build-release-package.yml is the in-run release handoff (workflow_call only).
+  const workflows = path.join(root, '.github/workflows');
+  for (const file of fsSync.readdirSync(workflows).filter(entry => /\.ya?ml$/.test(entry))) {
+    const text = fsSync.readFileSync(path.join(workflows, file), 'utf8');
+    assert.doesNotMatch(text, /vars\.CJCJ_NATIVE_SDK_/, file);
+    if (file !== 'srcbuild-target.yml' && file !== 'build-release-package.yml') assert.doesNotMatch(text, /name:\s*cjcj-srcbuild-/, file);
+  }
+  assert.deepEqual(Object.keys(llvmWorkflow('build-release-package.yml').on), ['workflow_call']);
   const source = llvmWorkflow('srcbuild-target.yml');
   const producer = Object.values(source.jobs).flatMap(job => job.steps || []).find(step => step.name === 'Upload self-hosted SDK and gate logs');
   assert.equal(producer.with.name, 'cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}');

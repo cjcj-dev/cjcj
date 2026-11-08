@@ -230,6 +230,7 @@ jobs:
       artifact: ${{ steps.native-sdk.outputs.artifact }}
       version: ${{ steps.native-sdk.outputs.version }}
       run: ${{ steps.native-sdk.outputs.run }}
+      digest: ${{ steps.candidate.outputs.digest }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
@@ -245,7 +246,9 @@ jobs:
         run: node ci/load_runtime_pin.mjs
       # Default: the single persisted native_sdk entry in ci/bootstrap_artifacts_pin.json
       # (release asset + SHA-256). Candidate: an explicit fresh producer run under
-      # acceptance. There is no fallback between the two and no repository variable.
+      # acceptance, downloaded by the exact selected artifact ID; its digest is the
+      # accepted identity persist-native-sdk must publish. There is no fallback
+      # between the two and no repository variable.
       - name: Select native SDK input
         id: native-sdk
         env:
@@ -255,13 +258,14 @@ jobs:
           CANDIDATE_VERSION: ${{ inputs.native_sdk_version }}
         run: node ci/release/persist_native_sdk.mjs select linux-x64 >> "$GITHUB_OUTPUT"
       - name: Receive packaged native SDK
+        id: candidate
         if: steps.native-sdk.outputs.mode == 'candidate'
-        uses: actions/download-artifact@v8
-        with:
-          name: cjcj-srcbuild-linux-x64-${{ steps.native-sdk.outputs.version }}
-          run-id: ${{ steps.native-sdk.outputs.run }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/native-sdk-artifact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_ARTIFACT: ${{ steps.native-sdk.outputs.artifact }}
+          CANDIDATE_RUN: ${{ steps.native-sdk.outputs.run }}
+          CANDIDATE_VERSION: ${{ steps.native-sdk.outputs.version }}
+        run: node ci/release/persist_native_sdk.mjs receive-candidate linux-x64 "$RUNNER_TEMP/native-sdk-artifact" >> "$GITHUB_OUTPUT"
       - name: Receive persisted native SDK
         if: steps.native-sdk.outputs.mode == 'persisted'
         env:
@@ -309,7 +313,7 @@ jobs:
 
   # Publication follows acceptance, never build success: only an explicit
   # dispatch, only a candidate that package-tests consumed and passed, and the
-  # script re-checks the producer srcbuild gate job before writing anything.
+  # script re-checks the producer binding and the accepted digest before writing.
   persist-native-sdk:
     name: Persist accepted native SDK (linux-x64)
     needs: package-tests
@@ -335,6 +339,7 @@ jobs:
           NATIVE_SDK_ARTIFACT_ID: ${{ needs.package-tests.outputs.artifact }}
           NATIVE_SDK_RUN_ID: ${{ needs.package-tests.outputs.run }}
           NATIVE_SDK_VERSION: ${{ needs.package-tests.outputs.version }}
+          NATIVE_SDK_ACCEPTED_DIGEST: ${{ needs.package-tests.outputs.digest }}
           ACCEPTANCE_JOB: package-tests
         run: |
           mkdir -p "$RUNNER_TEMP/native-sdk-persist"

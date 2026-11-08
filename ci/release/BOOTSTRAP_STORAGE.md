@@ -115,16 +115,34 @@ artifact existing is not evidence that the SDK passed its gates.
 
 Chain: producer `srcbuild` job (package-install, source-tool install, verify)
 -> `ci.yml` `package-tests` in candidate mode (`workflow_dispatch` with
-`native_sdk_run_id` and `native_sdk_version`: download, `receive_native_sdk.mjs`
-unpack/installed-SDK checks, registered package tests) -> `persist-native-sdk`
+`native_sdk_run_id` and `native_sdk_version`) -> `persist-native-sdk`
 (only with `persist_native_sdk: true` and a successful candidate
 `package-tests`) -> new prerelease -> readback -> reviewed registry commit ->
 default consumers.
 
-`ci/release/persist_native_sdk.mjs publish` rechecks the artifact ID, name,
-producer run and expiry, requires the producer job `<target> / srcbuild` to
-have concluded `success`, and requires exactly one packaged SDK archive with a
-matching `.sha256`. It then creates a draft prerelease
+Producer binding (`persist_native_sdk.mjs`, applied both when a candidate is
+received and again before publication): the producer run is a completed
+`workflow_dispatch` run of this repository from an allowed srcbuild caller
+(`release.yml`, `release-matrix.yml`, `arm-soak.yml`). In that run's current
+attempt, exactly one `<target> / srcbuild` job ran with that attempt number and
+the run's head and concluded `success`. The artifact was created between that
+job's start and completion, so bytes uploaded under the same name by a failed
+earlier attempt are refused. The producer commit must equal or be an ancestor of
+the accepting commit. A target job that was not re-run in the current attempt
+fails closed; the producer has to be re-run.
+
+Acceptance: `select` resolves the candidate run and version to one artifact ID.
+`receive-candidate` checks that ID's name, run, expiry, recorded digest and
+size (at most 2 GiB - 1, the release asset limit), applies the producer binding,
+downloads exactly that ID, requires the bytes to match the recorded digest and
+unpacks them for `receive_native_sdk.mjs` and the registered package tests. The
+digest is a `package-tests` job output.
+
+`ci/release/persist_native_sdk.mjs publish` requires that accepted digest to
+equal the artifact's recorded digest and the downloaded bytes. It reapplies the
+producer binding, requires exactly one packaged SDK archive with a matching
+`.sha256`, and checks that the uploaded SDK asset reads back with the same
+SHA-256. It then creates a draft prerelease
 `native-sdk-<target>-<version>-<artifact>-<persist run>-<attempt>-prerelease`
 (`make_latest: "false"`). It uploads the original artifact ZIP, a separate
 `gate-logs.zip` and a `provenance.json`, and reads every asset back. It then
@@ -140,8 +158,13 @@ provenance key; consumers download the release asset by ID and SHA-256 and never
 query Actions for it. `download_pinned.mjs --select-native-sdk <target>` accepts
 exactly one marked entry per target: none stops with
 `NATIVE_SDK_PERSISTENT_PIN_MISSING` and more than one stops with
-`NATIVE_SDK_PERSISTENT_PIN_AMBIGUOUS`. Nothing falls back to a run ID,
-repository variable or expired artifact.
+`NATIVE_SDK_PERSISTENT_PIN_AMBIGUOUS`. The default consumers are `ci.yml`
+`package-tests` (linux-x64) and `platform-matrix.yml` `colour-runtime` for each
+matrix target (linux-x64 and linux-aarch64). Both use the same
+`persist_native_sdk.mjs select` + `download_pinned.mjs` path, so linux-aarch64
+stops with `NATIVE_SDK_PERSISTENT_PIN_MISSING` until an accepted entry for that
+target exists. Nothing falls back to a run ID, repository variable or expired
+artifact.
 
 Lifecycle: one current SDK per target. A replacement commit removes the old
 marked entry and adds the new one; both prereleases briefly coexist.
@@ -149,4 +172,7 @@ marked entry and adds the new one; both prereleases briefly coexist.
 `NATIVE_SDK_RETIRE_CANDIDATE ... action=kept`. A maintainer retires the old
 prerelease after these checks: the switch is on master, `package-tests` passes
 on the new entry, and no active branch, open PR or frozen evidence still names
-the old artifact ID or tag. The workflow never deletes anything.
+the old artifact ID or tag. The workflow never deletes anything. A failure
+before the undraft step leaves an unpublished, untagged draft; these drafts are
+reported in the job log and provenance artifact and are not purged
+automatically.

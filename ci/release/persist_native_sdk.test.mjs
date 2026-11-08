@@ -11,6 +11,7 @@ import {digest} from './bootstrap_store.mjs';
 const entry = new URL('./persist_native_sdk.mjs', import.meta.url).pathname;
 const downloader = new URL('./download_pinned.mjs', import.meta.url).pathname;
 const SHA = 'a'.repeat(40);
+const HEAD = 'd'.repeat(40);
 const VERSION = '1.2.3';
 const NAME = `cjcj-srcbuild-linux-x64-${VERSION}`;
 const TAG = `native-sdk-linux-x64-${VERSION}-456-77-1-prerelease`;
@@ -49,13 +50,22 @@ globalThis.fetch = async (url, options = {}) => {
   const reply = (value, status = 200) => new Response(JSON.stringify(value), {status});
   const api = 'https://api.github.com/repos/cjcj-dev/cjcj';
   if (url === api + '/actions/runs/123/artifacts?name=${NAME}&per_page=100') return reply({artifacts: [{id: 456, name: '${NAME}', expired: false}]});
-  if (url === api + '/actions/artifacts/456') return reply({name: '${NAME}', expired: process.env.EXPIRED === '1',
-    workflow_run: {id: 123, head_sha: '${SHA}'}, digest: 'sha256:${zipSha}', size_in_bytes: 1});
+  if (url === api + '/actions/artifacts/456') return reply({id: 456, name: '${NAME}', expired: process.env.EXPIRED === '1',
+    workflow_run: {id: 123, head_sha: '${SHA}'}, digest: 'sha256:${zipSha}', size_in_bytes: Number(process.env.ARTIFACT_SIZE || 1),
+    created_at: process.env.ARTIFACT_CREATED || '2026-01-01T00:10:00Z', expires_at: '2026-04-01T00:00:00Z'});
+  // Another artifact of the same producer run (e.g. diagnosis logs).
+  if (url === api + '/actions/artifacts/458') return reply({id: 458, name: '${NAME}-diagnosis', expired: false,
+    workflow_run: {id: 123, head_sha: '${SHA}'}, digest: 'sha256:${'f'.repeat(64)}', size_in_bytes: 1, created_at: '2026-01-01T00:10:00Z'});
   if (url === api + '/actions/artifacts/456/zip') return new Response(fs.readFileSync(dir + '/artifact.zip'));
-  if (url === api + '/actions/runs/123') return reply({head_sha: '${SHA}', run_attempt: 1, path: '.github/workflows/srcbuild.yml'});
-  if (url === api + '/actions/runs/123/jobs?filter=latest&per_page=100&page=1') return reply({jobs: [
-    {id: 9, name: 'srcbuild / linux-x64 / source SDK / linux-x64 / srcbuild', conclusion: process.env.PRODUCER_CONCLUSION || 'success'},
-    {id: 10, name: 'srcbuild / linux-aarch64 / source SDK / linux-aarch64 / srcbuild', conclusion: 'failure'}]});
+  // Producer run on its second attempt (a rerun); the gate job of that attempt ran 00:00-00:20.
+  if (url === api + '/actions/runs/123') return reply({id: 123, head_sha: '${SHA}', run_attempt: 2, status: 'completed', event: 'workflow_dispatch',
+    path: process.env.PRODUCER_PATH || '.github/workflows/release.yml', head_repository: {full_name: 'cjcj-dev/cjcj'}});
+  if (url === api + '/actions/runs/123/attempts/2/jobs?per_page=100&page=1') return reply({jobs: [
+    {id: 9, name: 'srcbuild / linux-x64 / source SDK / linux-x64 / srcbuild', run_id: 123, run_attempt: Number(process.env.JOB_ATTEMPT || 2),
+      head_sha: '${SHA}', status: 'completed', conclusion: process.env.PRODUCER_CONCLUSION || 'success',
+      started_at: '2026-01-01T00:00:00Z', completed_at: '2026-01-01T00:20:00Z'},
+    {id: 10, name: 'srcbuild / linux-aarch64 / source SDK / linux-aarch64 / srcbuild', run_id: 123, run_attempt: 2, conclusion: 'failure'}]});
+  if (url === api + '/compare/${SHA}...${HEAD}') return reply({status: process.env.COMPARE_STATUS || 'ahead'});
   if (url === api + '/releases?per_page=100&page=1') return reply([{id: 11, tag_name: '${OLD}'}, {id: 12, tag_name: 'llvm-dylib-x-prerelease'},
     ...(process.env.TAG_TAKEN ? [{id: 13, tag_name: '${TAG}', draft: true}] : [])]);
   if (url === api + '/git/ref/tags/${TAG}') return reply({message: 'Not Found'}, 404);
@@ -86,9 +96,10 @@ process.stdout.write(fs.readFileSync(process.env.FIXTURE_DIR + '/asset-' + match
 `, {mode: 0o755});
     const env = {...process.env, FIXTURE_DIR: dir, PATH: `${bin}:${process.env.PATH}`, BOOTSTRAP_ARCHIVES_PIN: registry,
       GITHUB_REPOSITORY: 'cjcj-dev/cjcj', GITHUB_TOKEN: 'fixture-token', GH_TOKEN: 'fixture-token', GITHUB_RUN_ID: '77',
-      GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: 'd'.repeat(40), NATIVE_SDK_ARTIFACT_ID: '456', NATIVE_SDK_RUN_ID: '123',
-      NATIVE_SDK_VERSION: VERSION, ACCEPTANCE_JOB: 'package-tests'};
-    for (const key of ['CANDIDATE_RUN', 'CANDIDATE_VERSION', 'EXPIRED', 'PRODUCER_CONCLUSION', 'CORRUPT_RELEASE', 'TAG_TAKEN']) delete env[key];
+      GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: HEAD, NATIVE_SDK_ARTIFACT_ID: '456', NATIVE_SDK_RUN_ID: '123',
+      NATIVE_SDK_VERSION: VERSION, NATIVE_SDK_ACCEPTED_DIGEST: `sha256:${zipSha}`, ACCEPTANCE_JOB: 'package-tests'};
+    for (const key of ['CANDIDATE_RUN', 'CANDIDATE_VERSION', 'CANDIDATE_ARTIFACT', 'EXPIRED', 'PRODUCER_CONCLUSION', 'CORRUPT_RELEASE', 'TAG_TAKEN',
+      'ARTIFACT_SIZE', 'ARTIFACT_CREATED', 'PRODUCER_PATH', 'JOB_ATTEMPT', 'COMPARE_STATUS']) delete env[key];
     const run = (args, extra = {}) => {
       const result = spawnSync(process.execPath, ['--import', preload, entry, ...args], {env: {...env, ...extra}, encoding: 'utf8'});
       const read = name => fs.existsSync(path.join(dir, name))
@@ -120,6 +131,11 @@ test('accepted candidate is persisted, read back through the consumer and never 
     tag: TAG, native_sdk: {target: 'linux-x64', version: VERSION, producer_run: 123, acceptance_run: 77}}});
   const provenance = JSON.parse(fs.readFileSync(path.join(out, 'provenance.json'), 'utf8'));
   assert.equal(provenance.producer.job.name, 'srcbuild / linux-x64 / source SDK / linux-x64 / srcbuild');
+  // Bound to the exact producer attempt and to the bytes package-tests accepted.
+  assert.deepEqual([provenance.producer.workflow, provenance.producer.attempt, provenance.producer.job.attempt, provenance.producer.commit],
+    ['.github/workflows/release.yml', 2, 2, SHA]);
+  assert.equal(provenance.acceptance.digest, `sha256:${zipSha}`);
+  assert(!result.requests.some(item => /filter=latest|artifacts\?name=/.test(item.url)));
   assert.equal(provenance.readback.facts.version, VERSION);
   assert.deepEqual(provenance.retention.candidates, [{id: 11, tag: OLD, current: true}]);
   assert.match(result.stdout, new RegExp(`NATIVE_SDK_RETIRE_CANDIDATE tag=${OLD} release=11 current=true action=kept`));
@@ -138,6 +154,12 @@ for (const [label, extra, options, code] of [
   ['artifact holds only logs', {}, {logsOnly: true}, /NATIVE_SDK_ARTIFACT_PACKAGE_MISSING/],
   ['artifact expired', {EXPIRED: '1'}, {}, /NATIVE_SDK_ARTIFACT_IDENTITY_MISMATCH/],
   ['tag already used', {TAG_TAKEN: '1'}, {}, /NATIVE_SDK_TAG_EXISTS/],
+  ['artifact was created by another attempt', {ARTIFACT_CREATED: '2025-12-31T23:50:00Z'}, {}, /NATIVE_SDK_ARTIFACT_ATTEMPT_MISMATCH artifact=456/],
+  ['gate job success belongs to another attempt', {JOB_ATTEMPT: '1'}, {}, /NATIVE_SDK_PRODUCER_GATE_NOT_PASSED attempt=2/],
+  ['producer workflow is not an allowed srcbuild caller', {PRODUCER_PATH: '.github/workflows/ci.yml'}, {}, /NATIVE_SDK_PRODUCER_RUN_NOT_ALLOWED/],
+  ['producer head is outside the accepted history', {COMPARE_STATUS: 'diverged'}, {}, /NATIVE_SDK_PRODUCER_HEAD_NOT_ANCESTOR/],
+  ['artifact digest differs from the accepted digest', {NATIVE_SDK_ACCEPTED_DIGEST: `sha256:${'e'.repeat(64)}`}, {}, /NATIVE_SDK_ACCEPTED_DIGEST_MISMATCH/],
+  ['artifact exceeds the release asset limit', {ARTIFACT_SIZE: String(2 * 1024 ** 3)}, {}, /NATIVE_SDK_ARTIFACT_SIZE_INVALID/],
 ]) {
   test(`no release is created when ${label}`, () => fixture(({dir, run}) => {
     const result = run(['publish', 'linux-x64', path.join(dir, 'out')], extra);
@@ -178,3 +200,25 @@ test('selection without an accepted SDK names the missing producer chain', () =>
   assert.match(result.stderr, /NATIVE_SDK_PERSISTENT_PIN_MISSING target=linux-x64: no accepted full native SDK is persisted/);
   assert.deepEqual(result.requests, []);
 }, {oldEntry: false}));
+
+test('candidate acceptance downloads the exact selected artifact ID and reports its digest', () => fixture(({dir, run, zipSha}) => {
+  const candidate = {CANDIDATE_ARTIFACT: '456', CANDIDATE_RUN: '123', CANDIDATE_VERSION: VERSION};
+  const dest = path.join(dir, 'received');
+  const result = run(['receive-candidate', 'linux-x64', dest], candidate);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, `digest=sha256:${zipSha}\n`);
+  const archive = `cangjie-sdk-linux-x64-${VERSION}-cjcj.tar.gz`;
+  assert.deepEqual(fs.readdirSync(dest).sort(), [archive, `${archive}.sha256`, 'verify.log']);
+  assert(result.requests.some(item => item.url.endsWith('/actions/artifacts/456/zip')));
+  assert(!result.requests.some(item => item.method !== 'GET' || /artifacts\?name=|filter=latest/.test(item.url)));
+  // A different artifact of the same producer run is refused before any byte is fetched.
+  const other = run(['receive-candidate', 'linux-x64', path.join(dir, 'other')], {...candidate, CANDIDATE_ARTIFACT: '458'});
+  assert.notEqual(other.status, 0);
+  assert.match(other.stderr, /NATIVE_SDK_ARTIFACT_IDENTITY_MISMATCH artifact=458/);
+  assert(!other.requests.some(item => item.url.endsWith('/actions/artifacts/458/zip')));
+  // An artifact left by a failed earlier attempt is not acceptance input either.
+  const stale = run(['receive-candidate', 'linux-x64', path.join(dir, 'stale')], {...candidate, ARTIFACT_CREATED: '2025-12-31T23:50:00Z'});
+  assert.notEqual(stale.status, 0);
+  assert.match(stale.stderr, /NATIVE_SDK_ARTIFACT_ATTEMPT_MISMATCH/);
+  assert(!fs.existsSync(path.join(dir, 'stale')));
+}));

@@ -18,6 +18,12 @@ import {getTarget} from '../../build/lib/targets.mjs';
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z._-]*$/;
 const ID = /^[1-9][0-9]*$/;
 export const artifactName = (target, version) => `cjcj-srcbuild-${target}-${version}`;
+const DIGEST = /^sha256:[a-f0-9]{64}$/;
+// GitHub rejects release assets of 2 GiB or more; refuse before any transfer.
+export const MAX_ASSET_BYTES = 2 * 1024 ** 3 - 1;
+// Top-level workflows that reach srcbuild-target.yml through srcbuild.yml. All
+// are workflow_dispatch only, so no push, PR or fork run can produce an input.
+export const PRODUCER_WORKFLOWS = ['.github/workflows/release.yml', '.github/workflows/release-matrix.yml', '.github/workflows/arm-soak.yml'];
 
 function fail(code, detail = '') { throw new Error(`${code}${detail ? ' ' + detail : ''}`); }
 
@@ -57,6 +63,88 @@ export async function select(target, env = process.env) {
   return {mode: 'candidate', artifact: String(matches[0].id), version, run, tag: ''};
 }
 
+// The exact artifact by ID: identity, expiry, recorded digest and size are
+// checked before any byte is transferred.
+async function exactArtifact(repository, artifactId, name, run) {
+  const artifact = await (await api(`/repos/${repository}/actions/artifacts/${artifactId}`)).json();
+  if (String(artifact.id) !== artifactId || artifact.name !== name || String(artifact.workflow_run?.id) !== run || artifact.expired) {
+    fail('NATIVE_SDK_ARTIFACT_IDENTITY_MISMATCH', `artifact=${artifactId} name=${artifact.name} run=${artifact.workflow_run?.id} expired=${artifact.expired}`);
+  }
+  if (!DIGEST.test(artifact.digest || '')) fail('NATIVE_SDK_ARTIFACT_DIGEST_MISSING', `artifact=${artifactId}`);
+  if (!Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes < 1 || artifact.size_in_bytes > MAX_ASSET_BYTES) {
+    fail('NATIVE_SDK_ARTIFACT_SIZE_INVALID', `artifact=${artifactId} size=${artifact.size_in_bytes} limit=${MAX_ASSET_BYTES}`);
+  }
+  return artifact;
+}
+
+async function artifactZip(repository, artifact) {
+  const zip = Buffer.from(await (await api(`/repos/${repository}/actions/artifacts/${artifact.id}/zip`)).arrayBuffer());
+  const actual = `sha256:${digest(zip)}`;
+  if (actual !== artifact.digest) fail('NATIVE_SDK_ARTIFACT_DIGEST_MISMATCH', `artifact=${artifact.id} recorded=${artifact.digest} actual=${actual}`);
+  return zip;
+}
+
+// The producer is an allowed dispatch-only workflow of this repository. Its
+// current attempt ran the target's srcbuild gate job (package-install,
+// source-tool install, verify) to success, and the artifact was created inside
+// that job execution, so bytes uploaded by a failed earlier attempt under the
+// same name are refused. The producer commit must be in the accepting history.
+async function producerBinding(repository, run, target, artifact, accepted) {
+  const producerRun = await (await api(`/repos/${repository}/actions/runs/${run}`)).json();
+  const attempt = producerRun.run_attempt;
+  if (String(producerRun.id) !== run || !PRODUCER_WORKFLOWS.includes(producerRun.path) || producerRun.event !== 'workflow_dispatch'
+      || producerRun.status !== 'completed' || producerRun.head_repository?.full_name !== repository
+      || !/^[a-f0-9]{40}$/.test(producerRun.head_sha || '') || !Number.isSafeInteger(attempt) || attempt < 1) {
+    fail('NATIVE_SDK_PRODUCER_RUN_NOT_ALLOWED', `run=${run} workflow=${producerRun.path} event=${producerRun.event} status=${producerRun.status}`);
+  }
+  if (artifact.workflow_run?.head_sha !== producerRun.head_sha) fail('NATIVE_SDK_PRODUCER_PROVENANCE_MISMATCH');
+  const jobs = (await pages(`/repos/${repository}/actions/runs/${run}/attempts/${attempt}/jobs`, 'jobs'))
+    .filter(job => job.name === `${target} / srcbuild` || job.name.endsWith(` / ${target} / srcbuild`));
+  const job = jobs[0];
+  if (jobs.length !== 1 || String(job.run_id) !== run || job.run_attempt !== attempt || job.head_sha !== producerRun.head_sha
+      || job.status !== 'completed' || job.conclusion !== 'success') {
+    fail('NATIVE_SDK_PRODUCER_GATE_NOT_PASSED', `attempt=${attempt} jobs=${JSON.stringify(jobs.map(item => [item.name, item.run_attempt, item.conclusion]))}`);
+  }
+  const created = Date.parse(artifact.created_at);
+  if (!(Date.parse(job.started_at) <= created && created <= Date.parse(job.completed_at))) {
+    fail('NATIVE_SDK_ARTIFACT_ATTEMPT_MISMATCH', `artifact=${artifact.id} created=${artifact.created_at} job=${job.id} attempt=${attempt} window=${job.started_at}..${job.completed_at}`);
+  }
+  const compare = await (await api(`/repos/${repository}/compare/${producerRun.head_sha}...${accepted}`)).json();
+  if (!['identical', 'ahead'].includes(compare.status)) {
+    fail('NATIVE_SDK_PRODUCER_HEAD_NOT_ANCESTOR', `producer=${producerRun.head_sha} accepted=${accepted} status=${compare.status}`);
+  }
+  return {run: Number(run), attempt, commit: producerRun.head_sha, workflow: producerRun.path, event: producerRun.event,
+    job: {id: job.id, name: job.name, attempt: job.run_attempt, url: job.html_url, conclusion: job.conclusion,
+      started_at: job.started_at, completed_at: job.completed_at}};
+}
+
+// Candidate acceptance consumes the exact selected artifact ID (never a name
+// lookup) after the same producer binding the publisher applies, and reports the
+// digest of the bytes it unpacked; publication must then match that digest.
+export async function receiveCandidate(target, dest, env = process.env) {
+  getTarget(target);
+  const repository = env.GITHUB_REPOSITORY;
+  const artifactId = env.CANDIDATE_ARTIFACT || '';
+  const run = env.CANDIDATE_RUN || '';
+  const version = env.CANDIDATE_VERSION || '';
+  if (!ID.test(artifactId) || !ID.test(run) || !VERSION.test(version) || !/^[a-f0-9]{40}$/.test(env.GITHUB_SHA || '')) {
+    fail('NATIVE_SDK_CANDIDATE_INPUT_INCOMPLETE', 'selected artifact, run, version and GITHUB_SHA are required');
+  }
+  if (fs.existsSync(dest) && fs.readdirSync(dest).length) fail('NATIVE_SDK_CANDIDATE_DEST_NOT_EMPTY', dest);
+  const artifact = await exactArtifact(repository, artifactId, artifactName(target, version), run);
+  const producer = await producerBinding(repository, run, target, artifact, env.GITHUB_SHA);
+  const zip = await artifactZip(repository, artifact);
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'native-sdk-candidate-'));
+  try {
+    const zipFile = path.join(scratch, 'artifact.zip');
+    fs.writeFileSync(zipFile, zip);
+    fs.mkdirSync(dest, {recursive: true});
+    if (spawnSync('unzip', ['-q', zipFile, '-d', dest]).status !== 0) fail('NATIVE_SDK_ARTIFACT_ZIP_INVALID');
+  } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
+  console.error(`NATIVE_SDK_CANDIDATE_RECEIVED artifact=${artifactId} digest=${artifact.digest} run=${run} attempt=${producer.attempt} job=${producer.job.id}`);
+  return {digest: artifact.digest};
+}
+
 function zipList(file) {
   const result = spawnSync('unzip', ['-Z1', file], {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
   if (result.status !== 0) fail('NATIVE_SDK_ARTIFACT_ZIP_INVALID');
@@ -69,6 +157,7 @@ function zipMember(file, member) {
 }
 
 async function upload(release, name, bytes, contentType) {
+  if (bytes.length > MAX_ASSET_BYTES) fail('NATIVE_SDK_ASSET_TOO_LARGE', `${name} size=${bytes.length} limit=${MAX_ASSET_BYTES}`);
   const response = await fetch(`${release.upload_url.split('{')[0]}?name=${encodeURIComponent(name)}`, {method: 'POST',
     headers: {Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, 'Content-Type': contentType}, body: bytes});
   if (!response.ok) fail('NATIVE_SDK_UPLOAD_FAILED', `${response.status} ${name}`);
@@ -84,7 +173,8 @@ export async function publish(target, outdir, env = process.env) {
   const artifactId = env.NATIVE_SDK_ARTIFACT_ID || '';
   const run = env.NATIVE_SDK_RUN_ID || '';
   const version = env.NATIVE_SDK_VERSION || '';
-  if (repository !== 'cjcj-dev/cjcj' || !ID.test(artifactId) || !ID.test(run) || !VERSION.test(version)
+  const accepted = env.NATIVE_SDK_ACCEPTED_DIGEST || '';
+  if (repository !== 'cjcj-dev/cjcj' || !ID.test(artifactId) || !ID.test(run) || !VERSION.test(version) || !DIGEST.test(accepted)
       || !ID.test(env.GITHUB_RUN_ID || '') || !ID.test(env.GITHUB_RUN_ATTEMPT || '') || !/^[a-f0-9]{40}$/.test(env.GITHUB_SHA || '')) {
     fail('NATIVE_SDK_PERSIST_INPUT_INVALID');
   }
@@ -92,38 +182,26 @@ export async function publish(target, outdir, env = process.env) {
   const name = artifactName(target, version);
   const provenance = {version: 1, kind: 'cjcj-full-native-sdk', target, sdk_version: version,
     acceptance: {repository, run: Number(env.GITHUB_RUN_ID), attempt: Number(env.GITHUB_RUN_ATTEMPT), commit: env.GITHUB_SHA,
-      job: env.ACCEPTANCE_JOB || 'package-tests', workflow: env.GITHUB_WORKFLOW_REF || ''}};
+      job: env.ACCEPTANCE_JOB || 'package-tests', workflow: env.GITHUB_WORKFLOW_REF || '', digest: accepted}};
   const record = () => fs.writeFileSync(path.join(outdir, 'provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`);
   record();
 
-  // 1. The accepted bytes: exact artifact ID, name, producer run, not expired.
-  const artifact = await (await api(`/repos/${repository}/actions/artifacts/${artifactId}`)).json();
-  if (artifact.name !== name || String(artifact.workflow_run?.id) !== run || artifact.expired) {
-    fail('NATIVE_SDK_ARTIFACT_IDENTITY_MISMATCH', `artifact=${artifactId} name=${artifact.name} run=${artifact.workflow_run?.id} expired=${artifact.expired}`);
-  }
-  const producerRun = await (await api(`/repos/${repository}/actions/runs/${run}`)).json();
-  if (producerRun.head_sha !== artifact.workflow_run.head_sha || !/^[a-f0-9]{40}$/.test(producerRun.head_sha || '')) {
-    fail('NATIVE_SDK_PRODUCER_PROVENANCE_MISMATCH');
-  }
-  // 2. The producer gate: the target's srcbuild job (package-install, source-tool
-  // install, verify) must have succeeded; artifact existence alone is not enough.
-  const jobs = (await pages(`/repos/${repository}/actions/runs/${run}/jobs?filter=latest`, 'jobs'))
-    .filter(job => job.name === `${target} / srcbuild` || job.name.endsWith(` / ${target} / srcbuild`));
-  if (jobs.length !== 1 || jobs[0].conclusion !== 'success') {
-    fail('NATIVE_SDK_PRODUCER_GATE_NOT_PASSED', `jobs=${JSON.stringify(jobs.map(job => [job.name, job.conclusion]))}`);
-  }
-  provenance.producer = {run: Number(run), attempt: producerRun.run_attempt, commit: producerRun.head_sha,
-    workflow: producerRun.path || '', job: {id: jobs[0].id, name: jobs[0].name, url: jobs[0].html_url, conclusion: jobs[0].conclusion},
-    artifact: {id: Number(artifactId), name, digest: artifact.digest || '', size: artifact.size_in_bytes,
-      created_at: artifact.created_at, expires_at: artifact.expires_at}};
+  // 1. The accepted bytes: the exact artifact ID package-tests downloaded, with
+  // the digest it recorded; nothing is re-resolved by name.
+  const artifact = await exactArtifact(repository, artifactId, name, run);
+  if (artifact.digest !== accepted) fail('NATIVE_SDK_ACCEPTED_DIGEST_MISMATCH', `artifact=${artifactId} recorded=${artifact.digest} accepted=${accepted}`);
+  // 2. The producer gate: allowed workflow, exact attempt, successful srcbuild
+  // job execution that created this artifact; artifact existence is not enough.
+  const producer = await producerBinding(repository, run, target, artifact, env.GITHUB_SHA);
+  provenance.producer = {...producer, artifact: {id: Number(artifactId), name, digest: artifact.digest, size: artifact.size_in_bytes,
+    created_at: artifact.created_at, expires_at: artifact.expires_at}};
   record();
 
   // 3. Download the original artifact ZIP and require the packaged SDK inside it.
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'native-sdk-persist-'));
   try {
-    const zip = Buffer.from(await (await api(`/repos/${repository}/actions/artifacts/${artifactId}/zip`)).arrayBuffer());
+    const zip = await artifactZip(repository, artifact);
     const sha256 = digest(zip);
-    if (artifact.digest && artifact.digest !== `sha256:${sha256}`) fail('NATIVE_SDK_ARTIFACT_DIGEST_MISMATCH');
     const zipFile = path.join(scratch, 'artifact.zip');
     fs.writeFileSync(zipFile, zip);
     const members = zipList(zipFile);
@@ -144,8 +222,8 @@ export async function publish(target, outdir, env = process.env) {
       fail('NATIVE_SDK_TAG_EXISTS', tag);
     }
     const release = await (await api(`/repos/${repository}/releases`, {method: 'POST', body: JSON.stringify({
-      tag_name: tag, target_commitish: producerRun.head_sha, name: tag, draft: true, prerelease: true, make_latest: 'false',
-      body: `Temporary full native SDK prerelease for ${target} ${version}. Producer run ${run} job ${jobs[0].id}; `
+      tag_name: tag, target_commitish: producer.commit, name: tag, draft: true, prerelease: true, make_latest: 'false',
+      body: `Temporary full native SDK prerelease for ${target} ${version}. Producer run ${run} attempt ${producer.attempt} job ${producer.job.id}; `
         + `accepted by run ${env.GITHUB_RUN_ID} attempt ${env.GITHUB_RUN_ATTEMPT} (${provenance.acceptance.job}). `
         + 'Current only while ci/bootstrap_artifacts_pin.json names it as the native_sdk entry for this target.'})})).json();
     provenance.release = {id: release.id, tag, assets: []};
@@ -162,6 +240,7 @@ export async function publish(target, outdir, env = process.env) {
     }
     record();
     const sdkAsset = provenance.release.assets[0];
+    if (`sha256:${sdkAsset.sha256}` !== accepted) fail('NATIVE_SDK_PUBLISHED_DIGEST_MISMATCH', `asset=${sdkAsset.id} accepted=${accepted}`);
     const entry = {repository, asset: sdkAsset.id, release_sha256: sdkAsset.sha256, prerelease: true, tag,
       native_sdk: {target, version, producer_run: Number(run), acceptance_run: Number(env.GITHUB_RUN_ID)}};
     provenance.release.assets.push(await upload(release, `${name}.provenance.json`,
@@ -226,10 +305,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const selected = await select(target);
       for (const [key, value] of Object.entries(selected)) process.stdout.write(`${key}=${value}\n`);
       console.error(`NATIVE_SDK_SELECTED mode=${selected.mode} artifact=${selected.artifact} version=${selected.version}`);
+    } else if (command === 'receive-candidate' && target && outdir && !extra.length) {
+      const received = await receiveCandidate(target, outdir);
+      process.stdout.write(`digest=${received.digest}\n`);
     } else if (command === 'publish' && target && outdir && !extra.length) {
       await publish(target, outdir);
     } else {
-      throw new Error('usage: persist_native_sdk.mjs select TARGET | publish TARGET OUTDIR');
+      throw new Error('usage: persist_native_sdk.mjs select TARGET | receive-candidate TARGET DEST | publish TARGET OUTDIR');
     }
   } catch (error) { console.error(error.stack || String(error)); process.exitCode = 1; }
 }
