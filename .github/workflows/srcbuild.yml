@@ -265,8 +265,6 @@ jobs:
     env:
       CJCJ_SRCBUILD_TARGET: ${{ inputs.targets }}
       CJCJ_NATIVE_INPUT_STAGE: ${{ inputs.native_input_stage }}
-      CJCJ_NATIVE_CJDB_INSTALL: ${{ runner.temp }}/native-preparation/native/install
-      CJCJ_NATIVE_RUNTIME_INSTALL: ${{ runner.temp }}/native-runtime-install
     steps:
       - uses: actions/checkout@v7
         with:
@@ -282,6 +280,8 @@ jobs:
           ulimit -H -c 0
           test "$CJCJ_SRCBUILD_TARGET" = linux-x64
           case "$CJCJ_NATIVE_INPUT_STAGE" in all|development-dependencies) ;; *) exit 1;; esac
+          printf 'CJCJ_NATIVE_CJDB_INSTALL=%s/native-preparation/native/install\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'CJCJ_NATIVE_RUNTIME_INSTALL=%s/native-runtime-install\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           if test -n "$CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT$CJCJ_NATIVE_BUILD_INPUTS_RUN_ID"; then
             test -n "$CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT"
             test -n "$CJCJ_NATIVE_BUILD_INPUTS_RUN_ID"
