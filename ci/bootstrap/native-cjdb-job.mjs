@@ -31,6 +31,7 @@ export async function prepareNativeCjdbJob({input,work,env=process.env}) {
     ||Object.keys(selected).some(key=>key.endsWith('Archive')&&key!=='xml2Archive'))
     throw Error('NATIVE_INPUT_ONLY_SOURCE_ARCHIVE_FORBIDDEN');
   const pair=nativePair(env,{requireHost:true}),pins=readSourcePins();
+  if(!pair)throw Error('NATIVE_INPUT_ONLY_PAIR_REQUIRED');
   const {selection}=nativeSourceSelection(env,pair);
   const sources={compiler:selection.ast,llvm:selection.llvm,runtime:selection.runtime,
     bounds:{repository:pins.source.BOUNDS_SRC_URL,commit:pins.source.BOUNDS_REF},
@@ -75,7 +76,9 @@ export async function packageNativeInputs({input,work,env=process.env}) {
   const locations=await readJson(path.join(input,'locations.json'));
   if(locations.platform!=='linux_x86_64'||locations.host)throw Error('NATIVE_INPUT_ONLY_LOCATIONS');
   const install=await privateRoot(env.CJCJ_NATIVE_CJDB_INSTALL),facts=await readJson(path.join(install,'BUILD-INPUTS.json'));
-  const pair=nativePair(env,{requireHost:true}),{selection}=nativeSourceSelection(env,pair);
+  const pair=nativePair(env,{requireHost:true});
+  if(!pair)throw Error('NATIVE_INPUT_ONLY_PAIR_REQUIRED');
+  const {selection}=nativeSourceSelection(env,pair);
   if(facts.platform!==locations.platform||facts.commits?.llvm!==pair.llvm||facts.commits?.runtime!==pair.runtime
     ||facts.commits?.compiler!==selection.ast.commit)throw Error('NATIVE_INPUT_ONLY_INSTALL_PAIR');
   await readInstalledNativeShim({install,facts});

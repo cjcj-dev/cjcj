@@ -288,7 +288,10 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ env.CJCJ_NATIVE_RUNTIME_INSTALL }}
       - name: Prepare the normal Unix CMake tools
-        run: npx --yes zx@8 build/cli.mjs --target linux-x64 install-system-deps
+        run: |
+          ulimit -S -c 0
+          ulimit -H -c 0
+          npx --yes zx@8 build/cli.mjs --target linux-x64 install-system-deps
       - uses: ./.github/actions/sccache
         with:
           component: native-cjdb
@@ -303,7 +306,10 @@ jobs:
           node ci/bootstrap/native-cjdb-job.mjs prepare-inputs "$RUNNER_TEMP/native-dependencies" "$RUNNER_TEMP/native-preparation"
           node ci/bootstrap/native-cjdb-job.mjs build "$RUNNER_TEMP/native-preparation/prepared" "$RUNNER_TEMP/native-preparation/native"
       - name: Package complete native inputs using the existing installations and location map
-        run: node ci/bootstrap/native-cjdb-job.mjs package-inputs "$RUNNER_TEMP/native-dependencies" "$RUNNER_TEMP/native-preparation"
+        run: |
+          ulimit -S -c 0
+          ulimit -H -c 0
+          node ci/bootstrap/native-cjdb-job.mjs package-inputs "$RUNNER_TEMP/native-dependencies" "$RUNNER_TEMP/native-preparation"
       - uses: actions/upload-artifact@v7
         with:
           name: native-inputs-linux-x64

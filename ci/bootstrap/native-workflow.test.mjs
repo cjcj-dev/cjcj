@@ -150,6 +150,9 @@ test('native input only preparation is opt-in and refuses source archives at its
  console.log('NATIVE_INPUT_ONLY_SOURCE_ARCHIVE_ASSERTION_REACHED');
  assert.equal(archived.status,1);assert.match(archived.stderr,/NATIVE_INPUT_ONLY_SOURCE_ARCHIVE_FORBIDDEN/);
  assert.equal(fs.existsSync(path.join(work,'sources')),false,'source preparation must not start with archived project inputs');
+ fs.writeFileSync(path.join(input,'native-cjdb.json'),JSON.stringify({platform:'linux_x86_64'}));
+ const unpaired=invoke({GITHUB_ACTIONS:'true',CJCJ_SOURCE_SELECTION:'{}',CJCJ_NATIVE_LLVM_REF:'',CJCJ_NATIVE_RUNTIME_REF:''});
+ assert.equal(unpaired.status,1);assert.match(unpaired.stderr,/NATIVE_INPUT_ONLY_PAIR_REQUIRED/);
 });
 
 test('formal native host entry unpacks installed payload modes before its ordinary host validation',t=>{

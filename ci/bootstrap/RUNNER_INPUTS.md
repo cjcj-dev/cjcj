@@ -114,7 +114,7 @@ node --test ci/release/bootstrap_entries.test.mjs \
 
 The source workflow requires `native_inputs_artifact` and its original
 `native_inputs_run_id`. The artifact contains complete N/R/AST native install
-roots and the two paired tools modules exported with
+roots and the existing Linux H1 producer exported with
 `node ci/bootstrap/deploy-native-tools.mjs TOOLS_REPO COMMIT EMPTY_DESTINATION`.
 Its `locations.json` records `platform`, `installations` (each has relative
 `install`, original `buildResult`, and `configuration`) and
@@ -125,6 +125,28 @@ and writes `CJCJ_SDK_INPUTS` into GITHUB_ENV. The artifact must contain genuine
 native outputs; a source workflow cannot create this input by naming empty paths.
 The eight bootstrap phases then use `sdk-targets.mjs`; native production and full
 SDK qualification remain distinct from configuration-only checks.
+
+`srcbuild.yml` also has an opt-in `native_inputs_only: true` mode for
+`targets: linux-x64`. It runs the existing native-cjdb producer and uploads
+`native-inputs-linux-x64`; it does not start SDK phases. Before dispatch it needs
+the real `native_build_inputs_artifact`/`native_build_inputs_run_id` for installed
+development dependencies plus deployed H1/HLE inputs, the accepted runtime
+artifact/run, and the exact native pair/host version. The dependency artifact
+contains `native-cjdb.json`, `locations.json`, original Python source/build facts,
+the Python development installation, libedit, libxml2 distribution archive,
+exported private tools, HLE entities and native-tool source facts. It contains no
+project checkout, Git directory, `native-build-inputs.tar` or compiler source
+archive. Official jobs fetch the fixed source commits themselves. The original
+default source workflow still requires complete native inputs.
+
+The output uses the existing `locations.json` and a `native-inputs.tar` containing
+installed/deployed entities under `.native-inputs/`, retaining executable modes.
+The host and SDK configuration entries unpack this optional installation payload
+before their normal readers run. Original N/R/Python facts remain unchanged;
+JSON tool source is fetched from its fixed source facts by each official job.
+For an already produced native installation, `native-cjdb-job.mjs package INSTALL
+WORK` uses the same packaging implementation as `build`, and the existing
+`unpack` entry consumes its `native-install.tar` without another native build.
 
 The same native artifact also carries the independently produced HLE dependency
 package. Extract it under an artifact-owned directory and record
