@@ -75,6 +75,6 @@ const r=spawnSync('cc',process.argv.slice(2),{stdio:'inherit'});process.exit(r.s
  assert.equal(failed.status,17,failed.stdout+failed.stderr);assert.match(failed.stdout,/H1_CJPM_PRODUCER_REACHED/);
  assert.equal(fs.readFileSync(source+'/cjpm.toml','utf8'),before,'H1_SOURCE_MUST_RESTORE_AFTER_FAILURE');
  assert.equal(fs.readFileSync(source+'/cjpm.lock','utf8'),lockBefore,'H1_LOCK_MUST_RESTORE_AFTER_FAILURE');
- assert.equal(JSON.parse(fs.readFileSync(root+'/failed.commands.json'))[1].rc,17);
+ assert.equal(JSON.parse(fs.readFileSync(root+'/failed.commands.json'))[2].rc,17);
  console.log('H1_PUBLIC_CJPM_CONTRACT_AND_RESTORATION_REACHED');
 });
