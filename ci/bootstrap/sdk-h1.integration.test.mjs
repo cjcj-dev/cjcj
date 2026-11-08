@@ -34,12 +34,20 @@ fs.writeFileSync(path.join(release,'bin/cjc@cjcj'),'finite product, not a compil
 fs.writeFileSync(path.join(release,'contract.json'),JSON.stringify({env:e,argv:process.argv.slice(2),manifest:fs.readFileSync('cjpm.toml','utf8'),shim:fs.readFileSync('runtime_shim/cjselfhost_llvmshim.o','utf8'),configurationObject:fs.statSync('runtime_shim/cjc_runtime_config.o').size}));
 `);
  fs.chmodSync(host+'/tools/bin/cjpm',0o755);
+ write(root+'/native-cc',`#!/usr/bin/env node
+const {spawnSync}=require('node:child_process');
+if(process.env.LD_LIBRARY_PATH||process.env.LD_PRELOAD||process.env.LD_AUDIT)throw Error('H1_NATIVE_CC_LOADER_DOMAIN');
+console.log('H1_NATIVE_CC_DOMAIN_REACHED');
+const r=spawnSync('cc',process.argv.slice(2),{stdio:'inherit'});process.exit(r.status??1);
+`);
+ fs.chmodSync(root+'/native-cc',0o755);
  const object='third_party/llvm/fixed-llc/cjselfhost_llvmshim.o',bytes='finite selected N shim';write(sdk+'/'+object,bytes);
  const hash=text=>createHash('sha256').update(text).digest('hex');
  const nativeShim={source:{commit:sourceCommit},compiler:{commit:'a'.repeat(40)},llvm:{commit:'b'.repeat(40)},object:{path:object,bytes:Buffer.byteLength(bytes),sha256:hash(bytes)}};
  write(sdk+'/BUILD-INPUTS.json',JSON.stringify({commits:{shim:sourceCommit,compiler:'a'.repeat(40),llvm:'b'.repeat(40)},nativeShim}));
- const argv=output=>[process.execPath,stage,'--kind','h1','--source',source,'--commit',sourceCommit,'--sdk',sdk,'--runtime',root+'/runtime','--host',host,'--output',output,'--platform','linux_x86_64','--jobs','1','--heap','1GB'];
+ const argv=output=>[process.execPath,stage,'--kind','h1','--source',source,'--commit',sourceCommit,'--sdk',sdk,'--runtime',root+'/runtime','--host',host,'--output',output,'--platform','linux_x86_64','--jobs','1','--heap','1GB','--cc',root+'/native-cc'];
  const output=root+'/output',r=run('h1',argv(output));assert.equal(r.status,0,r.stdout+r.stderr);
+ assert.match(r.stdout,/H1_NATIVE_CC_DOMAIN_REACHED/);
  const contract=JSON.parse(fs.readFileSync(output+'.h1/out/release/contract.json'));
  assert.equal(contract.env.CANGJIE_HOME,host,'H1_MUST_EXECUTE_IN_HOST_DOMAIN');
  assert.ok(contract.env.PATH.startsWith(host+'/bin:'+host+'/tools/bin:'+host+'/third_party/llvm/bin:'));
