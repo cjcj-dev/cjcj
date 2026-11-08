@@ -58,7 +58,7 @@ NODE
  assert.equal(fs.existsSync(output+'/bin/release'),false);assert.equal(fs.readFileSync(source+'/cjpm.toml','utf8'),before);
  const commands=JSON.parse(fs.readFileSync(output+'.commands.json'));assert.equal(commands.length,1);assert.equal(commands[0].rc,0);
  assert.deepEqual(commands[0].argv,['bash',privateTools+'/ts/src/sharedbuild/cjcj-stage1.sh']);
- const facts=JSON.parse(fs.readFileSync(output+'/bin/build-inputs.json'));assert.equal(facts.source,sourceCommit);assert.equal(facts.native,sdk);assert.equal(facts.host,host);assert.deepEqual(facts.nativeShim,nativeShim);assert.equal(facts.sha256,hash('finite product, not a compiler'));
+ const facts=JSON.parse(fs.readFileSync(output+'/bin/build-inputs.json'));assert.equal(facts.source,sourceCommit);assert.equal(facts.sourceRoot,source);assert.equal(facts.native,sdk);assert.equal(facts.host,host);assert.deepEqual(facts.nativeShim,nativeShim);assert.equal(facts.sha256,hash('finite product, not a compiler'));
  assert.equal(facts.sourceChanges['cjpm.toml'].beforeSha256,hash(before));
  const failed=run('h1-failed',argv(root+'/failed'),{...process.env,H1_FIXTURE_FAIL:'1'});
  assert.equal(failed.status,17,failed.stdout+failed.stderr);assert.match(failed.stdout,/H1_SHELL_PRODUCER_REACHED/);

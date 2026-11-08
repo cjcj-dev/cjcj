@@ -138,7 +138,7 @@ export async function nativeStage(options, {signal} = {}) {
     const product=path.join(bin,'cjcj-stage1');
     await fs.copyFile(path.join(productRoot,'cjcj-stage1'),product);
     const {sha256}=await import('./sdk-io.mjs');
-    await atomicJson(path.join(bin,'build-inputs.json'),{source:commit,host,native:sdk,nativeShim:shim,
+    await atomicJson(path.join(bin,'build-inputs.json'),{source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,
       sourceChanges:{'cjpm.toml':{beforeSha256:sha256(before),buildSha256:sha256(compiled)}},sha256:await fileDigest(product)});
   } else if(kind==='compiler') {
     const target=await privateRoot(options['target-dir']||path.join(source,'target'));

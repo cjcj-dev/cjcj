@@ -216,7 +216,8 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       ||!facts.sourceChanges||facts.sha256!==await fileDigest(product)
       ||path.resolve(reused.buildInputs)!==path.join(path.dirname(product),'build-inputs.json')
       ||!Array.isArray(commands)||commands.length!==1||commands[0].rc!==0||commands[0].signal
-      ||commands[0].cwd!==rows.h1.repository
+      ||!path.isAbsolute(facts.sourceRoot||'')||commands[0].cwd!==facts.sourceRoot
+      ||!isDeepStrictEqual(facts.nativeShim,await readInstalledNativeShim({install:rows.llvm.install}))
       ||commands[0].argv?.[0]!=='bash'
       ||commands[0].argv?.[1]!==path.join(path.resolve(tools.privateRoot),'ts/src/sharedbuild/cjcj-stage1.sh'))
       throw new Error('H1_REUSE_PRODUCER_MISMATCH');
