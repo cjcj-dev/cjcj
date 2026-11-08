@@ -10,6 +10,24 @@ import {nativeSourceSelection} from './native-source-selection.mjs';
 import {hostPlatform} from '../host-toolchain-pin.mjs';
 import {materializeNativeSource} from './sdk-source.mjs';
 
+// Package an installation produced by the normal native target, including its
+// original Python input. This also serves producers that build on kkk2 first.
+export async function packageNativeCjdb({install,work,env=process.env,records=[]}) {
+  install=await privateRoot(install);work=await privateRoot(work);
+  const facts=await readJson(path.join(install,'BUILD-INPUTS.json'));
+  if(!facts.pythonInstallationInput) {
+    const record=facts.configuration?.pythonInputs?.record;
+    if(!record||!facts.pythonSource?.build?.originalInputs)throw Error('NATIVE_JOB_PYTHON_SOURCE_REQUIRED');
+    const destination=path.join(install,'share/cjcj/build-inputs/python-original.json');
+    await fs.mkdir(path.dirname(destination),{recursive:true});
+    await fs.copyFile(record,destination);
+  }
+  await fs.mkdir(work,{recursive:true});
+  const archive=path.join(work,'native-install.tar');
+  await command(['tar','-cf',archive,'-C',install,'.'],{env,records});
+  return {archive,install};
+}
+
 export async function buildNativeCjdbJob({input,work,env=process.env}) {
   input=await privateRoot(input);work=await privateRoot(work);
   const selected=await readJson(path.join(input,'native-cjdb.json'));
@@ -66,17 +84,7 @@ export async function buildNativeCjdbJob({input,work,env=process.env}) {
   const file=path.join(work,'native-cjdb.json');
   await atomicJson(file,config);
     await command([process.execPath,fileURLToPath(new URL('./native-cjdb.mjs',import.meta.url)),file],{env,records});
-    const facts=await readJson(path.join(config.install,'BUILD-INPUTS.json'));
-    if(!facts.pythonInstallationInput) {
-      const record=config.pythonInputs?.record;
-      if(!record||!facts.pythonSource?.build?.originalInputs)throw Error('NATIVE_JOB_PYTHON_SOURCE_REQUIRED');
-      const destination=path.join(config.install,'share/cjcj/build-inputs/python-original.json');
-      await fs.mkdir(path.dirname(destination),{recursive:true});
-      await fs.copyFile(record,destination);
-    }
-    const archive=path.join(work,'native-install.tar');
-    await command(['tar','-cf',archive,'-C',config.install,'.'],{env,records});
-    return {archive,install:config.install};
+    return await packageNativeCjdb({install:config.install,work,env,records});
   } finally {await atomicJson(path.join(work,'commands.json'),records);}
 }
 
@@ -110,7 +118,12 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
     const [mode,input,work]=process.argv.slice(2);
     if(mode==='materialize')await materializeNativeJob({artifact:input,input:work});
     else if(mode==='build')await buildNativeCjdbJob({input,work});
+    else if(mode==='package') {
+      const records=[];
+      try {await packageNativeCjdb({install:input,work,records});}
+      finally {await atomicJson(path.join(work,'commands.json'),records);}
+    }
     else if(mode==='unpack')await unpackNativeCjdb({archive:input,install:work});
-    else throw Error('usage: native-cjdb-job.mjs materialize ARTIFACT INPUT | build INPUT WORK | unpack ARCHIVE INSTALL');
+    else throw Error('usage: native-cjdb-job.mjs materialize ARTIFACT INPUT | build INPUT WORK | package INSTALL WORK | unpack ARCHIVE INSTALL');
   }catch(error){console.error(error.stack);process.exitCode=error.rc||1;}
 }

@@ -110,6 +110,28 @@ test('public installation unpack transports original facts and refuses an existi
  assert.equal(again.status,1);assert.match(again.stderr,/EEXIST/);
 });
 
+test('public native package carries the original Python input through the existing unpack and locations reader',async t=>{
+ const root=fixture(t),install=path.join(root,'install'),work=path.join(root,'package'),unpacked=path.join(root,'unpacked');
+ fs.mkdirSync(install);
+ const record=path.join(root,'python-original.json'),python='{"source":"finite transport fixture; not a native build"}\n';
+ fs.writeFileSync(record,python);
+ const facts={platform:'linux_x86_64',configuration:{pythonInputs:{record}},pythonSource:{build:{originalInputs:{sha256:'a'.repeat(64)}}}};
+ const bytes=JSON.stringify(facts);fs.writeFileSync(path.join(install,'BUILD-INPUTS.json'),bytes);
+ const entry=path.join(repo,'ci/bootstrap/native-cjdb-job.mjs');
+ const packed=spawnSync(process.execPath,[entry,'package',install,work],{encoding:'utf8'});assert.equal(packed.status,0,packed.stderr);
+ const received=spawnSync(process.execPath,[entry,'unpack',path.join(work,'native-install.tar'),unpacked],{encoding:'utf8'});
+ assert.equal(received.status,0,received.stderr);
+ assert.equal(fs.readFileSync(path.join(unpacked,'BUILD-INPUTS.json'),'utf8'),bytes,'packaging must preserve original producer facts');
+ const selected=await nativeInstallationLocations(root,{platform:'linux_x86_64'},{CJCJ_NATIVE_CJDB_INSTALL:unpacked});
+ assert.equal(selected.llvm.install,selected.ast.install);
+ console.log('NATIVE_PACKAGE_PYTHON_INPUT_CONSUMER_REACHED');
+ assert.equal(fs.readFileSync(selected.llvm.verification.python.record,'utf8'),python);
+ fs.writeFileSync(path.join(install,'BUILD-INPUTS.json'),JSON.stringify({...facts,pythonSource:{}}));
+ const rejected=spawnSync(process.execPath,[entry,'package',install,path.join(root,'invalid')],{encoding:'utf8'});
+ assert.equal(rejected.status,1);assert.match(rejected.stderr,/NATIVE_JOB_PYTHON_SOURCE_REQUIRED/);
+ assert.equal(fs.existsSync(path.join(root,'invalid/native-install.tar')),false);
+});
+
 test('formal Windows release package key needs an explicit pair and its native std contract',t=>{
  const root=fixture(t),wf=workflow('build-release-package.yml');
  const entry=wf.jobs.package.steps.find(s=>s.run?.includes('ci/release/package-key.mjs'));
