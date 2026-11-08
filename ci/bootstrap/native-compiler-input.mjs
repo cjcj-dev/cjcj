@@ -16,12 +16,24 @@ export async function prepareNativeCompilerSource({compiler,compilerArchive,boun
    flatbuffers:{root:await fs.realpath(flatbuffers),...(commits.flatbuffers?{commit:commits.flatbuffers}:{})}},
   ...(compilerArchive?{archive:{file:path.resolve(compilerArchive.file),sha256:compilerArchive.sha256}}:{})};
  const record=path.join(install,'BUILD-INPUTS.json');
- const previous=await readJson(record).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+ let previous=await readJson(record).catch(error=>{if(error.code==='ENOENT')return null;throw error;}),fromBuild=false;
+ if(!previous){
+  // A separate installation may reuse this configured build. Its original
+  // CMake prefix identifies the existing source selection; the new output
+  // directory alone must not cause a recopy over CMake's writable sources.
+  const cache=await fs.readFile(path.join(build,'CMakeCache.txt'),'utf8').catch(error=>{if(error.code==='ENOENT')return '';throw error;});
+  const prefix=cache.match(/^CMAKE_INSTALL_PREFIX:PATH=(.+)\r?$/m)?.[1].trim();
+  if(prefix&&path.isAbsolute(prefix)){
+   previous=await readJson(path.join(prefix,'BUILD-INPUTS.json')).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+   fromBuild=!!previous;
+  }
+ }
  if(previous){
   // A different explicit input needs a different build directory. This is the
   // original selection, not a digest/stamp granting validity to working bytes.
   if(!isDeepStrictEqual(previous.compilerSource,source))throw Error('NATIVE_COMPILER_SOURCE_SELECTION_CHANGED use a new build/install directory');
   await fs.access(path.join(working,'CMakeLists.txt'));
+  if(fromBuild)await atomicJson(record,{compilerSource:source});
   return {compiler:working,source};
  }
  await verifyNativeSource({source:original,commit,output:build,

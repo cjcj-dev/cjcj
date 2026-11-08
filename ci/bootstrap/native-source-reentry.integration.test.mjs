@@ -30,6 +30,14 @@ test('complete official configure and ExternalProject recover without recopy or 
  assert.equal(records.length,before,'resume does not replay source commands');
  assert.equal((await fs.stat(bounds)).ino,boundsStat.ino);
  await run([...configure,'-DCANGJIE_ENABLE_COMPILER_TSAN=OFF']);
+ const next={...selected,install:path.join(work,'next-install')};
+ await assert.rejects(prepareNativeCompilerSource({...next,commit:'0'.repeat(40)},run),/NATIVE_COMPILER_SOURCE_SELECTION_CHANGED/);
+ const nextCommands=records.length;
+ assert.deepEqual(await prepareNativeCompilerSource(next,run),prepared);
+ assert.equal(records.length,nextCommands,'new installation reuses the configured compiler source');
+ assert.equal((await fs.stat(bounds)).ino,boundsStat.ino);
+ assert.deepEqual(JSON.parse(await fs.readFile(path.join(next.install,'BUILD-INPUTS.json'),'utf8')),{compilerSource:prepared.source});
+ console.log('OFFICIAL_NEW_INSTALL_SOURCE_RECOVERY_ASSERT_REACHED');
  const bin=path.join(work,'compiler-wrapper');await fs.mkdir(bin);
  const wrapper='#!'+process.execPath+'\nimport {spawnSync} from "node:child_process";\nif(process.env.FAIL_DEPENDENCY_CONFIGURE==="1"&&process.argv.some(arg=>arg.endsWith("/src/idl_gen_cangjie.cpp")))process.exit(42);\nconst r=spawnSync("/usr/lib/llvm-15/bin/clang",process.argv.slice(2),{stdio:"inherit"});process.exit(r.status??1);\n';
  await fs.writeFile(path.join(bin,'clang'),wrapper,{mode:0o755});
