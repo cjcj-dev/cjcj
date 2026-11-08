@@ -24,6 +24,7 @@ test('public Linux H1 uses normal cjpm, host domain and restores temporary sourc
  const before='[package]\ncompile-option = "-O0"\n';write(source+'/cjpm.toml',before);
  const lockBefore='version = 0\n\n[requires]\n';write(source+'/cjpm.lock',lockBefore);
  write(source+'/runtime_shim/cjc_runtime_config.c','const char* commit=CJCJ_COMMIT;\n');
+ write(source+'/runtime_shim/cjc_heap_defaults.c','const int heap_defaults=4;\n');
  const sourceCommit=commit(source,'source');
  write(host+'/tools/bin/cjpm',`#!/usr/bin/env node
 const fs=require('fs'),path=require('path'),e=process.env;
@@ -33,7 +34,7 @@ fs.writeFileSync('cjpm.lock','version = 1\\n\\n[requires]\\n');
 if(e.H1_FIXTURE_FAIL==='1')process.exit(17);
 fs.mkdirSync(path.join(release,'bin'),{recursive:true});
 fs.writeFileSync(path.join(release,'bin/cjc@cjcj'),'finite product, not a compiler');
-fs.writeFileSync(path.join(release,'contract.json'),JSON.stringify({env:e,argv:process.argv.slice(2),manifest:fs.readFileSync('cjpm.toml','utf8'),shim:fs.readFileSync('runtime_shim/cjselfhost_llvmshim.o','utf8'),configurationObject:fs.statSync('runtime_shim/cjc_runtime_config.o').size}));
+fs.writeFileSync(path.join(release,'contract.json'),JSON.stringify({env:e,argv:process.argv.slice(2),manifest:fs.readFileSync('cjpm.toml','utf8'),shim:fs.readFileSync('runtime_shim/cjselfhost_llvmshim.o','utf8'),configurationObject:fs.statSync('runtime_shim/cjc_runtime_config.o').size,heapDefaultsObject:fs.statSync('runtime_shim/cjc_heap_defaults.o').size}));
 `);
  fs.chmodSync(host+'/tools/bin/cjpm',0o755);
  write(root+'/native-cc',`#!/usr/bin/env node
@@ -58,15 +59,16 @@ const r=spawnSync('cc',process.argv.slice(2),{stdio:'inherit'});process.exit(r.s
  assert.equal(contract.env.SB_SOURCE,undefined);assert.deepEqual(contract.argv,['build','-j1']);
  console.log('H1_O1_TRIMPATH_ASSERTION_REACHED');
  assert.equal(contract.manifest,'[package]\ncompile-option = '+JSON.stringify('-O1 --trimpath '+source)+'\n','H1_O1_TRIMPATH_REQUIRED');
- assert.ok(contract.configurationObject>0);assert.equal(contract.shim,bytes,'H1_MUST_CONSUME_SELECTED_NATIVE_SHIM');
+ assert.ok(contract.configurationObject>0);assert.ok(contract.heapDefaultsObject>0);assert.equal(contract.shim,bytes,'H1_MUST_CONSUME_SELECTED_NATIVE_SHIM');
  assert.deepEqual(JSON.parse(fs.readFileSync(output+'.h1/parameters.json')),{compile_flags:''});
  assert.equal(fs.readFileSync(output+'.h1/out/release/bin/cjc@cjcj','utf8'),'finite product, not a compiler');
  assert.equal(fs.readFileSync(output+'/bin/cjcj-stage1','utf8'),'finite product, not a compiler');
  assert.equal(fs.existsSync(output+'/bin/release'),false);assert.equal(fs.readFileSync(source+'/cjpm.toml','utf8'),before);
  assert.equal(fs.readFileSync(source+'/cjpm.lock','utf8'),lockBefore,'H1_LOCK_MUST_RESTORE_AFTER_SUCCESS');
- const commands=JSON.parse(fs.readFileSync(output+'.commands.json'));assert.equal(commands.length,2);assert.ok(commands.every(row=>row.rc===0));
+ const commands=JSON.parse(fs.readFileSync(output+'.commands.json'));assert.equal(commands.length,3);assert.ok(commands.every(row=>row.rc===0));
  assert.ok(commands[0].argv.includes('-DCJCJ_COMMIT=\"'+sourceCommit+'\"'));
- assert.deepEqual(commands[1].argv,[host+'/tools/bin/cjpm','build','-j1']);
+ assert.ok(commands[1].argv.includes(source+'/runtime_shim/cjc_heap_defaults.c'));
+ assert.deepEqual(commands[2].argv,[host+'/tools/bin/cjpm','build','-j1']);
  const facts=JSON.parse(fs.readFileSync(output+'/bin/build-inputs.json'));assert.equal(facts.source,sourceCommit);assert.equal(facts.sourceRoot,source);assert.equal(facts.native,sdk);assert.equal(facts.host,host);assert.deepEqual(facts.nativeShim,nativeShim);assert.equal(facts.sha256,hash('finite product, not a compiler'));
  assert.equal(facts.sourceChanges['cjpm.toml'].beforeSha256,hash(before));
  const failed=run('h1-failed',argv(root+'/failed'),{...process.env,H1_FIXTURE_FAIL:'1'});

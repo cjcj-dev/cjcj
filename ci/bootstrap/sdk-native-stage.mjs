@@ -147,6 +147,10 @@ export async function nativeStage(options, {signal} = {}) {
         // The system C compiler loads its own LLVM. H's LLVM loader is for
         // cjpm/cjc and must not be injected into this native tool process.
         {cwd:source,env:{...h1env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''},records});
+      await command([...(process.env.CMAKE_C_COMPILER_LAUNCHER?[process.env.CMAKE_C_COMPILER_LAUNCHER]:[]),options.cc||'cc',
+        '-std=c11','-O2','-fPIC','-c',path.join(source,'runtime_shim/cjc_heap_defaults.c'),
+        '-o',path.join(source,'runtime_shim/cjc_heap_defaults.o')],
+        {cwd:source,env:{...h1env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''},records});
       await command([path.join(host,'tools/bin/cjpm'),'build','-j'+jobs],{cwd:source,env:h1env,records});
       const built=await resolveProductBinary(path.join(source,'target/release/bin'),'h1');
       await fs.copyFile(built,path.join(productRoot,'cjcj-stage1'));

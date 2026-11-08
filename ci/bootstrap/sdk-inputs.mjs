@@ -259,12 +259,13 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       ||!facts.sourceChanges||facts.sha256!==await fileDigest(product)
       ||path.resolve(reused.buildInputs)!==path.join(path.dirname(product),'build-inputs.json')
       ||facts.producer!=='sdk-native-stage:h1'
-      ||!Array.isArray(commands)||commands.length!==2||commands.some(row=>row.rc!==0||row.signal||row.cwd!==facts.sourceRoot)
+      ||!Array.isArray(commands)||commands.length!==3||commands.some(row=>row.rc!==0||row.signal||row.cwd!==facts.sourceRoot)
       ||!path.isAbsolute(facts.sourceRoot||'')
       ||!isDeepStrictEqual(facts.nativeShim,await readInstalledNativeShim({install:rows.llvm.install}))
       ||!commands[0].argv?.includes(path.join(facts.sourceRoot,'runtime_shim/cjc_runtime_config.c'))
       ||!commands[0].argv?.includes('-DCJCJ_COMMIT="'+h1Commit+'"')
-      ||commands[1].argv?.[0]!==path.join(host.install,'tools/bin/cjpm')||commands[1].argv?.[1]!=='build')
+      ||!commands[1].argv?.includes(path.join(facts.sourceRoot,'runtime_shim/cjc_heap_defaults.c'))
+      ||commands[2].argv?.[0]!==path.join(host.install,'tools/bin/cjpm')||commands[2].argv?.[1]!=='build')
       throw new Error('H1_REUSE_PRODUCER_MISMATCH');
     rows.h1={...rows.h1,product,configuration:facts,buildResult:path.resolve(reused.buildResult)};
   }
