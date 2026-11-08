@@ -2,6 +2,7 @@
 // Native build.py/install integration; records actual installed files, not SDK qualification.
 import fs from 'node:fs';
 import {nativeSourceSelection} from '../bootstrap/native-source-selection.mjs';
+import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
@@ -199,7 +200,8 @@ export async function recordNativeRuntime({source, installRoot, actualRef, versi
     }
   }
   const sourceRepository=await runtimeSourceRepository(repository);
-  const configuration={buildType,version,hostVersion:env.CJCJ_NATIVE_HOST_VERSION||version,pairedLlvmCommit:selection.llvm.commit};
+  const hostVersion=env.CJCJ_NATIVE_HOST_VERSION||readHostToolchainPin(platform).replace(/^nightly-/,'');
+  const configuration={buildType,version,hostVersion,pairedLlvmCommit:selection.llvm.commit};
   const artifacts=[required[0],required[2]];
   const stamps=embeddedStamp(fs.readFileSync(path.join(installRoot,artifacts[0])),'CJRT-COMMIT');
   let runtimeInputs;

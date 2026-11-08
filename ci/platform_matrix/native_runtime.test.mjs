@@ -11,6 +11,7 @@ const llvm = 'db51a4c7ebb6903e9f997d3b35d52f3577810385';
 const platform = `${process.platform}_${{x64:'x86_64',arm64:'aarch64'}[process.arch]}`;
 const toolchain = path.resolve('ci/platform_matrix/native_runtime_toolchain.cmake');
 import {directSource} from '../fixtures/runtime-direct-inputs.mjs';
+import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
 const directHelper=new URL('../fixtures/runtime-direct-inputs.mjs',import.meta.url).href;
 // External native compilation is a command fixture here. The real product CLI,
 // checkout check, CMake toolchain script, installation and manifest path execute.
@@ -139,6 +140,7 @@ test('native runtime public entry builds then installs and records the actual pa
   console.log('CJTHREAD_INSTALLED_ARCHIVE_TARGET_REACHED');
   for(const name of ['thread','aio'])assert.equal(fs.readFileSync(path.join(install,'lib',platform+'_cjnative','libcangjie-'+name+'.a'),'utf8'),'installed CJThread '+name);
   const m=manifest(); assert.equal(m.runtime_sha,runtime);assert.equal(m.paired_llvm_sha,llvm);assert.equal(m.platform,platform);
+  assert.equal(m.configuration.hostVersion,readHostToolchainPin(platform).replace(/^nightly-/,''));
   for(const [relative,digest] of Object.entries(m.files))assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(install,relative))).digest('hex'),digest);
   const commands=fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).filter(x=>x.name==='python3'&&x.args[0]==='build.py');
   assert.deepEqual(commands.map(x=>x.args),m.commands.map(x=>x.slice(1)));
@@ -310,7 +312,7 @@ const result=await receiveNativeRuntime(i);console.log('DIRECT_RECEIVE_REACHED '
  let serial=0;
  const invoke=(changes={},expected=0,reason)=>{
    const input={root:install,source,sourceRoot:path.join(source,'runtime'),gateStatus:current,
-     sourceRepository:source,platform,llvmCommit:llvm,runtimeCommit:runtime,hostVersion:'1.3.0-fixture',work:path.join(root,'receive'),...changes};
+     sourceRepository:source,platform,llvmCommit:llvm,runtimeCommit:runtime,hostVersion:readHostToolchainPin(platform).replace(/^nightly-/,''),work:path.join(root,'receive'),...changes};
    const name=String(++serial),file=path.join(root,'receive-'+name+'.json');fs.writeFileSync(file,JSON.stringify(input));
    const r=spawnSync(process.execPath,[driver,file],{encoding:'utf8',env:{...env,FIXTURE_ELF:'1'}});
    fs.writeFileSync(path.join(root,'receive-'+name+'-result.json'),JSON.stringify({argv:[process.execPath,driver,file],rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr}));
