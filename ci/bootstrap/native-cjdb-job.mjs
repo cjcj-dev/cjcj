@@ -17,6 +17,7 @@ import {readInstalledNativeShim} from './native-shim-inputs.mjs';
 import {readInstalledNativeAst} from './installed-native-ast.mjs';
 import {prepareHostSdk} from '../release/bootstrap_host_sdk.mjs';
 import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
+import {unpackNativeInstallations} from './native-installation-locations.mjs';
 
 // Official preparation receives installed dependencies and their original
 // configuration. Project sources are fetched here, never transported in tar.
@@ -32,6 +33,7 @@ export async function prepareNativeCjdbJob({input,work,env=process.env}) {
     throw Error('NATIVE_INPUT_ONLY_SOURCE_ARCHIVE_FORBIDDEN');
   const pair=nativePair(env,{requireHost:true}),pins=readSourcePins();
   if(!pair)throw Error('NATIVE_INPUT_ONLY_PAIR_REQUIRED');
+  await unpackNativeInstallations(input);
   const {selection}=nativeSourceSelection(env,pair);
   const sources={compiler:selection.ast,llvm:selection.llvm,runtime:selection.runtime,
     bounds:{repository:pins.source.BOUNDS_SRC_URL,commit:pins.source.BOUNDS_REF},

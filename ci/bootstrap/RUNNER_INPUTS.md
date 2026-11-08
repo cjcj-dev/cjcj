@@ -136,7 +136,9 @@ contains `native-cjdb.json`, `locations.json`, original Python source/build fact
 the Python development installation, libedit, libxml2 distribution archive,
 exported private tools, HLE entities and native-tool source facts. It contains no
 project checkout, Git directory, `native-build-inputs.tar` or compiler source
-archive. Official jobs fetch the fixed source commits themselves. The original
+archive. Its installed dependency entities use the same optional
+`native-inputs.tar`/`.native-inputs/` transport below to retain executable modes
+through Actions artifacts. Official jobs fetch the fixed source commits themselves. The original
 default source workflow still requires complete native inputs.
 
 The output uses the existing `locations.json` and a `native-inputs.tar` containing

@@ -153,6 +153,14 @@ test('native input only preparation is opt-in and refuses source archives at its
  fs.writeFileSync(path.join(input,'native-cjdb.json'),JSON.stringify({platform:'linux_x86_64'}));
  const unpaired=invoke({GITHUB_ACTIONS:'true',CJCJ_SOURCE_SELECTION:'{}',CJCJ_NATIVE_LLVM_REF:'',CJCJ_NATIVE_RUNTIME_REF:''});
  assert.equal(unpaired.status,1);assert.match(unpaired.stderr,/NATIVE_INPUT_ONLY_PAIR_REQUIRED/);
+ const payload=path.join(root,'payload');fs.mkdirSync(path.join(payload,'.native-inputs'),{recursive:true});
+ const tool=path.join(payload,'.native-inputs','dependency-tool');fs.writeFileSync(tool,'installed dependency fixture\n');fs.chmodSync(tool,0o755);
+ const tar=spawnSync('tar',['-cf',path.join(input,'native-inputs.tar'),'-C',payload,'.native-inputs'],{encoding:'utf8'});assert.equal(tar.status,0,tar.stderr);
+ fs.writeFileSync(path.join(input,'native-cjdb.json'),JSON.stringify({platform:'linux_x86_64',compiler:'.native-inputs/dependency-tool'}));
+ const existing=invoke({GITHUB_ACTIONS:'true',CJCJ_SOURCE_SELECTION:'{}',CJCJ_NATIVE_LLVM_REF:'a'.repeat(40),CJCJ_NATIVE_RUNTIME_REF:'b'.repeat(40),CJCJ_NATIVE_HOST_VERSION:'1.3.0-alpha.20261025001053'});
+ assert.equal(existing.status,1);assert.match(existing.stderr,/NATIVE_INPUT_ONLY_SOURCE_PAYLOAD compiler/);
+ console.log('NATIVE_DEPENDENCY_PAYLOAD_MODE_ASSERTION_REACHED');
+ assert.equal(fs.statSync(path.join(input,'.native-inputs/dependency-tool')).mode&0o777,0o755);
 });
 
 test('formal native host entry unpacks installed payload modes before its ordinary host validation',t=>{
