@@ -90,11 +90,14 @@ export async function nativeStage(options, {signal} = {}) {
     const stdlib=path.join(source,'stdlib');
     const cmakeType = {debug:'Debug',release:'Release',relwithdebinfo:'RelWithDebInfo'}[buildType];
     const build = path.join(stdlib,'build/build');
+    // The SDK's bootstrap std may contain older FFI archives. Prefer the
+    // current native build before those SDK libraries when linking new std.
+    const targetLibraries=[path.join(build,'lib'),link];
     const cache = await fs.readFile(path.join(build,'CMakeCache.txt'),'utf8').catch(error=>{
       if(error.code==='ENOENT')return null;throw error;
     });
     const cached = name => cache?.match(new RegExp('^'+name+':[^=]+=(.*)$','m'))?.[1];
-    const reconfigure = cache !== null && (cached('CMAKE_BUILD_TYPE') !== cmakeType || cached('CANGJIE_TARGET_LIB') !== link);
+    const reconfigure = cache !== null && (cached('CMAKE_BUILD_TYPE') !== cmakeType || cached('CANGJIE_TARGET_LIB') !== targetLibraries.join(';'));
     if(options['resume-installed'] && reconfigure)throw new Error('STD_RESUME_BUILD_CONFIGURATION');
     await prepareRuntimeInputs({runtime, link, native, buildType, resume:!!options['resume-installed'], signal});
     if (options['resume-installed']) {
@@ -107,8 +110,9 @@ export async function nativeStage(options, {signal} = {}) {
       // an existing cache with the requested type/input while retaining its
       // toolchain, platform and other legitimate cached options.
       if(reconfigure)await command(['cmake','-S',stdlib,'-B',build,'-DCMAKE_BUILD_TYPE='+cmakeType,
-        '-DCANGJIE_TARGET_LIB='+link,'-U','RUNTIME_COMMON_LIB_DIR'],{cwd:stdlib,env,records});
-      await command(['python3','-I','build.py','build','-t',buildType,'--jobs',jobs,'--target-lib='+link],{cwd:stdlib,env,records});
+        '-DCANGJIE_TARGET_LIB='+targetLibraries.join(';'),'-U','RUNTIME_COMMON_LIB_DIR'],{cwd:stdlib,env,records});
+      await command(['python3','-I','build.py','build','-t',buildType,'--jobs',jobs,
+        ...targetLibraries.map(directory=>'--target-lib='+directory)],{cwd:stdlib,env,records});
       await command(['python3','-I','build.py','install','--prefix',output],{cwd:stdlib,env,records});
     }
     for(const rel of stdInstallFiles(platform))

@@ -57,9 +57,10 @@ export async function acceptInstalledStd({file, source, output, commit, sdk, run
   const successful = (command, result) => command?.event === 'target-command'
     && result?.event === 'target-result' && sameCommand(command, result)
     && result.rc === 0 && !result.signal && !result.error && !result.cancelled;
-  if (!successful(buildCommand, build) || build.argv.length !== 9
+  if (!successful(buildCommand, build) || build.argv.length !== 10
       || buildArgv.some((v,i) => build.argv[i] !== v) || !/^[1-9][0-9]*$/.test(build.argv[7])
-      || build.argv[8] !== '--target-lib='+link) throw new Error('STD_RESUME_RECORD build');
+      || build.argv[8] !== '--target-lib='+path.join(stdlib,'build/build/lib')
+      || build.argv[9] !== '--target-lib='+link) throw new Error('STD_RESUME_RECORD build');
   if (!successful(installCommand, install) || JSON.stringify(install.argv) !== JSON.stringify(
     ['python3','-I','build.py','install','--prefix',output])) throw new Error('STD_RESUME_RECORD install');
   if (actions.length !== 4 || after.slice(end + 1).some(row => row.cwd === stdlib

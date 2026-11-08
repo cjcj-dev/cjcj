@@ -77,9 +77,11 @@ async function selectedSources(environment) {
     for(const name of ['compiler','runtime','stdlib','llvm','ast','h1']) {
       const row=inputs[name];if(row)await add(row.repository,row.commit);
     }
+    for(const row of Object.values(inputs.stdDependencies||{}))await add(row.root,row.commit);
   }
   if(environment.CJCJ_SDK_TARGETS) {
     const targets=JSON.parse(await fs.readFile(environment.CJCJ_SDK_TARGETS,'utf8'));
+    for(const row of Object.values(targets.bootstrapInputs?.stdDependencies||{}))await add(row.root,row.commit);
     for(const row of Object.values(targets.repos||{})) {
       if(row.archive)throw Error('handoff source archive forbidden');
       await add(row.root,row.commit);await add(row.checkout,row.commit);
