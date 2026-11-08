@@ -9,14 +9,30 @@ import {configureNativeToolInput} from './native-tool-input.mjs';
 import {configureHleInput} from './hle-input.mjs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {command, readJson, privateRoot} from './sdk-flow.mjs';
+import {command, readJson, privateRoot, fileDigest} from './sdk-flow.mjs';
 import {prepareNativeInputs} from './sdk-inputs.mjs';
 import {nativePair} from './native-runtime-input.mjs';
 import {hostPlatform, readHostToolchainPin} from '../host-toolchain-pin.mjs';
 import {nativeInstallationLocations,unpackNativeInstallations} from './native-installation-locations.mjs';
 import {buildConfig} from '../../build/lib/config.mjs';
 import {nativeSourceSelection} from './native-source-selection.mjs';
+import {stdDependencySources} from './stdlib-build.mjs';
 export {NATIVE_REPOSITORIES} from './native-source-selection.mjs';
+export async function nativeVerifierTools(tools,env=process.env) {
+  const selected={cmake:tools.cmake||'cmake','clang++':tools.cxx,ninja:tools.ninja||'ninja',
+    ...(tools.launcher?{launcher:tools.launcher}:{})};
+  const result={};
+  for(const [name,program] of Object.entries(selected)) {
+    if(typeof program!=='string'||!program)throw Error('GHA_NATIVE_VERIFIER_TOOL '+name);
+    const located=path.isAbsolute(program)?program:(await capture(process.platform==='win32'?'where':'which',[program],{env})).stdout.trim().split(/\r?\n/)[0];
+    const executable=path.resolve(located);
+    await fs.access(executable,fs.constants.X_OK);
+    // clang++ and clang can resolve to the same bytes. Preserve the selected
+    // executable name: argv[0] chooses the C++ linker driver.
+    result[name]={path:executable,sha256:await fileDigest(executable)};
+  }
+  return result;
+}
 export async function configureGhaInputs(env=process.env) {
   if(!env.CANGJIE_WORKSPACE||!env.GITHUB_WORKSPACE||!env.CJCJ_NATIVE_INPUT_ROOT||!env.CJCJ_BOOTSTRAP_BASE)
     throw new Error('GHA_NATIVE_LOCATIONS_REQUIRED');
@@ -34,7 +50,8 @@ export async function configureGhaInputs(env=process.env) {
   if(locations.hleDependencies)await configureHleInput(root,platform,env.GITHUB_ENV);
   await configureNativeToolInput({root,workspace,platform,envFile:env.GITHUB_ENV});
   const sources={compiler:path.resolve(env.GITHUB_WORKSPACE)};
-  for(const [name,{repository:url,commit}] of Object.entries(selection)) {
+  const stdDependencies=stdDependencySources();
+  for(const [name,{repository:url,commit}] of Object.entries({...selection,...stdDependencies})) {
     const source=path.join(workspace,'native-sources',name);
     await fs.mkdir(path.dirname(source),{recursive:true});
     if(await fs.stat(source).catch(error=>{if(error.code==='ENOENT')return null;throw error;})) {
@@ -70,8 +87,10 @@ export async function configureGhaInputs(env=process.env) {
     throw new Error('GHA_NATIVE_SELECTED_HOST_CHANGED');
   const tools={...locations.tools,
     cc:env.CC||'clang',cxx:env.CXX||'clang++',launcher:env.CMAKE_CXX_COMPILER_LAUNCHER||'sccache',zx:'zx'};
+  installations.llvm.verification={...installations.llvm.verification,tools:await nativeVerifierTools(tools,env)};
   if(env.GITHUB_ENV)await fs.appendFile(env.GITHUB_ENV,'CJCJ_BOOTSTRAP_WORK='+path.join(workspace,'native-bootstrap')+'\n');
   return prepareNativeInputs({platform,sources,installations,tools,sourceSelection:selection,
+    stdDependencies:Object.fromEntries(Object.entries(stdDependencies).map(([name,row])=>[name,{...row,root:sources[name]}])),
     ...(explicitAst?{astCommit:selection.ast.commit}:{}),
     ...(pair?{nativePair:pair,llvmCommit:pair.llvm,runtimeCommit:pair.runtime}:{}),
     work:path.join(workspace,'native-bootstrap'),install:path.join(workspace,'software','cangjie'),

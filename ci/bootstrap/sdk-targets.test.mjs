@@ -49,8 +49,21 @@ test('fixed products keep actual source labels and reject different identities',
  const input=inputs('linux_x86_64');input.host.version='different';assert.throws(()=>createBootstrapTargets(input),/TARGET_HOST_VERSION/);
 });
 test('H1 execution and N target backend use explicit different library directories',()=>{
- const c=createBootstrapTargets(inputs('linux_x86_64'));
- for(const id of ['stage0-run','stage1-initial','stage1-std'])assert.ok(c.stages.find(s=>s.id===id).entries[0].libraries.some(dir=>dir.startsWith('.host/runtime/')));
+ const input=inputs('linux_x86_64'),c=createBootstrapTargets(input);
+ for(const id of ['stage0-run','stage1-initial','stage1-std']) {
+  const stage=c.stages.find(s=>s.id===id),execution=stage.metadata.selection.compilerExecution;
+  assert.equal(execution.role,'separate');assert.equal(execution.runtime.install,input.host.install);
+  assert.equal(execution.std.install,input.host.install);assert.equal(execution.llvm.install,input.llvm.install);
+  assert.ok(stage.entries[0].libraries.includes('.compiler-exec/runtime/lib/linux_x86_64_cjnative'));
+  assert.ok(stage.entries[0].libraries.includes('.compiler-exec/third_party/llvm/lib'));
+  assert.ok(!stage.entries[0].libraries.includes('.host/third_party/llvm/lib'));
+  assert.equal(stage.copies.find(row=>row.to==='.compiler-exec/third_party/llvm/lib/libLLVM-15.so').from,
+   input.llvm.install+'/third_party/llvm/lib/libLLVM-15.so');
+ }
+ const wrong=structuredClone(c);
+ wrong.stages.find(s=>s.id==='stage0-run').metadata.selection.compilerExecution.llvm.install=input.host.install;
+ assert.throws(()=>validateBootstrapTargets(wrong),/BOOTSTRAP_TARGET_INPUT_MISMATCH/);
+ assert.doesNotThrow(()=>validateBootstrapTargets(c));
  for(const id of ['stage2','stage3'])assert.ok(c.stages.find(s=>s.id===id).entries[0].libraries.includes('runtime/lib/linux_x86_64_cjnative'));
  const finalStd=c.stages.find(s=>s.id==='stage3-std').test.commands[0].argv;
  assert.equal(finalStd[finalStd.indexOf('--host')+1],'/fixture/H','colour comparison retains the actual bootstrap reference');

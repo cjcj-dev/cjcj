@@ -8,7 +8,7 @@ import {parseArgs} from 'node:util';
 import {command, copyOutputs, atomicJson, fileDigest, inventory, privateRoot, assembleDirectory, withProcessCancellation} from './sdk-flow.mjs';
 import {sdkPlatform, stdInstallFiles, cleanSdkEnvironment} from './sdk-platform.mjs';
 import {compilerProducer} from './compiler_identity.mjs';
-import {verifyStdBuildInputs} from './stdlib-build.mjs';
+import {verifyStdBuildInputs, prepareStdDependencies} from './stdlib-build.mjs';
 import {injectCangjieVersion} from '../srcbuild/steps/inject-version-lib.mjs';
 import {prepareTrimpath} from '../release/trimpath.mjs';
 import {assertFinalStdInput} from './sdk-final-std.mjs';
@@ -80,7 +80,12 @@ export async function nativeStage(options, {signal} = {}) {
   }
   await fs.mkdir(output,{recursive:true});
   if(kind==='std') {
+    try {
     await verifyStdBuildInputs(sdk,platform);
+    if(!options['resume-installed']) {
+      const previous=await fs.readFile(output+'.commands.json','utf8').then(JSON.parse).catch(error=>{if(error.code==='ENOENT')return [];throw error;});
+      await prepareStdDependencies({source,dependencies:options['std-dependencies']?JSON.parse(options['std-dependencies']):undefined,previous,records});
+    }
     const link=output+'.runtime-input';
     const stdlib=path.join(source,'stdlib');
     const cmakeType = {debug:'Debug',release:'Release',relwithdebinfo:'RelWithDebInfo'}[buildType];
@@ -115,6 +120,7 @@ export async function nativeStage(options, {signal} = {}) {
     await writeStdProvenance({sourceDir:stdlib,sourceRoot:source,sourceRevision:commit,installPrefix:output,compiler:await compilerProducer(sdk),buildSdk:sdk,
       coloured:options['compiler-runtime']==='target'?'true':'bootstrap',preflightC2:options['compiler-runtime']==='target'?'stage2':'not-applicable',
       note:'native target/install '+commit});
+    } finally { await atomicJson(output+'.commands.json',records); }
   } else if(kind==='h1') {
     if(!host)throw new Error('H1_HOST_REQUIRED');
     if(native.os!=='linux')throw new Error('H1_LINUX_PRODUCER_REQUIRED');
@@ -236,7 +242,7 @@ export async function nativeStage(options, {signal} = {}) {
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type'].map(k=>[k,{type:'string'}]));
+    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies'].map(k=>[k,{type:'string'}]));
     spec['resume-installed']={type:'boolean'};
     nativeSourceOptions(process.argv); // Reject duplicate identity flags before parseArgs.
     const {values}=parseArgs({options:spec});

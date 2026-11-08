@@ -206,6 +206,7 @@ export function createBootstrapTargets(input) {
     '--sdk',sdk,'--runtime',runtime.install,'--output',output,'--platform',platform,
     '--commit',kind==='h1'?h1.commit:kind==='std'?stdlib.commit:compiler.commit,
     ...(kind==='std' && input.stdBuildType !== undefined ? ['--build-type',input.stdBuildType] : []),
+    ...(kind==='std' && input.stdDependencies ? ['--std-dependencies',JSON.stringify(input.stdDependencies)] : []),
     ...(kind==='compiler'&&compiler.shim?['--shim-install',compiler.shim.install]:[]),
     ...(phase?['--phase',phase,'--std-input',phase==='stage3'?out('stage3-std'):path.join(work,'build/stage1-std/std')]:[]),...(compilerRuntime?['--compiler-runtime',compilerRuntime]:[]),
     ...(kind==='h1'?['--host',host.install,...(tools.cc?['--cc',tools.cc]:[])]:[]),...(tools.zx?['--zx',tools.zx]:[])]});
@@ -213,8 +214,12 @@ export function createBootstrapTargets(input) {
   function composed(id,depends,product,std,hostObjects=false,commands=[]) {
     const transitional=['stage0-run','stage1-initial','stage1-std'].includes(id);
     const executionSource=id==='stage2-target-sdk'?out('stage2'):transitional?host.install:null;
-    const execution={role:id==='stage2-target-sdk'?'separate':transitional?'bootstrap-host':'target',stage:id,platform,
-      ...Object.fromEntries(['compiler','runtime','std','llvm'].map(name=>[name,{install:executionSource||(name==='runtime'?runtime.install:name==='llvm'?llvm.install:std),platform}]))};
+    // H1 was built with H's runtime/std, but its code generator and selected N
+    // shim require our LLVM intrinsics. Keep those per-component producers
+    // distinct in the normal launcher recipe, including bootstrap std builds.
+    const execution={role:id==='stage2-target-sdk'||transitional?'separate':'target',stage:id,platform,
+      ...Object.fromEntries(['compiler','runtime','std','llvm'].map(name=>[name,{install:transitional&&name==='llvm'?llvm.install:
+        executionSource||(name==='runtime'?runtime.install:name==='llvm'?llvm.install:std),platform}]))};
     const selection={platform,bootstrapHost:host,compilerExecution:execution,targetComponents:{compiler,std:stdlib,runtime,llvm,ast}};
     const recipe=installationRecipe(selection,{compiler:product,std,hostObjects,final:['stage3','stage2-target-sdk'].includes(id),bootstrap:true,nativeChecks:path.join(work,'native-check')});
     return {id,depends,commands,output:id===finalStage?'${install}':path.join(work,'sdk-'+id),...recipe,

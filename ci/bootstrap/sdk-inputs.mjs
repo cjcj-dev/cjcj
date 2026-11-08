@@ -21,6 +21,7 @@ import {readInstalledNativeAst} from './installed-native-ast.mjs';
 import {installPath as mingwInstallPath} from '../../build/toolchain/mingw.mjs';
 import {installationSelection,resolveSources} from './native-source-selection.mjs';
 import {stdBuildType,flag} from './sdk-std-resume.mjs';
+import {stdDependencyInputs} from './stdlib-build.mjs';
 const execute = promisify(execFile);
 
 export async function gitInput(repository, commit) {
@@ -124,6 +125,7 @@ async function installedCompilerShim(supplied, input) {
 // Validate the actual selected source objects, including an explicit inputs file.
 // The compiler's macro consumer must be this paired source, not an older C tree.
 export async function validateSourceInputs(input) {
+  if(input.stdDependencies&&!isDeepStrictEqual(await stdDependencyInputs(input.stdDependencies),input.stdDependencies))throw Error('STD_DEPENDENCY_INPUT_CHANGED');
   if(input.stage2?.mode==='ordinary-cjpm') {
     const native=sdkPlatform(input.platform);
     const observed=await execute(path.join(input.host.install,'bin/cjc'+native.exe),['--version']);
@@ -294,6 +296,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     rows.h1={...rows.h1,product,configuration:facts,buildResult:path.resolve(reused.buildResult)};
   }
   const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,
+    ...(descriptor.stdDependencies?{stdDependencies:await stdDependencyInputs(descriptor.stdDependencies)}:{}),
     ...(descriptor.stdBuildType === undefined ? {} : {stdBuildType:stdBuildType(descriptor.stdBuildType)}),
     ...(descriptor.nativePair ? {nativePair:descriptor.nativePair} : {}), ...rows, stdlib:stdlib??rows.runtime,
     ...(separateStd?{stdlibCommit:stdlib.commit}:{}), sourceSelection, tools,
