@@ -123,6 +123,7 @@ export async function nativeStage(options, {signal} = {}) {
     await fs.copyFile(path.join(sdk,shim.object.path),path.join(inputs,'llvm-shim.o'));
     const parameters=path.join(work,'parameters.json');await atomicJson(parameters,{compile_flags:''});
     const manifest=path.join(source,'cjpm.toml'),before=await fs.readFile(manifest);
+    const lock=path.join(source,'cjpm.lock'),lockBefore=await fs.readFile(lock).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
     const h1env={...cleanSdkEnvironment(host,platform,process.env,host),cjHeapSize:resources.heap,
       CANGJIE_BUILD_JOBS:jobs,CMAKE_BUILD_PARALLEL_LEVEL:jobs,CJCJ_COMMIT:commit,
       CJCJ_SUPERVISOR_WORK:env.CJCJ_SUPERVISOR_WORK};
@@ -153,6 +154,7 @@ export async function nativeStage(options, {signal} = {}) {
       compiled=await fs.readFile(manifest);
     } finally {
       await fs.writeFile(manifest,before);
+      if(lockBefore!==null)await fs.writeFile(lock,lockBefore);
       await atomicJson(output+'.commands.json',records);
     }
     const bin=path.join(output,'bin');await fs.mkdir(bin,{recursive:true});

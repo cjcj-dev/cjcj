@@ -22,12 +22,14 @@ test('public Linux H1 uses normal cjpm, host domain and restores temporary sourc
   return ok(name+'-head',['git','-C',dir,'rev-parse','HEAD']);};
  const source=root+'/source',host=root+'/host',sdk=root+'/native';
  const before='[package]\ncompile-option = "-O0"\n';write(source+'/cjpm.toml',before);
+ const lockBefore='version = 0\n\n[requires]\n';write(source+'/cjpm.lock',lockBefore);
  write(source+'/runtime_shim/cjc_runtime_config.c','const char* commit=CJCJ_COMMIT;\n');
  const sourceCommit=commit(source,'source');
  write(host+'/tools/bin/cjpm',`#!/usr/bin/env node
 const fs=require('fs'),path=require('path'),e=process.env;
 const source=process.cwd(),release=path.join(source,'target/release');
 console.log('H1_CJPM_PRODUCER_REACHED');
+fs.writeFileSync('cjpm.lock','version = 1\\n\\n[requires]\\n');
 if(e.H1_FIXTURE_FAIL==='1')process.exit(17);
 fs.mkdirSync(path.join(release,'bin'),{recursive:true});
 fs.writeFileSync(path.join(release,'bin/cjc@cjcj'),'finite product, not a compiler');
@@ -61,6 +63,7 @@ const r=spawnSync('cc',process.argv.slice(2),{stdio:'inherit'});process.exit(r.s
  assert.equal(fs.readFileSync(output+'.h1/out/release/bin/cjc@cjcj','utf8'),'finite product, not a compiler');
  assert.equal(fs.readFileSync(output+'/bin/cjcj-stage1','utf8'),'finite product, not a compiler');
  assert.equal(fs.existsSync(output+'/bin/release'),false);assert.equal(fs.readFileSync(source+'/cjpm.toml','utf8'),before);
+ assert.equal(fs.readFileSync(source+'/cjpm.lock','utf8'),lockBefore,'H1_LOCK_MUST_RESTORE_AFTER_SUCCESS');
  const commands=JSON.parse(fs.readFileSync(output+'.commands.json'));assert.equal(commands.length,2);assert.ok(commands.every(row=>row.rc===0));
  assert.ok(commands[0].argv.includes('-DCJCJ_COMMIT=\"'+sourceCommit+'\"'));
  assert.deepEqual(commands[1].argv,[host+'/tools/bin/cjpm','build','-j1']);
@@ -69,6 +72,7 @@ const r=spawnSync('cc',process.argv.slice(2),{stdio:'inherit'});process.exit(r.s
  const failed=run('h1-failed',argv(root+'/failed'),{...process.env,H1_FIXTURE_FAIL:'1'});
  assert.equal(failed.status,17,failed.stdout+failed.stderr);assert.match(failed.stdout,/H1_CJPM_PRODUCER_REACHED/);
  assert.equal(fs.readFileSync(source+'/cjpm.toml','utf8'),before,'H1_SOURCE_MUST_RESTORE_AFTER_FAILURE');
+ assert.equal(fs.readFileSync(source+'/cjpm.lock','utf8'),lockBefore,'H1_LOCK_MUST_RESTORE_AFTER_FAILURE');
  assert.equal(JSON.parse(fs.readFileSync(root+'/failed.commands.json'))[1].rc,17);
  console.log('H1_PUBLIC_CJPM_CONTRACT_AND_RESTORATION_REACHED');
 });
