@@ -78,6 +78,12 @@ if(name==='python3' && args[0]==='build.py') {
   const files=['runtime/lib/'+tuple+'/libcangjie-runtime.'+suffix,'lib/'+tuple+'/libcangjie-runtime.a'];
   if(process.platform==='darwin' && !e.FIXTURE_NO_BOUNDS)files.push('runtime/lib/'+tuple+'/libboundscheck.'+suffix);
   for(const file of files){const dst=path.join(prefix,file);fs.mkdirSync(path.dirname(dst),{recursive:true});fs.writeFileSync(dst,'fixture bytes '+file+'\0CJRT-COMMIT:'+e.CJCJ_NATIVE_RUNTIME_REF+'\0');}
+  // Parent install re-enters CJThread with --prefix, replacing its manifest.
+  const archives=['thread','aio'].map(name=>path.join(prefix,'lib',tuple,'libcangjie-'+name+'.a'));
+  for(const [index,file] of archives.entries())if(!(e.FIXTURE_NO_AIO&&index===1)) {
+    fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'installed CJThread '+['thread','aio'][index]);
+  }
+  fs.writeFileSync('CMakebuild/cjthread-build/install_manifest.txt',archives.filter((_,index)=>!(e.FIXTURE_BAD_MANIFEST&&index===1)).join('\n'));
   if(e.FIXTURE_ELF) {
     const cpp=path.resolve('CMakebuild/finite.c'),obj=path.resolve('CMakebuild/finite.o');
     fs.writeFileSync(cpp,'unsigned long g_cjLoadBadMask=42; const char stamp[]="CJRT-COMMIT:'+e.CJCJ_NATIVE_RUNTIME_REF+'";\n');
