@@ -1,12 +1,12 @@
 The three llvm.pack.00–02 files concatenate to one complete-tree shallow Git
-pack for the formal LLVM pin b957cfbc31cf22e70fe4bd646e92a6a6d45f7614.
+pack for the formal LLVM pin ba518962f0cda46ea71cad033214e8fe1ea83249.
 They were captured read-only from /root/cj_build/llvm_rebase using a fresh bare
 repository and `git fetch --depth 1 file:///root/cj_build/llvm_rebase
-b957cfbc31cf22e70fe4bd646e92a6a6d45f7614:refs/heads/main`.
+ba518962f0cda46ea71cad033214e8fe1ea83249:refs/heads/main`.
 
 The pack is about 178 MiB, split at 64 MiB to fit GitHub's per-file limit.
 It retains the entire pin tree, without parent history or an alternate object
-store. The test consumes the real CangjieRuntimeLayout.h (2493 bytes), and the
+store. The test consumes the real CangjieRuntimeLayout.h (2542 bytes), and the
 existing runtime.pack supplies the actual runtime ABI generator and assertions.
 The complete tree is intentional: checkoutExactSource does a real Git checkout;
 a header-only synthetic commit would not preserve the formal source identity.

@@ -2,7 +2,7 @@ These offline fixtures retain the exact formal Git identities used by the Node
 integration tests. They are shallow, complete-tree packs, not invented commits.
 
 - runtime.pack: cjcj-dev/cangjie-runtime at
-  259ad49f709222e75bdb832bcc28dc769ea4efbf
+  b33a70ed7354799f42218ce890fe729110a50b42
 - tools.pack: cjcj-tools publish candidate at
   52adc7a2b67f8f1e711b6a50fbd0c83d85558a58
 
