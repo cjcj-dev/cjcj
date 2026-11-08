@@ -1,5 +1,5 @@
 #!/usr/bin/env zx
-// Export the two actual H1 adapter modules from the paired private tools commit.
+// Export the existing Linux H1 producer from the selected private tools commit.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -14,7 +14,7 @@ export async function deployNativeTools(repository, commit, destination) {
   const actual=(await execute('git',['-C',repository,'rev-parse',commit+'^{commit}'])).stdout.trim();
   if(actual!==commit)throw new Error('NATIVE_TOOLS_COMMIT');
   const files={};
-  for(const name of ['cjcj-stage1.mjs','stage1-transform.mjs']) {
+  for(const name of ['cjcj-stage1.sh']) {
     const rel='ts/src/sharedbuild/'+name, file=path.join(destination,rel);
     const {stdout}=await execute('git',['-C',repository,'show',commit+':'+rel]);
     await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,stdout);

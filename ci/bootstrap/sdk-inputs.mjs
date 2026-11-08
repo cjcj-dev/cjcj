@@ -217,12 +217,13 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       ||path.resolve(reused.buildInputs)!==path.join(path.dirname(product),'build-inputs.json')
       ||!Array.isArray(commands)||commands.length!==1||commands[0].rc!==0||commands[0].signal
       ||commands[0].cwd!==rows.h1.repository
-      ||commands[0].argv?.[1]!==path.join(path.resolve(tools.privateRoot),'ts/src/sharedbuild/cjcj-stage1.mjs'))
+      ||commands[0].argv?.[0]!=='bash'
+      ||commands[0].argv?.[1]!==path.join(path.resolve(tools.privateRoot),'ts/src/sharedbuild/cjcj-stage1.sh'))
       throw new Error('H1_REUSE_PRODUCER_MISMATCH');
     rows.h1={...rows.h1,product,configuration:facts,buildResult:path.resolve(reused.buildResult)};
   }
   tools.privateRoot = path.resolve(tools.privateRoot);
-  for (const rel of installations.stage2 ? [] : ['cjcj-stage1.mjs', 'stage1-transform.mjs'])
+  for (const rel of installations.stage2 ? [] : ['cjcj-stage1.sh'])
     await fs.stat(path.join(tools.privateRoot, 'ts/src/sharedbuild', rel));
   const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,
     ...(descriptor.stdBuildType === undefined ? {} : {stdBuildType:stdBuildType(descriptor.stdBuildType)}),

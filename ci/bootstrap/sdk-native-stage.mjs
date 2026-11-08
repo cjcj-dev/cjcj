@@ -116,9 +116,30 @@ export async function nativeStage(options, {signal} = {}) {
       note:'native target/install '+commit});
   } else if(kind==='h1') {
     if(!host||!options['private-tools'])throw new Error('H1_HOST_AND_NATIVE_ADAPTER_REQUIRED');
-    await command([process.execPath,path.join(options['private-tools'],'ts/src/sharedbuild/cjcj-stage1.mjs')],{
-      cwd:source,env:{...env,CANGJIE_HOME:host,SB_SOURCE:source,SB_OUTPUT:path.join(output,'bin'),SB_NATIVE_ROOT:sdk,
-        SB_SHA:commit,SB_PLATFORM:platform,SB_CC:options.cc,SB_OPTIMIZATION:'O1',SB_PARAMETERS_JSON:'{"compile_flags":""}'},records});
+    if(native.os!=='linux')throw new Error('H1_LINUX_PRODUCER_REQUIRED');
+    const shim=await readInstalledNativeShim({install:sdk});
+    const work=output+'.h1',inputs=path.join(work,'inputs'),productRoot=path.join(work,'out');
+    await fs.mkdir(inputs,{recursive:true});await fs.mkdir(productRoot,{recursive:true});
+    await fs.copyFile(path.join(sdk,shim.object.path),path.join(inputs,'llvm-shim.o'));
+    const parameters=path.join(work,'parameters.json');await atomicJson(parameters,{compile_flags:''});
+    const manifest=path.join(source,'cjpm.toml'),before=await fs.readFile(manifest);
+    let compiled;
+    try {
+      await command(['bash',path.join(options['private-tools'],'ts/src/sharedbuild/cjcj-stage1.sh')],{
+        cwd:source,env:{...cleanSdkEnvironment(host,platform,process.env,host),cjHeapSize:resources.heap,
+          CANGJIE_BUILD_JOBS:jobs,SB_SOURCE:source,SB_OUTPUT:productRoot,SB_INPUTS:inputs,
+          SB_SHA:commit,SB_OPTIMIZATION:'O1',SB_PARAMETERS:parameters},records});
+      compiled=await fs.readFile(manifest);
+    } finally {
+      await fs.writeFile(manifest,before);
+      await atomicJson(output+'.commands.json',records);
+    }
+    const bin=path.join(output,'bin');await fs.mkdir(bin,{recursive:true});
+    const product=path.join(bin,'cjcj-stage1');
+    await fs.copyFile(path.join(productRoot,'cjcj-stage1'),product);
+    const {sha256}=await import('./sdk-io.mjs');
+    await atomicJson(path.join(bin,'build-inputs.json'),{source:commit,host,native:sdk,nativeShim:shim,
+      sourceChanges:{'cjpm.toml':{beforeSha256:sha256(before),buildSha256:sha256(compiled)}},sha256:await fileDigest(product)});
   } else if(kind==='compiler') {
     const target=await privateRoot(options['target-dir']||path.join(source,'target'));
     if(options.phase==='stage3')await assertFinalStdInput({sdk,std:sdk,runtime:sdk,

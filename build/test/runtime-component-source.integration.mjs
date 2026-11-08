@@ -120,7 +120,7 @@ return {...r,source};}
  await fs.symlink(host,inputs+'/host');await write(inputs+'/host-archive','controlled host archive location; host execute is actual');
  for(const file of ['node','cjbind'])await write(inputs+'/hle/'+file,'unrelated HLE boundary');await fs.mkdir(inputs+'/hle/modules');
  await write(inputs+'/hle/dependencies.json',JSON.stringify({platform,...Object.fromEntries(['node','modules','cjbind'].map(name=>[name,{path:name,source:'finite unrelated input',version:'fixture'}]))}));
- for(const file of ['cjcj-stage1.mjs','stage1-transform.mjs'])await write(inputs+'/private/ts/src/sharedbuild/'+file,'// unavailable stage producer\n');
+ for(const file of ['cjcj-stage1.sh'])await write(inputs+'/private/ts/src/sharedbuild/'+file,'// unavailable stage producer\n');
  const shapes={llvm:['third_party/llvm/bin/llc','third_party/llvm/bin/llvm-as','third_party/llvm/bin/llvm-dis','third_party/llvm/lib/libLLVM-15.so','third_party/llvm/fixed-llc/cjselfhost_llvmshim.o','tools/bin/cjdb'],
  ast:['libcangjie-ast-support.a','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h','third_party/flatbuffers/bin/flatc']};
  for(const [name,files]of Object.entries(shapes)){for(const file of files)await write(inputs+'/'+name+'/'+file,'unrelated native component shape; NOT_RUN');await write(inputs+'/'+name+'/result.json',JSON.stringify({controlledUnavailableNativeComponent:name}));}
