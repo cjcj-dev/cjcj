@@ -19,6 +19,29 @@ const inputs={native_runtime_artifact:'finite-declaration-R',native_runtime_run_
 const workflow=name=>load(fs.readFileSync(path.join(repo,'.github/workflows',name),'utf8'));
 const selectedEnv=wf=>Object.fromEntries(Object.entries(wf.env).map(([k,v])=>[k,v.replace(/\$\{\{ inputs\.(\w+) \}\}/g,(_,name)=>inputs[name]??'')]));
 function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'native-workflow-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root;}
+test('fixed sccache preparation validates actual distribution before normal action cache consumption',
+ {skip:!process.env.NATIVE_SCCACHE_DISTRIBUTION},t=>{
+ const root=fixture(t),bin=path.join(root,'bin');fs.mkdirSync(bin);
+ // Network transport is substituted; extraction, binary execution, digest and
+ // the public CLI remain real, using the exact official distribution bytes.
+ fs.writeFileSync(path.join(bin,'curl'),'#!/usr/bin/env node\n'+
+  "const fs=require('node:fs');const a=process.argv.slice(2);fs.copyFileSync(process.env.NATIVE_SCCACHE_DISTRIBUTION,a[a.indexOf('--output')+1]);\n",{mode:0o755});
+ const entry=path.join(repo,'ci/bootstrap/native-cjdb-job.mjs');
+ const invoke=(name,archive)=>spawnSync(process.execPath,[entry,'prepare-sccache','v0.18.0',path.join(root,name,'work')],
+  {cwd:repo,encoding:'utf8',env:{...process.env,PATH:bin+path.delimiter+process.env.PATH,GITHUB_ACTIONS:'true',
+   CJCJ_SRCBUILD_TARGET:'linux-x64',RUNNER_TOOL_CACHE:path.join(root,name,'cache'),NATIVE_SCCACHE_DISTRIBUTION:archive}});
+ const good=invoke('valid',process.env.NATIVE_SCCACHE_DISTRIBUTION);
+ console.log('NATIVE_SCCACHE_REAL_DISTRIBUTION_ASSERTION_REACHED');assert.equal(good.status,0,good.stderr);
+ const cache=path.join(root,'valid/cache/sccache/0.18.0/x64');assert.ok(fs.existsSync(cache+'.complete'));
+ const version=spawnSync(path.join(cache,'sccache'),['--version'],{encoding:'utf8'});
+ assert.equal(version.status,0,version.stderr);assert.equal(version.stdout.trim(),'sccache 0.18.0');
+ const records=JSON.parse(fs.readFileSync(path.join(root,'valid/work/commands.json')));
+ assert.ok(records.some(row=>row.argv?.[0]==='python3'&&row.rc===0));
+ const damaged=path.join(root,'damaged.tar.gz');fs.writeFileSync(damaged,'different distribution');
+ const bad=invoke('damaged',damaged);assert.equal(bad.status,1);assert.match(bad.stderr,/NATIVE_SCCACHE_DISTRIBUTION/);
+ assert.equal(fs.existsSync(path.join(root,'damaged/cache/sccache/0.18.0/x64.complete')),false);
+ console.log('NATIVE_SCCACHE_WRONG_DISTRIBUTION_REJECTION_REACHED');
+});
 function plan(t,target,extra={}) {
  const wf=workflow('srcbuild-target.yml'),root=fixture(t),file=path.join(root,'outputs');
  const step=wf.jobs.plan.steps.find(s=>s.id==='select');

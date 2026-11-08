@@ -33,13 +33,32 @@ export async function prepareNativeSccache({version,work,env=process.env}) {
   const expected='45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89';
   try {
     if(!await fs.stat(cache+'.complete').then(()=>true,()=>false)) {
-      const archive=path.join(work,'sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz');
+      const distribution=await fs.mkdtemp(path.join(work,'distribution-'));
+      const archive=path.join(distribution,'sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz');
       await command(['curl','--fail','--location','--retry','2','--max-time','120',
         '--header','Accept: application/octet-stream','--output',archive,
         'https://api.github.com/repos/mozilla/sccache/releases/assets/563130201'],{env,records});
       if(await fileDigest(archive)!==expected)throw Error('NATIVE_SCCACHE_DISTRIBUTION');
+      // Check every path and type before extraction, including link entries.
+      // Only this fixed distribution's one top-level directory is admissible.
+      await command(['python3','-c',[
+        'import sys,tarfile,pathlib,json',
+        'with tarfile.open(sys.argv[1]) as archive:',
+        ' members=archive.getmembers()',
+        ' assert members, "NATIVE_SCCACHE_ARCHIVE_EMPTY"',
+        ' for member in members:',
+        '  parts=pathlib.PurePosixPath(member.name).parts',
+        '  assert parts and parts[0]==sys.argv[2] and ".." not in parts and not member.name.startswith("/") and "\\\\" not in member.name, "NATIVE_SCCACHE_ARCHIVE_PATH"',
+        '  assert member.isfile() or member.isdir(), "NATIVE_SCCACHE_ARCHIVE_TYPE"',
+        ' print(json.dumps([member.name for member in members]))',
+      ].join('\n'),archive,'sccache-v0.18.0-x86_64-unknown-linux-musl'],{env,records});
+      const extracted=path.join(distribution,'extracted');await fs.mkdir(extracted);
+      await command(['tar','-xf',archive,'--strip-components=1','-C',extracted],{env,records});
+      await command([process.execPath,'-e',
+        "const {spawnSync}=require('node:child_process');const r=spawnSync(process.argv[1],['--version'],{encoding:'utf8'});process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');if(r.status!==0||r.stdout.trim()!=='sccache 0.18.0')process.exit(r.status||1);",
+        path.join(extracted,'sccache')],{env,records});
       await fs.mkdir(cache,{recursive:true});
-      await command(['tar','-xf',archive,'--strip-components=1','-C',cache],{env,records});
+      await fs.cp(extracted,cache,{recursive:true});
     }
     await command([process.execPath,'-e',
       "const {spawnSync}=require('node:child_process');const r=spawnSync(process.argv[1],['--version'],{encoding:'utf8'});process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');if(r.status!==0||r.stdout.trim()!=='sccache 0.18.0')process.exit(r.status||1);",
