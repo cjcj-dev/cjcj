@@ -16,8 +16,12 @@ const selected={...input,build:path.join(work,'build'),install:path.join(work,'i
 let prepared;
 test('complete official configure and ExternalProject recover without recopy or patch replay',async()=>{
  prepared=await prepareNativeCompilerSource(selected,run);
+ const bin=path.join(work,'compiler-wrapper');await fs.mkdir(bin);
+ const wrapper='#!'+process.execPath+'\nimport {spawnSync} from "node:child_process";\nif(process.env.FAIL_DEPENDENCY_CONFIGURE==="1"&&process.argv.some(arg=>arg.endsWith("/src/idl_gen_cangjie.cpp"))){console.error("OFFICIAL_DEPENDENCY_COMPILER_FAILURE_REACHED");process.exit(42);}\nconst r=spawnSync("/usr/lib/llvm-15/bin/clang",process.argv.slice(2),{stdio:"inherit"});process.exit(r.status??1);\n';
+ await fs.writeFile(path.join(bin,'clang'),wrapper,{mode:0o755});
+ await fs.writeFile(path.join(bin,'clang++'),wrapper.replace('/usr/lib/llvm-15/bin/clang','/usr/lib/llvm-15/bin/clang++'),{mode:0o755});
  const configure=['cmake','-G','Ninja','-S',prepared.compiler,'-B',selected.build,
-  '-DCMAKE_BUILD_TYPE=Release','-DCMAKE_C_COMPILER=/usr/lib/llvm-15/bin/clang','-DCMAKE_CXX_COMPILER=/usr/lib/llvm-15/bin/clang++',
+  '-DCMAKE_BUILD_TYPE=Release','-DCMAKE_C_COMPILER='+path.join(bin,'clang'),'-DCMAKE_CXX_COMPILER='+path.join(bin,'clang++'),
   '-DCANGJIE_BUILD_CJC=OFF','-DCANGJIE_BUILD_STD_SUPPORT=OFF','-DCANGJIE_BUILD_TESTS=OFF',
   '-DCANGJIE_CODEGEN_CJNATIVE_BACKEND=OFF','-DCANGJIE_SKIP_BUILD_CLANG_RT=ON',
   '-DCMAKE_INSTALL_PREFIX='+selected.install];
@@ -38,10 +42,6 @@ test('complete official configure and ExternalProject recover without recopy or 
  assert.equal((await fs.stat(bounds)).ino,boundsStat.ino);
  assert.deepEqual(JSON.parse(await fs.readFile(path.join(next.install,'BUILD-INPUTS.json'),'utf8')),{compilerSource:prepared.source});
  console.log('OFFICIAL_NEW_INSTALL_SOURCE_RECOVERY_ASSERT_REACHED');
- const bin=path.join(work,'compiler-wrapper');await fs.mkdir(bin);
- const wrapper='#!'+process.execPath+'\nimport {spawnSync} from "node:child_process";\nif(process.env.FAIL_DEPENDENCY_CONFIGURE==="1"&&process.argv.some(arg=>arg.endsWith("/src/idl_gen_cangjie.cpp")))process.exit(42);\nconst r=spawnSync("/usr/lib/llvm-15/bin/clang",process.argv.slice(2),{stdio:"inherit"});process.exit(r.status??1);\n';
- await fs.writeFile(path.join(bin,'clang'),wrapper,{mode:0o755});
- await fs.writeFile(path.join(bin,'clang++'),wrapper.replace('/usr/lib/llvm-15/bin/clang','/usr/lib/llvm-15/bin/clang++'),{mode:0o755});
  const build=['cmake','--build',selected.build,'--target','flatbuffers','-j','8'];
  await assert.rejects(run(build,{env:{PATH:bin+':'+process.env.PATH,FAIL_DEPENDENCY_CONFIGURE:'1'}}),error=>error.rc===1);
  const idl=path.join(prepared.compiler,'third_party/flatbuffers/src/idl_gen_cangjie.cpp');
