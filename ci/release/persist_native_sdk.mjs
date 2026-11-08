@@ -21,9 +21,12 @@ export const artifactName = (target, version) => `cjcj-srcbuild-${target}-${vers
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 // GitHub rejects release assets of 2 GiB or more; refuse before any transfer.
 export const MAX_ASSET_BYTES = 2 * 1024 ** 3 - 1;
-// Top-level workflows that reach srcbuild-target.yml through srcbuild.yml. All
-// are workflow_dispatch only, so no push, PR or fork run can produce an input.
-export const PRODUCER_WORKFLOWS = ['.github/workflows/release.yml', '.github/workflows/release-matrix.yml', '.github/workflows/arm-soak.yml'];
+// Top-level workflows whose dispatched run reaches srcbuild-target.yml:
+// srcbuild.yml itself and the callers that reach it through srcbuild.yml. The
+// run event must be workflow_dispatch, so no push, PR or fork run can produce an
+// input.
+export const PRODUCER_WORKFLOWS = ['.github/workflows/srcbuild.yml', '.github/workflows/release.yml',
+  '.github/workflows/release-matrix.yml', '.github/workflows/arm-soak.yml'];
 
 function fail(code, detail = '') { throw new Error(`${code}${detail ? ' ' + detail : ''}`); }
 

@@ -122,8 +122,9 @@ default consumers.
 
 Producer binding (`persist_native_sdk.mjs`, applied both when a candidate is
 received and again before publication): the producer run is a completed
-`workflow_dispatch` run of this repository from an allowed srcbuild caller
-(`release.yml`, `release-matrix.yml`, `arm-soak.yml`). In that run's current
+`workflow_dispatch` run of this repository of `srcbuild.yml` itself or of an
+allowed srcbuild caller (`release.yml`, `release-matrix.yml`, `arm-soak.yml`).
+In that run's current
 attempt, exactly one `<target> / srcbuild` job ran with that attempt number and
 the run's head and concluded `success`. The artifact was created between that
 job's start and completion, so bytes uploaded under the same name by a failed

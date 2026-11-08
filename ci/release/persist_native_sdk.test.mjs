@@ -61,7 +61,7 @@ globalThis.fetch = async (url, options = {}) => {
   if (url === api + '/actions/runs/123') return reply({id: 123, head_sha: '${SHA}', run_attempt: 2, status: 'completed', event: 'workflow_dispatch',
     path: process.env.PRODUCER_PATH || '.github/workflows/release.yml', head_repository: {full_name: 'cjcj-dev/cjcj'}});
   if (url === api + '/actions/runs/123/attempts/2/jobs?per_page=100&page=1') return reply({jobs: [
-    {id: 9, name: 'srcbuild / linux-x64 / source SDK / linux-x64 / srcbuild', run_id: 123, run_attempt: Number(process.env.JOB_ATTEMPT || 2),
+    {id: 9, name: process.env.JOB_NAME || 'srcbuild / linux-x64 / source SDK / linux-x64 / srcbuild', run_id: 123, run_attempt: Number(process.env.JOB_ATTEMPT || 2),
       head_sha: '${SHA}', status: 'completed', conclusion: process.env.PRODUCER_CONCLUSION || 'success',
       started_at: '2026-01-01T00:00:00Z', completed_at: '2026-01-01T00:20:00Z'},
     {id: 10, name: 'srcbuild / linux-aarch64 / source SDK / linux-aarch64 / srcbuild', run_id: 123, run_attempt: 2, conclusion: 'failure'}]});
@@ -99,7 +99,7 @@ process.stdout.write(fs.readFileSync(process.env.FIXTURE_DIR + '/asset-' + match
       GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: HEAD, NATIVE_SDK_ARTIFACT_ID: '456', NATIVE_SDK_RUN_ID: '123',
       NATIVE_SDK_VERSION: VERSION, NATIVE_SDK_ACCEPTED_DIGEST: `sha256:${zipSha}`, ACCEPTANCE_JOB: 'package-tests'};
     for (const key of ['CANDIDATE_RUN', 'CANDIDATE_VERSION', 'CANDIDATE_ARTIFACT', 'EXPIRED', 'PRODUCER_CONCLUSION', 'CORRUPT_RELEASE', 'TAG_TAKEN',
-      'ARTIFACT_SIZE', 'ARTIFACT_CREATED', 'PRODUCER_PATH', 'JOB_ATTEMPT', 'COMPARE_STATUS']) delete env[key];
+      'ARTIFACT_SIZE', 'ARTIFACT_CREATED', 'PRODUCER_PATH', 'JOB_ATTEMPT', 'COMPARE_STATUS', 'JOB_NAME']) delete env[key];
     const run = (args, extra = {}) => {
       const result = spawnSync(process.execPath, ['--import', preload, entry, ...args], {env: {...env, ...extra}, encoding: 'utf8'});
       const read = name => fs.existsSync(path.join(dir, name))
@@ -147,6 +147,17 @@ test('accepted candidate is persisted, read back through the consumer and never 
   fs.writeFileSync(registry, JSON.stringify({...before, artifacts: {...before.artifacts, ...written}}));
   const selected = spawnSync(process.execPath, [downloader, '--select-native-sdk', 'linux-x64', 'cjcj-dev/cjcj'], {env, encoding: 'utf8'});
   assert.equal(selected.stdout, `artifact=456\nversion=${VERSION}\ntag=${TAG}\n`, selected.stderr);
+}));
+
+test('a directly dispatched srcbuild.yml run is an allowed producer', () => fixture(({dir, run}) => {
+  const out = path.join(dir, 'out');
+  const result = run(['publish', 'linux-x64', out],
+    {PRODUCER_PATH: '.github/workflows/srcbuild.yml', JOB_NAME: 'linux-x64 / source SDK / linux-x64 / srcbuild'});
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const provenance = JSON.parse(fs.readFileSync(path.join(out, 'provenance.json'), 'utf8'));
+  assert.deepEqual([provenance.producer.workflow, provenance.producer.event, provenance.producer.attempt, provenance.producer.job.name,
+    provenance.producer.job.attempt, provenance.producer.commit],
+    ['.github/workflows/srcbuild.yml', 'workflow_dispatch', 2, 'linux-x64 / source SDK / linux-x64 / srcbuild', 2, SHA]);
 }));
 
 for (const [label, extra, options, code] of [
