@@ -27,11 +27,41 @@ test('native SDK downloads bind the actual packaged producer and read-only run a
     const download = job.steps.find(step => step.name === 'Receive packaged native SDK');
     assert.match(download.uses, /^actions\/download-artifact@/);
     assert.match(download.with.name, /^cjcj-srcbuild-/);
-    assert.equal(download.with['run-id'], '${{ inputs.native_sdk_run_id || vars.CJCJ_NATIVE_SDK_RUN_ID }}');
     assert.equal(download.with['github-token'], '${{ github.token }}');
     const receive = job.steps.find(step => step.name === 'Verify and select installed native SDK');
     assert.match(receive.run, /node ci\/release\/receive_native_sdk.mjs/);
     assert(job.steps.indexOf(download) < job.steps.indexOf(receive));
+    if (name === 'platform-matrix.yml') {
+      assert.equal(download.with['run-id'], '${{ inputs.native_sdk_run_id || vars.CJCJ_NATIVE_SDK_RUN_ID }}');
+      continue;
+    }
+    // ci.yml: persisted registry entry by default, explicit candidate run only
+    // under dispatch; no repository variable and no fallback between the two.
+    assert.doesNotMatch(JSON.stringify(job), /vars\.CJCJ_NATIVE_SDK/);
+    const select = job.steps.find(step => step.id === 'native-sdk');
+    assert.equal(select.run, 'node ci/release/persist_native_sdk.mjs select linux-x64 >> "$GITHUB_OUTPUT"');
+    assert.equal(select.env.CANDIDATE_RUN, '${{ inputs.native_sdk_run_id }}');
+    assert.equal(select.env.CANDIDATE_VERSION, '${{ inputs.native_sdk_version }}');
+    assert.equal(download.if, "steps.native-sdk.outputs.mode == 'candidate'");
+    assert.equal(download.with['run-id'], '${{ steps.native-sdk.outputs.run }}');
+    assert.equal(download.with.name, 'cjcj-srcbuild-linux-x64-${{ steps.native-sdk.outputs.version }}');
+    const persisted = job.steps.find(step => step.name === 'Receive persisted native SDK');
+    assert.equal(persisted.if, "steps.native-sdk.outputs.mode == 'persisted'");
+    assert.equal(persisted.run, 'node ci/release/download_pinned.mjs cjcj-dev/cjcj "$NATIVE_SDK_ARTIFACT" "$RUNNER_TEMP/native-sdk-artifact"');
+    assert.equal(receive.env.CJCJ_NATIVE_SDK_VERSION, '${{ steps.native-sdk.outputs.version }}');
+    assert(job.steps.indexOf(select) < job.steps.indexOf(download) && job.steps.indexOf(persisted) < job.steps.indexOf(receive));
+    // Publication is a separate job gated on acceptance of the same candidate.
+    const persist = workflow.jobs['persist-native-sdk'];
+    assert.equal(persist.needs, 'package-tests');
+    assert.equal(persist.if, "${{ github.event_name == 'workflow_dispatch' && inputs.persist_native_sdk && needs.package-tests.result == 'success' && needs.package-tests.outputs.mode == 'candidate' }}");
+    assert.deepEqual(persist.permissions, {contents: 'write', actions: 'read'});
+    assert.equal(workflow.on.workflow_dispatch.inputs.persist_native_sdk.default, false);
+    const publish = persist.steps.find(step => /persist_native_sdk\.mjs publish/.test(step.run || ''));
+    assert.equal(publish.env.NATIVE_SDK_ARTIFACT_ID, '${{ needs.package-tests.outputs.artifact }}');
+    assert.equal(publish.shell, 'bash');
+    const keep = persist.steps.find(step => step.name === 'Preserve persistence provenance and log');
+    assert.equal(keep.if, 'always()');
+    assert(persist.steps.indexOf(publish) < persist.steps.indexOf(keep));
   }
   const source = llvmWorkflow('srcbuild-target.yml');
   const producer = Object.values(source.jobs).flatMap(job => job.steps || []).find(step => step.name === 'Upload self-hosted SDK and gate logs');

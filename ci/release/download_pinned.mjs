@@ -5,15 +5,42 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {verify} from './bootstrap_store.mjs';
 
-export function archivePin(repository, artifactId) {
+function archiveRegistry() {
   const file = process.env.BOOTSTRAP_ARCHIVES_PIN || new URL('../bootstrap_artifacts_pin.json', import.meta.url);
-  const registry = JSON.parse(fs.readFileSync(file, 'utf8'));
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+export function archivePin(repository, artifactId) {
+  const registry = archiveRegistry();
   const pin = registry.artifacts?.[artifactId];
   if (registry.version !== 1 || !pin || pin.repository !== repository || pin.prerelease !== true
       || !Number.isSafeInteger(pin.asset) || pin.asset < 1 || !/^[a-f0-9]{64}$/.test(pin.release_sha256)) {
     throw new Error(`PERSISTENT_ARCHIVE_PIN_MISSING artifact=${artifactId}`);
   }
   return pin;
+}
+
+// The accepted full native SDK is an ordinary registry entry whose
+// `native_sdk.target` names the consumer target. Exactly one entry per target
+// is current; replacing it is one reviewed registry commit (old release kept
+// until retired). Missing or duplicate selection stops: no Actions fallback.
+export function nativeSdkPin(repository, target) {
+  const registry = archiveRegistry();
+  const matches = Object.entries(registry.artifacts || {}).filter(([, pin]) => pin?.native_sdk?.target === target);
+  if (matches.length === 0) {
+    throw new Error(`NATIVE_SDK_PERSISTENT_PIN_MISSING target=${target}: no accepted full native SDK is persisted; `
+      + 'producer srcbuild-target.yml cjcj-srcbuild-<target>-<version> must pass ci.yml package-tests in candidate mode '
+      + 'and persist-native-sdk before a reviewed registry entry can be committed');
+  }
+  if (matches.length !== 1) throw new Error(`NATIVE_SDK_PERSISTENT_PIN_AMBIGUOUS target=${target} count=${matches.length}`);
+  const [artifact] = matches[0];
+  const pin = archivePin(repository, artifact);
+  const version = pin.native_sdk.version;
+  if (!/^[0-9A-Za-z][0-9A-Za-z._-]*$/.test(String(version || ''))
+      || typeof pin.tag !== 'string' || !pin.tag.startsWith(`native-sdk-${target}-`)) {
+    throw new Error(`NATIVE_SDK_PERSISTENT_PIN_INVALID target=${target} artifact=${artifact}`);
+  }
+  return {artifact, version, tag: pin.tag, asset: pin.asset};
 }
 
 export function downloadPinned(repository, artifactId, archive, localArchive) {
@@ -59,6 +86,13 @@ export function downloadPinned(repository, artifactId, archive, localArchive) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
+  if (args[0] === '--select-native-sdk') {
+    // Prints GITHUB_OUTPUT records; the download itself stays the ordinary CLI below.
+    if (args.length !== 3) throw new Error('usage: download_pinned.mjs --select-native-sdk TARGET repository');
+    const selected = nativeSdkPin(args[2], args[1]);
+    process.stdout.write(`artifact=${selected.artifact}\nversion=${selected.version}\ntag=${selected.tag}\n`);
+    process.exit(0);
+  }
   let localArchive;
   if (args[0] === '--archive') {
     args.shift();
