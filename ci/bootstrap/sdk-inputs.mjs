@@ -105,6 +105,22 @@ export async function installedFinalStd(supplied, input) {
     'lib/'+native.tuple+'/libcangjie-std-core.a']);
   return {install, commands};
 }
+// The existing shim-only producer updates compiler-owned glue while retaining
+// the independently installed N/AST dependency pair and its original facts.
+async function installedCompilerShim(supplied, input) {
+  const install=await privateRoot(supplied.install);
+  const buildResult=path.resolve(supplied.buildResult||path.join(install,'BUILD-INPUTS.json'));
+  const facts=await readJson(buildResult);
+  const nativeShim=await readInstalledNativeShim({install,facts});
+  const dependency=await readInstalledNativeShim({install:input.llvm.install});
+  if(!facts.targets?.includes('compiler-shim')||!facts.commands?.length
+    ||facts.commands.some(row=>row.rc!==0||row.signal)
+    ||nativeShim.source.commit!==input.compiler.commit
+    ||nativeShim.llvm.commit!==input.llvm.commit||nativeShim.compiler.commit!==input.ast.commit
+    ||nativeShim.llvm.commit!==dependency.llvm.commit||nativeShim.compiler.commit!==dependency.compiler.commit)
+    throw Error('NATIVE_COMPILER_SHIM_INPUT');
+  return {install,buildResult,nativeShim};
+}
 // Validate the actual selected source objects, including an explicit inputs file.
 // The compiler's macro consumer must be this paired source, not an older C tree.
 export async function validateSourceInputs(input) {
@@ -132,6 +148,8 @@ export async function validateSourceInputs(input) {
       if(stdout!==expectedMacro)throw new Error('NATIVE_MACRO_SOURCE '+name);
     }
   }
+  if(input.compiler.shim&&!isDeepStrictEqual(await installedCompilerShim(input.compiler.shim,input),input.compiler.shim))
+    throw Error('NATIVE_COMPILER_SHIM_INPUT_CHANGED');
   if(input.stage2) {
     const actual = await stage2Input(input.stage2,input);
     if(!isDeepStrictEqual(actual,input.stage2))throw new Error('C2_REUSE_INPUT_CHANGED');
@@ -248,6 +266,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       await fs.access(rows[name].gateStatus);
     }
   }
+  if(installations.compilerShim)rows.compiler.shim=await installedCompilerShim(installations.compilerShim,rows);
   // Optional reuse is an original H1 producer, not a copied flow directory.
   // A new candidate/configuration gets a new work domain while retaining the
   // fixed H1 input. Never relabel an old flow's COMPLETE as this configuration.
