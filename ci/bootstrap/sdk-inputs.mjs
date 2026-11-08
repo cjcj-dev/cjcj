@@ -44,7 +44,11 @@ async function selectedSourceInput(repository, selection, registryFile) {
     const selectedGithub=github(selection.repository);
     if(!selectedGithub||selectedGithub!==github(checkoutRepository)) {
       // Network checkouts cannot acquire a different source identity from JSON.
-      if(!registryFile||!path.isAbsolute(checkoutRepository))throw Error('NATIVE_SOURCE_SELECTION repository');
+      const localFile=/^file:\/\/\//.test(checkoutRepository)&&(()=>{
+        const url=new URL(checkoutRepository);
+        return !url.host&&!url.search&&!url.hash&&path.isAbsolute(fileURLToPath(url));
+      })();
+      if(!registryFile||!path.isAbsolute(checkoutRepository)&&!localFile)throw Error('NATIVE_SOURCE_SELECTION repository');
       const common=await git('rev-parse','--path-format=absolute','--git-common-dir');
       const registry=await readJson(registryFile);
       const identity=createHash('sha256').update('origin:'+selection.repository.replace(/\.git$/,'')).digest('hex');
