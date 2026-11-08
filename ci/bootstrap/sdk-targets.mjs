@@ -16,8 +16,7 @@ export const FIXED_INPUTS=Object.freeze({llvm:pins.llvm.LLVM_SHA,
   compiler:pins.source.COMPILER_REF,bounds:pins.source.BOUNDS_REF,
   runtime:pins.runtime.RUNTIME_REF,flatbuffers:pins.llvm.FLATBUFFERS_SHA,
   h1:'46768d63d94da584933f7f6fb53947919b15ca89',host:readHostToolchainPin().replace(/^nightly-/, '')});
-const stageEntry=fileURLToPath(new URL('./sdk-native-stage.mjs',import.meta.url));
-const verifyEntry=fileURLToPath(new URL('./sdk-verify-install.mjs',import.meta.url));
+export const bootstrapEntryRoot=path.resolve(fileURLToPath(new URL('../../',import.meta.url)));
 // A tool update's pending consumer needs the compiler and its actual execution
 // closure. Copy those dependencies for use, never a backup of the whole SDK.
 export async function toolConsumerCopies(sdk,platform) {
@@ -55,7 +54,7 @@ export function compilerExecutionRoot(sdk,selection) {
   if(!['target','separate','bootstrap-host'].includes(role))throw Error('INSTALL_COMPILER_EXECUTION_ROLE');
   return path.join(sdk,role==='separate'?'.compiler-exec':role==='bootstrap-host'?'.host':'');
 }
-export function installationRecipe(selection,{compiler:product,std,bootstrap=false,hostObjects=false,final=false,nativeChecks,tools,layout}={}) {
+export function installationRecipe(selection,{compiler:product,std,bootstrap=false,hostObjects=false,final=false,nativeChecks,tools,layout,entryRoot=bootstrapEntryRoot}={}) {
   const {platform,bootstrapHost:host,compilerExecution:execution,targetComponents:target}=selection;
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
   const nLib=['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+tuple,'lib/'+tuple,'tools/lib'];
@@ -138,7 +137,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     if(copy.to===''||copy.to==='tools')copy.exclude=[...(copy.exclude??[]),
       ...scripts.map(name=>(copy.to===''?'tools/':'')+name)];
   }
-  copies.push(...scripts.map(name=>({from:fileURLToPath(new URL('../../scripts/'+name,import.meta.url)),
+  copies.push(...scripts.map(name=>({from:path.join(entryRoot,'scripts',name),
     to:'tools/'+name,owner:'repository SDK tools'})));
   // The component path consumes the same original N/AST installations as
   // bootstrap, but does not run bootstrap's native-check stage. Transport the
@@ -176,7 +175,9 @@ export function bootstrapPhases(input) {
   const phases=input.stage2 ? ['stage2','stage3-std','stage3'] : [...BOOTSTRAP_PHASES];
   return input.deliveryStage==='stage2-target-sdk' ? [...phases.slice(0,-1),'stage2-target-sdk'] : phases;
 }
-export function createBootstrapTargets(input) {
+export function createBootstrapTargets(input,{entryRoot=bootstrapEntryRoot}={}) {
+  const entry=name=>path.join(entryRoot,'ci/bootstrap',name);
+  const stageEntry=entry('sdk-native-stage.mjs'),verifyEntry=entry('sdk-verify-install.mjs');
   const {work,install,platform,host,llvm,runtime,ast,h1,compiler,stdlib,tools}=input;
   stdBuildType(input.stdBuildType);
   const finalStage=input.deliveryStage??'stage3';
@@ -221,7 +222,7 @@ export function createBootstrapTargets(input) {
       ...Object.fromEntries(['compiler','runtime','std','llvm'].map(name=>[name,{install:transitional&&name==='llvm'?llvm.install:
         executionSource||(name==='runtime'?runtime.install:name==='llvm'?llvm.install:std),platform}]))};
     const selection={platform,bootstrapHost:host,compilerExecution:execution,targetComponents:{compiler,std:stdlib,runtime,llvm,ast}};
-    const recipe=installationRecipe(selection,{compiler:product,std,hostObjects,final:['stage3','stage2-target-sdk'].includes(id),bootstrap:true,nativeChecks:path.join(work,'native-check')});
+    const recipe=installationRecipe(selection,{compiler:product,std,hostObjects,final:['stage3','stage2-target-sdk'].includes(id),bootstrap:true,nativeChecks:path.join(work,'native-check'),entryRoot});
     return {id,depends,commands,output:id===finalStage?'${install}':path.join(work,'sdk-'+id),...recipe,
       copies:[...recipe.copies,...(['stage2','stage3'].includes(id)?[
         {from:'${build}/compiler/share/cjcj',to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
@@ -239,7 +240,7 @@ export function createBootstrapTargets(input) {
   const repos={};
   for(const [id,row]of Object.entries({h1,compiler2:compiler,compiler3:compiler,std0:stdlib,stdBootstrap:stdlib,std1:stdlib}))
     if(!(id==='h1'&&h1.product))repos[id]={root:row.repository,commit:row.commit,tree:row.tree,checkout:path.join(work,'sources',id)};
-  const check=fileURLToPath(new URL('./sdk-native-input-check.mjs',import.meta.url));
+  const check=entry('sdk-native-input-check.mjs');
   const nativeTargets=Object.entries({llvm,runtime,ast}).map(([name,row])=>({
     id:{llvm:'nativeN',runtime:'nativeR',ast:'nativeAST'}[name],output:row.install,
     reuse:{commit:row.commit,tree:row.tree,configuration:row.configuration,source:row.buildResult,
@@ -285,7 +286,7 @@ export function createBootstrapTargets(input) {
         runtime:{...runtime,platform},llvm:{...llvm,platform}},
       targetComponents:{compiler,std:stdlib,runtime,llvm,ast}};
     const recipe=installationRecipe(selection,
-      {compiler:path.join(reused.install,compilerFile),std:reused.bootstrapStd,bootstrap:true,nativeChecks:path.join(work,'native-check')});
+      {compiler:path.join(reused.install,compilerFile),std:reused.bootstrapStd,bootstrap:true,nativeChecks:path.join(work,'native-check'),entryRoot});
     stage.copies=[...recipe.copies,
       {from:path.join(reused.install,'share/cjcj'),to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
       ...(reused.compilerInputs?[{from:reused.compilerInputs,to:'compiler-inputs.json',owner:'compiler'}]:[])];
@@ -339,7 +340,7 @@ export function createBootstrapTargets(input) {
     delete repos.compiler3;
   }
   stages.find(s=>s.id==='stage3-std').test={commands:[{argv:[process.execPath,
-    fileURLToPath(new URL('./sdk-final-std.mjs',import.meta.url)), '--sdk',out('stage2'),
+    entry('sdk-final-std.mjs'), '--sdk',out('stage2'),
     '--std','${output}','--runtime',runtime.install,'--host',host.install,
     '--platform',platform,'--work','${work}/final-std-consumers']}]};
   // The original Linux language obligation consumes the final installed
@@ -347,7 +348,7 @@ export function createBootstrapTargets(input) {
   // R's normal install carries its actual language scripts and build inputs.
   for(const stage of stages.filter(s=>['stage2-target-sdk','stage3'].includes(s.id))) {
     if(native.os==='linux')stage.test={commands:[{argv:[process.execPath,
-      fileURLToPath(new URL('./sdk-installed-language.mjs',import.meta.url)),
+      entry('sdk-installed-language.mjs'),
       '--sdk','${output}','--platform',platform,'--work','${work}/'+stage.id+'-language']}]};
   }
   // The first macro consumer is AFTER C2 has been built and installed. H/H1
@@ -372,6 +373,12 @@ export function createBootstrapTargets(input) {
 // Checking before buildFlow starts prevents changing a command or dropping a native check.
 export function validateBootstrapTargets(config) {
   if(!config.bootstrapInputs)throw new Error('BOOTSTRAP_INPUTS_REQUIRED');
-  const expected=createBootstrapTargets(config.bootstrapInputs);
-  if(!isDeepStrictEqual(JSON.parse(JSON.stringify(config)),JSON.parse(JSON.stringify(expected))))throw new Error('BOOTSTRAP_TARGET_INPUT_MISMATCH');
+  const roots=[bootstrapEntryRoot];
+  const repository=config.bootstrapInputs.compiler?.repository;
+  if(typeof repository==='string'&&path.isAbsolute(repository))roots.push(path.resolve(repository));
+  for(const entryRoot of new Set(roots)) {
+    const expected=createBootstrapTargets(config.bootstrapInputs,{entryRoot});
+    if(isDeepStrictEqual(JSON.parse(JSON.stringify(config)),JSON.parse(JSON.stringify(expected))))return entryRoot;
+  }
+  throw new Error('BOOTSTRAP_TARGET_INPUT_MISMATCH');
 }

@@ -362,15 +362,31 @@ export async function publishPaths(paths) {
 export async function buildFlow(config, options = {}) {
   return supervisionWork.run(path.resolve(config.work), () => buildFlowInWork(config, options));
 }
+// A retained table still names the exact old producer entries. Only a clean
+// descendant orchestrator may repair its in-process installation on --from.
+export async function retainedEntryResume({root,entryRoot,compiler,from,resumeInstalled,previous,configuration}) {
+  if(!from||resumeInstalled||!previous||previous.configuration!==configuration)
+    throw new Error('RETAINED_ENTRY_RESUME');
+  try {
+    const git=async(...args)=>(await capture('git',['-C',root,...args])).stdout.trim();
+    if(await git('rev-parse','--show-toplevel')!==root
+      ||await git('status','--porcelain','--untracked-files=no'))throw new Error('orchestrator checkout');
+    const commit=await git('rev-parse','HEAD');
+    await git('merge-base','--is-ancestor',compiler.commit,commit);
+    return {root,commit,entryRoot};
+  }catch(cause){throw new Error('RETAINED_ENTRY_RESUME',{cause});}
+}
 async function buildFlowInWork(config, {through, from, packageOutput = true, resumeInstalled, acceptRecords} = {}) {
   // The entry recipes name the target platform, which is a property of the flow,
   // not of the machine producing it. Carry it in one place so both preparation
   // and final installation read the same value.
   const metadataPlatform = (metadata, flow) => flow.platform || metadata?.platform;
   const work = await privateRoot(config.work), install = await privateRoot(config.install);
+  const ownRoot=path.resolve(fileURLToPath(new URL('../../',import.meta.url)));
+  let entryRoot=ownRoot;
   if(config.bootstrapInputs || config.stages.some(s=>s.id==='stage0')) {
     const {validateBootstrapTargets}=await import('./sdk-targets.mjs');
-    validateBootstrapTargets(config);
+    entryRoot=validateBootstrapTargets(config);
     const {validateSourceInputs}=await import('./sdk-inputs.mjs');
     await validateSourceInputs(config.bootstrapInputs);
   }
@@ -381,6 +397,8 @@ async function buildFlowInWork(config, {through, from, packageOutput = true, res
     if(error.code==='ENOENT')return null;throw error;
   });
   if(previous && previous.configuration!==configuration)throw new Error('WORK_INPUT_MISMATCH');
+  const orchestrator=entryRoot!==ownRoot?await retainedEntryResume({root:ownRoot,entryRoot,
+    compiler:config.bootstrapInputs.compiler,from,resumeInstalled,previous,configuration}):null;
   if(!previous && (from || resumeInstalled))throw new Error('WORK_INPUTS_MISSING');
   if (acceptRecords && !resumeInstalled) throw new Error('STD_RESUME_ARGUMENTS');
   if (resumeInstalled && from && from !== resumeInstalled) throw new Error('STD_RESUME_STAGE from');
@@ -421,10 +439,11 @@ async function buildFlowInWork(config, {through, from, packageOutput = true, res
   // Every skipped stage is still checked again below; this is not acceptance.
   const predecessorIds = new Set(ordered.slice(0,start).map(stage => stage.id));
   const records = [], outputs = {}, result = {configuration,status: 'WIP',
-    stages: (previous?.stages || []).filter(stage => predecessorIds.has(stage.id)), commands: records};
+    stages: (previous?.stages || []).filter(stage => predecessorIds.has(stage.id)), commands: records,
+    ...(orchestrator?{orchestrator}:{})};
   await fs.mkdir(work, {recursive: true});
   let resumeState = path.join(work,'build-result.json');
-  if(previous?.status==='COMPLETE') {
+  if(previous?.status==='COMPLETE'||orchestrator) {
     const retained = path.join(work,'build-result.json.previous-'+crypto.randomUUID());
     await fs.rename(resumeState,retained);
     resumeState = retained;

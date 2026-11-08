@@ -64,6 +64,12 @@ test('H1 execution and N target backend use explicit different library directori
  wrong.stages.find(s=>s.id==='stage0-run').metadata.selection.compilerExecution.llvm.install=input.host.install;
  assert.throws(()=>validateBootstrapTargets(wrong),/BOOTSTRAP_TARGET_INPUT_MISMATCH/);
  assert.doesNotThrow(()=>validateBootstrapTargets(c));
+ const own=validateBootstrapTargets(c),retained=createBootstrapTargets(input,{entryRoot:input.compiler.repository});
+ assert.deepEqual(c,createBootstrapTargets(input,{entryRoot:own}));
+ assert.equal(validateBootstrapTargets(retained),input.compiler.repository);
+ assert.throws(()=>validateBootstrapTargets(createBootstrapTargets(input,{entryRoot:'/fixture/unrelated-entry'})),/BOOTSTRAP_TARGET_INPUT_MISMATCH/);
+ const changedRetained=structuredClone(retained);changedRetained.stages[0].test.commands[0].argv.push('--skip-check');
+ assert.throws(()=>validateBootstrapTargets(changedRetained),/BOOTSTRAP_TARGET_INPUT_MISMATCH/);
  for(const id of ['stage2','stage3'])assert.ok(c.stages.find(s=>s.id===id).entries[0].libraries.includes('runtime/lib/linux_x86_64_cjnative'));
  const finalStd=c.stages.find(s=>s.id==='stage3-std').test.commands[0].argv;
  assert.equal(finalStd[finalStd.indexOf('--host')+1],'/fixture/H','colour comparison retains the actual bootstrap reference');
