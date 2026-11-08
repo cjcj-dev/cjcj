@@ -270,8 +270,7 @@ export async function prepareSources(repos, records) {
       // repository and a distinct destination instead of resetting a shared tree.
       if (repo.checkout && !(await fs.stat(repo.checkout).catch(()=>null))) {
         await privateRoot(repo.checkout);
-        await command(['git', 'clone', '--no-checkout', repo.root, repo.checkout], {records});
-        await command(['git', '-C', repo.checkout, 'checkout', '--detach', repo.commit], {records});
+        await command(['git', '-C', repo.root, 'worktree', 'add', '--detach', repo.checkout, repo.commit], {records});
       }
       repo.root=effectiveSourceRoot(repo);
       const git = async (...args) => (await capture('git', ['-C', repo.root, ...args])).stdout.trim();

@@ -206,6 +206,12 @@ test('public source preparation failure preserves predecessors for subsequent no
  r=await cli(c,['--from','next','--no-package']);assert.equal(r.status,0,r.stdout+r.stderr);
  const state=JSON.parse(await fs.readFile(work+'/build-result.json'));
  assert.deepEqual(state.stages.map(s=>s.id),['pre','next']);
+ const linked={...c,work:work+'/linked',install:work+'/linked/installed',
+  repos:{input:{root:source,commit,tree,checkout:work+'/checkout'}}};
+ r=await cli(linked,['--no-package']);assert.equal(r.status,0,r.stdout+r.stderr);
+ const common=repo=>run('git',['-C',repo,'rev-parse','--path-format=absolute','--git-common-dir']).stdout.trim();
+ assert.equal(common(linked.repos.input.checkout),common(source),'SDK_PRIVATE_CHECKOUT_MUST_SHARE_CANONICAL_GIT_ROOT');
+ assert.equal(await fs.stat(path.join(common(source),'objects/info/alternates')).catch(()=>null),null);
 });
 
 // The registered flow gate includes the public archive-source branch.

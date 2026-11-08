@@ -42,7 +42,8 @@ export async function configureGhaInputs(env=process.env) {
       const dirty=await capture('git',['-C',source,'status','--porcelain']);
       if(head.stdout.trim()!==commit||origin.stdout.trim()!==url||dirty.stdout.trim())throw new Error('GHA_NATIVE_SOURCE_REUSE_CHANGED '+name);
     } else {
-      await command(['git','clone','--no-checkout','--filter=blob:none',url,source]);
+      await command(['git','init',source]);
+      await command(['git','-C',source,'remote','add','origin',url]);
       await command(['git','-C',source,'fetch','--depth=1','origin',commit]);
       await command(['git','-C',source,'checkout','--detach',commit]);
     }

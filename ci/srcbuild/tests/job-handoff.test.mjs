@@ -177,10 +177,17 @@ test('native HLE locations and relative component paths survive the public job h
 
 test('public handoff carries native tool dependency locations and rejects an unarchived source',async t=>{
  const f=await fixture(t),selection={};
+ const donor=path.join(f.dir,'json-source');await fs.mkdir(donor);
+ const git=(source,...args)=>{const r=spawnSync('git',['-C',source,...args],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
+ await fs.writeFile(path.join(donor,'transport.txt'),'finite dependency transport json');
+ git(donor,'init','-q');git(donor,'add','.');
+ git(donor,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','test: fixed native source');
+ git(donor,'remote','add','origin',donor);
+ const commit=git(donor,'rev-parse','HEAD');
  for(const name of ['json']) {
-  const source=path.join(f.root,'.srcbuild','native-tools',name);await fs.mkdir(source,{recursive:true});
-  await fs.writeFile(path.join(source,'transport.txt'),'finite dependency transport '+name);
-  selection[name]={repo:'fixture://'+name,commit:'a'.repeat(40),path:source};
+  const source=path.join(f.root,'.srcbuild','native-tools',name);await fs.mkdir(path.dirname(source),{recursive:true});
+  git(donor,'worktree','add','--detach',source,commit);
+  selection[name]={repo:donor,commit,path:source};
  }
  const descriptor=path.join(f.root,'.srcbuild','native-tool-dependencies.json');
  const inputRoot=path.join(f.root,'.srcbuild'),sourceDescriptor=path.join(inputRoot,'native-source-dependencies.json');
@@ -196,11 +203,16 @@ test('public handoff carries native tool dependency locations and rejects an una
  await fs.writeFile(sourceDescriptor,JSON.stringify(relativeSelection));
  await configure();f.env.CJCJ_NATIVE_TOOL_DEPENDENCIES=descriptor;
  assert.equal(f.run('pack').rc,0);
+ const members=spawnSync('tar',['-tf',path.join(f.archive,'payload.tar')],{encoding:'utf8'});
+ assert.equal(members.status,0,members.stderr);
+ assert.doesNotMatch(members.stdout,/native-tools\/json|\.git(?:\/|$)/,'source and Git objects must not travel in the artifact');
  await fs.rm(f.root,{recursive:true});await fs.mkdir(f.root);
- const restored=f.run('restore');assert.equal(restored.rc,0,restored.output);
+ git(donor,'worktree','prune');
+ const restored=f.run('restore',{GITHUB_ACTIONS:'true'});assert.equal(restored.rc,0,restored.output);
  assert((await fs.readFile(f.env.GITHUB_ENV,'utf8')).includes('CJCJ_NATIVE_TOOL_DEPENDENCIES='+descriptor));
  assert.deepEqual(JSON.parse(await fs.readFile(descriptor)),selection);
  for(const [name,row]of Object.entries(selection))assert.equal(await fs.readFile(path.join(row.path,'transport.txt'),'utf8'),'finite dependency transport '+name);
+ assert.equal(git(selection.json.path,'rev-parse','HEAD'),commit);
  const outside=path.join(f.dir,'outside');await fs.mkdir(outside);selection.json.path=outside;
  await fs.writeFile(descriptor,JSON.stringify(selection));const rejected=f.run('pack');
  assert.equal(rejected.rc,1);assert.match(rejected.output,/handoff native tool dependency outside archived inputs/);
