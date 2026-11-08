@@ -14,25 +14,25 @@ import {verifyTuplePayloads} from '../release/verify-tuple-payloads.mjs';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 import {verifyInstalledLlvmTuple} from './llvm-tuple.mjs';
 
-export const producer = Object.freeze({repository:'cjcj-dev/cjcj', run:42413454092, attempt:1,
-  entry:'6d9b54f6b7cc612a38c3868de08f0544b08f9446',
+export const producer = Object.freeze({repository:'cjcj-dev/cjcj', run:42439807224, attempt:1,
+  entry:'5eb8bc6da68e372c6a13876a5fe48ab92c9a9462',
   llvm:'ba518962f0cda46ea71cad033214e8fe1ea83249',
-  runtime:'b33a70ed7354799f42218ce890fe729110a50b42',
+  runtime:'37e4fe3d14e41103643c5975f21dd75f8201ac04',
   compiler:'41b22350b8eb5b0c8244704f906b7b8d3096eb9c',
   flatbuffers:'c3e4d69cbd5950e43f775ba76eadb30750d6e0b7'});
 export const tuples = Object.freeze({
-  linux_aarch64:{artifact:13592311144, bytes:98464800,
-    sums:'147ca789b28a39e420b8b362127eb3c18422086bd447b76c405d9127a2686887'},
-  darwin_aarch64:{artifact:13591933514, bytes:93811233,
-    sums:'0fc621e65b1c21f68b9eec2da90ff554e16d991615d9cb8b494f588bda9adc72'},
-  darwin_x86_64:{artifact:13591789042, bytes:103705940,
-    sums:'5f9894bc30ad8f471052b2ef95c86190dad6e928db6336a24e3321f1b71a02e9'},
+  linux_aarch64:{artifact:13601022871, bytes:98464800,
+    sums:'e6e0a44d507e4fdb772b32f1667e5adb12139b3e3251fdac90b96a12e32d0541'},
+  darwin_aarch64:{artifact:13600772937, bytes:93797249,
+    sums:'7c8bd01a525e3eabb0741b943cd0610321dd8521774c6470654b5debe0e0fbfc'},
+  darwin_x86_64:{artifact:13600772984, bytes:103690063,
+    sums:'67a752ec072157a503aa5a3189a3fe1f7371a326864ac221d39d26363dfde6cb'},
 });
 // Retained manifests from the SAME completed producer as the tuple/shim object.
 export const dylibs = Object.freeze({
-  linux_aarch64:{artifact:13591755324,bytes:75602211,sha256:'40688641ac8e11dad3cd95a4a9c09a4bfceab18e38b6ae8454e4532b7a04935b'},
-  darwin_x86_64:{artifact:13592473009,bytes:24729564,sha256:'41b9a49a131025aa7128869874bead4e31ead4db1a9c2005825cfa59bc061e3f'},
-  darwin_aarch64:{artifact:13591765728,bytes:23599492,sha256:'ca9a715c36a656226d15287bde88e78d2dff8deec3daa5b6991327ad974b66ed'},
+  linux_aarch64:{artifact:13601459358,bytes:75602193,sha256:'40688641ac8e11dad3cd95a4a9c09a4bfceab18e38b6ae8454e4532b7a04935b'},
+  darwin_x86_64:{artifact:13602539515,bytes:24729559,sha256:'18c992d0329ab636dec5cd40083fa3520c08051ddabf0fadf347dcebe73b8eea'},
+  darwin_aarch64:{artifact:13601633789,bytes:23599230,sha256:'fbb4fde75e4ae2ea3f576b91f3c87bdc198c602c8cbbda1adb71a3ab25727ed4'},
 });
 const GiB = 1024 ** 3;
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));

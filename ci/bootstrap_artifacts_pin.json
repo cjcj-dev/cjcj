@@ -161,6 +161,34 @@
       "release_sha256": "e1e036da4ffc921812557df15a2c533f4c326a74490d82e8199708a70af81c0d",
       "prerelease": true,
       "tag": "llvm-dylib-ba518962f0cd-42413454092-1-prerelease"
+    },
+    "13601619842": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 722810477,
+      "release_sha256": "835ae3de973b2c8475c3d4c6bad50d4aa8d78b15a163bd410960c7cde3ebf4e8",
+      "prerelease": true,
+      "tag": "llvm-dylib-ba518962f0cd-42439807224-1-prerelease"
+    },
+    "13601459358": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 722811862,
+      "release_sha256": "c6fa899dbb713e01a10b24c9857e682e87a3c0d54a099a5fef5403a1da1adcd9",
+      "prerelease": true,
+      "tag": "llvm-dylib-ba518962f0cd-42439807224-1-prerelease"
+    },
+    "13602539515": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 722813383,
+      "release_sha256": "46478c0a0aa3e4f6bf7ba8d89314f4511e1b6153d2464a7488dcb5d515f2b14d",
+      "prerelease": true,
+      "tag": "llvm-dylib-ba518962f0cd-42439807224-1-prerelease"
+    },
+    "13601633789": {
+      "repository": "cjcj-dev/cjcj",
+      "asset": 722813942,
+      "release_sha256": "dfc03d5e96e480b6921ab75dad6f2d52f99e394452b629ca56d83cc43c42815b",
+      "prerelease": true,
+      "tag": "llvm-dylib-ba518962f0cd-42439807224-1-prerelease"
     }
   }
 }
