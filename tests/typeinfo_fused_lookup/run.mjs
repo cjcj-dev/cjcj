@@ -48,9 +48,10 @@ for (const opt of ['O0', 'O2']) {
   if (compile.rc !== 0) continue;
   const exec = run(`${opt}.run`, [exe], dir);
   assert(`${opt}:run`, exec.rc === 0 && exec.text.includes('typeinfo_fused_lookup OK'), exec.rc);
-  // The saved bitcode is the module given to the backend; intrinsics are lowered later.
+  // Inspect only backend inputs. The sibling .opt.bc has already lowered these
+  // intrinsics and must not overwrite the same functions in the map below.
   const bcs = fs.readdirSync(path.join(dir, 'temps'), {recursive: true}).map(String)
-    .filter(f => /typeinfo_fused_lookup.*\.(bc|ll)$/.test(f)).map(f => path.join(dir, 'temps', f));
+    .filter(f => /typeinfo_fused_lookup\.(bc|ll)$/.test(f)).map(f => path.join(dir, 'temps', f));
   let ir = '';
   for (const f of bcs) {
     if (f.endsWith('.ll')) ir += fs.readFileSync(f, 'utf8');
