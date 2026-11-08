@@ -241,7 +241,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
 
     public func GetSuccessorIndex(index: Int64): Int64 {
         var first: Int64 = 0
-        while (first < operands.size && !(operands[first] as Block).isSome()) { first++ }
+        while (first < operands.size && !operands[first].IsBlock()) { first++ }
         return first + index
     }
 
@@ -257,14 +257,14 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         let out = ArrayList<Block>()
         var index: Int64 = 0
         while (index < operands.size) {
-            if (let Some(block) <- (operands[index] as Block)) { out.add(block) }
+            if (let Some(block) <- operands[index].AsBlock()) { out.add(block) }
             index++
         }
         return out
     }
 
     public func GetNumOfSuccessor(): Int64 { return operands.size - GetSuccessorIndex(0) }
-    public func GetSuccessor(index: Int64): Block { return (operands[GetSuccessorIndex(index)] as Block).getOrThrow() }
+    public func GetSuccessor(index: Int64): Block { return operands[GetSuccessorIndex(index)].AsBlock().getOrThrow() }
 
     public func ReplaceSuccessor(oldBlock: Block, newBlock: Block): Unit {
         for (index in 0..GetNumOfSuccessor()) {
@@ -301,7 +301,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
             return
         }
         operands[idx] = newOperand
-        if (let Some(newBlock) <- (newOperand as Block)) {
+        if (let Some(newBlock) <- newOperand.AsBlock()) {
             newBlock.AddPredecessor(parent.getOrThrow())
         } else {
             newOperand.AddUserOnly(this)
@@ -313,13 +313,13 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
             }
         }
         if (stillUsed) {
-            if (let Some(_) <- (oldOperand as Block)) {
+            if (oldOperand.IsBlock()) {
                 return
             }
             oldOperand.RemoveUserOccurrenceOnly(this)
             return
         }
-        if (let Some(oldBlock) <- (oldOperand as Block)) {
+        if (let Some(oldBlock) <- oldOperand.AsBlock()) {
             oldBlock.RemovePredecessor(parent.getOrThrow())
         } else {
             oldOperand.RemoveUserOnly(this)
@@ -344,7 +344,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         if (!found) {
             return
         }
-        if (let Some(oldBlock) <- (oldOperand as Block)) {
+        if (let Some(oldBlock) <- oldOperand.AsBlock()) {
             oldBlock.RemovePredecessor(parent.getOrThrow())
         } else {
             var removedCount: Int64 = 0
@@ -353,7 +353,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
                 removedCount++
             }
         }
-        if (let Some(newBlock) <- (newOperand as Block)) {
+        if (let Some(newBlock) <- newOperand.AsBlock()) {
             newBlock.AddPredecessor(parent.getOrThrow())
         } else {
             var addedCount: Int64 = 0
@@ -371,7 +371,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
 
     public func EraseOperands(): Unit {
         for (operand in operands) {
-            if (let Some(_) <- (operand as Block)) {
+            if (operand.IsBlock()) {
                 // DetachFromBlockOnly owns CFG predecessor removal; preserve
                 // the all-match user cleanup for this relation.
                 operand.RemoveUserOnly(this)
