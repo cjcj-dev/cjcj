@@ -27,7 +27,8 @@ export async function assertLauncherFormat({binary, native, platform}) {
   console.log(`ENTRY_LAUNCHER_FORMAT_PASS platform=${platform} result=${JSON.stringify(actual)}`);
   return actual;
 }
-export async function installEntries({root, build, groups, tools = {}, records, platform}) {
+export async function installEntries({root, build, groups, tools = {}, records, platform,
+  entryRoot=fileURLToPath(new URL('../../',import.meta.url))}) {
   // The launcher refuses an entry whose platform is not the one it was built
   // for, so this field has to name the target, not the machine producing it. A
   // Windows cell cross-built on Linux otherwise writes `linux` into every
@@ -40,7 +41,7 @@ export async function installEntries({root, build, groups, tools = {}, records, 
   const system = entryPlatformName(platform);
   const native = sdkPlatform(platform);
   root = await privateRoot(root);
-  const source = fileURLToPath(new URL('./native-launcher/', import.meta.url));
+  const source = path.join(entryRoot,'ci/bootstrap/native-launcher')+path.sep;
   // The launcher is produced for the platform its recipes name. A cross cell
   // installs it into a target SDK, so building the host's launcher and writing
   // the target's name into the recipe ships a host-format binary that the target

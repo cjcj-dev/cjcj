@@ -1,4 +1,4 @@
-import test from'node:test';import assert from'node:assert/strict';import fs from'node:fs/promises';import path from'node:path';import {spawnSync}from'node:child_process';import {installEntries,assertLauncherFormat}from'./sdk-install-entries.mjs';import {fileDigest}from'./sdk-flow.mjs';
+import test from'node:test';import assert from'node:assert/strict';import fs from'node:fs/promises';import path from'node:path';import {spawnSync}from'node:child_process';import {fileURLToPath}from'node:url';import {installEntries,assertLauncherFormat}from'./sdk-install-entries.mjs';import {fileDigest}from'./sdk-flow.mjs';
 const parent=process.env.RELEASE_EVIDENCE_TEST_ROOT;if(!parent)throw new Error('RELEASE_EVIDENCE_TEST_ROOT required');await fs.mkdir(parent,{recursive:true});
 test('bundled Python passes caller helper libraries to subprocesses while compiler entries remain isolated',
  {skip:process.platform!=='linux'},async()=>{
@@ -107,8 +107,11 @@ set_target_properties(compiler PROPERTIES RUNTIME_OUTPUT_DIRECTORY "\${SDK}/bin"
  const payload=path.join(sdk,'bin','compiler'+exe),original=await fileDigest(payload);
  for(const name of ['cjc','cjc-frontend'])await fs.copyFile(payload,path.join(sdk,'bin',name+exe));
  const records=[];
- await installEntries({root:sdk,build:path.join(work,'entry-build'),platform,records,
+ const entryRoot=process.env.RETAINED_ENTRY_ROOT||fileURLToPath(new URL('../../',import.meta.url));
+ await installEntries({root:sdk,build:path.join(work,'entry-build'),platform,records,entryRoot,
   groups:[{directory:'bin',retain:'libexec/compiler',names:['cjc'+exe,'cjc-frontend'+exe],libraries:['.compiler-exec/runtime']}]});
+ const configure=records.find(row=>row.argv.includes('-S'));
+ assert.equal(configure.argv[configure.argv.indexOf('-S')+1],path.join(entryRoot,'ci/bootstrap/native-launcher')+path.sep);
  await fs.writeFile(path.join(work,'install-commands.json'),JSON.stringify(records,null,2));
  const argumentsToKeep=['space value','quote"value','back\\slash'];
  const results=[];

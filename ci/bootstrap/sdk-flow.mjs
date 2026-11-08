@@ -189,10 +189,10 @@ export async function assembleDirectory(root, produce, signal = cancellation.get
 }
 // Both the bootstrap graph and install-only consume these existing recipes.
 // Tests observe the pending tree, including its real launcher, before publish.
-export async function installRecipe({root, recipe, build, tools, platform, test, vars = {}, records = [], consume}) {
+export async function installRecipe({root, recipe, build, tools, platform, test, vars = {}, records = [], consume,entryRoot}) {
   return assembleDirectory(root, async pending => {
     const owners = await copyOutputs(pending, recipe.copies || []);
-    if (recipe.entries?.length) await installEntries({root:pending,build,groups:recipe.entries,tools,records,platform});
+    if (recipe.entries?.length) await installEntries({root:pending,build,groups:recipe.entries,tools,records,platform,entryRoot});
     await installLinks(pending,recipe.links);
     if(recipe.runtimeLanguageInputs) {
       const {buildConfig}=await import('../../build/lib/config.mjs');
@@ -520,7 +520,7 @@ async function buildFlowInWork(config, {through, from, packageOutput = true, res
         ...(stage.metadata?{metadata:JSON.parse(JSON.stringify(stage.metadata),(_key,value)=>expand(value,local))}:{})};
       let owners={};
       if(stage.copies?.length || stage.entries || stage.links) {
-        owners=await installRecipe({root:output,recipe,build:path.join(build,'entries'),tools:config.tools,
+        owners=await installRecipe({root:output,recipe,build:path.join(build,'entries'),tools:config.tools,entryRoot,
           platform:metadataPlatform(stage.metadata,config),test,vars:local,records});
       } else {
         // Native producer outputs stay native; they are not advertised as a
