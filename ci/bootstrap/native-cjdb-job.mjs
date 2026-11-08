@@ -97,13 +97,15 @@ export async function packageNativeInputs({input,work,env=process.env}) {
       if(path.basename(file)==='.git')throw Error('NATIVE_INPUT_ONLY_GIT_PAYLOAD '+file);return true;
     }});
   };
-  const privateTools=locations.tools?.privateRoot;await copy(privateTools);
-  await fs.access(path.join(payload,privateTools,'ts/src/sharedbuild/cjcj-stage1.sh'));
-  const descriptor=locations.hleDependencies;relative(descriptor);
-  const hle=await readHleDependencies(path.join(input,descriptor),locations.platform);await copy(descriptor);
-  for(const name of ['node','modules','cjbind'])await copy(path.relative(input,hle[name].path));
-  if(!locations.nativeToolDependencies)throw Error('NATIVE_INPUT_ONLY_TOOL_DEPENDENCIES');
-  await copy(locations.nativeToolDependencies); // source facts only; each SDK job fetches JSON itself.
+  // HLE is a later tools input, not an N/AST/H1 build prerequisite. Carry a
+  // supplied complete HLE deployment; the tools producer still requires it.
+  const descriptor=locations.hleDependencies;
+  if(descriptor) {
+    relative(descriptor);
+    const hle=await readHleDependencies(path.join(input,descriptor),locations.platform);await copy(descriptor);
+    for(const name of ['node','modules','cjbind'])await copy(path.relative(input,hle[name].path));
+  }
+  if(locations.nativeToolDependencies)await copy(locations.nativeToolDependencies); // source facts only
   await fs.cp(install,path.join(payload,'native'),{recursive:true,verbatimSymlinks:true});
   await fs.cp(runtime.install,path.join(payload,'runtime'),{recursive:true,verbatimSymlinks:true});
   if(readHostToolchainPin(locations.platform)!=='nightly-'+pair.hostVersion)throw Error('NATIVE_INPUT_ONLY_HOST_SELECTION');
@@ -117,8 +119,8 @@ export async function packageNativeInputs({input,work,env=process.env}) {
   await fs.access(path.join(payload,'native',python.record));
   await atomicJson(path.join(output,'locations.json'),{...locations,
     host:{version:pair.hostVersion,install:prefix('host/sdk'),archive:prefix('host/'+path.basename(host.archive))},
-    tools:{...locations.tools,privateRoot:prefix(privateTools)},hleDependencies:prefix(descriptor),
-    nativeToolDependencies:prefix(locations.nativeToolDependencies),installations:{
+    tools:locations.tools??{},...(descriptor?{hleDependencies:prefix(descriptor)}:{}),
+    ...(locations.nativeToolDependencies?{nativeToolDependencies:prefix(locations.nativeToolDependencies)}:{}),installations:{
       llvm:{...native,verification:{python:{record:prefix('native/'+python.record),sha256:python.sha256}}},ast:native,
       runtime:{install:prefix('runtime'),buildResult:prefix('runtime/NATIVE-INPUTS.json'),configuration:runtime.configuration}}});
   try {await command(['tar','-cf',path.join(output,'native-inputs.tar'),'-C',output,'.native-inputs'],{env,records});}

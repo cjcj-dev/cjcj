@@ -31,7 +31,7 @@ export async function configureGhaInputs(env=process.env) {
     config.sourceSelection.compiler?{ast:{repository:compiler.url,commit:compiler.tag}}:{});
   if (Boolean(env.CJCJ_NATIVE_RUNTIME_INSTALL) !== Boolean(pair)) throw new Error('GHA_NATIVE_RUNTIME_PAIR_INSTALL_REQUIRED');
   if(locations.platform!==platform)throw new Error('GHA_NATIVE_ARTIFACT_PLATFORM');
-  await configureHleInput(root,platform,env.GITHUB_ENV);
+  if(locations.hleDependencies)await configureHleInput(root,platform,env.GITHUB_ENV);
   await configureNativeToolInput({root,workspace,platform,envFile:env.GITHUB_ENV});
   const sources={compiler:path.resolve(env.GITHUB_WORKSPACE)};
   for(const [name,{repository:url,commit}] of Object.entries(selection)) {
@@ -68,7 +68,7 @@ export async function configureGhaInputs(env=process.env) {
   if (pair && (path.resolve(selectedHost.install) !== path.resolve(env.CJCJ_BOOTSTRAP_BASE)
     || !selectedHost.archive || path.resolve(selectedHost.archive) !== path.resolve(env.CJCJ_BOOTSTRAP_BASE_ARCHIVE || '')))
     throw new Error('GHA_NATIVE_SELECTED_HOST_CHANGED');
-  const tools={...locations.tools,privateRoot:member(locations.tools.privateRoot),
+  const tools={...locations.tools,
     cc:env.CC||'clang',cxx:env.CXX||'clang++',launcher:env.CMAKE_CXX_COMPILER_LAUNCHER||'sccache',zx:'zx'};
   if(env.GITHUB_ENV)await fs.appendFile(env.GITHUB_ENV,'CJCJ_BOOTSTRAP_WORK='+path.join(workspace,'native-bootstrap')+'\n');
   return prepareNativeInputs({platform,sources,installations,tools,sourceSelection:selection,

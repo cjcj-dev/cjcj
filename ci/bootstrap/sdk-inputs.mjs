@@ -99,7 +99,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   if (platform !== hostPlatform()) throw new Error('NATIVE_RUNNER_REQUIRED ' + platform);
   const work = await privateRoot(descriptor.work), install = await privateRoot(descriptor.install);
   const {sources, installations, tools} = descriptor;
-  if (!sources || !installations || !tools?.privateRoot) throw new Error('NATIVE_INPUT_LOCATIONS_REQUIRED');
+  if (!sources || !installations || !tools) throw new Error('NATIVE_INPUT_LOCATIONS_REQUIRED');
   // Resolve all source choices before validating or preparing any installation.
   // The local checkout is a transport location; repository is the source identity.
   const compilerDefault=(await execute('git',['-C',sources.compiler,'rev-parse','HEAD'])).stdout.trim();
@@ -215,17 +215,16 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     if(facts.source!==h1Commit||facts.host!==host.install||facts.native!==rows.llvm.install
       ||!facts.sourceChanges||facts.sha256!==await fileDigest(product)
       ||path.resolve(reused.buildInputs)!==path.join(path.dirname(product),'build-inputs.json')
-      ||!Array.isArray(commands)||commands.length!==1||commands[0].rc!==0||commands[0].signal
-      ||!path.isAbsolute(facts.sourceRoot||'')||commands[0].cwd!==facts.sourceRoot
+      ||facts.producer!=='sdk-native-stage:h1'
+      ||!Array.isArray(commands)||commands.length!==2||commands.some(row=>row.rc!==0||row.signal||row.cwd!==facts.sourceRoot)
+      ||!path.isAbsolute(facts.sourceRoot||'')
       ||!isDeepStrictEqual(facts.nativeShim,await readInstalledNativeShim({install:rows.llvm.install}))
-      ||commands[0].argv?.[0]!=='bash'
-      ||commands[0].argv?.[1]!==path.join(path.resolve(tools.privateRoot),'ts/src/sharedbuild/cjcj-stage1.sh'))
+      ||!commands[0].argv?.includes(path.join(facts.sourceRoot,'runtime_shim/cjc_runtime_config.c'))
+      ||!commands[0].argv?.includes('-DCJCJ_COMMIT="'+h1Commit+'"')
+      ||commands[1].argv?.[0]!==path.join(host.install,'tools/bin/cjpm')||commands[1].argv?.[1]!=='build')
       throw new Error('H1_REUSE_PRODUCER_MISMATCH');
     rows.h1={...rows.h1,product,configuration:facts,buildResult:path.resolve(reused.buildResult)};
   }
-  tools.privateRoot = path.resolve(tools.privateRoot);
-  for (const rel of installations.stage2 ? [] : ['cjcj-stage1.sh'])
-    await fs.stat(path.join(tools.privateRoot, 'ts/src/sharedbuild', rel));
   const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,
     ...(descriptor.stdBuildType === undefined ? {} : {stdBuildType:stdBuildType(descriptor.stdBuildType)}),
     ...(descriptor.nativePair ? {nativePair:descriptor.nativePair} : {}), ...rows, stdlib:stdlib??rows.runtime,

@@ -207,7 +207,7 @@ export function createBootstrapTargets(input) {
     '--commit',kind==='h1'?h1.commit:kind==='std'?stdlib.commit:compiler.commit,
     ...(kind==='std' && input.stdBuildType !== undefined ? ['--build-type',input.stdBuildType] : []),
     ...(phase?['--phase',phase,'--std-input',phase==='stage3'?out('stage3-std'):path.join(work,'build/stage1-std/std')]:[]),...(compilerRuntime?['--compiler-runtime',compilerRuntime]:[]),
-    ...(kind==='h1'?['--host',host.install,'--private-tools',tools.privateRoot,...(tools.cc?['--cc',tools.cc]:[])]:[]),...(tools.zx?['--zx',tools.zx]:[])]});
+    ...(kind==='h1'?['--host',host.install,...(tools.cc?['--cc',tools.cc]:[])]:[]),...(tools.zx?['--zx',tools.zx]:[])]});
   const compilerName='bin/cjcj-stage1'+exe;
   function composed(id,depends,product,std,hostObjects=false,commands=[]) {
     const transitional=['stage0-run','stage1-initial','stage1-std'].includes(id);

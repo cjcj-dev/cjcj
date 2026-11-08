@@ -115,7 +115,7 @@ export async function nativeStage(options, {signal} = {}) {
       coloured:options['compiler-runtime']==='target'?'true':'bootstrap',preflightC2:options['compiler-runtime']==='target'?'stage2':'not-applicable',
       note:'native target/install '+commit});
   } else if(kind==='h1') {
-    if(!host||!options['private-tools'])throw new Error('H1_HOST_AND_NATIVE_ADAPTER_REQUIRED');
+    if(!host)throw new Error('H1_HOST_REQUIRED');
     if(native.os!=='linux')throw new Error('H1_LINUX_PRODUCER_REQUIRED');
     const shim=await readInstalledNativeShim({install:sdk});
     const work=output+'.h1',inputs=path.join(work,'inputs'),productRoot=path.join(work,'out');
@@ -123,12 +123,31 @@ export async function nativeStage(options, {signal} = {}) {
     await fs.copyFile(path.join(sdk,shim.object.path),path.join(inputs,'llvm-shim.o'));
     const parameters=path.join(work,'parameters.json');await atomicJson(parameters,{compile_flags:''});
     const manifest=path.join(source,'cjpm.toml'),before=await fs.readFile(manifest);
+    const h1env={...cleanSdkEnvironment(host,platform,process.env,host),cjHeapSize:resources.heap,
+      CANGJIE_BUILD_JOBS:jobs,CMAKE_BUILD_PARALLEL_LEVEL:jobs,CJCJ_COMMIT:commit,
+      CJCJ_SUPERVISOR_WORK:env.CJCJ_SUPERVISOR_WORK};
     let compiled;
     try {
-      await command(['bash',path.join(options['private-tools'],'ts/src/sharedbuild/cjcj-stage1.sh')],{
-        cwd:source,env:{...cleanSdkEnvironment(host,platform,process.env,host),cjHeapSize:resources.heap,
-          CANGJIE_BUILD_JOBS:jobs,SB_SOURCE:source,SB_OUTPUT:productRoot,SB_INPUTS:inputs,
-          SB_SHA:commit,SB_OPTIMIZATION:'O1',SB_PARAMETERS:parameters},records});
+      // The normal Linux producer owns these operations here. Its installed N
+      // shim is already validated; only H1's own runtime configuration is built.
+      const params=await fs.readFile(parameters,'utf8').then(JSON.parse);
+      if(Object.keys(params).some(key=>key!=='compile_flags')||typeof params.compile_flags!=='string')throw Error('H1_PARAMETERS');
+      const compileOption='-O1 '+(params.compile_flags+' --trimpath '+source).trim();
+      let replacements=0;
+      const text=before.toString().replace(/^(\s*compile-option\s*=\s*)"[^"\n]*"/gm,(_,prefix)=>{
+        replacements++;return prefix+JSON.stringify(compileOption);
+      });
+      if(replacements!==1)throw Error('H1_WORKSPACE_COMPILE_OPTION');
+      await fs.writeFile(manifest,text);
+      await fs.copyFile(path.join(inputs,'llvm-shim.o'),path.join(source,'runtime_shim/cjselfhost_llvmshim.o'));
+      await command([...(process.env.CMAKE_C_COMPILER_LAUNCHER?[process.env.CMAKE_C_COMPILER_LAUNCHER]:[]),options.cc||'cc',
+        '-std=c11','-O2','-fPIC','-D_POSIX_C_SOURCE=200809L','-DCJCJ_COMMIT="'+commit+'"',
+        '-c',path.join(source,'runtime_shim/cjc_runtime_config.c'),'-o',path.join(source,'runtime_shim/cjc_runtime_config.o')],
+        {cwd:source,env:h1env,records});
+      await command([path.join(host,'tools/bin/cjpm'),'build','-j'+jobs],{cwd:source,env:h1env,records});
+      const built=await resolveProductBinary(path.join(source,'target/release/bin'),'h1');
+      await fs.copyFile(built,path.join(productRoot,'cjcj-stage1'));
+      await fs.cp(path.join(source,'target/release'),path.join(productRoot,'release'),{recursive:true,dereference:true});
       compiled=await fs.readFile(manifest);
     } finally {
       await fs.writeFile(manifest,before);
@@ -138,7 +157,7 @@ export async function nativeStage(options, {signal} = {}) {
     const product=path.join(bin,'cjcj-stage1');
     await fs.copyFile(path.join(productRoot,'cjcj-stage1'),product);
     const {sha256}=await import('./sdk-io.mjs');
-    await atomicJson(path.join(bin,'build-inputs.json'),{source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,
+    await atomicJson(path.join(bin,'build-inputs.json'),{producer:'sdk-native-stage:h1',source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,
       sourceChanges:{'cjpm.toml':{beforeSha256:sha256(before),buildSha256:sha256(compiled)}},sha256:await fileDigest(product)});
   } else if(kind==='compiler') {
     const target=await privateRoot(options['target-dir']||path.join(source,'target'));
@@ -192,7 +211,7 @@ export async function nativeStage(options, {signal} = {}) {
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type'].map(k=>[k,{type:'string'}]));
+    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type'].map(k=>[k,{type:'string'}]));
     spec['resume-installed']={type:'boolean'};
     nativeSourceOptions(process.argv); // Reject duplicate identity flags before parseArgs.
     const {values}=parseArgs({options:spec});
