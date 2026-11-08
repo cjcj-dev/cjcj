@@ -17,6 +17,7 @@ import {stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
 import {resolveProductBinary} from '../srcbuild/lib/product-binary.mjs';
 import {acceptInstalledStd, flag, stdBuildType} from './sdk-std-resume.mjs';
 import {readInstalledNativeShim} from './native-shim-inputs.mjs';
+import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {materializeNativeSource, nativeSourceOptions} from './sdk-source.mjs';
 export {acceptInstalledStd} from './sdk-std-resume.mjs';
 // Runtime inputs are a private build input snapshot, not an install overlay.
@@ -123,6 +124,11 @@ export async function nativeStage(options, {signal} = {}) {
     await fs.copyFile(path.join(sdk,shim.object.path),path.join(inputs,'llvm-shim.o'));
     const parameters=path.join(work,'parameters.json');await atomicJson(parameters,{compile_flags:''});
     const manifest=path.join(source,'cjpm.toml'),before=await fs.readFile(manifest);
+    const packageManifest=path.join(source,'packages/cjc/cjpm.toml'),packageBefore=await fs.readFile(packageManifest);
+    const hostRuntimeFile=path.join(host,'runtime/lib',native.tuple,'libcangjie-runtime'+native.shared);
+    const hostRuntimeSupportsConfigV1=(await nativeSymbolRows(hostRuntimeFile,{platform,runtime:true,defined:true})).includes('CJ_MRT_CjRuntimeInitWithConfigV1');
+    const startupConfiguration={hostRuntimeFile,hostRuntimeSupportsConfigV1};
+    let packageCompiled=packageBefore;
     const lock=path.join(source,'cjpm.lock'),lockBefore=await fs.readFile(lock).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
     const h1env={...cleanSdkEnvironment(host,platform,process.env,host),cjHeapSize:resources.heap,
       CANGJIE_BUILD_JOBS:jobs,CMAKE_BUILD_PARALLEL_LEVEL:jobs,CJCJ_COMMIT:commit,
@@ -139,6 +145,12 @@ export async function nativeStage(options, {signal} = {}) {
         replacements++;return prefix+JSON.stringify(compileOption);
       });
       if(replacements!==1)throw Error('H1_WORKSPACE_COMPILE_OPTION');
+      if(!hostRuntimeSupportsConfigV1) {
+        const hostOnly=new Set(['runtime_shim/cjc_heap_defaults.o','--wrap=CJ_MRT_CjRuntimeInit','--wrap=CJ_MRT_CjRuntimeInitWithConfigV1']);
+        packageCompiled=Buffer.from(packageBefore.toString().replace(/^(\s*link-option\s*=\s*)"([^"\n]*)"/gm,
+          (_,prefix,value)=>prefix+JSON.stringify(value.split(/\s+/).filter(token=>!hostOnly.has(token)).join(' '))));
+      }
+      await fs.writeFile(packageManifest,packageCompiled);
       await fs.writeFile(manifest,text);
       await fs.copyFile(path.join(inputs,'llvm-shim.o'),path.join(source,'runtime_shim/cjselfhost_llvmshim.o'));
       await command([...(process.env.CMAKE_C_COMPILER_LAUNCHER?[process.env.CMAKE_C_COMPILER_LAUNCHER]:[]),options.cc||'cc',
@@ -147,7 +159,7 @@ export async function nativeStage(options, {signal} = {}) {
         // The system C compiler loads its own LLVM. H's LLVM loader is for
         // cjpm/cjc and must not be injected into this native tool process.
         {cwd:source,env:{...h1env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''},records});
-      await command([...(process.env.CMAKE_C_COMPILER_LAUNCHER?[process.env.CMAKE_C_COMPILER_LAUNCHER]:[]),options.cc||'cc',
+      if(hostRuntimeSupportsConfigV1)await command([...(process.env.CMAKE_C_COMPILER_LAUNCHER?[process.env.CMAKE_C_COMPILER_LAUNCHER]:[]),options.cc||'cc',
         '-std=c11','-O2','-fPIC','-c',path.join(source,'runtime_shim/cjc_heap_defaults.c'),
         '-o',path.join(source,'runtime_shim/cjc_heap_defaults.o')],
         {cwd:source,env:{...h1env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''},records});
@@ -158,15 +170,20 @@ export async function nativeStage(options, {signal} = {}) {
       compiled=await fs.readFile(manifest);
     } finally {
       await fs.writeFile(manifest,before);
-      if(lockBefore!==null)await fs.writeFile(lock,lockBefore);
+      await fs.writeFile(packageManifest,packageBefore);
+      const {sha256}=await import('./sdk-io.mjs');
+      await atomicJson(path.join(work,'startup-configuration.json'),{...startupConfiguration,sourceChanges:{
+        'packages/cjc/cjpm.toml':{beforeSha256:sha256(packageBefore),buildSha256:sha256(packageCompiled)}}});
+      if(lockBefore!==null)await fs.writeFile(lock,lockBefore);else await fs.rm(lock,{force:true});
       await atomicJson(output+'.commands.json',records);
     }
     const bin=path.join(output,'bin');await fs.mkdir(bin,{recursive:true});
     const product=path.join(bin,'cjcj-stage1');
     await fs.copyFile(path.join(productRoot,'cjcj-stage1'),product);
     const {sha256}=await import('./sdk-io.mjs');
-    await atomicJson(path.join(bin,'build-inputs.json'),{producer:'sdk-native-stage:h1',source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,
-      sourceChanges:{'cjpm.toml':{beforeSha256:sha256(before),buildSha256:sha256(compiled)}},sha256:await fileDigest(product)});
+    await atomicJson(path.join(bin,'build-inputs.json'),{producer:'sdk-native-stage:h1',source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,startupConfiguration,
+      sourceChanges:{'cjpm.toml':{beforeSha256:sha256(before),buildSha256:sha256(compiled)},
+        'packages/cjc/cjpm.toml':{beforeSha256:sha256(packageBefore),buildSha256:sha256(packageCompiled)}},sha256:await fileDigest(product)});
   } else if(kind==='compiler') {
     const target=await privateRoot(options['target-dir']||path.join(source,'target'));
     if(options.phase==='stage3')await assertFinalStdInput({sdk,std:sdk,runtime:sdk,

@@ -1,4 +1,5 @@
 #!/usr/bin/env zx
+import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {readInstalledNativeShim} from './native-shim-inputs.mjs';
 // Turn received native installations and real Git objects into build inputs.
 // The descriptor contains locations, not producer receipts or SDK authorities.
@@ -255,17 +256,21 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     if(!reused.product||!reused.buildInputs||!reused.buildResult)throw new Error('H1_REUSE_LOCATIONS_REQUIRED');
     const product=path.resolve(reused.product);
     const facts=await readJson(reused.buildInputs), commands=await readJson(reused.buildResult);
+    const hostRuntimeFile=path.join(host.install,'runtime/lib',native.tuple,'libcangjie-runtime'+native.shared);
+    const hostRuntimeSupportsConfigV1=(await nativeSymbolRows(hostRuntimeFile,{platform,runtime:true,defined:true})).includes('CJ_MRT_CjRuntimeInitWithConfigV1');
+    const packageCommand=hostRuntimeSupportsConfigV1?2:1;
     if(facts.source!==h1Commit||facts.host!==host.install||facts.native!==rows.llvm.install
-      ||!facts.sourceChanges||facts.sha256!==await fileDigest(product)
+      ||!facts.sourceChanges?.['packages/cjc/cjpm.toml']
+      ||!isDeepStrictEqual(facts.startupConfiguration,{hostRuntimeFile,hostRuntimeSupportsConfigV1})||facts.sha256!==await fileDigest(product)
       ||path.resolve(reused.buildInputs)!==path.join(path.dirname(product),'build-inputs.json')
       ||facts.producer!=='sdk-native-stage:h1'
-      ||!Array.isArray(commands)||commands.length!==3||commands.some(row=>row.rc!==0||row.signal||row.cwd!==facts.sourceRoot)
+      ||!Array.isArray(commands)||commands.length!==packageCommand+1||commands.some(row=>row.rc!==0||row.signal||row.cwd!==facts.sourceRoot)
       ||!path.isAbsolute(facts.sourceRoot||'')
       ||!isDeepStrictEqual(facts.nativeShim,await readInstalledNativeShim({install:rows.llvm.install}))
       ||!commands[0].argv?.includes(path.join(facts.sourceRoot,'runtime_shim/cjc_runtime_config.c'))
       ||!commands[0].argv?.includes('-DCJCJ_COMMIT="'+h1Commit+'"')
-      ||!commands[1].argv?.includes(path.join(facts.sourceRoot,'runtime_shim/cjc_heap_defaults.c'))
-      ||commands[2].argv?.[0]!==path.join(host.install,'tools/bin/cjpm')||commands[2].argv?.[1]!=='build')
+      ||hostRuntimeSupportsConfigV1&&!commands[1].argv?.includes(path.join(facts.sourceRoot,'runtime_shim/cjc_heap_defaults.c'))
+      ||commands[packageCommand].argv?.[0]!==path.join(host.install,'tools/bin/cjpm')||commands[packageCommand].argv?.[1]!=='build')
       throw new Error('H1_REUSE_PRODUCER_MISMATCH');
     rows.h1={...rows.h1,product,configuration:facts,buildResult:path.resolve(reused.buildResult)};
   }
