@@ -40,27 +40,29 @@ private func GenerateInvoke(irBuilder: IRBuilder2, invoke: CHIRInvokeWrapper): L
     }
     let objectRawValue = cgMod.GetMappedCGValue(invoke.GetObject()).GetRawValue()
     let objectType = DeRef(invoke.GetObject().GetType().getOrThrow())
-    let rawFuncPtr = if (IsAutoEnvType(objectType)) {
-        GenerateFuncPtrForAutoEnv(irBuilder, invoke)
-    } else {
-        let objectTypeInfo = irBuilder.GetTypeInfoFromObject(objectRawValue)
-        GenerateFuncPtrForNonAutoEnv(irBuilder, objectTypeInfo, invoke)
-    }
     let instTypeArgs = invoke.GetInstantiatedTypeArgs()
     let typeExtra = TypeExtraInfo(0u32, true, false, true, instTypeArgs)
     let concreteFuncType =
         (CGType.GetOrCreate(cgMod, invoke.GetMethodType(), extraInfo: typeExtra) as CGFunctionType).getOrThrow()
+    let rawFuncPtr = if (IsAutoEnvType(objectType)) {
+        GenerateFuncPtrForAutoEnv(irBuilder, invoke)
+    } else {
+        let objectTypeInfo = irBuilder.GetTypeInfoFromObject(objectRawValue)
+        GenerateFuncPtrForNonAutoEnv(irBuilder, objectTypeInfo, invoke,
+            outerTypeInfoArgNeeded: concreteFuncType.IsMethodType())
+    }
     let typedFuncPtr = irBuilder.CreateBitCast(rawFuncPtr,
         unsafe { LLVMPointerType(concreteFuncType.GetLLVMFunctionType(), 0u32) })
     let result = irBuilder.CreateCallOrInvokeWithMethodTypeInfo(concreteFuncType, typedFuncPtr, argValues,
         None, instTypeArgs)
+    CJC_ASSERT(!irBuilder.HasFusedOuterTypeInfo())
     GenIRToUnboxResult(irBuilder, objectRawValue,
         invoke.TestVritualMethodAttr(Attribute.MUT))
     return result
 }
 
 private func GenerateFuncPtrForNonAutoEnv(irBuilder: IRBuilder2, thisTI: LLVMValueRef,
-    invokeExpr: CHIRInvokeExpr): LLVMValueRef {
+    invokeExpr: CHIRInvokeExpr, outerTypeInfoArgNeeded!: Bool = false): LLVMValueRef {
     let cgCtx = irBuilder.GetCGContext()
     if (VirtualCallCanBeHoisted(irBuilder, invokeExpr)) {
         let prepForVirtualCallBB = irBuilder.CreateAndInsertBasicBlocks(
@@ -73,12 +75,22 @@ private func GenerateFuncPtrForNonAutoEnv(irBuilder: IRBuilder2, thisTI: LLVMVal
     let introTi = irBuilder.CreateTypeInfo(introType)
     let vtableOffset = invokeExpr.GetVirtualMethodOffset()
     let idxOfVFunc = irBuilder.GetInt64(Int64(vtableOffset))
+    // The lookup call that carries the objType (VFE) metadata.
+    var lookupCall = LLVMNullValue()
     let funcPtr = if (introType.GetClassDef().IsInterface()) {
         let mtableArgs = ArrayList<LLVMValueRef>()
         mtableArgs.add(thisTI)
         mtableArgs.add(introTi)
         mtableArgs.add(idxOfVFunc)
-        irBuilder.CallIntrinsicMTable(mtableArgs)
+        if (outerTypeInfoArgNeeded && CanFuseOuterTypeInfoLookup(irBuilder, invokeExpr, introType)) {
+            let fusedLookup = irBuilder.CallIntrinsicMTableAndOuterType(mtableArgs)
+            lookupCall = fusedLookup
+            irBuilder.SetFusedOuterTypeInfo(invokeExpr.GetExpression(), irBuilder.CreateExtractValue(fusedLookup, 1u32))
+            irBuilder.CreateExtractValue(fusedLookup, 0u32)
+        } else {
+            lookupCall = irBuilder.CallIntrinsicMTable(mtableArgs)
+            lookupCall
+        }
     } else {
         let vtableSizeOfIntroType = GetVTableSizeOf(introType)
         CJC_ASSERT(vtableSizeOfIntroType > 0)
@@ -86,10 +98,11 @@ private func GenerateFuncPtrForNonAutoEnv(irBuilder: IRBuilder2, thisTI: LLVMVal
             idxOfVFunc, introTi)
         LLVMSetInstructionMetadata(irBuilder.GetLLVMContext(), rawPtr, "IntroType",
             LLVMCreateMDTupleFromString(irBuilder.GetLLVMContext(), GetTypeQualifiedName(introType)))
+        lookupCall = rawPtr
         rawPtr
     }
     if (introType.GetTypeArgs().size <= 1) {
-        LLVMSetInstructionMetadata(irBuilder.GetLLVMContext(), funcPtr, "objType",
+        LLVMSetInstructionMetadata(irBuilder.GetLLVMContext(), lookupCall, "objType",
             GenObjTyMetaForVirtualCall(irBuilder, introType))
     }
     let prepForVirtualCallBB = invokeExpr.GetPrepForVirtualCallBB()
@@ -103,6 +116,28 @@ private func GenerateFuncPtrForNonAutoEnv(irBuilder: IRBuilder2, thisTI: LLVMVal
         irBuilder.SetInsertPoint(prepForVirtualCallEndBB)
     }
     return funcPtr
+}
+
+// One runtime lookup may serve both the interface method pointer and the
+// outer TypeInfo argument only where CreateOuterTypeInfo would otherwise emit
+// cj.get.method.outertype for this same Invoke/TryInvoke with identical
+// operands: receiver TypeInfo from the same object (GetThisParam is
+// GetObject), the same interface TypeInfo and method offset. InvokeStatic,
+// AutoEnv receivers and LICM-prepared sites keep the original two lookups.
+// Each execution still performs its own runtime lookup; nothing is cached.
+private func CanFuseOuterTypeInfoLookup(irBuilder: IRBuilder2, invokeExpr: CHIRInvokeExpr,
+    introType: ClassType): Bool {
+    if (!invokeExpr.GetPrepForVirtualCallBB().isNull()) {
+        return false
+    }
+    match (invokeExpr as CHIRInvokeWrapper) {
+        case Some(invoke) =>
+            if (DeRef(invoke.GetObject().GetType().getOrThrow()).IsAutoEnv()) {
+                return false
+            }
+        case None => return false
+    }
+    return irBuilder.GetCGContext().GetCGPkgContext().NeedOuterTypeInfo(introType)
 }
 
 private func VirtualCallCanBeHoisted(irBuilder: IRBuilder2, callExprWrapper: CHIRCallExpr): Bool {
