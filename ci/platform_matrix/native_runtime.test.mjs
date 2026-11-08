@@ -12,6 +12,7 @@ const platform = `${process.platform}_${{x64:'x86_64',arm64:'aarch64'}[process.a
 const toolchain = path.resolve('ci/platform_matrix/native_runtime_toolchain.cmake');
 import {directSource} from '../fixtures/runtime-direct-inputs.mjs';
 import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
+import {NATIVE_REPOSITORIES} from '../bootstrap/native-source-selection.mjs';
 const directHelper=new URL('../fixtures/runtime-direct-inputs.mjs',import.meta.url).href;
 // External native compilation is a command fixture here. The real product CLI,
 // checkout check, CMake toolchain script, installation and manifest path execute.
@@ -30,6 +31,7 @@ function fixture(check,{legacy=false}={}) {
     git(['init','-q']); git(['add','.']);
     git(['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','runtime fixture']);
     const runtime = git(['rev-parse','HEAD']);
+    git(['remote','add','origin',NATIVE_REPOSITORIES.runtime.replace(/\.git$/,'')]);
     const command = `#!${process.execPath}\nimport {directBuild} from ${JSON.stringify(directHelper)};\n` + String.raw`
 import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto'; import {spawnSync} from 'node:child_process';
 const name=path.basename(process.argv[1]), args=process.argv.slice(2), e=process.env;
@@ -129,7 +131,7 @@ if(name==='python3' && args[0]==='build.py') {
   } finally {if(!process.env.RELEASE_EVIDENCE_TEST_ROOT)fs.rmSync(root,{recursive:true,force:true});}
 }
 
-test('native runtime public entry builds then installs and records the actual pair and payload',()=>fixture(({run,manifest,runtime,install,log})=>{
+test('native runtime public entry builds then installs and records the actual pair and payload',()=>fixture(({run,manifest,runtime,install,log,source})=>{
   const r=run();
   const phases=fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse)
     .filter(x=>x.name==='python3'&&x.args[0]==='build.py').map(x=>x.args[1]);
@@ -141,10 +143,20 @@ test('native runtime public entry builds then installs and records the actual pa
   for(const name of ['thread','aio'])assert.equal(fs.readFileSync(path.join(install,'lib',platform+'_cjnative','libcangjie-'+name+'.a'),'utf8'),'installed CJThread '+name);
   const m=manifest(); assert.equal(m.runtime_sha,runtime);assert.equal(m.paired_llvm_sha,llvm);assert.equal(m.platform,platform);
   assert.equal(m.configuration.hostVersion,readHostToolchainPin(platform).replace(/^nightly-/,''));
+  assert.equal(m.source.repository,NATIVE_REPOSITORIES.runtime,'SELECTED_RUNTIME_REPOSITORY_RECORDED');
+  assert.equal(m.checkout_repository,NATIVE_REPOSITORIES.runtime.replace(/\.git$/,''));
   for(const [relative,digest] of Object.entries(m.files))assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(install,relative))).digest('hex'),digest);
   const commands=fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).filter(x=>x.name==='python3'&&x.args[0]==='build.py');
   assert.deepEqual(commands.map(x=>x.args),m.commands.map(x=>x.slice(1)));
   assert.deepEqual(commands.map(x=>x.toolchain),[toolchain,toolchain]);
+  const original=fs.readFileSync(path.join(install,'NATIVE-INPUTS.json'));
+  const changed=spawnSync('git',['-C',source,'remote','set-url','origin','https://github.com/cjcj-dev/unrelated-runtime'],{encoding:'utf8'});
+  assert.equal(changed.status,0,changed.stderr);
+  const rejected=run();
+  assert.notEqual(rejected.status,0,'DIFFERENT_RUNTIME_REPOSITORY_MUST_FAIL');
+  assert.match(rejected.stdout+rejected.stderr,/NATIVE_RUNTIME_SOURCE_REPOSITORY/);
+  assert.deepEqual(fs.readFileSync(path.join(install,'NATIVE-INPUTS.json')),original);
+  console.log('SELECTED_RUNTIME_REPOSITORY_POSITIVE_AND_NEGATIVE_REACHED');
 }));
 test('native public entry carries direct scripts and generated headers through archive relocation', {skip:process.platform!=='linux'},()=>fixture(({run,install,source,root})=>{
  const r=run();assert.equal(r.status,0,r.stdout+r.stderr);
@@ -312,7 +324,7 @@ const result=await receiveNativeRuntime(i);console.log('DIRECT_RECEIVE_REACHED '
  let serial=0;
  const invoke=(changes={},expected=0,reason)=>{
    const input={root:install,source,sourceRoot:path.join(source,'runtime'),gateStatus:current,
-     sourceRepository:source,platform,llvmCommit:llvm,runtimeCommit:runtime,hostVersion:readHostToolchainPin(platform).replace(/^nightly-/,''),work:path.join(root,'receive'),...changes};
+     sourceRepository:NATIVE_REPOSITORIES.runtime,platform,llvmCommit:llvm,runtimeCommit:runtime,hostVersion:readHostToolchainPin(platform).replace(/^nightly-/,''),work:path.join(root,'receive'),...changes};
    const name=String(++serial),file=path.join(root,'receive-'+name+'.json');fs.writeFileSync(file,JSON.stringify(input));
    const r=spawnSync(process.execPath,[driver,file],{encoding:'utf8',env:{...env,FIXTURE_ELF:'1'}});
    fs.writeFileSync(path.join(root,'receive-'+name+'-result.json'),JSON.stringify({argv:[process.execPath,driver,file],rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr}));

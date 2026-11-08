@@ -199,7 +199,17 @@ export async function recordNativeRuntime({source, installRoot, actualRef, versi
       compilerCache[language] = {mode:'compiler-wrapper', compiler, cache:env.SCCACHE_PATH};
     }
   }
-  const sourceRepository=await runtimeSourceRepository(repository);
+  const checkoutRepository=await runtimeSourceRepository(repository);
+  const sourceRepository=selection.runtime.repository;
+  // Only the official GitHub HTTPS spelling's optional .git suffix may differ.
+  // Keep exact host/owner/repo case, transport and all other URL bytes.
+  const githubRepository=value=>/^https:\/\/github\.com\/[^/?#:@]+\/[^/?#:@]+$/.test(value||'')
+    ? value.replace(/\.git$/, '') : null;
+  assert.ok(checkoutRepository===sourceRepository || githubRepository(checkoutRepository)!==null
+    && githubRepository(checkoutRepository)===githubRepository(sourceRepository), 'NATIVE_RUNTIME_SOURCE_REPOSITORY');
+  const checkout=spawnSync('git',['-C',repository,'rev-parse','HEAD'],{encoding:'utf8'});
+  assert.equal(checkout.status,0,'NATIVE_RUNTIME_CHECKOUT_REQUIRED');
+  assert.equal(checkout.stdout.trim(),actualRef,'NATIVE_RUNTIME_CHECKOUT_COMMIT');
   const hostVersion=env.CJCJ_NATIVE_HOST_VERSION||readHostToolchainPin(platform).replace(/^nightly-/,'');
   const configuration={buildType,version,hostVersion,pairedLlvmCommit:selection.llvm.commit};
   const artifacts=[required[0],required[2]];
@@ -233,7 +243,7 @@ export async function recordNativeRuntime({source, installRoot, actualRef, versi
   walk(installRoot);
   fs.writeFileSync(path.join(installRoot, 'NATIVE-INPUTS.json'), JSON.stringify({
     runtime_sha:actualRef, paired_llvm_sha:selection.llvm.commit, platform, version, build_type:buildType,
-    source:runtimeInputs.source, configuration,
+    source:runtimeInputs.source, checkout_repository:checkoutRepository, configuration,
     producer_sha:env.GITHUB_SHA || null, run_id:env.GITHUB_RUN_ID || null,
     run_attempt:env.GITHUB_RUN_ATTEMPT || null, compiler_cache:env.SCCACHE_PATH,
     compiler_cache_configuration:compilerCache,

@@ -23,6 +23,7 @@ async function fixture(t, body) {
   git(['init','-q']); git(['add','.']);
   git(['-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','Controlled runtime installer fixture']);
   env.CJCJ_NATIVE_RUNTIME_REF = git(['rev-parse','HEAD']);
+  git(['remote','add','origin','https://github.com/cjcj-dev/cangjie-runtime.git']);
 
   const tuple='windows_x86_64_cjnative',preinstall=path.join(root,'cjthread-install'),runtime=path.join(source,'runtime'),build=path.join(runtime,'CMakebuild');
   put(path.join(build,'CMakeCache.txt'),`CMAKE_HOME_DIRECTORY:INTERNAL=${runtime}\nCMAKE_INSTALL_PREFIX:PATH=${preinstall}\nCMAKE_BUILD_TYPE:STRING=Release\nCANGJIE_COMPILER_CACHE:FILEPATH=${cache}\nCMAKE_C_COMPILER_LAUNCHER:STRING=${cache}\nCMAKE_CXX_COMPILER_LAUNCHER:STRING=${cache}\n`);
@@ -66,7 +67,8 @@ test('native Windows copies this invocation bounds DLL and records Windows layou
     ...['runtime','thread','aio'].map(name=>`lib/${tuple}/libcangjie-${name}.a`)].sort());
   assert.ok(facts.files[RUNTIME_INPUTS]);
   const original = JSON.parse(fs.readFileSync(path.join(f.installRoot, RUNTIME_INPUTS)));
-  assert.equal(original.source.repository, f.source);
+  assert.equal(original.source.repository, 'https://github.com/cjcj-dev/cangjie-runtime.git');
+  assert.equal(facts.checkout_repository,original.source.repository);
   assert.equal(original.source.commit, f.env.CJCJ_NATIVE_RUNTIME_REF);
   assert.equal(original.embedded_stamp, 'CJRT-COMMIT:' + f.env.CJCJ_NATIVE_RUNTIME_REF);
   assert.deepEqual(original.artifacts.map(row => row.path), [
