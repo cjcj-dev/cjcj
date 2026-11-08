@@ -105,3 +105,48 @@ SDK inputs plus the separately reviewed #904 integration. Source readiness
 continues to report those missing producers. #906 Apple capture, #907 installed
 alternate-stack behavior, device execution and full SDK packaging are separate
 uncompleted acceptance obligations.
+
+## Full native SDK
+
+This is the complete source-built SDK (`srcbuild-target.yml` artifact
+`cjcj-srcbuild-<target>-<version>`), not an LLVM component prerelease and not
+the qualified language SDK above. Its upload step runs under `always()`, so an
+artifact existing is not evidence that the SDK passed its gates.
+
+Chain: producer `srcbuild` job (package-install, source-tool install, verify)
+-> `ci.yml` `package-tests` in candidate mode (`workflow_dispatch` with
+`native_sdk_run_id` and `native_sdk_version`: download, `receive_native_sdk.mjs`
+unpack/installed-SDK checks, registered package tests) -> `persist-native-sdk`
+(only with `persist_native_sdk: true` and a successful candidate
+`package-tests`) -> new prerelease -> readback -> reviewed registry commit ->
+default consumers.
+
+`ci/release/persist_native_sdk.mjs publish` rechecks the artifact ID, name,
+producer run and expiry, requires the producer job `<target> / srcbuild` to
+have concluded `success`, and requires exactly one packaged SDK archive with a
+matching `.sha256`. It then creates a draft prerelease
+`native-sdk-<target>-<version>-<artifact>-<persist run>-<attempt>-prerelease`
+(`make_latest: "false"`). It uploads the original artifact ZIP, a separate
+`gate-logs.zip` and a `provenance.json`, and reads every asset back. It then
+selects the new entry the way consumers will and downloads it with
+`download_pinned.mjs`, unpacks the package facts, and only after that publishes
+the draft as a prerelease. Existing tags, releases and assets are never reused
+or overwritten. The job's `native-sdk-persist-<target>` artifact keeps the
+provenance and log even when publication fails.
+
+The emitted `registry-entry.json` is an ordinary `ci/bootstrap_artifacts_pin.json`
+entry with a `native_sdk: {target, version, ...}` marker. The artifact ID is a
+provenance key; consumers download the release asset by ID and SHA-256 and never
+query Actions for it. `download_pinned.mjs --select-native-sdk <target>` accepts
+exactly one marked entry per target: none stops with
+`NATIVE_SDK_PERSISTENT_PIN_MISSING` and more than one stops with
+`NATIVE_SDK_PERSISTENT_PIN_AMBIGUOUS`. Nothing falls back to a run ID,
+repository variable or expired artifact.
+
+Lifecycle: one current SDK per target. A replacement commit removes the old
+marked entry and adds the new one; both prereleases briefly coexist.
+`persist-native-sdk` only reports older `native-sdk-<target>-*` prereleases as
+`NATIVE_SDK_RETIRE_CANDIDATE ... action=kept`. A maintainer retires the old
+prerelease after these checks: the switch is on master, `package-tests` passes
+on the new entry, and no active branch, open PR or frozen evidence still names
+the old artifact ID or tag. The workflow never deletes anything.
