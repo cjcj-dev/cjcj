@@ -186,7 +186,6 @@ test('public handoff carries native tool dependency locations and rejects an una
  const commit=git(donor,'rev-parse','HEAD');
  for(const name of ['json']) {
   const source=path.join(f.root,'.srcbuild','native-tools',name);await fs.mkdir(path.dirname(source),{recursive:true});
-  git(donor,'worktree','add','--detach',source,commit);
   selection[name]={repo:donor,commit,path:source};
  }
  const descriptor=path.join(f.root,'.srcbuild','native-tool-dependencies.json');
@@ -196,7 +195,12 @@ test('public handoff carries native tool dependency locations and rejects an una
  await fs.writeFile(sourceDescriptor,JSON.stringify(relativeSelection));
  const {configureNativeToolInput}=await import('../../bootstrap/native-tool-input.mjs');
  const configure=()=>configureNativeToolInput({root:inputRoot,workspace:inputRoot,platform:'linux_x86_64',envFile:f.env.GITHUB_ENV});
- assert.equal(await configure(),descriptor,'json-only artifact reaches ordinary input configuration');
+ const previousActions=process.env.GITHUB_ACTIONS;
+ try {
+  process.env.GITHUB_ACTIONS='true'; // finite Git transport fixture for the official-runner branch
+  assert.equal(await configure(),descriptor,'source facts reach ordinary fixed Git preparation');
+ } finally {if(previousActions===undefined)delete process.env.GITHUB_ACTIONS;else process.env.GITHUB_ACTIONS=previousActions;}
+ assert.equal(git(selection.json.path,'rev-parse','HEAD'),commit);
  assert.deepEqual(JSON.parse(await fs.readFile(descriptor)),selection);
  await fs.writeFile(sourceDescriptor,JSON.stringify({}));
  await assert.rejects(configure(),/GHA_NATIVE_TOOL_SOURCE json/);

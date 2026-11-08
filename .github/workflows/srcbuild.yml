@@ -3,6 +3,11 @@ name: Self-hosted source SDK and final std
 on:
   workflow_call:
     inputs:
+      native_inputs_only:
+        description: Prepare complete Linux x64 native inputs only, without building or qualifying an SDK
+        type: boolean
+        required: false
+        default: false
       native_runtime_artifact:
         description: Existing native-runtime-install artifact prefix
         type: string
@@ -50,11 +55,13 @@ on:
         default: '{}'
       native_inputs_artifact:
         description: Reviewed complete native installations and exported paired tools artifact
-        required: true
+        required: false
+        default: ''
         type: string
       native_inputs_run_id:
         description: Original native installation producer run
-        required: true
+        required: false
+        default: ''
         type: string
       cangjie_ref:
         description: Optional SDK version label; source repository revisions remain pinned
@@ -106,6 +113,11 @@ on:
         default: false
   workflow_dispatch:
     inputs:
+      native_inputs_only:
+        description: Prepare complete Linux x64 native inputs only, without building or qualifying an SDK
+        type: boolean
+        required: false
+        default: false
       native_runtime_artifact:
         description: Existing native-runtime-install artifact prefix
         type: string
@@ -153,11 +165,13 @@ on:
         default: '{}'
       native_inputs_artifact:
         description: Reviewed complete native installations and exported paired tools artifact
-        required: true
+        required: false
+        default: ''
         type: string
       native_inputs_run_id:
         description: Original native installation producer run
-        required: true
+        required: false
+        default: ''
         type: string
       cangjie_ref:
         description: Optional SDK version label; source repository revisions remain pinned
@@ -232,12 +246,98 @@ env:
   CJCJ_SOURCE_SELECTION: ${{ inputs.source_selection }}
 
 jobs:
+  native-inputs:
+    name: Linux x64 / native input preparation
+    if: inputs.native_inputs_only
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      CJCJ_SRCBUILD_TARGET: ${{ inputs.targets }}
+      CJCJ_NATIVE_CJDB_INSTALL: ${{ runner.temp }}/native-preparation/native/install
+      CJCJ_NATIVE_RUNTIME_INSTALL: ${{ runner.temp }}/native-runtime-install
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.1'
+      - name: Require the actual selected dependency and accepted runtime producers
+        run: |
+          set -euo pipefail
+          ulimit -S -c 0
+          ulimit -H -c 0
+          test "$CJCJ_SRCBUILD_TARGET" = linux-x64
+          test -n "$CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT"
+          test -n "$CJCJ_NATIVE_BUILD_INPUTS_RUN_ID"
+          test -n "$CJCJ_NATIVE_RUNTIME_ARTIFACT"
+          test -n "$CJCJ_NATIVE_RUNTIME_RUN_ID"
+      - name: Receive installed dependencies and deployed H1/HLE inputs, without project sources
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.native_build_inputs_artifact }}-linux-x64
+          run-id: ${{ inputs.native_build_inputs_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/native-dependencies
+      - name: Receive the accepted exact runtime installation
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.native_runtime_artifact }}-linux_x86_64
+          run-id: ${{ inputs.native_runtime_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ env.CJCJ_NATIVE_RUNTIME_INSTALL }}
+      - name: Prepare the normal Unix CMake tools
+        run: npx --yes zx@8 build/cli.mjs --target linux-x64 install-system-deps
+      - uses: ./.github/actions/sccache
+        with:
+          component: native-cjdb
+          platform: linux_x86_64
+          pin: ${{ inputs.native_llvm_ref }}
+          cache-size: 2G
+      - name: Fetch fixed sources on this official runner and build the normal N and AST targets
+        run: |
+          set -euo pipefail
+          ulimit -S -c 0
+          ulimit -H -c 0
+          node ci/bootstrap/native-cjdb-job.mjs prepare-inputs "$RUNNER_TEMP/native-dependencies" "$RUNNER_TEMP/native-preparation"
+          node ci/bootstrap/native-cjdb-job.mjs build "$RUNNER_TEMP/native-preparation/prepared" "$RUNNER_TEMP/native-preparation/native"
+      - name: Package complete native inputs using the existing installations and location map
+        run: node ci/bootstrap/native-cjdb-job.mjs package-inputs "$RUNNER_TEMP/native-dependencies" "$RUNNER_TEMP/native-preparation"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-inputs-linux-x64
+          path: |
+            ${{ runner.temp }}/native-preparation/native-inputs/locations.json
+            ${{ runner.temp }}/native-preparation/native-inputs/native-inputs.tar
+          if-no-files-found: error
+      - name: Retain original native preparation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-inputs-diagnostics-linux-x64
+          path: |
+            ${{ runner.temp }}/native-preparation/prepare-commands.json
+            ${{ runner.temp }}/native-preparation/prepared/native-cjdb.json
+            ${{ runner.temp }}/native-preparation/native/commands.json
+            ${{ runner.temp }}/native-preparation/native/install/BUILD-INPUTS.json
+            ${{ runner.temp }}/native-preparation/native/build/CMakeCache.txt
+            ${{ runner.temp }}/native-preparation/package-inputs-commands.json
+          if-no-files-found: warn
+      - uses: ./.github/actions/sccache-report
+        if: always()
+        with:
+          component: native-cjdb
+          platform: linux_x86_64
+          require-compiles: ${{ job.status == 'success' }}
+
   # Four source SDK builds are the expensive part of a release, and starting all
   # of them before phase 1 has reported anything is what the phase policy exists
   # to prevent. Selecting here lets each phase call this workflow for its own
   # target; the tuple list stays in one place.
   plan:
     name: Select targets
+    if: ${{ !inputs.native_inputs_only }}
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
@@ -255,7 +355,10 @@ jobs:
         id: select
         env:
           REQUESTED: ${{ inputs.targets }}
-        run: node ci/srcbuild/target-matrix.mjs --targets "$REQUESTED"
+        run: |
+          test -n "$CJCJ_NATIVE_INPUTS_ARTIFACT"
+          test -n "$CJCJ_NATIVE_INPUTS_RUN_ID"
+          node ci/srcbuild/target-matrix.mjs --targets "$REQUESTED"
 
   srcbuild:
     name: ${{ matrix.target }} / source SDK

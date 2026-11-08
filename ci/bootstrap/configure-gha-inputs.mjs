@@ -13,7 +13,7 @@ import {command, readJson, privateRoot} from './sdk-flow.mjs';
 import {prepareNativeInputs} from './sdk-inputs.mjs';
 import {nativePair} from './native-runtime-input.mjs';
 import {hostPlatform, readHostToolchainPin} from '../host-toolchain-pin.mjs';
-import {nativeInstallationLocations} from './native-installation-locations.mjs';
+import {nativeInstallationLocations,unpackNativeInstallations} from './native-installation-locations.mjs';
 import {buildConfig} from '../../build/lib/config.mjs';
 import {nativeSourceSelection} from './native-source-selection.mjs';
 export {NATIVE_REPOSITORIES} from './native-source-selection.mjs';
@@ -21,6 +21,7 @@ export async function configureGhaInputs(env=process.env) {
   if(!env.CANGJIE_WORKSPACE||!env.GITHUB_WORKSPACE||!env.CJCJ_NATIVE_INPUT_ROOT||!env.CJCJ_BOOTSTRAP_BASE)
     throw new Error('GHA_NATIVE_LOCATIONS_REQUIRED');
   const root=await privateRoot(env.CJCJ_NATIVE_INPUT_ROOT), workspace=await privateRoot(env.CANGJIE_WORKSPACE);
+  await unpackNativeInstallations(root);
   const locations=await readJson(path.join(root,'locations.json'));
   const platform=hostPlatform(), sourcePair=nativePair(env,{requireHost:Boolean(env.CJCJ_NATIVE_RUNTIME_INSTALL)}),
     pair=env.CJCJ_NATIVE_RUNTIME_INSTALL?sourcePair:null;

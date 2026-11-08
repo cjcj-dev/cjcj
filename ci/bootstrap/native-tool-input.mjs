@@ -3,7 +3,7 @@
 // options. Reuse the same inputs across job handoff and public tools.run.
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {readJson,atomicJson,relative} from './sdk-flow.mjs';
+import {readJson,atomicJson,relative,command} from './sdk-flow.mjs';
 import {readNativeToolDependencies} from '../../build/srcbuild/native-tool-dependencies.mjs';
 export async function configureNativeToolInput({root,workspace,platform,envFile}) {
   root=await fs.realpath(root);
@@ -20,7 +20,19 @@ export async function configureNativeToolInput({root,workspace,platform,envFile}
     const row=selection[name];
     if(!row)throw Error('GHA_NATIVE_TOOL_SOURCE '+name);
     relative(row.path);
-    const source=await fs.realpath(path.resolve(path.dirname(file),row.path));
+    const selected=path.resolve(path.dirname(file),row.path);
+    if(!selected.startsWith(root+path.sep))throw Error('GHA_NATIVE_TOOL_SOURCE_PATH '+name);
+    const exists=await fs.lstat(selected).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;});
+    if(!exists) {
+      if(process.env.GITHUB_ACTIONS!=='true'||!row.repo||!/^[a-f0-9]{40}$/.test(row.commit||''))
+        throw Error('GHA_NATIVE_TOOL_FIXED_SOURCE_REQUIRED '+name);
+      await fs.mkdir(selected,{recursive:true});
+      await command(['git','init',selected]);
+      await command(['git','-C',selected,'remote','add','origin',row.repo]);
+      await command(['git','-C',selected,'fetch','--depth=1','origin',row.commit]);
+      await command(['git','-C',selected,'checkout','--detach',row.commit]);
+    }
+    const source=await fs.realpath(selected);
     if(!source.startsWith(root+path.sep))throw Error('GHA_NATIVE_TOOL_SOURCE_PATH '+name);
     resolved[name]={...row,path:source};
   }

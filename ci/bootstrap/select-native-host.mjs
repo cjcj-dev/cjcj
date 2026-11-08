@@ -11,7 +11,7 @@ import {targetForHost} from '../../build/lib/targets.mjs';
 import {verifyOfficialSdkIdentity} from '../../build/lib/official-sdk-identity.mjs';
 import {buildConfig} from '../../build/lib/config.mjs';
 import {nativeSourceSelection} from './native-source-selection.mjs';
-import {nativeInstallationLocations} from './native-installation-locations.mjs';
+import {nativeInstallationLocations,unpackNativeInstallations} from './native-installation-locations.mjs';
 import {readInstalledNativeAst} from './installed-native-ast.mjs';
 import {captureWindowsHostLlvm} from './native-windows-llvm-trace.mjs';
 const execute=promisify(execFile);
@@ -19,6 +19,7 @@ export async function selectNativeHost(inputRoot, work, env=process.env, signal)
   signal?.throwIfAborted();
   const pair=nativePair(env);if(!pair)throw new Error('NATIVE_HOST_EXPLICIT_PAIR_REQUIRED');
   const root=await privateRoot(inputRoot), platform=hostPlatform(), native=sdkPlatform(platform);
+  await unpackNativeInstallations(root);
   const locations=await readJson(path.join(root,'locations.json'));
   if(locations.platform!==platform)throw new Error('NATIVE_HOST_PLATFORM');
   if(!locations.host?.install||!locations.host?.archive||locations.host.version!==pair.hostVersion)

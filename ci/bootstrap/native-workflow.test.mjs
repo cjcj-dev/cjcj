@@ -125,11 +125,49 @@ test('public native package carries the original Python input through the existi
  const selected=await nativeInstallationLocations(root,{platform:'linux_x86_64'},{CJCJ_NATIVE_CJDB_INSTALL:unpacked});
  assert.equal(selected.llvm.install,selected.ast.install);
  console.log('NATIVE_PACKAGE_PYTHON_INPUT_CONSUMER_REACHED');
+ assert.equal(fs.existsSync(selected.llvm.verification.python.record),true,'NATIVE_PACKAGE_PYTHON_INPUT_REQUIRED');
  assert.equal(fs.readFileSync(selected.llvm.verification.python.record,'utf8'),python);
  fs.writeFileSync(path.join(install,'BUILD-INPUTS.json'),JSON.stringify({...facts,pythonSource:{}}));
  const rejected=spawnSync(process.execPath,[entry,'package',install,path.join(root,'invalid')],{encoding:'utf8'});
  assert.equal(rejected.status,1);assert.match(rejected.stderr,/NATIVE_JOB_PYTHON_SOURCE_REQUIRED/);
  assert.equal(fs.existsSync(path.join(root,'invalid/native-install.tar')),false);
+});
+
+test('native input only preparation is opt-in and refuses source archives at its public entry',t=>{
+ const wf=workflow('srcbuild.yml'),job=wf.jobs['native-inputs'];
+ assert.equal(wf.on.workflow_dispatch.inputs.native_inputs_only.default,false);
+ assert.equal(job.if,'inputs.native_inputs_only');assert.equal(job['runs-on'],'ubuntu-22.04');
+ assert.match(wf.jobs.plan.if,/!inputs.native_inputs_only/);
+ const scripts=job.steps.map(s=>s.run||'').join('\n');
+ assert.match(scripts,/native-cjdb-job.mjs prepare-inputs/);assert.match(scripts,/native-cjdb-job.mjs build/);
+ assert.match(scripts,/native-cjdb-job.mjs package-inputs/);assert.doesNotMatch(scripts,/native-cjdb-job.mjs materialize/);
+ const root=fixture(t),input=path.join(root,'input');fs.mkdirSync(input);
+ fs.writeFileSync(path.join(input,'native-cjdb.json'),JSON.stringify({platform:'linux_x86_64',compilerArchive:{file:'retired-source.tar'}}));
+ const entry=path.join(repo,'ci/bootstrap/native-cjdb-job.mjs'),work=path.join(root,'work');
+ const invoke=env=>spawnSync(process.execPath,[entry,'prepare-inputs',input,work],{encoding:'utf8',env:{...process.env,...env,CJCJ_SRCBUILD_TARGET:'linux-x64'}});
+ const refused=invoke({GITHUB_ACTIONS:'false'});assert.equal(refused.status,1);assert.match(refused.stderr,/NATIVE_INPUT_ONLY_OFFICIAL_LINUX_REQUIRED/);
+ const archived=invoke({GITHUB_ACTIONS:'true',CJCJ_SOURCE_SELECTION:'{}'});
+ console.log('NATIVE_INPUT_ONLY_SOURCE_ARCHIVE_ASSERTION_REACHED');
+ assert.equal(archived.status,1);assert.match(archived.stderr,/NATIVE_INPUT_ONLY_SOURCE_ARCHIVE_FORBIDDEN/);
+ assert.equal(fs.existsSync(path.join(work,'sources')),false,'source preparation must not start with archived project inputs');
+});
+
+test('formal native host entry unpacks installed payload modes before its ordinary host validation',t=>{
+ const root=fixture(t),from=path.join(root,'from'),input=path.join(root,'input');
+ fs.mkdirSync(path.join(from,'.native-inputs'),{recursive:true});fs.mkdirSync(input);
+ const marker=path.join(from,'.native-inputs','installed-tool');fs.writeFileSync(marker,'finite installed payload; not a host SDK\n');fs.chmodSync(marker,0o755);
+ const archive=spawnSync('tar',['-cf',path.join(input,'native-inputs.tar'),'-C',from,'.native-inputs'],{encoding:'utf8'});
+ assert.equal(archive.status,0,archive.stderr);
+ const locations=JSON.stringify({platform:'linux_x86_64'});fs.writeFileSync(path.join(input,'locations.json'),locations);
+ const env={...process.env,GITHUB_WORKSPACE:root,GITHUB_ENV:path.join(root,'env'),RUNNER_TEMP:root,
+  CJCJ_NATIVE_INPUT_ROOT:input,CJCJ_NATIVE_LLVM_REF:'1'.repeat(40),CJCJ_NATIVE_RUNTIME_REF:'2'.repeat(40),CJCJ_NATIVE_HOST_VERSION:'1.3.0-alpha.20261025001053'};
+ const r=spawnSync(process.execPath,[path.join(repo,'ci/bootstrap/prepare-native-host.mjs')],{env,encoding:'utf8'});
+ assert.equal(r.status,1);assert.match(r.stderr,/NATIVE_HOST_ORIGINAL_INPUT_REQUIRED/,'ordinary host validation remains an independent rejection');
+ assert.equal(fs.readFileSync(path.join(input,'locations.json'),'utf8'),locations);
+ console.log('NATIVE_INSTALLED_PAYLOAD_MODE_ASSERTION_REACHED');
+ const target=path.join(input,'.native-inputs/installed-tool');
+ assert.equal(fs.existsSync(target),true,'NATIVE_INSTALLED_PAYLOAD_REQUIRED');
+ assert.equal(fs.statSync(target).mode&0o777,0o755);
 });
 
 test('formal Windows release package key needs an explicit pair and its native std contract',t=>{
