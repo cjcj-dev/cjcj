@@ -68,6 +68,20 @@ test('fixed 259 scripts are installed with only reader/compiler wiring substitut
     assert.equal(body(after),body(before));
   }
   assert.equal(fs.readFileSync(carried+'/tests/gc_unit/run_so_reentry_bounded.sh','utf8'),originals['tests/gc_unit/run_so_reentry_bounded.sh']);
+  // The real runtime producer has already prepared its installed payload.
+  // The SDK installer must consume that installation without changing bodies.
+  const sdk2=f.root+'/sdk-from-install';
+  installGcUnitInputs(f.config,carried,sdk2);
+  for(const member of ['run_finalizer_trigger.sh','run_phase_entry_trigger.sh','run_segmented_array_managed.sh'])
+    assert.equal(fs.readFileSync(sdk2+'/share/runtime-build/runtime/tests/gc_unit/'+member,'utf8'),fs.readFileSync(carried+'/tests/gc_unit/'+member,'utf8'));
+  const script=carried+'/tests/gc_unit/run_finalizer_trigger.sh',saved=fs.readFileSync(script,'utf8');
+  try {
+    fs.writeFileSync(script,saved.replace('--compile','--wrong-compile'));
+    assert.throws(()=>installGcUnitInputs(f.config,carried,sdk2),/unsupported runtime compiler calls/);
+    fs.writeFileSync(script,saved+'\ngc_unit_language_admit\n');
+    assert.throws(()=>installGcUnitInputs(f.config,carried,sdk2),/unsupported runtime language admission/);
+  } finally {fs.writeFileSync(script,saved);}
+  installGcUnitInputs(f.config,carried,sdk2);
 });
 test('259 public installed CLI reaches both mandatory payloads and preserves compiler/phase failure and recovery',()=>{
   const f=fixture('public');f.install();const first=f.run();assert.equal(first.status,0,first.stderr);

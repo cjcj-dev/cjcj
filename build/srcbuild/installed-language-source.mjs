@@ -33,12 +33,28 @@ export function prepareInstalledLanguage(runtime) {
   for(const member of managed) {
     const file=path.join(unit,member),text=fs.readFileSync(file,'utf8');
     const block=/^source [^\n]*language_toolchain\.sh"\ngc_unit_language_admit\ngc_unit_language_environment$/gm;
-    if([...text.matchAll(block)].length!==1)throw Error('unsupported runtime language admission '+member);
     const expected=member==='run_phase_entry_trigger.sh'?2:1;
+    const admission='LANGUAGE_INPUT_SHELL="$(zx "$(dirname "$0")/installed-language-inputs.mjs" --shell)"\neval "$LANGUAGE_INPUT_SHELL"';
+    const compile='zx "$(dirname "$0")/installed-language-inputs.mjs" --compile';
+    const preparedRuntime='SDK_RUNTIME="${GC_UNIT_SDK_RUNTIME_DIR:?}"';
+    const count=value=>text.split(value).length-1;
+    const sourceBlocks=[...text.matchAll(block)].length;
+    // Runtime installations already carry these same prepared scripts. A
+    // subsequent SDK install consumes them without repeating substitutions.
+    if(sourceBlocks===0) {
+      if(count(admission)!==1||/\bgc_unit_language_(?:admit|environment|compile)\b/.test(text)
+          ||text.includes('language_toolchain.sh'))throw Error('unsupported runtime language admission '+member);
+      if(count(compile)!==expected)throw Error('unsupported runtime compiler calls '+member);
+      if(count(preparedRuntime)!==1)throw Error('unsupported runtime library input '+member);
+      continue;
+    }
+    if(sourceBlocks!==1||count(admission)!==0||count(compile)!==0)
+      throw Error('unsupported runtime language admission '+member);
     if((text.match(/\bgc_unit_language_compile\b/g)||[]).length!==expected)throw Error('unsupported runtime compiler calls '+member);
-    const prepared=text.replace(block,'LANGUAGE_INPUT_SHELL="$(zx "$(dirname "$0")/installed-language-inputs.mjs" --shell)"\neval "$LANGUAGE_INPUT_SHELL"')
-      .replaceAll('gc_unit_language_compile','zx "$(dirname "$0")/installed-language-inputs.mjs" --compile')
-      .replace('SDK_RUNTIME="${CANGJIE_HOME:-}/runtime/lib/linux_x86_64_cjnative"','SDK_RUNTIME="${GC_UNIT_SDK_RUNTIME_DIR:?}"');
+    const sourceRuntime='SDK_RUNTIME="${CANGJIE_HOME:-}/runtime/lib/linux_x86_64_cjnative"';
+    if(count(sourceRuntime)!==1||count(preparedRuntime)!==0)throw Error('unsupported runtime library input '+member);
+    const prepared=text.replace(block,admission).replaceAll('gc_unit_language_compile',compile)
+      .replace(sourceRuntime,preparedRuntime);
     fs.writeFileSync(file,prepared);
   }
 }
