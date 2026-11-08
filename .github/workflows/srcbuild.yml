@@ -8,6 +8,11 @@ on:
         type: boolean
         required: false
         default: false
+      native_input_stage:
+        description: Native preparation scope; development-dependencies builds no N or SDK
+        type: string
+        required: false
+        default: all
       native_runtime_artifact:
         description: Existing native-runtime-install artifact prefix
         type: string
@@ -118,6 +123,12 @@ on:
         type: boolean
         required: false
         default: false
+      native_input_stage:
+        description: Native preparation scope; development-dependencies builds no N or SDK
+        type: choice
+        required: false
+        default: all
+        options: [all, development-dependencies]
       native_runtime_artifact:
         description: Existing native-runtime-install artifact prefix
         type: string
@@ -253,6 +264,7 @@ jobs:
     timeout-minutes: 360
     env:
       CJCJ_SRCBUILD_TARGET: ${{ inputs.targets }}
+      CJCJ_NATIVE_INPUT_STAGE: ${{ inputs.native_input_stage }}
       CJCJ_NATIVE_CJDB_INSTALL: ${{ runner.temp }}/native-preparation/native/install
       CJCJ_NATIVE_RUNTIME_INSTALL: ${{ runner.temp }}/native-runtime-install
     steps:
@@ -263,17 +275,23 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.1'
-      - name: Require the actual selected dependency and accepted runtime producers
+      - name: Require the selected preparation scope and actual optional producer pair
         run: |
           set -euo pipefail
           ulimit -S -c 0
           ulimit -H -c 0
           test "$CJCJ_SRCBUILD_TARGET" = linux-x64
-          test -n "$CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT"
-          test -n "$CJCJ_NATIVE_BUILD_INPUTS_RUN_ID"
-          test -n "$CJCJ_NATIVE_RUNTIME_ARTIFACT"
-          test -n "$CJCJ_NATIVE_RUNTIME_RUN_ID"
-      - name: Receive installed dependencies and deployed H1/HLE inputs, without project sources
+          case "$CJCJ_NATIVE_INPUT_STAGE" in all|development-dependencies) ;; *) exit 1;; esac
+          if test -n "$CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT$CJCJ_NATIVE_BUILD_INPUTS_RUN_ID"; then
+            test -n "$CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT"
+            test -n "$CJCJ_NATIVE_BUILD_INPUTS_RUN_ID"
+          fi
+          if test "$CJCJ_NATIVE_INPUT_STAGE" = all; then
+            test -n "$CJCJ_NATIVE_RUNTIME_ARTIFACT"
+            test -n "$CJCJ_NATIVE_RUNTIME_RUN_ID"
+          fi
+      - name: Receive proven compatible development installations when explicitly supplied
+        if: inputs.native_build_inputs_artifact != ''
         uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.native_build_inputs_artifact }}-linux-x64
@@ -281,6 +299,7 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/native-dependencies
       - name: Receive the accepted exact runtime installation
+        if: inputs.native_input_stage == 'all'
         uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.native_runtime_artifact }}-linux_x86_64
@@ -292,25 +311,45 @@ jobs:
           ulimit -S -c 0
           ulimit -H -c 0
           npx --yes zx@8 build/cli.mjs --target linux-x64 install-system-deps
+          sudo apt-get install -y libffi-dev libbz2-dev libsqlite3-dev liblzma-dev pkg-config
       - uses: ./.github/actions/sccache
         with:
           component: native-cjdb
           platform: linux_x86_64
           pin: ${{ inputs.native_llvm_ref }}
           cache-size: 2G
+      - name: Produce the missing normal development installations from fixed official distributions
+        if: inputs.native_build_inputs_artifact == ''
+        run: |
+          set -euo pipefail
+          ulimit -S -c 0
+          ulimit -H -c 0
+          node ci/bootstrap/native-cjdb-job.mjs dependencies "$RUNNER_TEMP/native-dependencies" "$RUNNER_TEMP/native-preparation/dependencies"
+      - name: Retain development installations and original configuration, without source trees
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-development-dependencies-linux-x64
+          path: |
+            ${{ runner.temp }}/native-dependencies/native-cjdb.json
+            ${{ runner.temp }}/native-dependencies/locations.json
+            ${{ runner.temp }}/native-dependencies/native-inputs.tar
+          if-no-files-found: error
       - name: Fetch fixed sources on this official runner and build the normal N and AST targets
+        if: inputs.native_input_stage == 'all'
         run: |
           set -euo pipefail
           ulimit -S -c 0
           ulimit -H -c 0
           node ci/bootstrap/native-cjdb-job.mjs prepare-inputs "$RUNNER_TEMP/native-dependencies" "$RUNNER_TEMP/native-preparation"
           node ci/bootstrap/native-cjdb-job.mjs build "$RUNNER_TEMP/native-preparation/prepared" "$RUNNER_TEMP/native-preparation/native"
-      - name: Package complete native inputs using the existing installations and location map
+      - name: Package N, AST, runtime and host installations using the existing location map
+        if: inputs.native_input_stage == 'all'
         run: |
           ulimit -S -c 0
           ulimit -H -c 0
           node ci/bootstrap/native-cjdb-job.mjs package-inputs "$RUNNER_TEMP/native-dependencies" "$RUNNER_TEMP/native-preparation"
       - uses: actions/upload-artifact@v7
+        if: inputs.native_input_stage == 'all'
         with:
           name: native-inputs-linux-x64
           path: |
@@ -323,6 +362,10 @@ jobs:
         with:
           name: native-inputs-diagnostics-linux-x64
           path: |
+            ${{ runner.temp }}/native-preparation/dependencies/dependency-commands.json
+            ${{ runner.temp }}/native-preparation/dependencies/python-configuration.json
+            ${{ runner.temp }}/native-dependencies/.native-inputs/python-original.json
+            ${{ runner.temp }}/native-dependencies/.native-inputs/DEVELOPMENT-INPUTS.json
             ${{ runner.temp }}/native-preparation/prepare-commands.json
             ${{ runner.temp }}/native-preparation/prepared/native-cjdb.json
             ${{ runner.temp }}/native-preparation/native/commands.json

@@ -136,6 +136,8 @@ test('public native package carries the original Python input through the existi
 test('native input only preparation is opt-in and refuses source archives at its public entry',t=>{
  const wf=workflow('srcbuild.yml'),job=wf.jobs['native-inputs'];
  assert.equal(wf.on.workflow_dispatch.inputs.native_inputs_only.default,false);
+ assert.equal(wf.on.workflow_dispatch.inputs.native_input_stage.default,'all');
+ assert.deepEqual(wf.on.workflow_dispatch.inputs.native_input_stage.options,['all','development-dependencies']);
  assert.equal(job.if,'inputs.native_inputs_only');assert.equal(job['runs-on'],'ubuntu-22.04');
  assert.match(wf.jobs.plan.if,/!inputs.native_inputs_only/);
  const scripts=job.steps.map(s=>s.run||'').join('\n');
@@ -144,6 +146,12 @@ test('native input only preparation is opt-in and refuses source archives at its
  const root=fixture(t),input=path.join(root,'input');fs.mkdirSync(input);
  fs.writeFileSync(path.join(input,'native-cjdb.json'),JSON.stringify({platform:'linux_x86_64',compilerArchive:{file:'retired-source.tar'}}));
  const entry=path.join(repo,'ci/bootstrap/native-cjdb-job.mjs'),work=path.join(root,'work');
+ const development=env=>spawnSync(process.execPath,[entry,'dependencies',path.join(root,'development'),path.join(root,'development-work')],
+   {encoding:'utf8',env:{...process.env,...env,CJCJ_SRCBUILD_TARGET:'linux-x64'}});
+ const local=development({GITHUB_ACTIONS:'false'});assert.equal(local.status,1);assert.match(local.stderr,/NATIVE_INPUT_ONLY_OFFICIAL_LINUX_REQUIRED/);
+ const noPair=development({GITHUB_ACTIONS:'true',CJCJ_NATIVE_LLVM_REF:'',CJCJ_NATIVE_RUNTIME_REF:''});
+ assert.equal(noPair.status,1);assert.match(noPair.stderr,/NATIVE_INPUT_ONLY_PAIR_REQUIRED/);
+ assert.equal(fs.existsSync(path.join(root,'development')),false,'unpaired dependency production must not start');
  const invoke=env=>spawnSync(process.execPath,[entry,'prepare-inputs',input,work],{encoding:'utf8',env:{...process.env,...env,CJCJ_SRCBUILD_TARGET:'linux-x64'}});
  const refused=invoke({GITHUB_ACTIONS:'false'});assert.equal(refused.status,1);assert.match(refused.stderr,/NATIVE_INPUT_ONLY_OFFICIAL_LINUX_REQUIRED/);
  const archived=invoke({GITHUB_ACTIONS:'true',CJCJ_SOURCE_SELECTION:'{}'});

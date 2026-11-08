@@ -114,11 +114,11 @@ node --test ci/release/bootstrap_entries.test.mjs \
 
 The source workflow requires `native_inputs_artifact` and its original
 `native_inputs_run_id`. The artifact contains complete N/R/AST native install
-roots and the existing Linux H1 producer exported with
-`node ci/bootstrap/deploy-native-tools.mjs TOOLS_REPO COMMIT EMPTY_DESTINATION`.
-Its `locations.json` records `platform`, `installations` (each has relative
-`install`, original `buildResult`, and `configuration`) and
-`tools.privateRoot`. No removed receipt or SDK lock is a prerequisite.
+roots. Linux H1 is built by `sdk-native-stage.mjs` using the selected host's
+normal cjpm and the validated native shim; no private orchestration repository
+or adapter export is consumed. Its `locations.json` records `platform`,
+`installations` (each has relative `install`, original `buildResult`, and
+`configuration`) and ordinary tool options. No receipt or SDK lock is required.
 `configure-gha-inputs.mjs` checks out the fixed LLVM, runtime, AST compiler and
 H1 repositories, reads the actual candidate checkout, selects execution-host H,
 and writes `CJCJ_SDK_INPUTS` into GITHUB_ENV. The artifact must contain genuine
@@ -127,19 +127,30 @@ The eight bootstrap phases then use `sdk-targets.mjs`; native production and ful
 SDK qualification remain distinct from configuration-only checks.
 
 `srcbuild.yml` also has an opt-in `native_inputs_only: true` mode for
-`targets: linux-x64`. It runs the existing native-cjdb producer and uploads
-`native-inputs-linux-x64`; it does not start SDK phases. Before dispatch it needs
-the real `native_build_inputs_artifact`/`native_build_inputs_run_id` for installed
-development dependencies plus deployed H1/HLE inputs, the accepted runtime
-artifact/run, and the exact native pair/host version. The dependency artifact
-contains `native-cjdb.json`, `locations.json`, original Python source/build facts,
-the Python development installation, libedit, libxml2 distribution archive,
-exported private tools, HLE entities and native-tool source facts. It contains no
-project checkout, Git directory, `native-build-inputs.tar` or compiler source
-archive. Its installed dependency entities use the same optional
-`native-inputs.tar`/`.native-inputs/` transport below to retain executable modes
-through Actions artifacts. Official jobs fetch the fixed source commits themselves. The original
-default source workflow still requires complete native inputs.
+`targets: linux-x64`. With `native_input_stage: all` it produces the missing
+normal development installations, runs the existing N/AST producer, and uploads
+`native-inputs-linux-x64` without starting SDK phases. The exact native pair,
+host version and accepted runtime artifact/run must be supplied. An actual
+compatible `native_build_inputs_artifact`/`native_build_inputs_run_id` can be
+reused explicitly; an unproduced dependency artifact is not a prerequisite.
+
+`native_input_stage: development-dependencies` runs the same dependency step
+and uploads `native-development-dependencies-linux-x64`, without fetching or
+rebuilding N/AST or requiring runtime installation. The step uses fixed official
+Python 3.11.17, ncurses 6.6, libedit 20260512-3.1, libxml2 2.15.4 and Node 22.23.3
+distributions. Python keeps its headers, pkg-config/config files and libraries;
+its actual sysconfig and loader are tested at the installation prefix before
+original source/build facts are recorded. Reuse requires a compatible actual
+prefix, not edited sysconfig or rewritten build facts. Native library source and
+build directories remain outside the transported installations. No project
+checkout, Git directory, `native-build-inputs.tar` or compiler source archive is
+transported. Official jobs fetch their fixed Git commits themselves.
+
+HLE's independently produced modules/cjbind and native-tool source facts can
+accompany the native installations when present. They are required by their
+actual tools consumers, not by N/AST/H1 preparation. A native artifact without
+those later tools inputs does not qualify a complete SDK. JDK/Lombok belong to
+the later cjprof tools build, not this development-dependency stage.
 
 The output uses the existing `locations.json` and a `native-inputs.tar` containing
 installed/deployed entities under `.native-inputs/`, retaining executable modes.
@@ -150,7 +161,7 @@ For an already produced native installation, `native-cjdb-job.mjs package INSTAL
 WORK` uses the same packaging implementation as `build`, and the existing
 `unpack` entry consumes its `native-install.tar` without another native build.
 
-The same native artifact also carries the independently produced HLE dependency
+The native artifact can also carry the independently produced HLE dependency
 package. Extract it under an artifact-owned directory and record
 `hleDependencies` in `locations.json`, relative to that artifact root, pointing
 to its `hle-dependencies.relative.json`. Keep the Node, modules and cjbind paths

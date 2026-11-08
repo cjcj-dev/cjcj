@@ -38,12 +38,14 @@ export function isInstalled(buildRoot) {
   return componentInstalled(buildRoot,'ncurses') && componentInstalled(buildRoot,'libedit');
 }
 
-export async function install(buildRoot, {jobs} = {}) {
-  if (isInstalled(buildRoot)) {
+export async function install(buildRoot, {jobs, workRoot=buildRoot, libeditShared=false} = {}) {
+  const sharedReady=()=>!libeditShared||fs.existsSync(path.join(installationPaths(buildRoot).libedit,'lib/libedit.so'));
+  if (isInstalled(buildRoot)&&sharedReady()) {
     logger.info('Static libs already present at %s; skipping', buildRoot);
     return;
   }
   fs.mkdirSync(buildRoot, {recursive: true});
+  fs.mkdirSync(workRoot, {recursive: true});
   const cpus = jobs ?? os.availableParallelism();
   if(!Number.isSafeInteger(cpus)||cpus<1)throw new Error('STATIC_LIBS_JOBS');
   // autotools has no launcher variable; the compiler cache cmake-driven stages
@@ -52,9 +54,9 @@ export async function install(buildRoot, {jobs} = {}) {
   const cxx = [process.env.CMAKE_CXX_COMPILER_LAUNCHER, 'clang++'].filter(Boolean).join(' ');
 
   if(!componentInstalled(buildRoot,'ncurses'))await stage('static_libs:ncurses', async () => {
-    const archive = path.join(buildRoot, `ncurses-${NCURSES_VERSION}.tar.gz`);
+    const archive = path.join(workRoot, `ncurses-${NCURSES_VERSION}.tar.gz`);
     await download(NCURSES_URL, archive);
-    const source = await extract(archive, path.join(buildRoot,'sources'));
+    const source = await extract(archive, path.join(workRoot,'sources'));
     const installRoot = path.join(buildRoot, `ncurses-${NCURSES_VERSION}`);
     await run([
       './configure',
@@ -81,14 +83,14 @@ export async function install(buildRoot, {jobs} = {}) {
     });
   });
 
-  if(!componentInstalled(buildRoot,'libedit'))await stage('static_libs:libedit', async () => {
-    const archive = path.join(buildRoot, `${LIBEDIT_TARBALL}.tar.gz`);
+  if(!componentInstalled(buildRoot,'libedit')||!sharedReady())await stage('static_libs:libedit', async () => {
+    const archive = path.join(workRoot, `${LIBEDIT_TARBALL}.tar.gz`);
     await download(LIBEDIT_URL, archive);
-    const source = await extract(archive, path.join(buildRoot,'sources'));
+    const source = await extract(archive, path.join(workRoot,'sources'));
     const {libedit:prefix,ncurses}=installationPaths(buildRoot);
     // libedit keeps configure's own compiler choice; only the launcher is added.
     const launcher = process.env.CMAKE_C_COMPILER_LAUNCHER;
-    await run(['./configure', '--with-pic', '--enable-shared=no', `--prefix=${prefix}`], {
+    await run(['./configure', '--with-pic', '--enable-shared='+(libeditShared?'yes':'no'), `--prefix=${prefix}`], {
       cwd: source,
       envOverlay: {
         ...(launcher?{CC:`${launcher} ${process.env.CC || 'cc'}`} : {}),
@@ -100,7 +102,7 @@ export async function install(buildRoot, {jobs} = {}) {
     await run(['make', `-j${cpus}`], {cwd: source, stage: 'static_libs.libedit.make'});
     await run(['make', 'install'], {cwd: source, stage: 'static_libs.libedit.install'});
   });
-  if(!isInstalled(buildRoot))throw new Error('STATIC_LIBS_INSTALL_INCOMPLETE');
+  if(!isInstalled(buildRoot)||!sharedReady())throw new Error('STATIC_LIBS_INSTALL_INCOMPLETE');
 }
 
 export function cmakePrefixPath(buildRoot) {

@@ -4,7 +4,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {command,readJson,atomicJson,privateRoot,relative} from './sdk-flow.mjs';
+import {command,readJson,atomicJson,privateRoot,relative,fileDigest} from './sdk-flow.mjs';
 import {nativePair} from '../runtime-pin.mjs';
 import {nativeSourceSelection} from './native-source-selection.mjs';
 import {hostPlatform} from '../host-toolchain-pin.mjs';
@@ -18,6 +18,90 @@ import {readInstalledNativeAst} from './installed-native-ast.mjs';
 import {prepareHostSdk} from '../release/bootstrap_host_sdk.mjs';
 import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
 import {unpackNativeInstallations} from './native-installation-locations.mjs';
+import {download} from '../../build/lib/archive.mjs';
+import {install as installStaticLibs,installationPaths,NCURSES_URL,LIBEDIT_URL} from '../../build/toolchain/static-libs.mjs';
+
+// Development installations used by this same N/AST producer. These are official
+// third-party distributions, not project Git source handoffs. Keep their normal
+// install prefixes and configuration intact; only installations enter the tar.
+export async function prepareDevelopmentDependencies({input,work,env=process.env}) {
+  if(env.GITHUB_ACTIONS!=='true'||hostPlatform()!=='linux_x86_64'||env.CJCJ_SRCBUILD_TARGET!=='linux-x64')
+    throw Error('NATIVE_INPUT_ONLY_OFFICIAL_LINUX_REQUIRED');
+  const pair=nativePair(env,{requireHost:true});
+  if(!pair)throw Error('NATIVE_INPUT_ONLY_PAIR_REQUIRED');
+  if(Object.keys(JSON.parse(env.CJCJ_SOURCE_SELECTION||'{}')).length)throw Error('NATIVE_INPUT_ONLY_DEFAULT_SOURCES_REQUIRED');
+  input=await privateRoot(input);work=await privateRoot(work);
+  await fs.mkdir(input,{recursive:true});await fs.mkdir(work,{recursive:true});
+  const payload=path.join(input,'.native-inputs');await fs.mkdir(payload); // fresh production, no overlay
+  const records=[],jobs=String(await selectBuildJobs(undefined,env));
+  const pythonSource={version:'3.11.17',url:'https://www.python.org/ftp/python/3.11.17/Python-3.11.17.tar.xz',
+    sha256:'bfb74ad39efae27cda510f134ab408e00f9992c56851cfc0b1cdb5646da11599'};
+  const nodeSource={version:'22.23.3',url:'https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-x64.tar.xz',
+    sha256:'df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de'};
+  const xml2={url:'https://download.gnome.org/sources/libxml2/2.15/libxml2-2.15.4.tar.xz',
+    sha256:'98087fd181d9070724f3fbc65c7377db03038eb92bd882374daff44940138821'};
+  const verified=async(url,sha256,destination)=>{
+    await download(url,destination);
+    if(await fileDigest(destination)!==sha256)throw Error('NATIVE_DEVELOPMENT_ARCHIVE_BYTES '+url);
+    return destination;
+  };
+  try {
+    const archive=await verified(pythonSource.url,pythonSource.sha256,path.join(work,'Python-3.11.17.tar.xz'));
+    const source=path.join(work,'python-source'),python=path.join(payload,'python');await fs.mkdir(source);
+    await command(['tar','-xf',archive,'--strip-components=1','-C',source],{env,records});
+    const configure=[path.join(source,'configure'),'--prefix='+python,'--enable-shared','--with-ensurepip=no'];
+    const buildEnv={...env,CC:[env.CMAKE_C_COMPILER_LAUNCHER,env.CC||'clang'].filter(Boolean).join(' '),
+      LDFLAGS:'-Wl,-rpath,\\$$ORIGIN/../lib'};
+    await command(configure,{cwd:source,env:buildEnv,records});
+    await command(['make','-j'+jobs],{cwd:source,env:buildEnv,records});
+    await command(['make','install'],{cwd:source,env:buildEnv,records});
+    const probe=path.join(work,'python-configuration.json');
+    await command([path.join(python,'bin/python3.11'),'-I','-c',[
+      'import sys,sysconfig,os,json,ssl,_ctypes,ctypes,glob',
+      'root=os.path.realpath(sys.argv[1])',
+      'assert sys.version.split()[0]=="3.11.17"',
+      'assert os.path.realpath(sys.prefix)==root',
+      'assert os.path.realpath(sysconfig.get_config_var("LIBDIR"))==root+"/lib"',
+      'assert os.path.isfile(sysconfig.get_path("include")+"/Python.h")',
+      'assert glob.glob(root+"/lib/python3.11/config-*/Makefile")',
+      'assert os.path.isfile(root+"/lib/pkgconfig/python-3.11.pc")',
+      'library=root+"/lib/"+sysconfig.get_config_var("LDLIBRARY")',
+      'ctypes.CDLL(library)',
+      'maps=sorted(set(line.split()[-1] for line in open("/proc/self/maps") if "/" in line))',
+      'assert os.path.realpath(library) in maps',
+      'print("NATIVE_DEVELOPMENT_PYTHON_CONFIGURATION_AND_LOADER_REACHED")',
+      'json.dump(dict(prefix=sys.prefix,include=sysconfig.get_path("include"),library=library,config=sysconfig.get_config_vars(),maps=maps),open(sys.argv[2],"w"),default=str)',
+    ].join(';'),python,probe],{env:{...env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''},records});
+    const files={};
+    for(const name of ['bin/python3.11','include/python3.11/Python.h','lib/libpython3.11.so.1.0'])
+      files[name]={sha256:await fileDigest(path.join(python,name)),bytes:(await fs.stat(path.join(python,name))).size};
+    await atomicJson(path.join(payload,'python-original.json'),{producer:'native-cjdb-job.mjs dependencies',rc:0,
+      host:'linux_x86_64',target:'linux_x86_64',source:pythonSource,configure,configuration:await readJson(probe),files});
+    const staticWork=path.join(work,'native-libs');await fs.mkdir(staticWork);
+    await verified(NCURSES_URL,'355b4cbbed880b0381a04c46617b7656e362585d52e9cf84a67e2009b749ff11',path.join(staticWork,path.basename(NCURSES_URL)));
+    await verified(LIBEDIT_URL,'432d5e7ea8b0116dd39f2eca7bc11d0eed77faa6b77ea526ace89907c23ea4a0',path.join(staticWork,path.basename(LIBEDIT_URL)));
+    const libraries=path.join(payload,'native-libs');
+    await installStaticLibs(libraries,{jobs:Number(jobs),workRoot:staticWork,libeditShared:true});
+    const libedit=installationPaths(libraries).libedit;
+    await command(['pkg-config','--modversion',path.join(libedit,'lib/pkgconfig/libedit.pc')],{env,records});
+    await command(['readelf','-d',path.join(libedit,'lib/libedit.so')],{env,records});
+    const node=path.join(payload,'node');await fs.mkdir(node);
+    const nodeArchive=await verified(nodeSource.url,nodeSource.sha256,path.join(work,path.basename(nodeSource.url)));
+    await command(['tar','-xf',nodeArchive,'--strip-components=1','-C',node],{env,records});
+    await command([path.join(node,'bin/node'),'-e','if(process.version!=="v22.23.3")process.exit(1);console.log(process.version)'],{env,records});
+    const xmlFile=path.join(payload,path.basename(xml2.url));await verified(xml2.url,xml2.sha256,xmlFile);
+    await atomicJson(path.join(input,'native-cjdb.json'),{platform:'linux_x86_64',python:'.native-inputs/python',
+      pythonInputs:{record:'.native-inputs/python-original.json'},libedit:path.relative(input,libedit),
+      libeditLibraryDirectory:path.relative(input,path.join(libedit,'lib')),
+      xml2Archive:{file:path.relative(input,xmlFile),sha256:xml2.sha256}});
+    await atomicJson(path.join(input,'locations.json'),{platform:'linux_x86_64',tools:{}});
+    await atomicJson(path.join(payload,'DEVELOPMENT-INPUTS.json'),{python:pythonSource,node:nodeSource,xml2,
+      libedit:{url:LIBEDIT_URL,sha256:'432d5e7ea8b0116dd39f2eca7bc11d0eed77faa6b77ea526ace89907c23ea4a0'},
+      ncurses:{url:NCURSES_URL,sha256:'355b4cbbed880b0381a04c46617b7656e362585d52e9cf84a67e2009b749ff11'},jobs:Number(jobs)});
+    await command(['tar','-cf',path.join(input,'native-inputs.tar'),'-C',input,'.native-inputs'],{env,records});
+    return input;
+  } finally {await atomicJson(path.join(work,'dependency-commands.json'),records);}
+}
 
 // Official preparation receives installed dependencies and their original
 // configuration. Project sources are fetched here, never transported in tar.
@@ -234,7 +318,8 @@ export async function unpackNativeCjdb({archive,install}) {
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
     const [mode,input,work]=process.argv.slice(2);
-    if(mode==='materialize')await materializeNativeJob({artifact:input,input:work});
+    if(mode==='dependencies')await prepareDevelopmentDependencies({input,work});
+    else if(mode==='materialize')await materializeNativeJob({artifact:input,input:work});
     else if(mode==='prepare-inputs')await prepareNativeCjdbJob({input,work});
     else if(mode==='package-inputs')await packageNativeInputs({input,work});
     else if(mode==='build')await buildNativeCjdbJob({input,work});
@@ -244,6 +329,6 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
       finally {await atomicJson(path.join(work,'commands.json'),records);}
     }
     else if(mode==='unpack')await unpackNativeCjdb({archive:input,install:work});
-    else throw Error('usage: native-cjdb-job.mjs prepare-inputs DEPENDENCIES WORK | package-inputs DEPENDENCIES WORK | materialize ARTIFACT INPUT | build INPUT WORK | package INSTALL WORK | unpack ARCHIVE INSTALL');
+    else throw Error('usage: native-cjdb-job.mjs dependencies OUTPUT WORK | prepare-inputs DEPENDENCIES WORK | package-inputs DEPENDENCIES WORK | materialize ARTIFACT INPUT | build INPUT WORK | package INSTALL WORK | unpack ARCHIVE INSTALL');
   }catch(error){console.error(error.stack);process.exitCode=error.rc||1;}
 }
