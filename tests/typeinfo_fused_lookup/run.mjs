@@ -75,9 +75,20 @@ for (const opt of ['O0', 'O2']) {
   for (const [name, bodies] of [['loopSite', loopSite], ['optionLoop', optionLoop], ['throwingSite', throwingSite]]) {
     // The lookup stays at the dispatch inside the loop: not in the entry block.
     const entry = bodies.map(b => b.split(/\n\n|\n(?=[\w.$"-]+:)/)[0]);
+    // A for-in loop also invokes generic Iterator.next through its vtable.
+    // That independent class dispatch retains its own outer-TypeInfo lookup.
+    const iteratorTI = '@"std.core:Iterator<typeinfo_fused_lookup:Shape<Int64>>.ti"';
+    const outerLines = bodies.flatMap(b => b.split('\n').filter(line => line.includes(outer)));
+    const iteratorOuter = name === 'loopSite' ? bodies.flatMap(b => b.split(/\n\n/))
+      .filter(block => block.split('\n').some(line => line.includes(vtable) && line.includes(iteratorTI)))
+      .flatMap(block => block.split('\n').filter(line => line.includes(outer) && line.includes(iteratorTI))) : [];
+    if (name === 'loopSite' && opt === 'O0')
+      assert(`${opt}:generic iterator retains vtable plus outer lookup`, iteratorOuter.length === 1,
+        {iteratorOuter: iteratorOuter.length});
     assert(`${opt}:${name} per-iteration fused lookup`, bodies.length > 0 && count(bodies, fused) >= 1 &&
-      count(entry, fused) === 0 && count(bodies, outer) === 0,
-      {defs: bodies.length, fused: count(bodies, fused), entry: count(entry, fused)});
+      count(entry, fused) === 0 && outerLines.length === iteratorOuter.length,
+      {defs: bodies.length, fused: count(bodies, fused), entry: count(entry, fused),
+        outer: outerLines.length, independentIteratorOuter: iteratorOuter.length});
   }
 }
 result.passed = result.assertions.length > 0 && result.assertions.every(a => a.passed);

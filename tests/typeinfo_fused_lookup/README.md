@@ -15,3 +15,7 @@ runs both executables (`typeinfo_fused_lookup OK`) and checks the backend input 
 The fused intrinsic has no memory/speculation attributes, so LLVM does not hoist or merge it; the LLVM lit test
 `CJRuntimeLowering/mtable-outertype-fused.ll` checks that directly. Runtime equality and unload/reload/stable-guard
 behaviour of `CJ_MCC_GetMTableAndOuterTI` are covered by the runtime `mtable_api_lifecycle_harness.cpp`.
+
+Only pre-lowering backend input `.bc`/`.ll` files enter the IR assertions; `.opt.bc` is excluded.
+At O0, the for-in iterator has an independent generic class vtable call and outer-TypeInfo lookup.
+The runner checks that pairing separately; the fused Shape interface call must still have no separate outer lookup.
