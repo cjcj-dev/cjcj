@@ -174,6 +174,7 @@ export const GATING = Object.freeze([
   'ci/bootstrap/sdk-stage2-cli.integration.test.mjs',
   'build/test/source-tool-production-entry.test.mjs',
   'ci/release/download_pinned.test.mjs',
+  'ci/release/persist_native_sdk.test.mjs',
   'build/test/target-registry.test.mjs',
   'build/test/bootstrap-handoff.test.mjs',
   'build/test/cangjie-written-tools.test.mjs',

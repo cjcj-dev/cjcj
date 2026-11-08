@@ -7,11 +7,15 @@ on:
   workflow_dispatch:
     inputs:
       native_sdk_version:
-        description: Fixed package version emitted by srcbuild-target source-package
+        description: Candidate only - package version emitted by srcbuild-target srcbuild; empty consumes the persisted native_sdk registry entry
         type: string
       native_sdk_run_id:
-        description: Run producing the native SDK package
+        description: Candidate only - fresh srcbuild-target producer run (provenance, never a long-term input)
         type: string
+      persist_native_sdk:
+        description: After package-tests accepts the candidate, persist it as a new immutable prerelease (latest=false)
+        type: boolean
+        default: false
       native_inputs_artifact:
         description: Complete native N/R/AST installations and paired build adapter artifact
         type: string
@@ -221,6 +225,12 @@ jobs:
     needs: fixed-llvm-tools
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      mode: ${{ steps.native-sdk.outputs.mode }}
+      artifact: ${{ steps.native-sdk.outputs.artifact }}
+      version: ${{ steps.native-sdk.outputs.version }}
+      run: ${{ steps.native-sdk.outputs.run }}
+      digest: ${{ steps.candidate.outputs.digest }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
@@ -234,16 +244,37 @@ jobs:
           path: fixed-toolchain/linux_x86_64
       - name: Load runtime pin
         run: node ci/load_runtime_pin.mjs
+      # Default: the single persisted native_sdk entry in ci/bootstrap_artifacts_pin.json
+      # (release asset + SHA-256). Candidate: an explicit fresh producer run under
+      # acceptance, downloaded by the exact selected artifact ID; its digest is the
+      # accepted identity persist-native-sdk must publish. There is no fallback
+      # between the two and no repository variable.
+      - name: Select native SDK input
+        id: native-sdk
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.native_sdk_run_id }}
+          CANDIDATE_VERSION: ${{ inputs.native_sdk_version }}
+        run: node ci/release/persist_native_sdk.mjs select linux-x64 >> "$GITHUB_OUTPUT"
       - name: Receive packaged native SDK
-        uses: actions/download-artifact@v8
-        with:
-          name: cjcj-srcbuild-linux-x64-${{ inputs.native_sdk_version || vars.CJCJ_NATIVE_SDK_VERSION }}
-          run-id: ${{ inputs.native_sdk_run_id || vars.CJCJ_NATIVE_SDK_RUN_ID }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/native-sdk-artifact
+        id: candidate
+        if: steps.native-sdk.outputs.mode == 'candidate'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_ARTIFACT: ${{ steps.native-sdk.outputs.artifact }}
+          CANDIDATE_RUN: ${{ steps.native-sdk.outputs.run }}
+          CANDIDATE_VERSION: ${{ steps.native-sdk.outputs.version }}
+        run: node ci/release/persist_native_sdk.mjs receive-candidate linux-x64 "$RUNNER_TEMP/native-sdk-artifact" >> "$GITHUB_OUTPUT"
+      - name: Receive persisted native SDK
+        if: steps.native-sdk.outputs.mode == 'persisted'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NATIVE_SDK_ARTIFACT: ${{ steps.native-sdk.outputs.artifact }}
+        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "$NATIVE_SDK_ARTIFACT" "$RUNNER_TEMP/native-sdk-artifact"
       - name: Verify and select installed native SDK
         env:
-          CJCJ_NATIVE_SDK_VERSION: ${{ inputs.native_sdk_version || vars.CJCJ_NATIVE_SDK_VERSION }}
+          CJCJ_NATIVE_SDK_VERSION: ${{ steps.native-sdk.outputs.version }}
         run: node ci/release/receive_native_sdk.mjs "$RUNNER_TEMP/native-sdk-artifact" "$RUNNER_TEMP/native-sdk" linux-x64
       - name: Start sccache
         uses: ./.github/actions/sccache
@@ -279,6 +310,48 @@ jobs:
             ${{ runner.temp }}/package-tests/prepare
             ${{ runner.temp }}/package-tests/objc-fixture
             ${{ runner.temp }}/package-tests/prerequisite.json
+
+  # Publication follows acceptance, never build success: only an explicit
+  # dispatch, only a candidate that package-tests consumed and passed, and the
+  # script re-checks the producer binding and the accepted digest before writing.
+  persist-native-sdk:
+    name: Persist accepted native SDK (linux-x64)
+    needs: package-tests
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.persist_native_sdk && needs.package-tests.result == 'success' && needs.package-tests.outputs.mode == 'candidate' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.1'
+      - name: Persist, read back and report the accepted native SDK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          NATIVE_SDK_ARTIFACT_ID: ${{ needs.package-tests.outputs.artifact }}
+          NATIVE_SDK_RUN_ID: ${{ needs.package-tests.outputs.run }}
+          NATIVE_SDK_VERSION: ${{ needs.package-tests.outputs.version }}
+          NATIVE_SDK_ACCEPTED_DIGEST: ${{ needs.package-tests.outputs.digest }}
+          ACCEPTANCE_JOB: package-tests
+        run: |
+          mkdir -p "$RUNNER_TEMP/native-sdk-persist"
+          node ci/release/persist_native_sdk.mjs publish linux-x64 "$RUNNER_TEMP/native-sdk-persist" 2>&1 | tee "$RUNNER_TEMP/native-sdk-persist/persist.log"
+      - name: Preserve persistence provenance and log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-sdk-persist-linux-x64
+          path: ${{ runner.temp }}/native-sdk-persist
+          if-no-files-found: warn
+          retention-days: 90
 
   fixed-llvm-tools:
     name: Build LLVM tools
