@@ -7,7 +7,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify, isDeepStrictEqual} from 'node:util';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {atomicJson, readJson, privateRoot, fileDigest} from './sdk-flow.mjs';
 import {FIXED_INPUTS} from './sdk-targets.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
@@ -29,6 +29,44 @@ export async function gitInput(repository, commit) {
   const actual = await git(commit + '^{commit}'), tree = await git(commit + '^{tree}');
   if (actual !== commit) throw new Error('NATIVE_SOURCE_COMMIT');
   return {repository:root, commit:actual, tree};
+}
+// A registered local mirror is transport, not the selected public repository.
+// Read the existing cjops root registry; no SDK-owned registry is produced.
+async function selectedSourceInput(repository, selection, registryFile) {
+  const input=await gitInput(repository,selection.commit),root=input.repository;
+  const git=async(...args)=>(await execute('git',['-C',root,...args])).stdout.trim();
+  if(await git('rev-parse','HEAD')!==selection.commit)throw Error('NATIVE_SOURCE_CHECKOUT_COMMIT');
+  if(await git('status','--porcelain','--untracked-files=no'))throw Error('NATIVE_SOURCE_CHECKOUT_DIRTY');
+  const checkoutRepository=await runtimeSourceRepository(root);
+  if(selection.repository!==checkoutRepository) {
+    const github=value=>typeof value==='string'&&/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?$/.test(value)
+      ?value.replace(/\.git$/,''):null;
+    const selectedGithub=github(selection.repository);
+    if(!selectedGithub||selectedGithub!==github(checkoutRepository)) {
+      // Network checkouts cannot acquire a different source identity from JSON.
+      if(!registryFile||!path.isAbsolute(checkoutRepository))throw Error('NATIVE_SOURCE_SELECTION repository');
+      const common=await git('rev-parse','--path-format=absolute','--git-common-dir');
+      const registry=await readJson(registryFile);
+      const identity=createHash('sha256').update('origin:'+selection.repository.replace(/\.git$/,'')).digest('hex');
+      const entry=registry.version===1&&registry.roots?.find(row=>row.root===common&&row.identity===identity);
+      const within=target=>root===target||root.startsWith(target+path.sep);
+      if(!entry||!entry.grants?.some(grant=>grant.targets?.some(within))
+        ||!['bare','primary'].includes(entry.kind)||!/^[a-f0-9]{40}$/.test(entry.anchor||'')
+        ||await fs.realpath(common)!==common
+        ||(await git('rev-parse','--is-bare-repository'))!=='false')throw Error('NATIVE_SOURCE_CANONICAL_ROOT');
+      const atRoot=async(...args)=>(await execute('git',['--git-dir='+common,...args])).stdout.trim();
+      if((await atRoot('rev-parse','--is-bare-repository')==='true')!==(entry.kind==='bare'))
+        throw Error('NATIVE_SOURCE_CANONICAL_KIND');
+      if(await fs.lstat(path.join(common,'objects/info/alternates')).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;}))
+        throw Error('NATIVE_SOURCE_CANONICAL_ALTERNATES');
+      const keys=(await atRoot('config','--local','--name-only','--list')).split('\n');
+      if(keys.some(key=>/^(include|includeif)\.|^core\.(worktree|alternaterefscommand|alternaterefsprefixes)$|^extensions\./i.test(key)
+        &&!/^extensions\.(worktreeconfig|objectformat)$/i.test(key)))throw Error('NATIVE_SOURCE_CANONICAL_CONFIG');
+      await atRoot('cat-file','-e',entry.anchor+'^{commit}');
+      await atRoot('merge-base',entry.anchor,selection.commit);
+    }
+  }
+  return {...input,sourceRepository:selection.repository,checkoutRepository};
 }
 async function installation(root, required) {
   if (!root) throw new Error('NATIVE_INSTALL_REQUIRED');
@@ -77,7 +115,9 @@ export async function validateSourceInputs(input) {
     hostVersion:input.host.version,work:input.work});
   const expectedMacro=await fs.readFile(new URL('../../packages/macro/src/InvokeUtil.cj',import.meta.url),'utf8');
   for(const [name,row] of Object.entries({llvm:input.llvm,runtime:input.runtime,stdlib:input.stdlib??input.runtime,ast:input.ast,h1:input.h1,compiler:input.compiler})) {
-    const actual=await gitInput(row.repository,row.commit);
+    const actual=row.sourceRepository
+      ?await selectedSourceInput(row.repository,{repository:row.sourceRepository,commit:row.commit},input.sourceRegistry)
+      :await gitInput(row.repository,row.commit);
     if(actual.tree!==row.tree)throw new Error('NATIVE_SOURCE_TREE '+name);
     // An ordinary CJPM producer has no H1 parent or H1 execution node. Its
     // installed compiler still must satisfy the current macro source contract;
@@ -118,8 +158,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   for(const [name,row]of Object.entries(sourceSelection)) {
     const explicitCommit=descriptor[name+'Commit'];
     if(explicitCommit&&explicitCommit!==row.commit)throw Error('NATIVE_SOURCE_SELECTION '+name);
-    if(row.repository!==defaults[name].repository)throw Error('NATIVE_SOURCE_SELECTION '+name);
-    rows[name]={...await gitInput(sources[name],row.commit),sourceRepository:row.repository};
+    rows[name]=await selectedSourceInput(sources[name],row,descriptor.sourceRegistry);
   }
   const {compiler:{commit:compilerCommit},runtime:{commit:runtimeCommit},llvm:{commit:llvmCommit},ast:{commit:astCommit},h1:{commit:h1Commit}}=rows;
   const stdlib=rows.stdlib;
@@ -229,6 +268,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     ...(descriptor.stdBuildType === undefined ? {} : {stdBuildType:stdBuildType(descriptor.stdBuildType)}),
     ...(descriptor.nativePair ? {nativePair:descriptor.nativePair} : {}), ...rows, stdlib:stdlib??rows.runtime,
     ...(separateStd?{stdlibCommit:stdlib.commit}:{}), sourceSelection, tools,
+    ...(descriptor.sourceRegistry?{sourceRegistry:path.resolve(descriptor.sourceRegistry)}:{}),
     archive:descriptor.archive, finalStd:descriptor.finalStd, deliveryStage:descriptor.deliveryStage};
   const component=(row)=>({...row,platform});
   inputs.selection={platform,hostPlatform:platform,bootstrapHost:{...host,platform},
