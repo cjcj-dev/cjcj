@@ -312,6 +312,8 @@ jobs:
           ulimit -H -c 0
           npx --yes zx@8 build/cli.mjs --target linux-x64 install-system-deps
           sudo apt-get install -y libffi-dev libbz2-dev libsqlite3-dev liblzma-dev pkg-config
+      - name: Prepare the fixed official sccache distribution in the normal action tool cache
+        run: node ci/bootstrap/native-cjdb-job.mjs prepare-sccache v0.18.0 "$RUNNER_TEMP/native-preparation/sccache"
       - uses: ./.github/actions/sccache
         with:
           component: native-cjdb
@@ -366,6 +368,7 @@ jobs:
             ${{ runner.temp }}/native-preparation/dependencies/python-configuration.json
             ${{ runner.temp }}/native-dependencies/.native-inputs/python-original.json
             ${{ runner.temp }}/native-dependencies/.native-inputs/DEVELOPMENT-INPUTS.json
+            ${{ runner.temp }}/native-preparation/sccache/commands.json
             ${{ runner.temp }}/native-preparation/prepare-commands.json
             ${{ runner.temp }}/native-preparation/prepared/native-cjdb.json
             ${{ runner.temp }}/native-preparation/native/commands.json

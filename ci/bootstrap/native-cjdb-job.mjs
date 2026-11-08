@@ -21,6 +21,33 @@ import {unpackNativeInstallations} from './native-installation-locations.mjs';
 import {download} from '../../build/lib/archive.mjs';
 import {install as installStaticLibs,installationPaths,NCURSES_URL,LIBEDIT_URL} from '../../build/toolchain/static-libs.mjs';
 
+// Seed the ordinary action tool cache from the same fixed official release.
+// Its browser download endpoint returned HTTP 504; the official asset API serves
+// these exact distribution bytes. The existing sccache action still configures,
+// restores, starts and reports the normal compiler cache.
+export async function prepareNativeSccache({version,work,env=process.env}) {
+  if(env.GITHUB_ACTIONS!=='true'||hostPlatform()!=='linux_x86_64'||env.CJCJ_SRCBUILD_TARGET!=='linux-x64'
+    ||version!=='v0.18.0'||!path.isAbsolute(env.RUNNER_TOOL_CACHE||''))throw Error('NATIVE_SCCACHE_SELECTION');
+  work=await privateRoot(work);await fs.mkdir(work,{recursive:true});
+  const cache=path.join(env.RUNNER_TOOL_CACHE,'sccache',version.slice(1),'x64'),records=[];
+  const expected='45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89';
+  try {
+    if(!await fs.stat(cache+'.complete').then(()=>true,()=>false)) {
+      const archive=path.join(work,'sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz');
+      await command(['curl','--fail','--location','--retry','2','--max-time','120',
+        '--header','Accept: application/octet-stream','--output',archive,
+        'https://api.github.com/repos/mozilla/sccache/releases/assets/563130201'],{env,records});
+      if(await fileDigest(archive)!==expected)throw Error('NATIVE_SCCACHE_DISTRIBUTION');
+      await fs.mkdir(cache,{recursive:true});
+      await command(['tar','-xf',archive,'--strip-components=1','-C',cache],{env,records});
+    }
+    await command([process.execPath,'-e',
+      "const {spawnSync}=require('node:child_process');const r=spawnSync(process.argv[1],['--version'],{encoding:'utf8'});process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');if(r.status!==0||r.stdout.trim()!=='sccache 0.18.0')process.exit(r.status||1);",
+      path.join(cache,'sccache')],{env,records});
+    await fs.writeFile(cache+'.complete','');
+  } finally {await atomicJson(path.join(work,'commands.json'),records);}
+}
+
 // Development installations used by this same N/AST producer. These are official
 // third-party distributions, not project Git source handoffs. Keep their normal
 // install prefixes and configuration intact; only installations enter the tar.
@@ -318,7 +345,8 @@ export async function unpackNativeCjdb({archive,install}) {
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
     const [mode,input,work]=process.argv.slice(2);
-    if(mode==='dependencies')await prepareDevelopmentDependencies({input,work});
+    if(mode==='prepare-sccache')await prepareNativeSccache({version:input,work});
+    else if(mode==='dependencies')await prepareDevelopmentDependencies({input,work});
     else if(mode==='materialize')await materializeNativeJob({artifact:input,input:work});
     else if(mode==='prepare-inputs')await prepareNativeCjdbJob({input,work});
     else if(mode==='package-inputs')await packageNativeInputs({input,work});
@@ -329,6 +357,6 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
       finally {await atomicJson(path.join(work,'commands.json'),records);}
     }
     else if(mode==='unpack')await unpackNativeCjdb({archive:input,install:work});
-    else throw Error('usage: native-cjdb-job.mjs dependencies OUTPUT WORK | prepare-inputs DEPENDENCIES WORK | package-inputs DEPENDENCIES WORK | materialize ARTIFACT INPUT | build INPUT WORK | package INSTALL WORK | unpack ARCHIVE INSTALL');
+    else throw Error('usage: native-cjdb-job.mjs prepare-sccache VERSION WORK | dependencies OUTPUT WORK | prepare-inputs DEPENDENCIES WORK | package-inputs DEPENDENCIES WORK | materialize ARTIFACT INPUT | build INPUT WORK | package INSTALL WORK | unpack ARCHIVE INSTALL');
   }catch(error){console.error(error.stack);process.exitCode=error.rc||1;}
 }
