@@ -74,11 +74,15 @@ test('stream errors, bounded output, nonzero and cancellation retain child respo
  for(const mode of ['exit-zero','ignore']){
   const ready=root+'/stream-'+mode;
   const controller=new AbortController();
-  const body='const fs=require("fs");process.on("SIGTERM",()=>{'+(mode==='exit-zero'?'process.exit(0);':'')+'});fs.writeFileSync('+JSON.stringify(ready)+',String(process.pid));setInterval(()=>{},100);';
-  const pending=assert.rejects(streamStdProcess([process.execPath,'-e',body],{signal:controller.signal}),/CANCELLED/);
+  // Publish the pid atomically: writeFileSync creates the file before its bytes
+  // land, and an empty read is Number('')===0, where kill(0,0) probes our own group.
+  const body='const fs=require("fs");process.on("SIGTERM",()=>{'+(mode==='exit-zero'?'process.exit(0);':'')+'});fs.writeFileSync('+JSON.stringify(ready+'.tmp')+',String(process.pid));fs.renameSync('+JSON.stringify(ready+'.tmp')+','+JSON.stringify(ready)+');setInterval(()=>{},100);';
+  let cancelled;
+  const pending=assert.rejects(streamStdProcess([process.execPath,'-e',body],{signal:controller.signal}),error=>{cancelled=error;return /CANCELLED/.test(String(error));});
   const deadline=Date.now()+5000;
   while(!await fs.stat(ready).catch(()=>null)){if(Date.now()>deadline){controller.abort();await pending;assert.fail('stream fixture not ready');}await new Promise(r=>setTimeout(r,20));}
   const pid=Number(await fs.readFile(ready,'utf8'));controller.abort();await pending;
+  assert.equal(cancelled.processGroup,pid);assert.equal(cancelled.cleanupComplete,true);
   assert.equal(getEventListeners(controller.signal,'abort').length,0);assert.throws(()=>process.kill(pid,0),/ESRCH/);
  }
 });
