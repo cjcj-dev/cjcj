@@ -75,7 +75,8 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   if(tools)return {copies:[...tools.rows,...tools.payloads].map(row=>({...row,owner:'source-built tools'})),
     entries:tools.rows.map(row=>({directory:'tools/bin',retain:path.posix.dirname(retainedToolPath(row)),
       names:[row.name],libraries:toolExecutionLibraries(row.producer)})),links:{}};
-  const {llvm,runtime,ast}=target;
+  const {llvm,runtime,ast,backend}=target;
+  if(backend&&(bootstrap||hostObjects||layout==='native-output'))throw Error('INSTALL_BACKEND_LAYOUT');
   product??=target.compiler.product;std??=target.std.install;
   const compilerName='bin/cjcj-stage1'+exe;
   const prefix=path.relative('.',compilerExecutionRoot('.',selection));
@@ -93,7 +94,9 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
         ...(llvm.windowsToolchain?.installedFiles.filter(row=>row.path.startsWith('bin/')).map(row=>row.path)||[]),
         ...(hostObjects?[]:['modules','lib','runtime','bin','tools'])]},
     ]:[]),
-    {from:llvm.install+'/third_party/llvm',to:'third_party/llvm',owner:'N'},
+    {from:llvm.install+'/third_party/llvm',to:'third_party/llvm',owner:'N',...(backend?{exclude:['bin/llc'+exe,'bin/opt'+exe]}:{})},
+    ...(backend?['llc','opt'].map(name=>({from:path.join(backend.install,'bin',name+exe),
+      to:'third_party/llvm/bin/'+name+exe,owner:'target backend'})):[]),
     {from:llvm.install+'/tools',to:'tools',owner:'N'},
     ...(!hostObjects?[{from:llvm.install+'/lib/'+tuple,to:'lib/'+tuple,owner:'N',exclude:nativeTargetLibraryExcludes}]:[]),
     ...(ast?[

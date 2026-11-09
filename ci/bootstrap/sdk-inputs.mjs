@@ -1,4 +1,5 @@
 #!/usr/bin/env zx
+import {embeddedStamp} from '../../build/lib/toolchain-identity.mjs';
 import {readInstalledNativeShim} from './native-shim-inputs.mjs';
 // Turn received native installations and real Git objects into build inputs.
 // The descriptor contains locations, not producer receipts or SDK authorities.
@@ -309,6 +310,34 @@ export async function prepareInstallInputs(descriptor) {
   const selection=installationSelection(descriptor.selection);
   const {platform,targetComponents:target,compilerExecution:execution}=selection,native=sdkPlatform(platform);
   const work=await privateRoot(descriptor.work),install=await privateRoot(descriptor.install);
+  // An optional backend is a normal CMake component install, independent of
+  // N's libLLVM/clang/CJDB/AST installation. Record the actual selected binaries
+  // in the existing installation selection, without rewriting either producer.
+  if(target.backend) {
+    if(descriptor.layout==='native-output')throw Error('INSTALL_BACKEND_LAYOUT');
+    const backend=target.backend;
+    backend.install=await fs.realpath(backend.install);
+    backend.build=await fs.realpath(backend.build);
+    const cache=await fs.readFile(path.join(backend.build,'CMakeCache.txt'),'utf8');
+    const value=name=>new RegExp('^'+name+':[^=]+=(.*)$','m').exec(cache)?.[1]?.trim();
+    if(!value('CMAKE_HOME_DIRECTORY')||!value('CMAKE_INSTALL_PREFIX')
+      ||await fs.realpath(value('CMAKE_INSTALL_PREFIX'))!==backend.install)
+      throw Error('INSTALL_BACKEND_CMAKE');
+    const source=await gitInput(value('CMAKE_HOME_DIRECTORY'),backend.commit);
+    if((await execute('git',['-C',source.repository,'rev-parse','HEAD'])).stdout.trim()!==backend.commit)
+      throw Error('INSTALL_BACKEND_SOURCE');
+    backend.configuration={sourceRoot:source.repository,tree:source.tree,
+      buildType:value('CMAKE_BUILD_TYPE'),generator:value('CMAKE_GENERATOR')};
+    backend.artifacts=[];
+    for(const name of ['llc','opt']) {
+      const rel='bin/'+name+native.exe,file=path.join(backend.install,rel);
+      const manifest=await fs.readFile(path.join(backend.build,'install_manifest_'+name+'.txt'),'utf8');
+      if(!manifest.split(/\r?\n/).some(row=>path.resolve(row)===file))throw Error('INSTALL_BACKEND_COMPONENT '+name);
+      const bytes=await fs.readFile(file);
+      if(!isDeepStrictEqual(embeddedStamp(bytes,'CJLLVM-COMMIT'),[backend.commit]))throw Error('INSTALL_BACKEND_SOURCE '+name);
+      backend.artifacts.push({path:rel,sha256:await fileDigest(file)});
+    }
+  }
   let dependencyRoot;
   const executionPlatform=platform;
   if(descriptor.layout==='native-output') {

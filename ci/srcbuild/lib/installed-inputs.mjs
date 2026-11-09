@@ -162,7 +162,7 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
     if(stage?.selection?.targetComponents?.runtime?.buildResult){
       const original=await readJson(path.join(sdk,'share/cjcj/build-inputs/native-runtime.json'));
       if(original.runtime_sha!==runtime.source.commit||original.platform!==platform
-        ||original.paired_llvm_sha!==stage.sources?.llvm?.commit||!original.files)throw Error('INSTALLED_RUNTIME_NATIVE_SOURCE');
+        ||original.paired_llvm_sha!==(stage.sources?.backend??stage.sources?.llvm)?.commit||!original.files)throw Error('INSTALLED_RUNTIME_NATIVE_SOURCE');
       const pair=new Set(products.map(row=>row.path));
       for(const [rel,expected] of Object.entries(original.files)) {
         if(!/^(lib|runtime\/lib)\//.test(rel)||pair.has(rel))continue;
@@ -200,11 +200,25 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
     pythonConfiguration:nativeFacts.python?.configured,pythonInstallation:nativeFacts.python?.installed,
     pythonSource:nativeFacts.pythonSource,windowsToolchain:nativeFacts.windowsToolchain,
   }:null);
+  const backend=stage?.selection?.targetComponents?.backend;
+  const backendPaths=new Set(backend?['llc','opt'].map(name=>'third_party/llvm/bin/'+name+native.exe):[]);
+  if(backend) {
+    if(backend.commit!==stage.sources?.backend?.commit||backend.repository!==stage.sources?.backend?.repository
+      ||backend.platform!==platform||backend.artifacts?.length!==2
+      ||new Set(backend.artifacts.map(row=>row.path)).size!==2)throw Error('INSTALLED_BACKEND_SOURCE');
+    const products=[];
+    for(const row of backend.artifacts) {
+      if(!backendPaths.has('third_party/llvm/'+row.path)||!/^[a-f0-9]{64}$/.test(row.sha256||''))throw Error('INSTALLED_BACKEND_ARTIFACT');
+      products.push(await nativeProduct(sdk,'third_party/llvm/'+row.path,row.sha256,checkArtifact));
+    }
+    rows.push({component:'llvm-backend',source:source(stage.sources.backend),
+      build:{configuration:backend.configuration,components:['llc','opt']},artifacts:products});
+  }
   if(llvm){
     if(llvmCheck&&llvmCheck.rc!==0||llvm.platform!==platform)throw new Error('INSTALLED_NATIVE_INPUT');
     if(!Array.isArray(llvm.artifacts)||llvm.artifacts.length<2)throw new Error('INSTALLED_NATIVE_ARTIFACTS');
     const products=[];
-    for(const product of llvm.artifacts)products.push(await nativeProduct(sdk,product.path,product.sha256,checkArtifact));
+    for(const product of llvm.artifacts)if(!backendPaths.has(product.path))products.push(await nativeProduct(sdk,product.path,product.sha256,checkArtifact));
     // Both the component and bootstrap-check paths carry N's original facts.
     // Check all target libraries actually selected by the shared copy recipe.
     if(nativeFacts?.targetLibraries) {

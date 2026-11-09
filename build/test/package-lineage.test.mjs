@@ -261,7 +261,7 @@ test('normal native facts reach public verify after relocation; missing/tampered
 // installed-only tests, R/C/std/N below traverse the entire public installer.
 // Existing unrelated tool fixtures are added separately; they never supply R
 // records, runtime files or language results and do not claim tool production.
-test('normal install pair and language transition reach release rows and relocated lineage',async t=>{
+for(const separateBackend of [false,true])test('normal install pair and language transition reach release rows and relocated lineage'+(separateBackend?' with separate backend':''),async t=>{
   const {directSource,directBuild}=await import('../../ci/fixtures/runtime-direct-inputs.mjs');
   const {installedInputs}=await import('../../ci/srcbuild/lib/installed-inputs.mjs');
   const {writeInstalledReleaseManifest,verifyInstalledReleaseManifest}=await import('../lib/release-manifest.mjs');
@@ -281,7 +281,7 @@ test('normal install pair and language transition reach release rows and relocat
   }
   await write(R,statusRel,deferred);files[statusRel]=digest(deferred);
   await write(R,'include/schedule.h','finite installed runtime headers');
-  const original=JSON.stringify({runtime_sha:STD,paired_llvm_sha:STAGE2,platform,files});
+  let original=JSON.stringify({runtime_sha:STD,paired_llvm_sha:STAGE2,platform,files});
   await write(R,'NATIVE-INPUTS.json',original);
   for(const rel of ['modules','lib/'+TUPLE+'/libcangjie-std-core.a','PROVENANCE.txt'])await copy(fixture,S,rel);
   const cjo='modules/'+TUPLE+'/std/std.core.cjo';await write(S,cjo,'finite std CJO');
@@ -378,6 +378,29 @@ export async function verifyRelocatedCjdbPython(){throw Error('not used');}`;
   const target={compiler:component(C,{product:C+'/bin/cjcj-stage1'}),std:component(S),
     runtime:component(R,{buildResult:R+'/NATIVE-INPUTS.json',sourceRoot:root+'/source',gateStatus:runtime+'/CMakebuild/gc-unit.status'}),
     llvm:component(N,{commit:STAGE2,buildResult:N+'/BUILD-INPUTS.json'}),ast:component(N,{astInstallation:produced.astInstallation})};
+  let backend;
+  if(separateBackend) {
+    const sourceRoot=root+'/backend-source',build=root+'/backend-build',install=root+'/backend-install';
+    await write(sourceRoot,'main.c','#include <stdio.h>\nint main(void){puts("BACKEND_COMPONENT_EXECUTED");puts("CJLLVM-COMMIT:" BACKEND_COMMIT);return 0;}\n');
+    await write(sourceRoot,'CMakeLists.txt',`cmake_minimum_required(VERSION 3.20)
+project(FiniteBackend C)
+foreach(tool llc opt)
+ add_executable(\${tool} main.c)
+ target_compile_definitions(\${tool} PRIVATE BACKEND_COMMIT="\${BACKEND_COMMIT}")
+ install(TARGETS \${tool} RUNTIME DESTINATION bin COMPONENT \${tool})
+endforeach()
+`);
+    await command(['git','init',sourceRoot],{records});
+    await command(['git','-C',sourceRoot,'add','.'],{records});
+    await command(['git','-C',sourceRoot,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','test: finite backend producer'],{records});
+    const commit=spawnSync('git',['-C',sourceRoot,'rev-parse','HEAD'],{encoding:'utf8'}).stdout.trim();
+    await command(['cmake','-S',sourceRoot,'-B',build,'-DCMAKE_INSTALL_PREFIX='+install,'-DBACKEND_COMMIT='+commit],{records});
+    await command(['cmake','--build',build,'--parallel','2'],{records});
+    for(const tool of ['llc','opt'])await command(['cmake','--install',build,'--component',tool],{records});
+    backend=component(install,{commit,build});target.backend=backend;
+    original=JSON.stringify({runtime_sha:STD,paired_llvm_sha:commit,platform,files});
+    await write(R,'NATIVE-INPUTS.json',original);
+  }
   const descriptor={work:root+'/work',install:sdk,selection:{platform,hostPlatform:platform,bootstrapHost:{install:H,platform},
     compilerExecution:{role:'target',stage:'finite-final',platform,...target},targetComponents:target},test:{commands:[
       {argv:[process.execPath,'-e',`const f=require('node:fs'),a=require('node:assert/strict'),s=process.argv[1];console.log('INSTALL_PAIR_ASSERTION_REACHED');a.equal(f.readFileSync(s+'/RUNTIME-INPUTS.json','utf8'),f.readFileSync(${JSON.stringify(R+'/RUNTIME-INPUTS.json')},'utf8'));`, '${install}']},
@@ -398,6 +421,22 @@ export async function verifyRelocatedCjdbPython(){throw Error('not used');}`;
     for(const suffix of ['','.entry'])await copy(fixture,sdk,'tools/bin/'+name+suffix);}
   console.log('POST_LANGUAGE_INSTALLED_INPUTS_ASSERTION_REACHED');
   const inputs=await installedInputs(sdk,platform),r=inputs.components.find(row=>row.component==='runtime');
+  if(separateBackend) {
+    console.log('SEPARATE_BACKEND_SELECTION_ASSERTION_REACHED');
+    const selected=inputs.components.find(row=>row.component==='llvm-backend');
+    assert.equal(selected.source.commit,backend.commit);
+    assert.equal(inputs.components.find(row=>row.component==='llvm-cjdb').source.commit,STAGE2);
+    assert.equal(await fs.readFile(sdk+'/'+llvm,'utf8'),'finite LLVM');
+    for(const name of ['llc','opt']) {
+      const file=sdk+'/.native-tools/third_party/llvm/bin/'+name;
+      assert.equal(digest(await fs.readFile(file)),digest(await fs.readFile(backend.install+'/bin/'+name)));
+      const r=spawnSync(sdk+'/third_party/llvm/bin/'+name,[],{encoding:'utf8'});
+      assert.equal(r.status,0,r.stderr);assert.match(r.stdout,/BACKEND_COMPONENT_EXECUTED/);
+    }
+    const file=sdk+'/.native-tools/third_party/llvm/bin/opt',bytes=await fs.readFile(file);
+    await fs.appendFile(file,'changed backend');await assert.rejects(installedInputs(sdk,platform),/INSTALLED_INPUT_BYTES/);
+    await fs.writeFile(file,bytes);
+  }
   assert.ok(r.artifacts.some(row=>row.path.endsWith('libcangjie-aio.a')));
   assert.ok(!r.artifacts.some(row=>row.path===statusRel));
   assert.deepEqual(r.results,[{path:statusRel,sha256:digest(await fs.readFile(sdk+'/'+statusRel))}]);
@@ -423,7 +462,7 @@ export async function verifyRelocatedCjdbPython(){throw Error('not used');}`;
   await fs.writeFile(library,bytes);await fs.rename(library,library+'.missing');
   assert.equal((await inspectPackagedLineage(sdk,{allowNightlyStd:true})).ok,false);await fs.rename(library+'.missing',library);
   const archive=root+'/installed.tar.gz';await archiveInstall({install:sdk,archive,records:[]});
-  for(const dir of [C,R,N,oldN,nSource,nBuild,payload,S,root+'/source',sdk])await fs.rename(dir,dir+'.unavailable');
+  for(const dir of [C,R,N,oldN,nSource,nBuild,payload,S,root+'/source',...(backend?[backend.install,backend.build,root+'/backend-source']:[]),sdk])await fs.rename(dir,dir+'.unavailable');
   const relocated=archive+'.unpacked/installed';
   assert.equal((await inspectPackagedLineage(relocated)).ok,true);
   const moved=await installedInputs(relocated,platform);await verifyInstalledReleaseManifest({stage:relocated,platform,...moved});
