@@ -11,7 +11,7 @@ function write(file,text,mode=0o644){fs.mkdirSync(path.dirname(file),{recursive:
 function run(cmd,args,options={}){const r=spawnSync(cmd,args,{encoding:'utf8',...options});assert.equal(r.status,0,r.stdout+'\n'+r.stderr);return r;}
 
 test('public stdx entry installs into SDK and the next public build consumes that installation', t=>{
- const {root,sdk,stdx,env,args:base}=fixture(t);
+ const {root,sdk,stdx,env,args:base}=fixture(t,{precompiledMacros:true});
  const args=[...base,'build','stdx'];
  run(process.execPath,args,{env});
  console.log('STDX_INSTALL_ASSERT_REACHED');
@@ -53,7 +53,7 @@ test('public Windows cross stdx entry sends installation to the target SDK', t=>
 
 
 test('public stdx consumer failure preserves previous payload and facts then same argv recovers', t=>{
- const f=fixture(t);const argv=[...f.args,'build','stdx'];
+ const f=fixture(t,{precompiledMacros:true});const argv=[...f.args,'build','stdx'];
  run(process.execPath,argv,{env:f.env});
  const old=fs.readFileSync(path.join(f.sdk,'share/cjcj/build-inputs/stdx.json'));
  const marker=path.join(f.sdk,'stdx','old-success');fs.writeFileSync(marker,'usable');

@@ -15,7 +15,7 @@ export function run(cmd, args, options = {}) {
   const r = spawnSync(cmd, args, {encoding: 'utf8', ...options});
   assert.equal(r.status, 0, r.stdout + '\n' + r.stderr); return r;
 }
-export function fixture(t) {
+export function fixture(t, {precompiledMacros=false} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stdx-facts-'));
   const evidence = process.env.STDX_FACTS_EVIDENCE
     ? path.join(process.env.STDX_FACTS_EVIDENCE, path.basename(root)) : null;
@@ -32,6 +32,14 @@ export function fixture(t) {
   }
   // Only the Cangjie boundary is controlled; native CMake libraries remain real.
   write(path.join(sdk, 'bin/cjc'), "#!/bin/sh\nif [ \"$1\" != \"\" ]; then\n  while [ \"$#\" -gt 0 ]; do\n    if [ \"$1\" = \"-o\" ]; then shift; printf '#!/bin/sh\\nexit \"${FIXTURE_FAIL_CONSUMER:-0}\"\\n' > \"$1\"; chmod +x \"$1\"; exit 0; fi\n    shift\n  done\nfi\nprintf \"%s\" \"$CANGJIE_STDX_PATH\"\n", 0o755);
+  if(precompiledMacros)write(path.join(sdk,'bin/cjc'),'#!'+process.execPath+'\n'+String.raw`
+const fs=require('node:fs'),path=require('node:path'),a=process.argv.slice(2),i=a.indexOf('-o');
+if(i<0)process.stdout.write(process.env.CANGJIE_STDX_PATH||'');
+else {
+ const labels={'ordinary.cj':['PRECOMPILED_ORDINARY value=42'],'to-string.cj':['PRECOMPILED_TOSTRING_BODY_EXECUTED','PRECOMPILED_TOSTRING value=42'],'plugin.cj':['PRECOMPILED_PLUGIN_BODY_EXECUTED','PRECOMPILED_PLUGIN value=42']};
+ fs.writeFileSync(a[i+1],'#!'+process.execPath+'\n'+'for(const line of '+JSON.stringify(labels[path.basename(a[0])]||[])+')console.log(line);process.exit(Number(process.env.FIXTURE_FAIL_CONSUMER||0));\n',{mode:0o755});
+}
+`,0o755);
   write(path.join(stdx, '.gitignore'), 'build_temp/\ntarget/\n');
   write(path.join(stdx, 'unit.c'), 'int stdx_fixture_value(void) { return 42; }\n');
   write(path.join(stdx, 'input.cj'), '// controlled custom-command source dependency\n');
@@ -79,7 +87,14 @@ add_custom_command(OUTPUT "@{CMAKE_CURRENT_BINARY_DIR}/custom.cjo"
   COMMAND @{CMAKE_COMMAND} -E copy "@{CMAKE_CURRENT_SOURCE_DIR}/input.cj" "@{CMAKE_CURRENT_BINARY_DIR}/custom.cjo"
   DEPENDS input.cj)
 add_custom_target(custom_cj ALL DEPENDS "@{CMAKE_CURRENT_BINARY_DIR}/custom.cjo")
-`.replaceAll('@{', '${'));
+`.replaceAll('@{', '${')+(precompiledMacros?String.raw`
+# Controlled Cangjie boundary inputs; SO bytes are the real native fixture target.
+foreach(name chir.to_string_macro plugin)
+  file(WRITE "@{CMAKE_CURRENT_BINARY_DIR}/stdx.@{name}.cjo" "from native install")
+  install(FILES "@{CMAKE_CURRENT_BINARY_DIR}/stdx.@{name}.cjo" DESTINATION linux_x86_64_cjnative/static/stdx)
+  install(FILES $<TARGET_FILE:plugin_shared> DESTINATION linux_x86_64_cjnative/static/stdx RENAME "lib-macro_stdx.@{name}.so")
+endforeach()
+`.replaceAll('@{','${'):''));
   write(path.join(stdx, 'build.py'), String.raw`import sys,os,pathlib,json,subprocess,shutil
 root=pathlib.Path(os.environ['FIXTURE_ROOT'])
 build=pathlib.Path('build_temp/build')
