@@ -291,6 +291,8 @@ public class CGModule {
         HashMap<Value, (LLVMTypeRef, LLVMValueRef)>()
     private let basicBlocks: HashMap<Int64, LLVMBasicBlockRef> = HashMap<Int64, LLVMBasicBlockRef>()
     private let linkNameUsedInMeta: HashSet<String> = HashSet<String>()
+    // Some entry of linkNameUsedInMeta has an embedded NUL byte. Reset with every clear of the set.
+    private var linkNameUsedInMetaHasNul: Bool = false
     private let externalExtensionDefs: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
     private let nonExternalExtensionDefs: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
     private let extensionDefStartIndices: HashMap<String, Int64> = HashMap<String, Int64>()
@@ -618,6 +620,7 @@ public class CGModule {
         boxedValuesToLoad.clear()
         basicBlocks.clear()
         linkNameUsedInMeta.clear()
+        linkNameUsedInMetaHasNul = false
         externalExtensionDefs.clear()
         nonExternalExtensionDefs.clear()
         extensionDefStartIndices.clear()
@@ -1382,7 +1385,10 @@ public class CGModule {
         return GetModuleTargetData().GetOffsetOfElement(structTy, element)
     }
 
-    public func ClearLinkNameUsedInMeta(): Unit { linkNameUsedInMeta.clear() }
+    public func ClearLinkNameUsedInMeta(): Unit {
+        linkNameUsedInMeta.clear()
+        linkNameUsedInMetaHasNul = false
+    }
     public func IsLinkNameUsedInMeta(linkageName: String): Bool {
         if (linkNameUsedInMeta.isEmpty()) {
             CollectLinkNameUsedInMeta()
@@ -1394,6 +1400,36 @@ public class CGModule {
             CollectLinkNameUsedInMeta()
         }
         return linkNameUsedInMeta
+    }
+
+    // Same result as strcmp of the NUL-terminated `linkageName` against every entry
+    // (an entry compares up to its first NUL byte). Every entry is valid UTF-8, since
+    // LLVMGetMDStringValue builds it with String.fromUtf8. Without NUL entries, a
+    // match therefore means byte equality with a valid UTF-8 name, which is one hash
+    // lookup. Names that are not valid UTF-8, or NUL entries, use the strcmp scan.
+    public func IsLinkNameUsedInMetaCString(linkageName: CString): Bool {
+        let names = GetLinkNamesUsedInMeta()
+        if (linkageName.isNull()) {
+            return false
+        }
+        if (!linkNameUsedInMetaHasNul) {
+            let converted: Option<String> = try {
+                LLVMCStringToString(linkageName)
+            } catch (_: IllegalArgumentException) {
+                None
+            }
+            if (let Some(name) <- converted) {
+                return names.contains(name)
+            }
+        }
+        for (name in names) {
+            try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+                if (unsafe { strcmp(linkageName, nameCString.value) } == 0) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     private func CollectLinkNameUsedInMeta(): Unit {
@@ -1426,6 +1462,9 @@ public class CGModule {
             idx++
             if (let Some(metaString) <- LLVMGetMDStringValue(front)) {
                 linkNameUsedInMeta.add(metaString)
+                if (metaString.indexOf(0u8).isSome()) {
+                    linkNameUsedInMetaHasNul = true
+                }
                 continue
             }
             for (operand in LLVMGetMDNodeOperands(front)) {

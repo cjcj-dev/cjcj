@@ -106,7 +106,7 @@ private func IsRetainedGlobalValue(cgMod: CGModule, globalValue: LLVMValueRef, c
     if (CGContext.ContainsCString(cgMod.GetCGContext().GetLLVMUsedVars(), name)) {
         return true
     }
-    return IsLinkNameUsedInMetaCString(cgMod, name)
+    return cgMod.IsLinkNameUsedInMetaCString(name)
 }
 
 private func IsFunctionDeclaration(functionValue: LLVMValueRef): Bool {
@@ -129,15 +129,4 @@ private func HasLLVMName(value: LLVMValueRef, expected: String): Bool {
         matched = unsafe { strcmp(name, expectedCString.value) } == 0
     }
     return matched
-}
-
-private func IsLinkNameUsedInMetaCString(cgMod: CGModule, linkageName: CString): Bool {
-    for (name in cgMod.GetLinkNamesUsedInMeta()) {
-        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
-            if (unsafe { strcmp(linkageName, nameCString.value) } == 0) {
-                return true
-            }
-        }
-    }
-    return false
 }
