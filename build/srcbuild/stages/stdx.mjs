@@ -126,7 +126,7 @@ export async function run(config) {
     finishStdxInstall(config, attempt);
     if(!dry&&!limited) {
       await consumeStdx(config,prefix);
-      await publishPaths(['stdx',STDX_BUILD_INPUTS].map(relative=>({pending:path.join(installRoot,relative),destination:path.join(destination,relative)})));
+      await publishPaths(['stdx',STDX_BUILD_INPUTS].map(relative=>({pending:path.join(installRoot,relative),destination:path.join(destination,relative),previous:path.join(installRoot,'previous',relative)})));
       if(!config.target.spec.crossCompile)await precompiledStdxMacros({sdk:destination,
         work:path.join(config.workspace,'build/stdx/installed-macros'),platform:config.target.spec.llvmPlatform});
     }

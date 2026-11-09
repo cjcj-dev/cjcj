@@ -41,7 +41,7 @@ export async function installHleDependencies({toolsRoot,sdk,platform,input,prepa
     cjbind:{...input.cjbind,sha256:await fileDigest(input.cjbind.path)}};
   await atomicJson(path.join(destination,'DEPENDENCIES.json'),facts);
   if(prepareOnly)return {root:pending,facts};
-  await publishPaths(['tools/dtsparser','tools/bin/node'+native.exe].map(relative=>({pending:path.join(pending,relative),destination:path.join(sdk,relative)})));
+  await publishPaths(['tools/dtsparser','tools/bin/node'+native.exe].map(relative=>({pending:path.join(pending,relative),destination:path.join(sdk,relative),previous:path.join(pending,'previous',relative)})));
   return facts;
 }
 

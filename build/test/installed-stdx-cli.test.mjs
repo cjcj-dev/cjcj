@@ -23,6 +23,9 @@ test('public stdx entry installs into SDK and the next public build consumes tha
  // An unrelated old producer output must not be selected by the public build.
  write(path.join(stdx,'target',tuple,'static/stdx/stdx.base.cjo'),'old producer');
  run(process.execPath,args,{env});
+ console.log('STDX_REINSTALL_ROLLBACK_BOUNDARY_REACHED');
+ assert.equal(fs.readdirSync(sdk,{recursive:true}).some(name=>name.includes('.previous-')),false,'stdx installed root excludes rollback members');
+ assert.ok(fs.readdirSync(root).filter(name=>name.startsWith('sdk.stdx-pending-')).some(name=>fs.existsSync(path.join(root,name,'previous/stdx',tuple,'static/stdx/stdx.base.cjo'))),'previous stdx is retained outside SDK');
  console.log('STDX_CONSUMER_ASSERT_REACHED');
  const selected=fs.readFileSync(path.join(root,'consumer.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
  assert.equal(selected[0],'');assert.equal(selected[1],path.join(sdk,'stdx',tuple,'static/stdx'));
@@ -58,6 +61,17 @@ test('public stdx consumer failure preserves previous payload and facts then sam
  assert.notEqual(failed.status,0);assert.match(failed.stderr,/TARGET_FAILED rc=79/);
  assert.equal(fs.readFileSync(marker,'utf8'),'usable');
  assert.deepEqual(fs.readFileSync(path.join(f.sdk,'share/cjcj/build-inputs/stdx.json')),old);
+ // A linked second destination must fail after the first payload was published.
+ // The transaction must restore that payload and preserve the foreign link/facts.
+ const facts=path.join(f.sdk,'share/cjcj/build-inputs/stdx.json'),saved=facts+'.saved';
+ fs.renameSync(facts,saved);fs.symlinkSync(path.basename(saved),facts);
+ const publication=spawnSync(process.execPath,argv,{env:f.env,encoding:'utf8'});
+ assert.equal(publication.status,1,publication.stdout+publication.stderr);
+ assert.match(publication.stderr,/INSTALL_LINK/);
+ assert.equal(fs.readFileSync(marker,'utf8'),'usable');
+ assert.equal(fs.readlinkSync(facts),path.basename(saved));
+ assert.deepEqual(fs.readFileSync(saved),old);
+ fs.unlinkSync(facts);fs.renameSync(saved,facts);
  run(process.execPath,argv,{env:f.env});assert.equal(fs.existsSync(marker),false);
  console.log('STDX_CONSUMER_ROLLBACK_AND_RECOVERY_REACHED');
 });

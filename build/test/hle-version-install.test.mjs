@@ -104,3 +104,33 @@ test('HLE rejects unsupported versions, absent/wrong sources and invalid payload
   console.log('HLE_INDEPENDENT_REJECTION_ASSERTIONS_REACHED');
  }finally {await write(path.join(f.work,'commands.json'),JSON.stringify(f.commands,null,2));}
 });
+
+test('HLE reinstallation keeps rollback outside SDK and restores a partially published transaction',async()=>{
+ const f=await setup('0.3.6');
+ try {
+  await f.install();
+  const parser=path.join(f.sdk,'tools/dtsparser'),marker=path.join(parser,'old-success');
+  const facts=await fs.readFile(path.join(parser,'DEPENDENCIES.json'));
+  await fs.writeFile(marker,'first installation');
+  await f.install();
+  console.log('HLE_REINSTALL_ROLLBACK_BOUNDARY_REACHED');
+  assert.equal((await fs.readdir(f.sdk,{recursive:true})).some(name=>name.includes('.previous-')),false,'HLE installed root excludes rollback members');
+  const pending=(await fs.readdir(f.work)).filter(name=>name.startsWith('sdk.hle-pending-'));
+  assert.ok((await Promise.all(pending.map(async name=>{
+   try{return await fs.readFile(path.join(f.work,name,'previous/tools/dtsparser/old-success'),'utf8')==='first installation';}
+   catch(error){if(error.code==='ENOENT')return false;throw error;}
+  }))).some(Boolean),'previous HLE is retained outside SDK');
+  await fs.writeFile(marker,'second installation');
+  const node=path.join(f.sdk,'tools/bin/node'),saved=node+'.saved';
+  await fs.rename(node,saved);await fs.symlink(path.basename(saved),node);
+  await assert.rejects(f.install(),/INSTALL_LINK/);
+  assert.equal(await fs.readFile(marker,'utf8'),'second installation');
+  assert.equal(await fs.readlink(node),path.basename(saved));
+  assert.deepEqual(await fs.readFile(path.join(parser,'DEPENDENCIES.json')),facts);
+  await fs.unlink(node);await fs.rename(saved,node);
+  await f.install();
+  assert.equal(f.run([node,'-e','console.log("HLE_NODE_RECOVERED")']).stdout.trim(),'HLE_NODE_RECOVERED');
+  assert.equal(JSON.parse(f.run([path.join(parser,'node_modules/.bin/cjbind'),'--version']).stdout).version,'0.3.6');
+  console.log('HLE_PARTIAL_PUBLICATION_ROLLBACK_AND_RECOVERY_REACHED');
+ }finally {await write(path.join(f.work,'commands.json'),JSON.stringify(f.commands,null,2));}
+});
