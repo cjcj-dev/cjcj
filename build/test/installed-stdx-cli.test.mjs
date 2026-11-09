@@ -11,9 +11,9 @@ function write(file,text,mode=0o644){fs.mkdirSync(path.dirname(file),{recursive:
 function run(cmd,args,options={}){const r=spawnSync(cmd,args,{encoding:'utf8',...options});assert.equal(r.status,0,r.stdout+'\n'+r.stderr);return r;}
 
 test('public stdx entry installs into SDK and the next public build consumes that installation', t=>{
- const {root,sdk,stdx,env,args:base}=fixture(t,{precompiledMacros:true});
- const args=[...base,'build','stdx'];
- run(process.execPath,args,{env});
+ const {root,sdk,stdx,build}=fixture(t,{precompiledMacros:true});
+ const invoke=()=>{const result=build();assert.equal(result.status,0,result.stdout+result.stderr);};
+ invoke();
  console.log('STDX_INSTALL_ASSERT_REACHED');
  for(const kind of ['static','dynamic']) {
   const installed=path.join(sdk,'stdx',tuple,kind,'stdx/stdx.base.cjo');
@@ -22,7 +22,7 @@ test('public stdx entry installs into SDK and the next public build consumes tha
  }
  // An unrelated old producer output must not be selected by the public build.
  write(path.join(stdx,'target',tuple,'static/stdx/stdx.base.cjo'),'old producer');
- run(process.execPath,args,{env});
+ invoke();
  console.log('STDX_REINSTALL_ROLLBACK_BOUNDARY_REACHED');
  assert.equal(fs.readdirSync(sdk,{recursive:true}).some(name=>name.includes('.previous-')),false,'stdx installed root excludes rollback members');
  assert.ok(fs.readdirSync(root).filter(name=>name.startsWith('sdk.stdx-pending-')).some(name=>fs.existsSync(path.join(root,name,'previous/stdx',tuple,'static/stdx/stdx.base.cjo'))),'previous stdx is retained outside SDK');
@@ -53,11 +53,12 @@ test('public Windows cross stdx entry sends installation to the target SDK', t=>
 
 
 test('public stdx consumer failure preserves previous payload and facts then same argv recovers', t=>{
- const f=fixture(t,{precompiledMacros:true});const argv=[...f.args,'build','stdx'];
- run(process.execPath,argv,{env:f.env});
+ const f=fixture(t,{precompiledMacros:true});
+ const invoke=()=>{const result=f.build();assert.equal(result.status,0,result.stdout+result.stderr);};
+ invoke();
  const old=fs.readFileSync(path.join(f.sdk,'share/cjcj/build-inputs/stdx.json'));
  const marker=path.join(f.sdk,'stdx','old-success');fs.writeFileSync(marker,'usable');
- const failed=spawnSync(process.execPath,argv,{env:{...f.env,FIXTURE_FAIL_CONSUMER:'79'},encoding:'utf8'});
+ const failed=f.build([],{FIXTURE_FAIL_CONSUMER:'79'});
  assert.notEqual(failed.status,0);assert.match(failed.stderr,/TARGET_FAILED rc=79/);
  assert.equal(fs.readFileSync(marker,'utf8'),'usable');
  assert.deepEqual(fs.readFileSync(path.join(f.sdk,'share/cjcj/build-inputs/stdx.json')),old);
@@ -65,13 +66,13 @@ test('public stdx consumer failure preserves previous payload and facts then sam
  // The transaction must restore that payload and preserve the foreign link/facts.
  const facts=path.join(f.sdk,'share/cjcj/build-inputs/stdx.json'),saved=facts+'.saved';
  fs.renameSync(facts,saved);fs.symlinkSync(path.basename(saved),facts);
- const publication=spawnSync(process.execPath,argv,{env:f.env,encoding:'utf8'});
+ const publication=f.build();
  assert.equal(publication.status,1,publication.stdout+publication.stderr);
  assert.match(publication.stderr,/INSTALL_LINK/);
  assert.equal(fs.readFileSync(marker,'utf8'),'usable');
  assert.equal(fs.readlinkSync(facts),path.basename(saved));
  assert.deepEqual(fs.readFileSync(saved),old);
  fs.unlinkSync(facts);fs.renameSync(saved,facts);
- run(process.execPath,argv,{env:f.env});assert.equal(fs.existsSync(marker),false);
+ invoke();assert.equal(fs.existsSync(marker),false);
  console.log('STDX_CONSUMER_ROLLBACK_AND_RECOVERY_REACHED');
 });
