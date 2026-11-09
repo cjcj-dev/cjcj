@@ -12,6 +12,8 @@ import {prepareNativeCompilerSource} from './native-compiler-input.mjs';
 import {nativeAstInstallation} from './native-ast-inputs.mjs';
 import {installNativeClang} from './native-clang-install.mjs';
 import {pythonConfiguration,verifyCjdbPythonConfiguration,verifyCjdbPythonInstallation,pythonSourceInputs} from './sdk-cjdb-python.mjs';
+import {nativeTargetLibraryExcludes} from './sdk-targets.mjs';
+import {isDeepStrictEqual} from 'node:util';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {execute} from './sdk-io.mjs';
 import {nativeWindowsPython} from './native-python-windows.mjs';
@@ -79,7 +81,37 @@ export async function nativeCjdbShim(config) {
  });
 }
 
-export async function nativeCjdb(config) {
+// The compiler CMake install manifest is the existing producer's complete list,
+// including compiler-rt additions. Use the same ownership split as SDK copies;
+// neither a three-name exception nor another installed-tree inventory.
+export async function nativeTargetLibraries({build,install,platform}) {
+ const prefix='lib/'+sdkPlatform(platform).tuple+'/',root=path.resolve(install);
+ const manifest=(await fs.readFile(path.join(build,'install_manifest.txt'),'utf8')).split(/\r?\n/).filter(Boolean);
+ const libraries=[];
+ for(const file of new Set(manifest)) {
+  const relative=path.relative(root,path.resolve(file)).split(path.sep).join('/');
+  if(!relative.startsWith(prefix)||nativeTargetLibraryExcludes.includes(relative.slice(prefix.length)))continue;
+  const real=await fs.realpath(file);
+  if(!real.startsWith(await fs.realpath(root)+path.sep))throw Error('NATIVE_TARGET_LIBRARY_OUTSIDE '+relative);
+  libraries.push({path:relative,sha256:await fileDigest(file)});
+ }
+ return libraries;
+}
+
+export async function nativeCjdb(config,{installOnly=false}={}) {
+ let original;
+ if(installOnly) {
+  const {nativeInstall,install}=config;
+  original=await readJson(path.join(nativeInstall,'BUILD-INPUTS.json'));
+  const old=await fs.realpath(nativeInstall),next=path.resolve(install);
+  await privateRoot(next);
+  if(next===old||next.startsWith(old+path.sep)||next===path.resolve(original.configuration.install)
+    ||await fs.lstat(next).catch(error=>{if(error.code==='ENOENT')return null;throw error;}))throw Error('NATIVE_INSTALL_NEW_PREFIX_REQUIRED');
+  if(!isDeepStrictEqual(original.commits,original.configuration.commits)||original.compilerSource?.commit!==original.commits.compiler)
+    throw Error('NATIVE_INSTALL_SOURCE');
+  config={...original.configuration,install:next,nativeInstall:old};
+ }
+
  const {llvm,runtime,bounds,flatbuffers,libedit,xml2Archive,build,install,commits,shimSource}=config;
  let tools=config.tools;
  let python=config.python,compiler=config.compiler;
@@ -87,13 +119,13 @@ export async function nativeCjdb(config) {
  if(!Number.isSafeInteger(selectedJobs)||selectedJobs<1)throw new Error('NATIVE_JOBS');
  const selectedLinkJobs=config.linkJobs??Math.min(selectedJobs,8);
  if(!Number.isSafeInteger(selectedLinkJobs)||selectedLinkJobs<1)throw new Error('NATIVE_LINK_JOBS');
- const records=[],jobs=String(selectedJobs),linkJobs=String(selectedLinkJobs),launcher=tools.launcher;
+ const records=original?[...original.commands]:[],jobs=String(selectedJobs),linkJobs=String(selectedLinkJobs),launcher=tools.launcher;
  config={...config,jobs:selectedJobs,linkJobs:selectedLinkJobs};
  if(process.env.GITHUB_ACTIONS==='true'&&!/^sccache(?:\.exe)?$/i.test(path.basename(launcher||'')))throw new Error('GHA_SCCACHE_REQUIRED');
  const platform=config.platform || ({linux:'linux',darwin:'darwin',win32:'windows'}[process.platform]+'_'+(process.arch==='arm64'?'aarch64':'x86_64'));
  const native=sdkPlatform(platform),delimiter=native.os==='win32'?';':':';
  if(process.platform!==native.os||process.arch!==native.arch)throw new Error('NATIVE_CJDB_RUNNER_REQUIRED');
- if(config.pythonProducer){
+ if(config.pythonProducer&&!installOnly){
   if(native.os!=='win32'||python||config.pythonInputs)throw Error('NATIVE_PYTHON_PRODUCER_CONFLICT');
   const produced=await nativeWindowsPython({jobs:selectedJobs,...config.pythonProducer});
   config={...config,...produced};python=produced.python;
@@ -105,28 +137,37 @@ export async function nativeCjdb(config) {
   ...(native.loader==='PATH'?{}:{PATH:[python+'/bin',process.env.PATH].join(delimiter)})};
  const selectedPython=await pythonConfiguration(python,platform,execute,config.pythonExecutable);
  const run=(argv,options={})=>command(argv,{env,records,...options});
- const prepared=await prepareNativeCompilerSource({compiler,compilerArchive:config.compilerArchive,
+ const prepared=installOnly?{compiler:original.compilerSource.root,source:original.compilerSource}:await prepareNativeCompilerSource({compiler,compilerArchive:config.compilerArchive,
   bounds,flatbuffers,build,install,commits,commit:commits.compiler},run);
  compiler=prepared.compiler;
+ if(!installOnly) {
  // Preserve the existing frontend ordering fixes on the selected upstream source.
  applyCompilerCjdbPatches(compiler);
  applyCompilerBoundscheckDependencies(compiler);
  applyCompilerSchemaInstall(compiler);
  applyCompilerLlvmVersion(compiler);
  applyCompilerXml2Install(compiler);
+ }
  const compilerSource=prepared.source;
  let windowsToolchain;
- if(native.os==='win32') {
+ if(native.os==='win32'&&!installOnly) {
   applyCompilerWindowsPatches(compiler);
   windowsToolchain=await probeWindowsToolchain({tools,compiler,work:build+'.toolchain',env});
   tools={...tools,cc:windowsToolchain.cc,cxx:windowsToolchain.cxx};
   config={...config,tools};
   env.PATH=[path.dirname(tools.cc),env.PATH].join(';');
  }
+ const xml2=build+'/xml2-source';
+ if(!installOnly) {
  if(await fileDigest(xml2Archive.file)!==xml2Archive.sha256)throw new Error('XML2_ARCHIVE_IDENTITY');
- const xml2=build+'/xml2-source';await fs.mkdir(xml2,{recursive:true});
+ await fs.mkdir(xml2,{recursive:true});
  await run(['tar','-xJf',xml2Archive.file,'--strip-components=1','-C',xml2]);
  await run([selectedPython.executable,'-I','-c','import sys,sysconfig,ssl,_ctypes; assert sys.version_info[:2]==(3,11); print(sys.version)']);
+ }
+ // Reconfigure the existing graph for the new install prefix: upstream CJDB
+ // symlink install(CODE) embeds that prefix at configure time. --prefix alone
+ // would still write aliases into the old installation. No build target runs
+ // in install-only mode.
  const pythonArgs=[`-DPython3_EXECUTABLE=${selectedPython.executable}`,`-DPython3_INCLUDE_DIR=${selectedPython.include}`,`-DPython3_LIBRARY=${selectedPython.library}`];
  const toolchain=config.toolchain || path.join(compiler,'cmake',platform==='windows_x86_64'?'mingw_x86_64_toolchain.cmake':platform+'_toolchain.cmake');
  await fs.stat(toolchain);
@@ -137,15 +178,19 @@ export async function nativeCjdb(config) {
   `-DCMAKE_TOOLCHAIN_FILE=${toolchain}`,`-DCMAKE_C_COMPILER=${tools.cc}`,
   `-DCMAKE_CXX_COMPILER=${tools.cxx}`,`-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`,`-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,
   '-DCANGJIE_BUILD_CJC=ON','-DCANGJIE_BUILD_STD_SUPPORT=ON','-DCANGJIE_BUILD_TESTS=OFF','-DCANGJIE_BUILD_CJDB=ON',
-  ...(windowsToolchain?[`-DCANGJIE_TOOLCHAIN_RUNTIME_FILES=${windowsToolchain.runtimeFiles.join(';')}`]:[]),
+  ...(windowsToolchain?[`-DCANGJIE_TOOLCHAIN_RUNTIME_FILES=${windowsToolchain.runtimeFiles.join(';')}`]:
+    original?.windowsToolchain?[`-DCANGJIE_TOOLCHAIN_RUNTIME_FILES=${[...new Set(original.windowsToolchain.installedFiles.map(row=>path.join(config.nativeInstall,row.path)))].join(';')}`]:[]),
   '-DCANGJIE_LLVM_BUILD_TYPE=Release','-DCANGJIE_CJDB_BUILD_TYPE=Release',`-DCANGJIE_CJNATIVE_SOURCE_DIR=${llvm}`,
   `-DCANGJIE_RUNTIME_SOURCE_DIR=${runtime}`,`-DCANGJIE_XML2_SOURCE_DIR=${xml2}`,
   `-DCMAKE_PREFIX_PATH=${[python,libedit,build+'/third_party/xml2'].filter(Boolean).join(';')}`,`-DPython3_EXECUTABLE=${selectedPython.executable}`,
   `-DLLVM_BUILD_ARG=${pythonArgs.join(';')}`,`-DCANGJIE_LLVM_BUILD_ARGS=${llvmArgs.join(';')}`,
   `-DCANGJIE_LINK_JOB_POOL=${linkJobs}`,`-DCMAKE_INSTALL_PREFIX=${install}`]);
  const targets=[...new Set([...native.nativeTargets,'cangjie-ast-support'])];
+ if(!installOnly) {
  await run([tools.cmake||'cmake','--build',build,'--target',...targets.filter(t=>!['all','install'].includes(t)),'-j',jobs]);
- await run([tools.cmake||'cmake','--build',build,'-j',jobs]);await run([tools.cmake||'cmake','--install',build]);
+ await run([tools.cmake||'cmake','--build',build,'-j',jobs]);
+ }
+ await run([tools.cmake||'cmake','--install',build,...(installOnly?['--prefix',install]:[])]);
  const clangInstallation=await installNativeClang({build,install,platform,cmake:tools.cmake||'cmake',env},run);
  const astInstallation=await nativeAstInstallation({compiler,build,install,platform,source:compilerSource,commands:records,cmakeCommand:tools.cmake||'cmake'});
  // CMake is the only native library installer; Python and libedit are explicit
@@ -161,9 +206,19 @@ export async function nativeCjdb(config) {
  const installed=await verifyCjdbPythonInstallation(python,nativeRoot,execute,platform,selectedPython.executable);
  const pythonSource=await pythonSourceInputs({...config.pythonInputs,root:python,nativeRoot,platform,selected:observed.selected});
  const fixed=nativeRoot+'/fixed-llc';await fs.mkdir(fixed,{recursive:true});
- const nativeShim=await compileCjdbShim({flatc:await nativeHostFlatc(install,astInstallation),compiler,llvm,llvmBuild:build+'/third_party/cjnative-prefix/src/cjnative-build',flatbuffers,
+ let nativeShim;
+ if(installOnly) {
+  nativeShim=await readInstalledNativeShim({install:config.nativeInstall,facts:original});
+  await fs.copyFile(path.join(config.nativeInstall,nativeShim.object.path),path.join(install,nativeShim.object.path));
+ }else nativeShim=await compileCjdbShim({flatc:await nativeHostFlatc(install,astInstallation),compiler,llvm,llvmBuild:build+'/third_party/cjnative-prefix/src/cjnative-build',flatbuffers,
   generatedHeaders:build+'/shim-schema',repository:shimSource,object:fixed+'/cjselfhost_llvmshim.o',clang:tools.cxx,launcher,env,install,commit:commits.shim,sourceArchive:config.shimArchive,compilerCommit:commits.compiler,llvmCommit:commits.llvm},run);
- if(windowsToolchain) {
+ if(installOnly&&original.windowsToolchain) {
+  windowsToolchain=original.windowsToolchain;
+  const record=windowsToolchain.original.path;
+  await fs.mkdir(path.dirname(path.join(install,record)),{recursive:true});
+  await fs.copyFile(path.join(config.nativeInstall,record),path.join(install,record));
+  for(const row of windowsToolchain.installedFiles)if(await fileDigest(path.join(install,row.path))!==row.sha256)throw Error('WINDOWS_TOOLCHAIN_RUNTIME_INSTALL '+row.path);
+ }else if(windowsToolchain) {
   const manifest=(await fs.readFile(build+'/install_manifest.txt','utf8')).split(/\r?\n/).map(n=>path.resolve(n).toLowerCase());
   const installedFiles=[];
   for(const directory of ['bin','third_party/llvm/bin','third_party/flatbuffers/bin'])for(const row of windowsToolchain.facts.runtimes) {
@@ -180,9 +235,10 @@ export async function nativeCjdb(config) {
   windowsToolchain={compiler:windowsToolchain.facts.compiler,installedFiles,original:{path:original,sha256:await fileDigest(path.join(install,original))}};
  }
  await atomicJson(install+'/BUILD-INPUTS.json',{commits,compilerSource,platform,llvmLibrary:{file:'third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,sha256:await fileDigest(nativeRoot+'/'+native.llvmDirectory+'/'+native.llvmLibrary)},targets,
+  targetLibraries:await nativeTargetLibraries({build,install,platform}),
   astInstallation,clangInstallation,nativeShim,pythonInstallationInput,...(windowsToolchain?{windowsToolchain}:{}),configuration:config,python:{configured:observed,installed},pythonSource,commands:records});
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- try{if(process.argv.length>4||process.argv[3]&&process.argv[3]!=='--shim-only')throw Error('NATIVE_CJDB_USAGE config.json [--shim-only]');
-  await (process.argv[3]==='--shim-only'?nativeCjdbShim:nativeCjdb)(await readJson(process.argv[2]));}catch(e){console.error(e.stack);process.exitCode=e.rc||1;}
+ try{if(process.argv.length>4||process.argv[3]&&!['--shim-only','--install-only'].includes(process.argv[3]))throw Error('NATIVE_CJDB_USAGE config.json [--shim-only|--install-only]');
+  await (process.argv[3]==='--shim-only'?nativeCjdbShim:nativeCjdb)(await readJson(process.argv[2]),{installOnly:process.argv[3]==='--install-only'});}catch(e){console.error(e.stack);process.exitCode=e.rc||1;}
 }

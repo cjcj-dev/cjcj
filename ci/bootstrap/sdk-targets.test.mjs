@@ -388,27 +388,37 @@ test('component install carries root assets and the tool consumer preserves them
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'sdk-root-assets-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const tuple='linux_x86_64_cjnative',host=root+'/H',llvm=root+'/N';
  const selection={platform:'linux_x86_64',bootstrapHost:{install:host},compilerExecution:{role:'target'},
-  targetComponents:{compiler:{product:root+'/C/bin/cjc'},runtime:{install:root+'/R'},std:{install:root+'/std'},llvm:{install:llvm}}};
+  targetComponents:{compiler:{install:root+'/C',product:root+'/C/bin/cjc'},runtime:{install:root+'/R',buildResult:root+'/R/NATIVE-INPUTS.json'},std:{install:root+'/std'},llvm:{install:llvm},ast:{install:root+'/AST'}}};
+ const headers=['RuntimeConfig.h','Cangjie.h','CangjieRuntimeLayout.h','RuntimeAPI.h','RTInterface.h'];
  const recipe=installationRecipe(selection),names=['LICENSE','Open_Source_Software_Notice.docx','envsetup.sh',
-  'share/cjcj/build-inputs/native-build.json','share/cjcj/build-inputs/python-original.json'];
- const copies=recipe.copies.filter(row=>names.includes(row.to));assert.equal(copies.length,5);
+  'share/cjcj/build-inputs/native-build.json','share/cjcj/build-inputs/native-runtime.json','share/cjcj/build-inputs/python-original.json','compiler-inputs.json',
+  ...headers.map(name=>'runtime/include/'+name)];
+ const copies=recipe.copies.filter(row=>names.includes(row.to)||['share/cjcj','runtime/include'].includes(row.to));
+ assert.ok(!installationRecipe(selection,{hostObjects:true}).copies.some(row=>row.to==='runtime/include'));
+ assert.ok(!installationRecipe(selection,{layout:'native-output'}).copies.some(row=>row.to==='runtime/include'));
  assert.equal(recipe.links['lib/'+tuple+'/libboundscheck.so'],'../../runtime/lib/'+tuple+'/libboundscheck.so');
  const put=async(file,text)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,text);};
- for(const row of copies)await put(row.from,row.to+' selected producer bytes');
+ for(const row of copies)if(row.to==='share/cjcj') {
+  await put(row.from+'/cjo/compiler.cjo','new compiler CJO');
+  await put(row.from+'/build-inputs/native-build.json','old compiler dependency facts must not replace N');
+ } else if(row.to==='runtime/include') {
+  for(const header of headers)await put(row.from+'/'+header,'runtime/include/'+header+' selected producer bytes');
+ } else await put(row.from,row.to+' selected producer bytes');
  const installed=root+'/installed';
- const config={work:root+'/work',install:installed,repos:{},stages:[{id:'assets',output:'${install}',copies}],finalStage:'assets',test:{required:names}};
+ const config={work:root+'/work',install:installed,repos:{},stages:[{id:'assets',output:'${install}',copies}],finalStage:'assets',test:{required:[...names,'share/cjcj/cjo/compiler.cjo']}};
  const invoke=async(label,value)=>{const file=root+'/'+label+'.json';await put(file,JSON.stringify(value));
-  const argv=[new URL('./sdk-flow.mjs',import.meta.url).pathname,'--config',file,'--no-package'];
+  const argv=[new URL('./sdk-flow.mjs',import.meta.url).pathname,'--config',file,...(value.archive?[]:['--no-package'])];
   const r=spawnSync(process.execPath,argv,{encoding:'utf8'});console.log('ROOT_ASSETS_FLOW '+JSON.stringify({label,argv,rc:r.status,signal:r.signal,stderr:r.stderr}));return r;};
  const cut=structuredClone(config);cut.work=root+'/cut-work';cut.install=root+'/cut-install';cut.stages[0].copies=cut.stages[0].copies.filter(row=>row.to!=='envsetup.sh');
  const red=await invoke('cut',cut);assert.equal(red.status,1);assert.match(red.stderr,/envsetup.sh/);
- const green=await invoke('normal',config);assert.equal(green.status,0,green.stderr);
+ const green=await invoke('normal',config);assert.equal(green.status,0,green.stderr);assert.equal(copies.length,9);
  await put(installed+'/bin/cjc','finite consumer entry');
  const consumer=await toolConsumerCopies(installed,'linux_x86_64');
  for(const name of names)assert.ok(consumer.some(row=>row.to===name||name.startsWith(row.to+'/')));
- const forward={...config,work:root+'/consumer-work',install:root+'/consumer',stages:[{id:'assets',output:'${install}',copies:consumer}],finalStage:'assets'};
+ const forward={...config,work:root+'/consumer-work',install:root+'/consumer',archive:root+'/consumer.tar.gz',stages:[{id:'assets',output:'${install}',copies:consumer}],finalStage:'assets'};
  const forwarded=await invoke('consumer',forward);assert.equal(forwarded.status,0,forwarded.stderr);
- for(const name of names)assert.equal(await fs.readFile(root+'/consumer/'+name,'utf8'),name+' selected producer bytes');
+ for(const directory of [root+'/consumer',root+'/consumer.tar.gz.unpacked/consumer'])for(const name of names)assert.equal(await fs.readFile(directory+'/'+name,'utf8'),name+' selected producer bytes');
+ assert.equal(await fs.readFile(root+'/consumer/share/cjcj/cjo/compiler.cjo','utf8'),'new compiler CJO');
  console.log('ROOT_ASSETS_NORMAL_INSTALL_CONSUMER_REACHED finite=true');
 });
 

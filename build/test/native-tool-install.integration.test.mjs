@@ -12,6 +12,8 @@ import {installEntries} from '../../ci/bootstrap/sdk-install-entries.mjs';
 import {copyOutputs,fileDigest} from '../../ci/bootstrap/sdk-flow.mjs';
 import {sdkEnvironment} from '../../ci/bootstrap/sdk-platform.mjs';
 import {getTarget} from '../lib/targets.mjs';
+import {installedInputs} from '../../ci/srcbuild/lib/installed-inputs.mjs';
+import {retainedToolPath,toolName} from '../srcbuild/tool-layout.mjs';
 import {collectContentFindings,listPackagedArtifacts,PACKAGED_TOOL_NAMES} from '../lib/package-lineage.mjs';
 const inputs=JSON.parse(await fs.readFile(process.env.SDK_MIGRATION_INPUTS,'utf8'));
 await fs.mkdir(inputs.work,{recursive:true});
@@ -51,15 +53,18 @@ for(const [name]of products)test('source-built '+name+' is the installed public 
  const raw=path.join(sdk,['cjlint','LSPServer','cjhead'].includes(name)?'.target-tools/tools/'+(name==='LSPServer'?'lsp':name)+'/bin':'.target-tools/tools/bin',name);
  assert.equal(await fileDigest(raw),expected[name],'installed product retains actual independently captured build bytes');
 });
-test('lineage reads actual source-built tool bytes and still rejects unstamped interface fixtures',async()=>{
+test('lineage reads retained tools but rejects interface fixtures without original producer facts',async()=>{
  const files=await listPackagedArtifacts(sdk);
- for(const name of PACKAGED_TOOL_NAMES)assert.ok(files.includes(path.join(sdk,'.target-tools/tools/bin',name)),'lineage must consume retained product '+name);
- // These three fixtures are CJ stand-ins for native C++ producers. Their actual
- // source/install qualification belongs to the nine-tool reader, not CJ dye.
- // The preceding nine real launcher tests still check every transported body.
- const findings=await collectContentFindings(sdk,new Set());
- const toolFindings=findings.filter(row=>row.file.includes('/.target-tools/tools/bin/'));
- console.log('SOURCE_TOOL_DYE_TARGET_ASSERTION_REACHED '+JSON.stringify(toolFindings));
- assert.equal(toolFindings.length,PACKAGED_TOOL_NAMES.length,'unstamped CJ fixture products must not become qualified by a launcher');
- for(const row of toolFindings)assert.ok(row.reasons.some(reason=>reason.includes('missing rebuilt dye')));
+ const inputs=await installedInputs(sdk,'linux_x86_64');
+ for(const name of PACKAGED_TOOL_NAMES){
+  const retained=retainedToolPath({producer:toolName(name),name,to:'tools/bin/'+name});
+  assert.ok(files.includes(path.join(sdk,retained)),'lineage must consume retained product '+name);
+  const row=inputs.components.find(row=>row.component===name);
+  assert.equal(row.artifact.path,retained);
+  assert.equal(row.source.status,'unresolved','interface fixture lacks original producer source '+name);
+ }
+ // A no-stamp product is legitimate only with the original normal producer
+ // facts and matching retained bytes. These interface fixtures lack that
+ // source contract and must remain rejected, regardless of launcher stamps.
+ await assert.rejects(collectContentFindings(sdk,new Set(),{platform:'linux_x86_64'}),/source.status is unresolved/);
 });

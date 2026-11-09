@@ -142,6 +142,7 @@ console.log(`  cgroup-memory: ${cgroupMemory}`);
 
 await phase('lineage', async () => {
   await assertPackagedLineage(sdk, {
+    platform: target.spec.llvmPlatform,
     allowNightlyStd: process.env.CJCJ_ALLOW_NIGHTLY_STD === '1',officialRoot:resolveOfficialSdkRoot(),
   });
 });

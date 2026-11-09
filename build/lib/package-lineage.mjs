@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {installedInputs} from '../../ci/srcbuild/lib/installed-inputs.mjs';
+import {validateReleaseManifestSource} from './release-manifest.mjs';
 import {parseHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 
 export const PACKAGED_TOOL_NAMES = Object.freeze([
@@ -15,13 +17,6 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const ALLOWED_LINEAGE = new Set(['cjcj-stage2', 'final-std']);
 const ARTIFACT_EXT = new Set(['.cjo', '.a', '.so', '.bc']);
 const SCAN_ROOTS = Object.freeze(['modules', 'lib', 'runtime/lib']);
-const DYE_LABELS = Object.freeze([
-  'CJCJ-COMMIT',
-  'CJTOOL-COMMIT',
-  'CJLLVM-COMMIT',
-  'CJRT-COMMIT',
-  'g_cjStoreBadMask',
-]);
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -125,17 +120,6 @@ export async function collectStdArtifactShas(root) {
   return shas;
 }
 
-export function contentSignals(buffer) {
-  const text = Buffer.isBuffer(buffer) ? buffer.toString('latin1') : String(buffer);
-  const found = [];
-  if (/CJCJ-COMMIT:[0-9a-f]{40}/.test(text)) found.push('CJCJ-COMMIT');
-  if (/CJTOOL-COMMIT:[0-9a-f]{40}/.test(text)) found.push('CJTOOL-COMMIT');
-  if (/CJLLVM-COMMIT:[0-9a-f]{40}/.test(text)) found.push('CJLLVM-COMMIT');
-  if (/CJRT-COMMIT:(?:[0-9a-f]{40}|src-[0-9a-f]{64})(?![0-9A-Za-z._-])/.test(text)) found.push('CJRT-COMMIT');
-  if (text.includes('g_cjStoreBadMask')) found.push('g_cjStoreBadMask');
-  return found;
-}
-
 const cachedOfficialShas = new Map();
 
 export async function bindOfficialNightlyShas(officialRoot) {
@@ -149,20 +133,21 @@ export async function bindOfficialNightlyShas(officialRoot) {
   return hashes;
 }
 
-export async function collectContentFindings(sdkRoot, officialShas) {
-  const findings = [];
-  for (const file of await listPackagedArtifacts(sdkRoot)) {
-    const sha = await fileSha256(file);
-    const buffer = await fs.readFile(file);
-    const dyes = contentSignals(buffer);
-    const reasons = [];
-    if (officialShas.has(sha) && SHA256.test(sha)) {
-      reasons.push(`matches official nightly sha256 ${sha}`);
-    }
-    if (dyes.length === 0) reasons.push(`missing rebuilt dye signal (${DYE_LABELS.join('/')})`);
-    if (reasons.length > 0) {
-      findings.push({file, sha, reasons, dyes});
-    }
+export async function collectContentFindings(sdkRoot, officialShas, {platform} = {}) {
+  // Consume the same retained products as packaging. Inspect the digest the
+  // existing reader already computed; do not hash the installation again or
+  // treat embedded text as a second source of build authority.
+  platform ??= JSON.parse(await fs.readFile(path.join(sdkRoot,'STAGE-INPUTS.json'),'utf8')).platform;
+  const findings = [], checked = new Set();
+  const inputs = await installedInputs(sdkRoot,platform,{checkArtifact:({path:rel,sha256:sha})=>{
+    const file=path.join(sdkRoot,rel);
+    checked.add(file);
+    if(officialShas.has(sha)&&SHA256.test(sha))findings.push({file,sha,
+      reasons:[`matches official nightly sha256 ${sha}`]});
+  }});
+  for(const row of inputs.components)validateReleaseManifestSource(row.source,row.component);
+  for(const file of await listPackagedArtifacts(sdkRoot)) {
+    if(!checked.has(file))findings.push({file,reasons:['installed producer did not record this product']});
   }
   return findings;
 }
@@ -172,7 +157,7 @@ function formatFindings(findings) {
 }
 
 export async function inspectPackagedLineage(sdkRoot, {
-  allowNightlyStd = false, officialRoot,
+  allowNightlyStd = false, officialRoot, platform,
 } = {}) {
   const provenancePath = path.join(sdkRoot, 'PROVENANCE.txt');
   let provenanceKind = 'unknown';
@@ -191,8 +176,13 @@ export async function inspectPackagedLineage(sdkRoot, {
   }
 
   const officialShas = await bindOfficialNightlyShas(officialRoot);
-  const findings = await collectContentFindings(sdkRoot, officialShas);
-  if (allowNightlyStd && (findings.length > 0 || provenanceKind === 'official-std')) {
+  let findings;
+  try {
+    findings = await collectContentFindings(sdkRoot, officialShas, {platform});
+  } catch(error) {
+    return {ok:false,code:'installed-lineage',message:'installed-lineage: '+error.message,findings:[]};
+  }
+  if (allowNightlyStd && findings.every(row=>row.reasons.every(reason=>reason.startsWith('matches official nightly sha256'))) && (findings.length > 0 || provenanceKind === 'official-std')) {
     return {
       ok: true,
       code: 'ok',
@@ -202,10 +192,12 @@ export async function inspectPackagedLineage(sdkRoot, {
     };
   }
   if (findings.length > 0) {
+    const code=findings.some(row=>row.reasons.some(reason=>!reason.startsWith('matches official nightly sha256')))
+      ? 'installed-lineage' : 'official-std';
     return {
       ok: false,
-      code: 'official-std',
-      message: `official-std: content check failed for ${findings.length} file(s)\n${formatFindings(findings)}`,
+      code,
+      message: `${code}: content check failed for ${findings.length} file(s)\n${formatFindings(findings)}`,
       findings,
     };
   }

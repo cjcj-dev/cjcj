@@ -26,6 +26,7 @@ export async function run(config) {
     if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
       assertRuntimeSplit({hostSdk:bootstrapHostSdk(config),targetSdk:cangjieDir,target:config.target});
       await assertPackagedLineage(cangjieDir, {
+        platform:config.target.spec.llvmPlatform,
         allowNightlyStd:process.env.CJCJ_ALLOW_NIGHTLY_STD==='1',officialRoot:config.officialSdkRoot,
       });
       await verifyInstall({sdk:cangjieDir,work,platform:config.target.spec.llvmPlatform});

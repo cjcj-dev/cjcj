@@ -129,6 +129,8 @@ test('original layout crosses N copy and installedInputs with null CONFIG_ARGS; 
  const artifacts=[];
  for(const rel of ['third_party/llvm/bin/libLLVM-15.dll','tools/bin/cjdb.exe']){
   const file=path.join(sdk,rel.startsWith('tools/bin/')?'.native-tools/'+rel:rel);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'explicit nonexecutable N fixture');
+  if(rel.startsWith('tools/bin/')){await fs.mkdir(path.join(sdk,'tools/bin'),{recursive:true});await fs.writeFile(path.join(sdk,rel),'explicit launcher fixture');
+   await fs.writeFile(path.join(sdk,rel+'.entry'),['cjcj-sdk-entry-v1','2','.native-tools/'+rel,'windows','native-target:x64','third_party/llvm/bin',''].join('\n'));}
   artifacts.push({path:rel,sha256:await fileDigest(file)});
  }
  const nativeFacts={rc:0,platform:'windows_x86_64',install:sdk,artifacts,pythonSource,

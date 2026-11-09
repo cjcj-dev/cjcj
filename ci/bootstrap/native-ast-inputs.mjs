@@ -25,7 +25,9 @@ export async function nativeAstInstallation({compiler, build, install, platform,
     &&same(at(row.argv,'-S'),compiler)&&same(at(row.argv,'-B'),build));
   const built=commands.findIndex((row,i)=>i>configure&&cmake(row)&&succeeded(row)&&row.argv.includes('--build')
     &&same(at(row.argv,'--build'),build)&&row.argv.includes('--target')&&row.argv.includes('cangjie-ast-support'));
-  const installed=commands.findIndex((row,i)=>i>built&&cmake(row)&&succeeded(row)&&row.argv.includes('--install')
+  // A normal install-only invocation retains earlier build/install commands.
+  // Its last successful installation, not the historical prefix, supplied these bytes.
+  const installed=commands.findLastIndex((row,i)=>i>built&&cmake(row)&&succeeded(row)&&row.argv.includes('--install')
     &&same(at(row.argv,'--install'),build));
   if(configure<0||built<0||installed<0)throw Error('NATIVE_AST_PRODUCER_COMMANDS');
   const manifest=(await fs.readFile(manifestFile,'utf8')).split(/\r?\n/).filter(Boolean);

@@ -283,18 +283,21 @@ function assertToolStamps(tools, sourceByComponent) {
 // archive for a factory copy left the manifest byte-identical. The data was
 // already there; only the reconciliation was missing.
 //
-// The comparison is by content, deliberately not by path: package_sdk.mjs owns
-// the install-prefix -> stage mapping, and re-deriving it here would be a second
-// copy of that logic that drifts away from the first.
-function provenanceArtifactHashes(text) {
+// Producer paths are install-relative and survive archive relocation.
+function provenanceArtifacts(text) {
   const marker = text.indexOf('ARTIFACT-SHA256:');
   if (marker < 0) return null;
-  const hashes = new Set();
+  const artifacts = new Map();
   for (const line of text.slice(marker).split('\n').slice(1)) {
     const match = line.match(/^([0-9a-f]{64})\s\s(.+)$/);
-    if (match) hashes.add(match[1]);
+    if (match) {
+      const rel=match[2];
+      if(path.isAbsolute(rel)||rel.includes("\\")||rel.split("/").some(part=>!part||part===".."||part==="."))throw Error("STD_ARTIFACT_PATH "+rel);
+      if(artifacts.has(rel))throw Error("STD_ARTIFACT_DUPLICATE "+rel);
+      artifacts.set(rel,match[1]);
+    }
   }
-  return hashes;
+  return artifacts;
 }
 
 // The path this matches is stage-relative, deliberately: it used to be the
@@ -329,33 +332,29 @@ async function stagedStdFiles(stage) {
   return files.sort();
 }
 
-export async function reconcileStdArtifacts(stage, stdText) {
-  const hashes = provenanceArtifactHashes(stdText);
-  if (hashes === null) {
-    throw new Error('std PROVENANCE.txt has no ARTIFACT-SHA256 block; ' +
-      'the packaged std bytes cannot be tied to the build that produced them');
+export async function reconcileStdArtifacts(stage, stdText, {checkArtifact, exclude=[]} = {}) {
+  const artifacts = provenanceArtifacts(stdText);
+  if (artifacts === null) throw new Error('std PROVENANCE.txt has no ARTIFACT-SHA256 block');
+  if (artifacts.size === 0) throw new Error('std PROVENANCE.txt ARTIFACT-SHA256 block is empty');
+  // Native install retains these relative paths. Check every declared product,
+  // including FFI/dependency libraries without std in their names, and detect
+  // deletion as well as replacement. A stamp cannot stand in for these bytes.
+  const checked = new Set();
+  for (const [rel, expected] of artifacts) {
+    // The std flatbuffers module is copied explicitly after excluding the
+    // native third_party tree; it keeps its producer-relative path.
+    if(exclude.some(prefix=>rel===prefix||rel.startsWith(prefix+'/'))&&!rel.startsWith('third_party/flatbuffers/modules/'))continue;
+    const actual = await sha256(path.join(stage, rel));
+    if (actual !== expected) throw new Error('STD_ARTIFACT_BYTES '+rel);
+    checked.add(rel);
+    checkArtifact?.({path:rel,sha256:actual});
   }
-  if (hashes.size === 0) {
-    throw new Error('std PROVENANCE.txt ARTIFACT-SHA256 block is empty');
+  if(!checked.size)throw Error('no packaged std artifact matched PROVENANCE.txt');
+  for (const file of await stagedStdFiles(stage)) {
+    const rel=packagedPath(stage,file);
+    if (!checked.has(rel)) throw new Error('STD_ARTIFACT_UNRECORDED '+rel);
   }
-  const staged = await stagedStdFiles(stage);
-  const unmatched = [];
-  let matched = 0;
-  for (const file of staged) {
-    if (hashes.has(await sha256(file))) matched += 1;
-    else unmatched.push(packagedPath(stage, file));
-  }
-  if (matched === 0) {
-    // Same shape as the empty-population guard: nothing verified is not a pass.
-    throw new Error('no packaged std artifact matched PROVENANCE.txt ARTIFACT-SHA256; ' +
-      `staged=${staged.length} provenance_entries=${hashes.size}`);
-  }
-  if (unmatched.length) {
-    throw new Error(`${unmatched.length} packaged std artifact(s) are not in PROVENANCE.txt ` +
-      `ARTIFACT-SHA256, so they are not from this std build: ${unmatched.slice(0, 8).join(', ')}` +
-      `${unmatched.length > 8 ? ` (+${unmatched.length - 8} more)` : ''}`);
-  }
-  return {verified: matched, provenance_entries: hashes.size};
+  return {verified:checked.size, provenance_entries:artifacts.size};
 }
 
 function packagedPath(stage, file) {

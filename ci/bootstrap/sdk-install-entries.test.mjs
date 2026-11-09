@@ -175,6 +175,43 @@ test('native public entries retain actual bytes and separate host and target lib
  const moved=path.join(root,'moved');await fs.rename(sdk,moved);const relocated=run(path.join(moved,'bin/host-tool'),[]);assert.equal(relocated.status,0,relocated.stderr);assert.equal(relocated.stdout.trim(),'42 none');
 });
 
+// N's cjdb is an actual relative alias to lldb. Installation keeps that alias
+// and wraps the regular lldb, so the package reader reaches the original bytes
+// N recorded through the alias and the launcher recipe, and nothing else.
+test('package reader resolves native aliases and launchers to the original bytes N recorded',async()=>{
+ const {installedInputs}=await import('../srcbuild/lib/installed-inputs.mjs');
+ const root=await fs.mkdtemp(path.join(parent,'native-alias-')),sdk=path.join(root,'install');
+ const put=async(rel,text,mode=0o755)=>{await fs.mkdir(path.dirname(path.join(sdk,rel)),{recursive:true});await fs.writeFile(path.join(sdk,rel),text,{mode});};
+ await put('third_party/llvm/lib/libLLVM-15.so','llvm library',0o644);await put('third_party/llvm/bin/lldb','original lldb');await put('tools/bin/chir-dis','original chir-dis');
+ const link=path.join(sdk,'tools/bin/cjdb'),relink=async target=>{await fs.rm(link,{force:true});await fs.symlink(target,link);};
+ await relink('../../third_party/llvm/bin/lldb');
+ const recorded=await Promise.all(['third_party/llvm/lib/libLLVM-15.so','tools/bin/cjdb','tools/bin/chir-dis'].map(async rel=>({path:rel,sha256:await fileDigest(path.join(sdk,rel))})));
+ await installEntries({root:sdk,build:path.join(root,'build'),records:[],platform:'linux_x86_64',groups:[
+  {directory:'tools/bin',retain:'.native-tools/tools/bin',names:['cjdb','chir-dis'],libraries:['third_party/llvm/lib']},
+  {directory:'third_party/llvm/bin',retain:'.native-tools/third_party/llvm/bin',libraries:['third_party/llvm/lib']}]});
+ assert.equal((await fs.lstat(link)).isSymbolicLink(),true);
+ await assert.rejects(fs.lstat(path.join(sdk,'.native-tools/tools/bin/cjdb')),{code:'ENOENT'});
+ await put('share/cjcj/build-inputs/native-llvm.json',JSON.stringify({rc:0,platform:'linux_x86_64',artifacts:recorded}),0o644);
+ const read=async()=>(await installedInputs(sdk,'linux_x86_64')).components.find(row=>row.component==='llvm-cjdb').artifacts;
+ const products=await read();
+ console.log('NATIVE_ALIAS_PACKAGE_READER_REACHED '+JSON.stringify(products.map(row=>[row.path,row.alias??null,row.entry?.path??null])));
+ assert.deepEqual(products.map(row=>[row.path,row.sha256,row.alias,row.entry?.path]),[
+  ['third_party/llvm/lib/libLLVM-15.so',recorded[0].sha256,undefined,undefined],
+  ['.native-tools/third_party/llvm/bin/lldb',recorded[1].sha256,'tools/bin/cjdb','third_party/llvm/bin/lldb'],
+  ['.native-tools/tools/bin/chir-dis',recorded[2].sha256,undefined,'tools/bin/chir-dis']]);
+ for(const [target,error]of [['../../../outside',/INSTALLED_NATIVE_OUTSIDE/],[path.join(sdk,'third_party/llvm/bin/lldb'),/INSTALLED_NATIVE_OUTSIDE/],
+  ['cjdb',/INSTALLED_NATIVE_LINK_CYCLE/],['../../third_party/llvm/bin/missing',/ENOENT/],['../../third_party/llvm/bin',/INSTALLED_NATIVE_TYPE/]]){
+  await relink(target);await assert.rejects(read(),error);
+ }
+ await relink('../../third_party/llvm/bin/lldb');
+ const recipe=path.join(sdk,'third_party/llvm/bin/lldb.entry'),recipeText=await fs.readFile(recipe,'utf8');
+ await fs.writeFile(recipe,recipeText.replace('.native-tools/third_party/llvm/bin/lldb','.native-tools/tools/bin/chir-dis'));
+ await assert.rejects(read(),/INSTALLED_NATIVE_ENTRY tools\/bin\/cjdb/);await fs.writeFile(recipe,recipeText);
+ const original=path.join(sdk,'.native-tools/third_party/llvm/bin/lldb'),bytes=await fs.readFile(original);
+ await fs.appendFile(original,'changed');await assert.rejects(read(),/INSTALLED_INPUT_BYTES .native-tools\/third_party\/llvm\/bin\/lldb/);await fs.writeFile(original,bytes);
+ assert.deepEqual(await read(),products);
+});
+
 // The launcher (ci/bootstrap/native-launcher/entry.cpp) refuses a recipe whose
 // platform is not the one it was built for, and compiler_identity.mjs reads the
 // same field expecting the target's name. Writing it from the producer's own

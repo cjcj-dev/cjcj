@@ -12,8 +12,9 @@ export const GC_UNIT_LANGUAGE_DEFERRED = 'LANGUAGE_TESTS=LANGUAGE_DEFERRED';
 export function gcUnitLanguageGateEnabled(config, env=process.env) {
   return Boolean(bootstrapHostSdk(config,env)) && config.target.spec.os==='linux' && !config.target.spec.crossCompile;
 }
+export const gcUnitStatusRelative = tuple => path.posix.join('runtime/lib',tuple,'gc_unit_gate.status');
 export function gcUnitStatusPath(config,sdk) {
-  return path.join(sdk,'runtime/lib',config.target.runtimeLibSubdir(config.buildType),'gc_unit_gate.status');
+  return path.join(sdk,gcUnitStatusRelative(config.target.runtimeLibSubdir(config.buildType)));
 }
 export const gcUnitBuildStatus = runtime => path.join(runtime,'CMakebuild/gc-unit.status');
 export function gcUnitRuntimeBuildEnv(config,env=process.env) {

@@ -64,7 +64,8 @@ if(process.env.INSTALLED_PYTHON_RECORD){
   await write(sdk+'/'+product.path,await fs.readFile(source));
  }
  const library='third_party/llvm/lib/libLLVM-15.so';
- await write(sdk+'/'+library,bytes);await write(sdk+'/.native-tools/tools/bin/cjdb',bytes);
+ await write(sdk+'/'+library,bytes);await write(sdk+'/.native-tools/tools/bin/cjdb',bytes);await write(sdk+'/tools/bin/cjdb',bytes);
+ await write(sdk+'/tools/bin/cjdb.entry',['cjcj-sdk-entry-v1','2','.native-tools/tools/bin/cjdb','linux','native-target:x64','third_party/llvm/lib',''].join('\n'));
  for(const tool of ['llc','opt']){
   const rel='third_party/llvm/bin/'+tool,retained='.native-tools/'+rel;
   await write(sdk+'/'+retained,bytes);await write(sdk+'/'+rel,bytes);

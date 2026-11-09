@@ -55,6 +55,19 @@ export function compilerExecutionRoot(sdk,selection) {
   if(!['target','separate','bootstrap-host'].includes(role))throw Error('INSTALL_COMPILER_EXECUTION_ROLE');
   return path.join(sdk,role==='separate'?'.compiler-exec':role==='bootstrap-host'?'.host':'');
 }
+// These std outputs are deliberately supplied by the selected R/AST inputs.
+// The installer and the installed reader share this one layout decision.
+export function runtimeLibraryLinks(platform) {
+  const native=sdkPlatform(platform);
+  return native.os==='linux'?{['lib/'+native.tuple+'/libboundscheck.so']:'../../runtime/lib/'+native.tuple+'/libboundscheck.so'}:{};
+}
+export function stdInstallationExcludes(platform) {
+  const native=sdkPlatform(platform);
+  return ['lib/'+native.tuple+'/libboundscheck'+native.shared,'third_party','schema','include','lib/'+native.tuple+'/libcangjie-ast-support.a'];
+}
+// These libraries are supplied by the selected AST and std installations.
+export const nativeTargetLibraryExcludes = ['libcangjie-ast-support.a','libboundscheck-static.a'];
+
 export function installationRecipe(selection,{compiler:product,std,bootstrap=false,hostObjects=false,final=false,nativeChecks,tools,layout}={}) {
   const {platform,bootstrapHost:host,compilerExecution:execution,targetComponents:target}=selection;
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
@@ -82,7 +95,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     ]:[]),
     {from:llvm.install+'/third_party/llvm',to:'third_party/llvm',owner:'N'},
     {from:llvm.install+'/tools',to:'tools',owner:'N'},
-    ...(!hostObjects?[{from:llvm.install+'/lib/'+tuple,to:'lib/'+tuple,owner:'N',exclude:['libcangjie-ast-support.a','libboundscheck-static.a']}]:[]),
+    ...(!hostObjects?[{from:llvm.install+'/lib/'+tuple,to:'lib/'+tuple,owner:'N',exclude:nativeTargetLibraryExcludes}]:[]),
     ...(ast?[
       {from:ast.install+'/include',to:'include',owner:'AST'},
       {from:ast.install+'/schema',to:'schema',owner:'schema'},
@@ -91,7 +104,8 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     ]:[]),
     ...(!hostObjects?[
       {from:runtime.install,to:'',owner:'R',exclude:['RUNTIME-INPUTS.json','NATIVE-INPUTS.json','SOURCE_SHA',...(ast?['include']:[])]},
-      {from:std,to:'',owner:'std',exclude:['lib/'+tuple+'/libboundscheck'+native.shared,'third_party','schema','include','lib/'+tuple+'/libcangjie-ast-support.a']},
+      ...(ast?[{from:runtime.install+'/include',to:'runtime/include',owner:'R'}]:[]),
+      {from:std,to:'',owner:'std',exclude:stdInstallationExcludes(platform)},
       {from:std+'/third_party/flatbuffers/modules',to:'third_party/flatbuffers/modules',owner:'std'},
     ]:[]),
     ...(!bootstrap&&prefix?[
@@ -105,6 +119,11 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
       {from:execution.llvm.install+'/third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,to:prefix+'/third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,owner:'compiler execution LLVM'},
     ]:[]),
     {from:product,to:compilerName,owner:'compiler'},
+    ...(!bootstrap&&layout!=='native-output'?[
+      // Compiler payloads retain their own producer, independently of N facts.
+      {from:path.join(target.compiler.install,'share/cjcj'),to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
+      {from:path.join(target.compiler.install,'compiler-inputs.json'),to:'compiler-inputs.json',owner:'compiler'},
+    ]:[]),
   ];
   if(layout==='native-output') {
     // The original build.py compiler/runtime/std outputs are internal build
@@ -148,6 +167,10 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     ...(native.os==='win32'?[]:[{from:path.join(llvm.install,'share/cjcj/build-inputs/python-original.json'),to:'share/cjcj/build-inputs/python-original.json',owner:'N original Python input'}]),
     ...(ast&&ast.install!==llvm.install?[{from:ast.buildResult??path.join(ast.install,'BUILD-INPUTS.json'),
       to:'share/cjcj/build-inputs/native-ast.json',owner:'AST original build'}]:[]));
+  // Install-only has no bootstrap native-check stage. Carry R's original pair
+  // just as the native-output recipe does, without reconstructing its facts.
+  if(!hostObjects&&!nativeChecks&&layout!=='native-output')copies.push(
+    {from:path.join(runtime.install,'RUNTIME-INPUTS.json'),to:'RUNTIME-INPUTS.json',owner:'R original pair'});
   if(nativeChecks)copies.push(
     {from:nativeChecks+'/llvm/native-input-result.json',to:'share/cjcj/build-inputs/native-llvm.json',owner:'native LLVM checks'},
     {from:llvm.buildResult,to:'share/cjcj/build-inputs/native-build.json',owner:'native LLVM build'},
@@ -156,6 +179,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   if(llvm.windowsToolchain)copies.push(
     {from:path.join(llvm.install,relative(llvm.windowsToolchain.original.path)),to:relative(llvm.windowsToolchain.original.path),owner:'native toolchain input'},
     ...llvm.windowsToolchain.installedFiles.filter(row=>row.path.startsWith('bin/')).map(row=>({from:path.join(llvm.install,relative(row.path)),to:relative(row.path),owner:'native toolchain runtime'})));
+  if(!hostObjects&&runtime.buildResult)copies.push({from:runtime.buildResult,to:'share/cjcj/build-inputs/native-runtime.json',owner:'R original build'});
   if(runtime.gateStatus&&!runtime.sourceRoot)throw Error('INSTALL_RUNTIME_SOURCE_REQUIRED');
   return {copies,...(!hostObjects&&native.os==='linux'&&runtime.sourceRoot?{
     runtimeLanguageInputs:{runtime:path.join(runtime.sourceRoot,'runtime'),gateStatus:runtime.gateStatus}}:{}),entries:[
@@ -167,8 +191,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     ]:[]),
     {directory:'tools/bin',retain:'.native-tools/tools/bin',names:['cjdb'+exe,'chir-dis'+exe,'LSPMacroServer'+exe],libraries:nLib},
     {directory:'third_party/llvm/bin',retain:'.native-tools/third_party/llvm/bin',libraries:nLib,exclude:llvm.windowsToolchain?.installedFiles.filter(row=>row.path.startsWith('third_party/llvm/bin/')).map(row=>path.basename(row.path))||[]},
-  ],links:{...(!hostObjects&&layout!=='native-output'&&native.os==='linux'?{
-    ['lib/'+tuple+'/libboundscheck.so']:'../../runtime/lib/'+tuple+'/libboundscheck.so'}:{}),['bin/cjc'+exe]:'cjcj-stage1'+exe,['bin/cjc-frontend'+exe]:'cjcj-stage1'+exe,
+  ],links:{...(!hostObjects&&layout!=='native-output'&&native.os==='linux'?runtimeLibraryLinks(platform):{}),['bin/cjc'+exe]:'cjcj-stage1'+exe,['bin/cjc-frontend'+exe]:'cjcj-stage1'+exe,
     ['libexec/compiler/cjc'+exe]:'cjcj-stage1'+exe,['libexec/compiler/cjc-frontend'+exe]:'cjcj-stage1'+exe,
     'libexec/runtime':prefix?'../'+prefix+'/runtime':'../runtime'}};
 }
