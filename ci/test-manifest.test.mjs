@@ -475,6 +475,8 @@ test('mainline archive, initialization and ArrayClone plus parser/frontend keep 
     ['packages/lex/src/TokenCursor_test.cj', 'packages/lex'],
     ['packages/meta_transformation/src/NativeMetaTransformPlugin_test.cj', 'packages/meta_transformation'],
     ['packages/parse/src/TokenInputContract_test.cj', 'packages/parse'],
+    ['packages/codegen/src/MetadataLinkNameLookup_test.cj', 'packages/codegen'],
+    ['packages/codegen/src/RetainedNameLookup_test.cj', 'packages/codegen'],
   ]) {
     const entries = REGISTERED.filter(entry => entry.file === file);
     console.log(`MAINLINE_REGISTRY_ASSERTION_REACHED ${file}`);
