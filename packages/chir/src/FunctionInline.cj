@@ -1,5 +1,6 @@
 package cjcj::chir
 
+import cjcj::basic.Linkage as BasicLinkage
 import std.collection.*
 import std.core.Box as CoreBox
 import cjcj::option.{OptimizationLevel, enumIndex}
@@ -69,8 +70,156 @@ public class FunctionInline {
     }
 
     public func Run(fn: Function): Unit {
+        let _ = PreserveThrowBoundary(fn)
         globalFunc = fn
         InlineImpl(fn.GetBody().getOrThrow())
+        OutlineThrowConstructions(fn)
+    }
+
+    // Outline before LLVM creates aggregate entry slots. Only the complete
+    // construction suffix moves; field loads, guards and their roots stay put.
+    // This is not a lifetime inference for existing GC storage.
+    private func OutlineThrowConstructions(fn: Function): Unit {
+        if (fn.TestAttr(Attribute.IMPORTED) || fn.GetGenericDecl().isSome() ||
+            !fn.GetGenericTypeParams().isEmpty() || fn.GetType().getOrThrow().IsGenericRelated() ||
+            fn.GetReturnType().getOrThrow().IsNothing() || fn.GetFuncType().getOrThrow().IsCFunc()) {
+            return
+        }
+        // Do not hide annotation violations or change a special stack contract.
+        for (attr in [Attribute.NO_HEAP_ALLOC, Attribute.NO_WRITE_BARRIER, Attribute.NO_WRITE_BARRIER_REC,
+            Attribute.NO_STACK_GROW, Attribute.SYSTEM_STACK, Attribute.FOREIGN]) {
+            if (fn.TestAttr(attr)) { return }
+        }
+        for (block in fn.GetBody().getOrThrow().GetBlocks()) {
+            let exprs = block.GetExpressions()
+            if (block.IsLandingPadBlock() || exprs.size < 4) { continue }
+            let start = exprs.size - 4
+            let suffix = ArrayList<Expression>()
+            for (idx in start..exprs.size) { suffix.add(exprs[idx]) }
+            if (!IsCompleteThrowConstruction(suffix)) { continue }
+            let captures = ArrayList<Value>()
+            if (!CollectThrowCaptures(suffix, captures)) { continue }
+            OutlineThrowConstruction(fn, block, suffix, captures)
+        }
+    }
+
+    private func IsCompleteThrowConstruction(exprs: ArrayList<Expression>): Bool {
+        if (exprs[0].GetExprKind() != ExprKind.APPLY || exprs[1].GetExprKind() != ExprKind.ALLOCATE ||
+            exprs[2].GetExprKind() != ExprKind.APPLY || exprs[3].GetExprKind() != ExprKind.RAISE_EXCEPTION ||
+            !exprs[3].GetSuccessors().isEmpty()) {
+            return false
+        }
+        let message = (exprs[0] as Apply).getOrThrow()
+        let allocation = (exprs[1] as Allocate).getOrThrow()
+        let constructor = (exprs[2] as Apply).getOrThrow()
+        let aggregateTy = message.GetResult().getOrThrow().GetType().getOrThrow()
+        if ((!aggregateTy.IsStruct() && !aggregateTy.IsTuple()) || !allocation.GetType().IsClass()) {
+            return false
+        }
+        let ctor = constructor.GetCallee().AsFunction() ?? return false
+        let args = constructor.GetArgs()
+        if (!ctor.IsConstructor() || args.isEmpty() ||
+            !refEq(args[0], allocation.GetResult().getOrThrow()) ||
+            !args.contains(message.GetResult().getOrThrow()) ||
+            !refEq(exprs[3].GetOperand(0), constructor.GetResult().getOrThrow())) {
+            return false
+        }
+        // Dynamic/This/generic call context would need an additional capture
+        // contract. Direct, concretely typed calls use the ordinary ABI here.
+        for (call in [message, constructor]) {
+            if (!call.GetCallee().IsFunc()) { return false }
+            if (let Some(ty) <- call.GetThisType()) {
+                if (ty.IsGenericRelated() || ty.IsThis()) { return false }
+            }
+            for (ty in call.GetInstantiatedTypeArgs()) {
+                if (ty.IsGenericRelated() || ty.IsThis()) { return false }
+            }
+        }
+        return !allocation.GetType().IsGenericRelated()
+    }
+
+    private func CollectThrowCaptures(exprs: ArrayList<Expression>, captures: ArrayList<Value>): Bool {
+        let produced = HashSet<Value>()
+        for (expr in exprs) {
+            if (let Some(result) <- expr.GetResult()) {
+                if (result.GetType().getOrThrow().IsGenericRelated()) { return false }
+                produced.add(result)
+                for (user in result.GetUsers()) {
+                    if (!exprs.contains(user)) { return false }
+                }
+            }
+        }
+        let available = HashSet<Value>()
+        for (expr in exprs) {
+            for (operand in expr.GetOperands()) {
+                if (available.contains(operand)) { continue }
+                if (produced.contains(operand)) { return false }
+                if (operand.IsFunc()) { continue }
+                let ty = operand.GetType() ?? return false
+                // No managed/native/aggregate address is captured. Cold prefix
+                // reads finish in the caller; only their scalar results cross.
+                if (!ty.IsNumeric() && !ty.IsBoolean() && !ty.IsRune()) { return false }
+                if (!captures.contains(operand)) { captures.add(operand) }
+            }
+            if (let Some(result) <- expr.GetResult()) { available.add(result) }
+        }
+        return true
+    }
+
+    private func OutlineThrowConstruction(fn: Function, block: Block,
+        exprs: ArrayList<Expression>, captures: ArrayList<Value>): Unit {
+        let paramTys = ArrayList<Type>()
+        for (capture in captures) { paramTys.add(capture.GetType().getOrThrow()) }
+        let nothing = builder.context.GetNothingType()
+        let packageName = builder.context.GetCurPackage().getOrThrow().GetName()
+        // Frozen specializations have the same original name in different
+        // packages. Cross-split internal helpers need package-unique symbols.
+        let helper = builder.CreateFunction(builder.context.GetFuncTy(paramTys, nothing),
+            fn.GetIdentifierWithoutPrefix() + ".throw." + packageName + "." + block.GetIdentifier(),
+            packageName: packageName)
+        helper.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+        helper.EnableAttr(Attribute.COMPILER_ADD)
+        helper.EnableAttr(Attribute.NO_INLINE)
+        helper.EnableAttr(Attribute.NO_REFLECT_INFO)
+        helper.EnableAttr(Attribute.NO_DEBUG_INFO)
+        let body = builder.CreateBlockGroup(helper)
+        helper.InitBody(body)
+        let entry = builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        let replacements = HashMap<Value, Value>()
+        for (capture in captures) {
+            replacements[capture] = builder.CreateParameter(capture.GetType().getOrThrow(), DebugLocation(), helper)
+        }
+        for (expr in exprs) {
+            let cloned = expr.Clone(builder, entry)
+            cloned.CopyBaseInfoFrom(expr)
+            cloned.AppendAttributeInfo(expr.GetAttributeInfo())
+            // Generated frame: retain the original source position on the call,
+            // not a caller's lexical scope on instructions in a different fn.
+            cloned.SetDebugLocation(DebugLocation())
+            for (operand in expr.GetOperands()) {
+                if (let Some(replacement) <- replacements.get(operand)) {
+                    cloned.ReplaceOperand(operand, replacement)
+                }
+            }
+            entry.AppendExpression(cloned)
+            if (let Some(result) <- expr.GetResult()) {
+                let clonedResult = cloned.GetResult().getOrThrow()
+                clonedResult.CopyBaseInfoFrom(result)
+                clonedResult.AppendAttributeInfo(result.GetAttributeInfo())
+                clonedResult.SetDebugLocation(DebugLocation())
+                replacements[result] = clonedResult
+            }
+        }
+        let call = builder.CreateApply(nothing, helper, FuncCallContext(args: captures), block)
+        call.SetDebugLocation(exprs[0].GetDebugLocation())
+        // All results are suffix-local. Remove uses in reverse construction
+        // order after the new helper owns its own cloned values.
+        var idx = exprs.size
+        while (idx > 0) { idx--; exprs[idx].RemoveSelfFromBlock() }
+        block.AppendExpression(call)
+        block.AppendExpression(builder.CreateExit(None, block))
+        RecordEffectMap(call)
     }
 
     public func GetEffectMap(): OptEffectCHIRMap {
@@ -83,6 +232,9 @@ public class FunctionInline {
             return false
         }
         let fn = callee.AsFunction().getOrThrow()
+        if (PreserveThrowBoundary(fn)) {
+            return false
+        }
         let parentBlock = apply.GetParentBlock().getOrThrow()
         if (parentBlock.GetTerminator().getOrThrow().GetExprKind() == ExprKind.RAISE_EXCEPTION) {
             return false
@@ -223,6 +375,36 @@ public class FunctionInline {
         blockGroupCopy.GetInstMapFromApply(apply)
         return blockGroupCopy.CloneBlockGroup(oldBlockGroup, apply.GetParentBlockGroup().getOrThrow())
     }
+}
+
+// A complete throw function owns its exception construction and managed message
+// storage. Translation keeps a parameter-entry GoTo before the source body in
+// debug builds. Follow only an acyclic, unconditional path to an external raise;
+// do not depend on MergeBlocks removing that source/debug boundary. Keep calls,
+// handlers, roots and CFG intact, and carry the existing NO_INLINE to codegen.
+private func PreserveThrowBoundary(fn: Function): Bool {
+    if (!fn.GetReturnType().getOrThrow().IsNothing()) {
+        return false
+    }
+    var current = fn.GetEntryBlock()
+    let visited = HashSet<Value>()
+    while (let Some(block) <- current) {
+        if (visited.contains(block)) { return false }
+        visited.add(block)
+        if (block.GetTerminator().isNone()) { return false }
+        let terminator = block.GetTerminator().getOrThrow()
+        if (terminator.GetExprKind() == ExprKind.RAISE_EXCEPTION) {
+            // A local handler can continue or loop: this is not an external throw.
+            if (!terminator.GetSuccessors().isEmpty()) { return false }
+            fn.EnableAttr(Attribute.NO_INLINE)
+            return true
+        }
+        if (terminator.GetExprKind() != ExprKind.GOTO) { return false }
+        let successors = terminator.GetSuccessors()
+        if (successors.size != 1) { return false }
+        current = Some(successors[0])
+    }
+    return false
 }
 
 private func InBlackList(fn: Function): Bool {

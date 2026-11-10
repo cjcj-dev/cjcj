@@ -1815,11 +1815,56 @@ public class IRBuilder2 <: Resource {
         let _ = CreateStore(leaf, destination)
     }
 
+    // Keep managed addresses and unconstrained native aliases on the typed
+    // leaf path. This complete no-ref result copy has two distinct owners:
+    // a local entry alloca and the current function's typed noalias sret.
+    private func TryCopyNativeResultAggregate(aggregateType: LLVMTypeRef, source: LLVMValueRef,
+        destination: LLVMValueRef): Bool {
+        if (unsafe { LLVMGetTypeKind(aggregateType) } != LLVM_STRUCT_TYPE_KIND ||
+            unsafe { LLVMIsOpaqueStruct(aggregateType) } != 0 || IsTypeContainsRef(aggregateType) ||
+            (LLVMCStringToString(unsafe { LLVMGetStructName(aggregateType) }) ?? "").isEmpty() ||
+            (GetPointerAddressSpace(source) ?? 1u32) != 0u32 ||
+            (GetPointerAddressSpace(destination) ?? 1u32) != 0u32 ||
+            unsafe { LLVMIsAAllocaInst(source) }.isNull()) {
+            return false
+        }
+        if (unsafe { LLVMGetAllocatedType(source) }.toUIntNative() != aggregateType.toUIntNative()) {
+            return false
+        }
+        let currentBlock = unsafe { LLVMGetInsertBlock(builder.raw) }
+        let currentFunction = unsafe { LLVMGetBasicBlockParent(currentBlock) }
+        if (unsafe { LLVMGetInstructionParent(source) }.toUIntNative() !=
+            unsafe { LLVMGetEntryBasicBlock(currentFunction) }.toUIntNative() ||
+            unsafe { LLVMCountParams(currentFunction) } == 0u32 ||
+            unsafe { LLVMGetParam(currentFunction, 0u32) }.toUIntNative() != destination.toUIntNative() ||
+            !HasAttributeAtIndex(currentFunction, 1u32, "noalias") ||
+            (GetTypeAttributeValueAtIndex(currentFunction, 1u32, "sret") ?? LLVMNullType()).toUIntNative() !=
+                aggregateType.toUIntNative() ||
+            HasAttributeAtIndex(currentFunction, 1u32, "byval")) {
+            return false
+        }
+        let count = unsafe { LLVMGetOperand(source, 0u32) }
+        if (unsafe { LLVMSelfhostIsConstantInt(count) } == 0 ||
+            unsafe { LLVMConstIntGetZExtValue(count) } != 1u64) {
+            return false
+        }
+        let byteSize = cgMod.GetTypeSize(aggregateType)
+        if (byteSize == 0u64) {
+            return false
+        }
+        let size = unsafe { LLVMConstInt(GetSizetLLVMType(), byteSize, 0) }
+        CallCopyNoRefStruct(aggregateType, destination, source, size)
+        return true
+    }
+
     public func CopyNativeAggregate(aggregateType: LLVMTypeRef, source: LLVMValueRef,
         destination: LLVMValueRef): Unit {
         CJC_ASSERT(!aggregateType.isNull())
         let kind = unsafe { LLVMGetTypeKind(aggregateType) }
         CJC_ASSERT(kind == LLVM_STRUCT_TYPE_KIND || kind == LLVM_ARRAY_TYPE_KIND)
+        if (TryCopyNativeResultAggregate(aggregateType, source, destination)) {
+            return
+        }
         // CJNativeIRBuilder.cpp:837-847 copies the bytes at these addresses.
         // Debug boxing may cast an object payload to pointer-to-argument type
         // (IRBuilder.cpp:379-385); that does not add a slot to dereference.
@@ -5615,15 +5660,46 @@ public class IRBuilder2 <: Resource {
         let helperName = if (isOverflow) { CREATE_OVERFLOW_EXCEPTION_FUNC_NAME } else {
             CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME
         }
-        // The const-string global is already a sized `%String*` in address space 0 and the helper
-        // param is now address space 0 too, so pass it directly — mirror C++ DoSimpleCast
-        // (CJNativeIRBuilder.cpp:27) which emits no cast when the address spaces already match.
-        let literal = CreateStringLiteral(ident)
-        let (helperFunction, _) = GetOrInsertRuntimeExceptionHelper(helperName)
-        let helperArgs = ArrayList<LLVMValueRef>()
-        helperArgs.add(literal)
-        let exceptionValue = CreateCallOrInvoke(helperFunction, helperArgs, name: "exception")
-        CallExceptionIntrinsicThrow(exceptionValue)
+        var cache = LLVMNullValue()
+        // Without an insertion point this only declares the ordinary module
+        // literal cache. Materializing its String here would create a GC root
+        // in the caller's entry, even when the check never fails.
+        try (declarations = IRBuilder2(cgMod)) {
+            cache = declarations.CreateStringLiteral(ident)
+        }
+        // Use the collision-resolved global name, not just the literal hash.
+        let cacheName = LLVMCStringToString(unsafe { LLVMGetValueName(cache) }).getOrThrow()
+        let functionType = MakeFunctionType(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) },
+            ArrayList<LLVMTypeRef>())
+        let function = cgMod.GetOrInsertFunction(helperName + ".cold." + cacheName, functionType)
+        if (unsafe { LLVMCountBasicBlocks(function) } == 0u32) {
+            AddLinkageTypeMetadata(function, LLVMLinkage.Internal, false)
+            SetCangjieGC(function)
+            cgMod.SetExceptionIntrinsicPersonality(function)
+            AddFnAttr(function, "noinline")
+            AddFnAttr(function, "noreturn")
+            try (body = IRBuilder2(cgMod),
+                unwindScope = CodeGenUnwindBlockScope(cgMod, LLVMNullBasicBlock())) {
+                body.SetInsertPoint(body.CreateEntryBasicBlock(function, "entry"))
+                // Preserve the global read barrier and normal entry alloca
+                // initialization/registration in the function owning the root.
+                // No caller value or inferred storage lifetime crosses this call.
+                let literal = body.ReadStringLiteralCache(cache)
+                let (constructor, _) = body.GetOrInsertRuntimeExceptionHelper(helperName)
+                let exceptionValue = body.CreateCallOrInvoke(constructor,
+                    ArrayList<LLVMValueRef>([literal]), name: "exception")
+                body.CallExceptionIntrinsicThrow(exceptionValue)
+            }
+            // Generated functions do not pass through CGFunction.Opt. Finish
+            // their aggregate initialization through the same producer used by
+            // ordinary functions, including the required cj.memset intrinsic.
+            // CreateEntryAlloca's entry null store remains in place as well.
+            CGFunction.AddZeroInitForStructWithRefField(cgMod, function)
+        }
+        // The helper may unwind both while constructing and while throwing.
+        // Its body must not inherit this function's landing pad; this call must.
+        let _ = CreateCallOrInvoke(function, ArrayList<LLVMValueRef>())
+        let _ = CreateUnreachable()
     }
 
     // Global declarations retain the cache address; runtime consumers get a
