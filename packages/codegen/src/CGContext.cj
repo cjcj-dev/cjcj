@@ -391,8 +391,14 @@ public class CGContext {
         return globalsOfCompileUnit.contains(globalsName)
     }
 
-    public func IsGlobalsOfCompileUnitCString(globalsName: CString): Bool {
-        return CGContext.ContainsCString(globalsOfCompileUnit, globalsName)
+    public func GlobalsOfCompileUnitHaveNul(): Bool {
+        return CGContext.HasNulEntry(globalsOfCompileUnit)
+    }
+
+    // `haveNul` is GlobalsOfCompileUnitHaveNul() for the current content of the set and
+    // `converted` is CGContext.CheckedString(globalsName).
+    public func IsGlobalsOfCompileUnitCString(globalsName: CString, haveNul: Bool, converted: Option<String>): Bool {
+        return CGContext.ContainsCString(globalsOfCompileUnit, haveNul, globalsName, converted)
     }
 
     public func RegisterStaticGIName(staticGIName: String): Unit {
@@ -488,6 +494,43 @@ public class CGContext {
             }
         }
         return false
+    }
+
+    // Some entry has an embedded NUL byte. ContainsCString compares such an entry only up to that byte.
+    public static func HasNulEntry(values: HashSet<String>): Bool {
+        for (value in values) {
+            if (value.indexOf(0u8).isSome()) {
+                return true
+            }
+        }
+        return false
+    }
+
+    // The NUL-terminated `name` as a String, None if it is null or not valid UTF-8.
+    public static func CheckedString(name: CString): Option<String> {
+        let converted: Option<String> = try {
+            LLVMCStringToString(name)
+        } catch (_: IllegalArgumentException) {
+            None
+        }
+        return converted
+    }
+
+    // Same result as ContainsCString(values, name). `valuesHaveNul` is HasNulEntry(values) for the
+    // current content of `values`, `converted` is CheckedString(name). Without NUL entries strcmp
+    // equality is byte equality of the whole entry, so a valid UTF-8 name is one hash lookup.
+    // NUL entries and names without a checked String use the strcmp scan.
+    public static func ContainsCString(values: HashSet<String>, valuesHaveNul: Bool, name: CString,
+        converted: Option<String>): Bool {
+        if (name.isNull()) {
+            return false
+        }
+        if (!valuesHaveNul) {
+            if (let Some(text) <- converted) {
+                return values.contains(text)
+            }
+        }
+        return ContainsCString(values, name)
     }
 
     public func Add2CGTypePool(cgType: CGType): Unit {

@@ -33,13 +33,14 @@ public func EraseUselessGVAndFunctionsImpl(cgMod: CGModule): Unit {
 }
 
 private func EraseUnusedGVsAndFunctions(cgMod: CGModule, moduleRef: LLVMModuleRef, declarationsOnly!: Bool): Unit {
+    let retainedNames = RetainedNames(cgMod)
     var erased = true
     while (erased) {
         erased = false
         let globals = CollectIRGlobals(moduleRef)
         for (globalValue in globals) {
             unsafe { LLVMSelfhostGlobalValueRemoveDeadConstantUsers(globalValue) }
-            if (CanEraseGlobal(cgMod, globalValue, declarationsOnly: declarationsOnly)) {
+            if (CanEraseGlobal(retainedNames, globalValue, declarationsOnly: declarationsOnly)) {
                 unsafe { LLVMDeleteGlobal(globalValue) }
                 erased = true
             }
@@ -47,7 +48,7 @@ private func EraseUnusedGVsAndFunctions(cgMod: CGModule, moduleRef: LLVMModuleRe
         let functionValues = CollectIRFunctions(moduleRef)
         for (functionValue in functionValues) {
             unsafe { LLVMSelfhostGlobalValueRemoveDeadConstantUsers(functionValue) }
-            if (CanEraseFunction(cgMod, functionValue, declarationsOnly: declarationsOnly)) {
+            if (CanEraseFunction(retainedNames, functionValue, declarationsOnly: declarationsOnly)) {
                 unsafe { LLVMDeleteFunction(functionValue) }
                 erased = true
             }
@@ -75,8 +76,8 @@ private func CollectIRFunctions(moduleRef: LLVMModuleRef): ArrayList<LLVMValueRe
     return functionValues
 }
 
-private func CanEraseGlobal(cgMod: CGModule, globalValue: LLVMValueRef, declarationsOnly!: Bool): Bool {
-    if (!CGFunction.HasNoUse(globalValue) || IsRetainedGlobalValue(cgMod, globalValue, checkCompileUnit: true)) {
+private func CanEraseGlobal(retainedNames: RetainedNames, globalValue: LLVMValueRef, declarationsOnly!: Bool): Bool {
+    if (!CGFunction.HasNoUse(globalValue) || retainedNames.Contains(globalValue, checkCompileUnit: true)) {
         return false
     }
     if (declarationsOnly) {
@@ -85,8 +86,8 @@ private func CanEraseGlobal(cgMod: CGModule, globalValue: LLVMValueRef, declarat
     return unsafe { LLVMIsDeclaration(globalValue) } != 0 || IsLocalLinkage(globalValue)
 }
 
-private func CanEraseFunction(cgMod: CGModule, functionValue: LLVMValueRef, declarationsOnly!: Bool): Bool {
-    if (!CGFunction.HasNoUse(functionValue) || IsRetainedGlobalValue(cgMod, functionValue, checkCompileUnit: false)) {
+private func CanEraseFunction(retainedNames: RetainedNames, functionValue: LLVMValueRef, declarationsOnly!: Bool): Bool {
+    if (!CGFunction.HasNoUse(functionValue) || retainedNames.Contains(functionValue, checkCompileUnit: false)) {
         return false
     }
     if (declarationsOnly) {
@@ -95,18 +96,51 @@ private func CanEraseFunction(cgMod: CGModule, functionValue: LLVMValueRef, decl
     return IsFunctionDeclaration(functionValue) || IsLocalLinkage(functionValue)
 }
 
-private func IsRetainedGlobalValue(cgMod: CGModule, globalValue: LLVMValueRef, checkCompileUnit!: Bool): Bool {
-    let name = unsafe { LLVMGetValueName(globalValue) }
-    if (name.isNull()) {
-        return false
+// The names that keep an unused global or function, for one EraseUnusedGVsAndFunctions run.
+// The run only deletes globals and functions: it adds no entry to the two context sets and no
+// module metadata. So the NUL state of the context sets is read once, and the metadata link
+// names are collected once at the first query that reaches them, also when none exist.
+private class RetainedNames {
+    private let cgMod: CGModule
+    private let cgCtx: CGContext
+    private let compileUnitGlobalsHaveNul: Bool
+    private let usedVars: HashSet<String>
+    private let usedVarsHaveNul: Bool
+    private var metaNames: Option<HashSet<String>> = None
+    private var metaNamesHaveNul: Bool = false
+
+    init(cgMod: CGModule) {
+        let context = cgMod.GetCGContext()
+        let usedNames = context.GetLLVMUsedVars()
+        this.cgMod = cgMod
+        this.cgCtx = context
+        this.compileUnitGlobalsHaveNul = context.GlobalsOfCompileUnitHaveNul()
+        this.usedVars = usedNames
+        this.usedVarsHaveNul = CGContext.HasNulEntry(usedNames)
     }
-    if (checkCompileUnit && cgMod.GetCGContext().IsGlobalsOfCompileUnitCString(name)) {
-        return true
+
+    func Contains(globalValue: LLVMValueRef, checkCompileUnit!: Bool): Bool {
+        let name = unsafe { LLVMGetValueName(globalValue) }
+        if (name.isNull()) {
+            return false
+        }
+        let converted = CGContext.CheckedString(name)
+        if (checkCompileUnit && cgCtx.IsGlobalsOfCompileUnitCString(name, compileUnitGlobalsHaveNul, converted)) {
+            return true
+        }
+        if (CGContext.ContainsCString(usedVars, usedVarsHaveNul, name, converted)) {
+            return true
+        }
+        let names = match (metaNames) {
+            case Some(collected) => collected
+            case None =>
+                let (collected, haveNul) = cgMod.GetLinkNamesUsedInMetaWithNulState()
+                metaNames = Some(collected)
+                metaNamesHaveNul = haveNul
+                collected
+        }
+        return CGContext.ContainsCString(names, metaNamesHaveNul, name, converted)
     }
-    if (CGContext.ContainsCString(cgMod.GetCGContext().GetLLVMUsedVars(), name)) {
-        return true
-    }
-    return cgMod.IsLinkNameUsedInMetaCString(name)
 }
 
 private func IsFunctionDeclaration(functionValue: LLVMValueRef): Bool {

@@ -1412,24 +1412,20 @@ public class CGModule {
         if (linkageName.isNull()) {
             return false
         }
-        if (!linkNameUsedInMetaHasNul) {
-            let converted: Option<String> = try {
-                LLVMCStringToString(linkageName)
-            } catch (_: IllegalArgumentException) {
-                None
-            }
-            if (let Some(name) <- converted) {
-                return names.contains(name)
-            }
+        let converted: Option<String> = if (linkNameUsedInMetaHasNul) {
+            None
+        } else {
+            CGContext.CheckedString(linkageName)
         }
-        for (name in names) {
-            try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
-                if (unsafe { strcmp(linkageName, nameCString.value) } == 0) {
-                    return true
-                }
-            }
-        }
-        return false
+        return CGContext.ContainsCString(names, linkNameUsedInMetaHasNul, linkageName, converted)
+    }
+
+    // The collected link names and whether one of them has a NUL byte, for a caller that keeps
+    // the result while it adds no module metadata. GetLinkNamesUsedInMeta collects again on
+    // every query while the set is empty; holding this result collects an empty set once.
+    public func GetLinkNamesUsedInMetaWithNulState(): (HashSet<String>, Bool) {
+        let names = GetLinkNamesUsedInMeta()
+        return (names, linkNameUsedInMetaHasNul)
     }
 
     private func CollectLinkNameUsedInMeta(): Unit {
