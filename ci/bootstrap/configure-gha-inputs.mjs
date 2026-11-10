@@ -16,6 +16,7 @@ import {hostPlatform, readHostToolchainPin} from '../host-toolchain-pin.mjs';
 import {nativeInstallationLocations} from './native-installation-locations.mjs';
 import {buildConfig} from '../../build/lib/config.mjs';
 import {nativeSourceSelection} from './native-source-selection.mjs';
+import {stdDependencySources} from './stdlib-build.mjs';
 export {NATIVE_REPOSITORIES} from './native-source-selection.mjs';
 export async function configureGhaInputs(env=process.env) {
   if(!env.CANGJIE_WORKSPACE||!env.GITHUB_WORKSPACE||!env.CJCJ_NATIVE_INPUT_ROOT||!env.CJCJ_BOOTSTRAP_BASE)
@@ -33,7 +34,8 @@ export async function configureGhaInputs(env=process.env) {
   await configureHleInput(root,platform,env.GITHUB_ENV);
   await configureNativeToolInput({root,workspace,platform,envFile:env.GITHUB_ENV});
   const sources={compiler:path.resolve(env.GITHUB_WORKSPACE)};
-  for(const [name,{repository:url,commit}] of Object.entries(selection)) {
+  const stdDependencies=stdDependencySources();
+  for(const [name,{repository:url,commit}] of Object.entries({...selection,...stdDependencies})) {
     const source=path.join(workspace,'native-sources',name);
     await fs.mkdir(path.dirname(source),{recursive:true});
     if(await fs.stat(source).catch(error=>{if(error.code==='ENOENT')return null;throw error;})) {
@@ -70,6 +72,7 @@ export async function configureGhaInputs(env=process.env) {
     cc:env.CC||'clang',cxx:env.CXX||'clang++',launcher:env.CMAKE_CXX_COMPILER_LAUNCHER||'sccache',zx:'zx'};
   if(env.GITHUB_ENV)await fs.appendFile(env.GITHUB_ENV,'CJCJ_BOOTSTRAP_WORK='+path.join(workspace,'native-bootstrap')+'\n');
   return prepareNativeInputs({platform,sources,installations,tools,sourceSelection:selection,
+    stdDependencies:Object.fromEntries(Object.entries(stdDependencies).map(([name,row])=>[name,{...row,root:sources[name]}])),
     ...(explicitAst?{astCommit:selection.ast.commit}:{}),
     ...(pair?{nativePair:pair,llvmCommit:pair.llvm,runtimeCommit:pair.runtime}:{}),
     work:path.join(workspace,'native-bootstrap'),install:path.join(workspace,'software','cangjie'),

@@ -8,7 +8,7 @@ import {parseArgs} from 'node:util';
 import {command, copyOutputs, atomicJson, fileDigest, inventory, privateRoot, assembleDirectory, withProcessCancellation} from './sdk-flow.mjs';
 import {sdkPlatform, stdInstallFiles, cleanSdkEnvironment} from './sdk-platform.mjs';
 import {compilerProducer} from './compiler_identity.mjs';
-import {verifyStdBuildInputs} from './stdlib-build.mjs';
+import {verifyStdBuildInputs, prepareStdDependencies} from './stdlib-build.mjs';
 import {injectCangjieVersion} from '../srcbuild/steps/inject-version-lib.mjs';
 import {prepareTrimpath} from '../release/trimpath.mjs';
 import {assertFinalStdInput} from './sdk-final-std.mjs';
@@ -79,16 +79,24 @@ export async function nativeStage(options, {signal} = {}) {
   }
   await fs.mkdir(output,{recursive:true});
   if(kind==='std') {
+    try {
     await verifyStdBuildInputs(sdk,platform);
+    if(!options['resume-installed']) {
+      const previous=await fs.readFile(output+'.commands.json','utf8').then(JSON.parse).catch(error=>{if(error.code==='ENOENT')return [];throw error;});
+      await prepareStdDependencies({source,dependencies:options['std-dependencies']?JSON.parse(options['std-dependencies']):undefined,previous,records});
+    }
     const link=output+'.runtime-input';
     const stdlib=path.join(source,'stdlib');
     const cmakeType = {debug:'Debug',release:'Release',relwithdebinfo:'RelWithDebInfo'}[buildType];
     const build = path.join(stdlib,'build/build');
+    // The SDK's bootstrap std may contain older FFI archives. Prefer the
+    // current native build before those SDK libraries when linking new std.
+    const targetLibraries=[path.join(build,'lib'),link];
     const cache = await fs.readFile(path.join(build,'CMakeCache.txt'),'utf8').catch(error=>{
       if(error.code==='ENOENT')return null;throw error;
     });
     const cached = name => cache?.match(new RegExp('^'+name+':[^=]+=(.*)$','m'))?.[1];
-    const reconfigure = cache !== null && (cached('CMAKE_BUILD_TYPE') !== cmakeType || cached('CANGJIE_TARGET_LIB') !== link);
+    const reconfigure = cache !== null && (cached('CMAKE_BUILD_TYPE') !== cmakeType || cached('CANGJIE_TARGET_LIB') !== targetLibraries.join(';'));
     if(options['resume-installed'] && reconfigure)throw new Error('STD_RESUME_BUILD_CONFIGURATION');
     await prepareRuntimeInputs({runtime, link, native, buildType, resume:!!options['resume-installed'], signal});
     if (options['resume-installed']) {
@@ -101,8 +109,9 @@ export async function nativeStage(options, {signal} = {}) {
       // an existing cache with the requested type/input while retaining its
       // toolchain, platform and other legitimate cached options.
       if(reconfigure)await command(['cmake','-S',stdlib,'-B',build,'-DCMAKE_BUILD_TYPE='+cmakeType,
-        '-DCANGJIE_TARGET_LIB='+link,'-U','RUNTIME_COMMON_LIB_DIR'],{cwd:stdlib,env,records});
-      await command(['python3','-I','build.py','build','-t',buildType,'--jobs',jobs,'--target-lib='+link],{cwd:stdlib,env,records});
+        '-DCANGJIE_TARGET_LIB='+targetLibraries.join(';'),'-U','RUNTIME_COMMON_LIB_DIR'],{cwd:stdlib,env,records});
+      await command(['python3','-I','build.py','build','-t',buildType,'--jobs',jobs,
+        ...targetLibraries.map(directory=>'--target-lib='+directory)],{cwd:stdlib,env,records});
       await command(['python3','-I','build.py','install','--prefix',output],{cwd:stdlib,env,records});
     }
     for(const rel of stdInstallFiles(platform))
@@ -114,6 +123,7 @@ export async function nativeStage(options, {signal} = {}) {
     await writeStdProvenance({sourceDir:stdlib,sourceRoot:source,sourceRevision:commit,installPrefix:output,compiler:await compilerProducer(sdk),buildSdk:sdk,
       coloured:options['compiler-runtime']==='target'?'true':'bootstrap',preflightC2:options['compiler-runtime']==='target'?'stage2':'not-applicable',
       note:'native target/install '+commit});
+    } finally { await atomicJson(output+'.commands.json',records); }
   } else if(kind==='h1') {
     if(!host||!options['private-tools'])throw new Error('H1_HOST_AND_NATIVE_ADAPTER_REQUIRED');
     await command([process.execPath,path.join(options['private-tools'],'ts/src/sharedbuild/cjcj-stage1.mjs')],{
@@ -171,7 +181,7 @@ export async function nativeStage(options, {signal} = {}) {
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type'].map(k=>[k,{type:'string'}]));
+    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies'].map(k=>[k,{type:'string'}]));
     spec['resume-installed']={type:'boolean'};
     nativeSourceOptions(process.argv); // Reject duplicate identity flags before parseArgs.
     const {values}=parseArgs({options:spec});
