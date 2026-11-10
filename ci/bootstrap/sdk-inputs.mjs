@@ -317,25 +317,48 @@ export async function prepareInstallInputs(descriptor) {
     if(descriptor.layout==='native-output')throw Error('INSTALL_BACKEND_LAYOUT');
     const backend=target.backend;
     backend.install=await fs.realpath(backend.install);
-    backend.build=await fs.realpath(backend.build);
-    const cache=await fs.readFile(path.join(backend.build,'CMakeCache.txt'),'utf8');
-    const value=name=>new RegExp('^'+name+':[^=]+=(.*)$','m').exec(cache)?.[1]?.trim();
-    if(!value('CMAKE_HOME_DIRECTORY')||!value('CMAKE_INSTALL_PREFIX')
-      ||await fs.realpath(value('CMAKE_INSTALL_PREFIX'))!==backend.install)
-      throw Error('INSTALL_BACKEND_CMAKE');
-    const source=await gitInput(value('CMAKE_HOME_DIRECTORY'),backend.commit);
-    if((await execute('git',['-C',source.repository,'rev-parse','HEAD'])).stdout.trim()!==backend.commit)
-      throw Error('INSTALL_BACKEND_SOURCE');
-    backend.configuration={sourceRoot:source.repository,tree:source.tree,
-      buildType:value('CMAKE_BUILD_TYPE'),generator:value('CMAKE_GENERATOR')};
+    const tools=['llc','opt'].map(name=>'bin/'+name+native.exe);
+    let recorded;
+    if(backend.installed) {
+      // The build directory is a cache that may since have been configured for
+      // another prefix. A backend that a completed installation already
+      // consumed is identified by that installation's record and by the
+      // binaries themselves.
+      backend.installed=await fs.realpath(backend.installed);
+      const stage=await readJson(path.join(backend.installed,'STAGE-INPUTS.json'));
+      const row=stage.selection?.targetComponents?.backend;
+      if(!row||row.commit!==backend.commit||row.repository!==backend.repository||row.platform!==platform
+        ||stage.sources?.backend?.commit!==backend.commit||await fs.realpath(row.install)!==backend.install
+        ||(backend.build&&await fs.realpath(backend.build).catch(()=>path.resolve(backend.build))!==row.build)
+        ||!row.configuration?.sourceRoot||!/^[a-f0-9]{40}$/.test(row.configuration.tree||'')
+        ||!isDeepStrictEqual(row.artifacts?.map(item=>item.path),tools))
+        throw Error('INSTALL_BACKEND_RECORD');
+      backend.build=row.build;backend.configuration=row.configuration;recorded=row.artifacts;
+    } else {
+      backend.build=await fs.realpath(backend.build);
+      const cache=await fs.readFile(path.join(backend.build,'CMakeCache.txt'),'utf8');
+      const value=name=>new RegExp('^'+name+':[^=]+=(.*)$','m').exec(cache)?.[1]?.trim();
+      if(!value('CMAKE_HOME_DIRECTORY')||!value('CMAKE_INSTALL_PREFIX')
+        ||await fs.realpath(value('CMAKE_INSTALL_PREFIX'))!==backend.install)
+        throw Error('INSTALL_BACKEND_CMAKE');
+      const source=await gitInput(value('CMAKE_HOME_DIRECTORY'),backend.commit);
+      if((await execute('git',['-C',source.repository,'rev-parse','HEAD'])).stdout.trim()!==backend.commit)
+        throw Error('INSTALL_BACKEND_SOURCE');
+      backend.configuration={sourceRoot:source.repository,tree:source.tree,
+        buildType:value('CMAKE_BUILD_TYPE'),generator:value('CMAKE_GENERATOR')};
+    }
     backend.artifacts=[];
-    for(const name of ['llc','opt']) {
-      const rel='bin/'+name+native.exe,file=path.join(backend.install,rel);
-      const manifest=await fs.readFile(path.join(backend.build,'install_manifest_'+name+'.txt'),'utf8');
-      if(!manifest.split(/\r?\n/).some(row=>path.resolve(row)===file))throw Error('INSTALL_BACKEND_COMPONENT '+name);
+    for(const [index,rel] of tools.entries()) {
+      const name=['llc','opt'][index],file=path.join(backend.install,rel);
+      if(!recorded) {
+        const manifest=await fs.readFile(path.join(backend.build,'install_manifest_'+name+'.txt'),'utf8');
+        if(!manifest.split(/\r?\n/).some(row=>path.resolve(row)===file))throw Error('INSTALL_BACKEND_COMPONENT '+name);
+      }
       const bytes=await fs.readFile(file);
       if(!isDeepStrictEqual(embeddedStamp(bytes,'CJLLVM-COMMIT'),[backend.commit]))throw Error('INSTALL_BACKEND_SOURCE '+name);
-      backend.artifacts.push({path:rel,sha256:await fileDigest(file)});
+      const sha256=await fileDigest(file);
+      if(recorded&&recorded[index].sha256!==sha256)throw Error('INSTALL_BACKEND_RECORD '+name);
+      backend.artifacts.push({path:rel,sha256});
     }
   }
   let dependencyRoot;

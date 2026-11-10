@@ -436,6 +436,31 @@ endforeach()
     const file=sdk+'/.native-tools/third_party/llvm/bin/opt',bytes=await fs.readFile(file);
     await fs.appendFile(file,'changed backend');await assert.rejects(installedInputs(sdk,platform),/INSTALLED_INPUT_BYTES/);
     await fs.writeFile(file,bytes);
+    // The backend build directory is a cache: configure and install it for
+    // another prefix, as a later backend stage does. A new installation of the
+    // first backend then names the completed installation that consumed it.
+    console.log('BACKEND_REUSE_ASSERTION_REACHED');
+    const other=root+'/backend-other-install',{prepareInstallInputs}=await import('../../ci/bootstrap/sdk-inputs.mjs');
+    await command(['cmake','-S',root+'/backend-source','-B',backend.build,'-DCMAKE_INSTALL_PREFIX='+other],{records});
+    for(const tool of ['llc','opt'])await command(['cmake','--install',backend.build,'--component',tool],{records});
+    const reuse=extra=>{const next=structuredClone(descriptor);
+      Object.assign(next,{work:root+'/reuse-work',install:root+'/reuse-sdk'});
+      for(const role of ['compilerExecution','targetComponents'])Object.assign(next.selection[role].backend,extra);
+      return prepareInstallInputs(next);};
+    await assert.rejects(reuse({}),/INSTALL_BACKEND_CMAKE/);
+    const recorded=JSON.parse(await fs.readFile(sdk+'/STAGE-INPUTS.json','utf8')).selection.targetComponents.backend;
+    const reused=(await reuse({installed:sdk})).selection.targetComponents.backend;
+    assert.deepEqual({build:reused.build,configuration:reused.configuration,artifacts:reused.artifacts},
+      {build:recorded.build,configuration:recorded.configuration,artifacts:recorded.artifacts});
+    await fs.mkdir(root+'/reuse-empty');
+    await assert.rejects(reuse({installed:root+'/reuse-empty'}),/ENOENT/);
+    await assert.rejects(reuse({installed:sdk,install:other}),/INSTALL_BACKEND_RECORD/);
+    await assert.rejects(reuse({installed:sdk,commit:STAGE2}),/INSTALL_BACKEND_RECORD/);
+    await assert.rejects(reuse({installed:sdk,build:other}),/INSTALL_BACKEND_RECORD/);
+    const tool=backend.install+'/bin/opt',toolBytes=await fs.readFile(tool);
+    await fs.appendFile(tool,'changed backend');
+    await assert.rejects(reuse({installed:sdk}),/INSTALL_BACKEND_RECORD opt/);
+    await fs.writeFile(tool,toolBytes);
   }
   assert.ok(r.artifacts.some(row=>row.path.endsWith('libcangjie-aio.a')));
   assert.ok(!r.artifacts.some(row=>row.path===statusRel));
