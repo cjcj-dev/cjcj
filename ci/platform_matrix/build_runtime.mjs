@@ -3,7 +3,9 @@
 // MINGW64 only for build.py, whose Windows recipe requires POSIX make/PATH.
 
 import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
 import {nativeSourceSelection} from '../bootstrap/native-source-selection.mjs';
+import {hostPlatform} from '../host-toolchain-pin.mjs';
 import {readSourcePins} from '../native-llvm-inputs.mjs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -25,8 +27,11 @@ const runtimeToolchain = process.env.RUNTIME_TOOLCHAIN || '';
 const installRoot = path.join(root, 'runtime-install');
 let artifactRoot = installRoot;
 const nativePair = process.env.RUNTIME_NATIVE_PAIR === '1';
+const phase = process.env.RUNTIME_PHASE || 'build';
+assert.ok(['build','completed-install'].includes(phase), 'NATIVE_RUNTIME_PHASE');
+const completedBuild = phase === 'completed-install';
 let nativeCommands;
-if (nativePair) configureNativeRuntime({runtimeTarget,selection});
+if (nativePair && !completedBuild) configureNativeRuntime({runtimeTarget,selection});
 
 if (runtimeToolchain) {
   process.env.PATH = `${path.join(runtimeToolchain, 'bin')}${path.delimiter}${process.env.PATH || ''}`;
@@ -61,9 +66,50 @@ if(nativePair&&process.platform==='linux') {
 }
 const preinstall = path.join(process.env.RUNNER_TEMP || path.join(root, 'runtime-preinstall'));
 
+if (completedBuild) {
+  assert.ok(nativePair && process.platform === 'linux' && runtimeTarget === 'native', 'NATIVE_COMPLETED_PLATFORM');
+  assert.equal(process.env.NATIVE_RUNTIME_PLATFORM, hostPlatform(), 'NATIVE_RUNTIME_PLATFORM_MISMATCH');
+  const gateStatus = process.env.RUNTIME_COMPLETED_GATE_STATUS;
+  assert.ok(path.isAbsolute(gateStatus || ''), 'NATIVE_COMPLETED_GATE_REQUIRED');
+  await fs.access(gateStatus);
+  const build = path.join(runtimeDirectory, 'CMakebuild');
+  const cache = await fs.readFile(path.join(build, 'CMakeCache.txt'), 'utf8');
+  const value = key => new RegExp('^'+key+':[^=]+=(.*)$', 'm').exec(cache)?.[1]?.trim();
+  assert.equal(await fs.realpath(value('CMAKE_HOME_DIRECTORY')), await fs.realpath(runtimeDirectory), 'NATIVE_COMPLETED_SOURCE');
+  assert.equal(value('CMAKE_BUILD_TYPE')?.toLowerCase(), buildType.toLowerCase(), 'NATIVE_COMPLETED_BUILD_TYPE');
+  const prefix = value('CMAKE_INSTALL_PREFIX');
+  assert.ok(path.isAbsolute(prefix || ''), 'NATIVE_COMPLETED_PREFIX');
+  // A prior build.py install changes the child's manifest to its new prefix.
+  // Restore it through CMake installation, without reconfiguration or build.
+  const childArgs = ['--install', path.join(build,'cjthread-build'), '--prefix', prefix];
+  darwinCommand(path.join(root,'logs/native-runtime'), 'install-child', 'cmake', childArgs,
+    {cwd:runtimeDirectory,env:process.env});
+  if (nativePair) installNativeRuntimeDependencies({source, installRoot, buildType});
+  nativePython('install', ['build.py', 'install', '--prefix', installRoot]);
+  installNativeRuntimeInputs({source,installRoot,gateStatus,selection});
+  await recordNativeRuntime({source,installRoot,actualRef,version,buildType,selection,repository,completedBuild:true,
+    commands:[['cmake',...childArgs],['python3','build.py','install','--prefix',installRoot]]});
+  return;
+}
+
 if (process.platform === 'linux') {
-  await $`sudo apt-get update -qq`;
-  await $`sudo apt-get install -y -qq clang cmake make gdb coreutils`;
+  if (process.env.RUNTIME_PREINSTALLED_DEPENDENCIES === '1') {
+    // A shared host must not have its toolchain changed by one build: use the
+    // installed commands, record what they are, and stop when one is absent.
+    const missing = [];
+    for (const command of ['clang', 'clang++', 'cmake', 'make', 'gdb', 'timeout']) {
+      const probe = await $({nothrow: true, stdio: 'pipe', verbose: false})`${command} --version`;
+      if (probe.exitCode === 0) console.log(`preinstalled_dependency ${command}: ${probe.stdout.split('\n')[0]}`);
+      else missing.push(command);
+    }
+    if (missing.length) {
+      console.error(`FATAL: RUNTIME_PREINSTALLED_DEPENDENCIES=1 but not available: ${missing.join(' ')}`);
+      process.exit(6);
+    }
+  } else {
+    await $`sudo apt-get update -qq`;
+    await $`sudo apt-get install -y -qq clang cmake make gdb coreutils`;
+  }
   if (runtimeTarget === 'windows-x86_64') {
     if (!runtimeToolchain) {
       console.error('FATAL: RUNTIME_TOOLCHAIN is required for the Windows cross target');

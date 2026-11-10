@@ -153,10 +153,10 @@ export function installNativeRuntimeInputs({source,installRoot,gateStatus,select
   installGcUnitInputs(config,path.join(source,'runtime'),installRoot,{gateStatus});
 }
 
-export async function recordNativeRuntime({source, installRoot, actualRef, version, buildType, commands,selection,repository=source}, env = process.env) {
+export async function recordNativeRuntime({source, installRoot, actualRef, version, buildType, commands,selection,repository=source,completedBuild=false}, env = process.env) {
   selection??=nativeSourceSelection(env).selection;
   assert.equal(actualRef, selection.runtime.commit, 'NATIVE_RUNTIME_SOURCE_MISMATCH');
-  if (process.platform === 'win32') assert.ok(Array.isArray(commands) && commands.length > 0, 'NATIVE_RUNTIME_COMMANDS_REQUIRED');
+  if (process.platform === 'win32' || completedBuild) assert.ok(Array.isArray(commands) && commands.length > 0, 'NATIVE_RUNTIME_COMMANDS_REQUIRED');
   const platform = hostPlatform();
   const suffix = process.platform === 'darwin' ? 'dylib' : process.platform === 'win32' ? 'dll' : 'so';
   const tuple = `${platform}_cjnative`;
@@ -169,8 +169,10 @@ export async function recordNativeRuntime({source, installRoot, actualRef, versi
   const cache = fs.readFileSync(path.join(source, 'runtime/CMakebuild/CMakeCache.txt'), 'utf8');
   const cacheValue = key => new RegExp(`^${key}:[^=]+=(.*)$`, 'm').exec(cache)?.[1];
   const normalize = value => process.platform === 'win32' && value ? path.normalize(value).toLowerCase() : value;
-  assert.ok(path.isAbsolute(env.SCCACHE_PATH || ''), 'NATIVE_RUNTIME_CACHE_PATH');
-  assert.equal(normalize(cacheValue('CANGJIE_COMPILER_CACHE')), normalize(env.SCCACHE_PATH),
+  const selectedCache = completedBuild ? cacheValue('CANGJIE_COMPILER_CACHE') : env.SCCACHE_PATH;
+  assert.ok(path.isAbsolute(selectedCache || ''), 'NATIVE_RUNTIME_CACHE_PATH');
+  if (completedBuild) fs.accessSync(selectedCache, fs.constants.X_OK);
+  assert.equal(normalize(cacheValue('CANGJIE_COMPILER_CACHE')), normalize(selectedCache),
     'NATIVE_RUNTIME_CACHE_MISMATCH: CANGJIE_COMPILER_CACHE');
   const compilerCache = {};
   for (const language of ['C', 'CXX']) {
@@ -179,8 +181,27 @@ export async function recordNativeRuntime({source, installRoot, actualRef, versi
     if (launcher) {
       // Preserve the configured launcher contract, including rejecting lists or
       // a different launcher instead of silently falling back to a wrapper.
-      assert.equal(normalize(launcher), normalize(env.SCCACHE_PATH), `NATIVE_RUNTIME_CACHE_MISMATCH: ${key}`);
+      assert.equal(normalize(launcher), normalize(selectedCache), `NATIVE_RUNTIME_CACHE_MISMATCH: ${key}`);
       compilerCache[language] = {mode:'launcher', launcher, ...(compiler ? {compiler} : {})};
+    } else if (completedBuild) {
+      // build.py's CMake sets launchers as normal variables, not CACHE entries.
+      // Read the generated rule; never relabel a completed ccache build as the
+      // sccache selected for future production or infer use from the basename.
+      assert.equal(cacheValue('CMAKE_GENERATOR'), 'Unix Makefiles', 'NATIVE_COMPLETED_GENERATOR');
+      const build = path.join(source, 'runtime/CMakebuild');
+      const commands = JSON.parse(fs.readFileSync(path.join(build, 'compile_commands.json'), 'utf8'));
+      const extension = language === 'C' ? /\.c$/ : /\.(cpp|cc|cxx)$/;
+      const sample = commands.find(row => extension.test(row.file) && row.command?.startsWith(compiler + ' '));
+      assert.ok(sample, `NATIVE_COMPLETED_COMPILER: ${language}`);
+      const object = /(?:^|\s)-o (\S+\.o) -c /.exec(sample.command)?.[1];
+      const target = object && /^(.*CMakeFiles\/[^/]+\.dir)\//.exec(object)?.[1];
+      assert.ok(target, `NATIVE_COMPLETED_TARGET: ${language}`);
+      const rule = path.resolve(sample.directory, target, 'build.make');
+      assert.ok(rule.startsWith(path.resolve(build) + path.sep), 'NATIVE_COMPLETED_RULE_LOCATION');
+      const lines = fs.readFileSync(rule, 'utf8').split(/\r?\n/);
+      assert.ok(lines.some(line => line.includes(selectedCache + ' ' + compiler + ' ')
+        && line.includes('-o ' + object + ' -c ' + sample.file)), `NATIVE_COMPLETED_LAUNCHER: ${language}`);
+      compilerCache[language] = {mode:'generated-launcher', compiler, launcher:selectedCache, rule};
     } else {
       // ccache's documented compiler-name symlinks are an alternative producer
       // shape. A directory or basename alone is not proof: the executable must
@@ -233,7 +254,8 @@ export async function recordNativeRuntime({source, installRoot, actualRef, versi
     runtime_sha:actualRef, paired_llvm_sha:selection.llvm.commit, platform, version, build_type:buildType,
     source:runtimeInputs.source, configuration,
     producer_sha:env.GITHUB_SHA || null, run_id:env.GITHUB_RUN_ID || null,
-    run_attempt:env.GITHUB_RUN_ATTEMPT || null, compiler_cache:env.SCCACHE_PATH,
+    run_attempt:env.GITHUB_RUN_ATTEMPT || null, compiler_cache:selectedCache,
+    ...(completedBuild ? {phase:'completed-install'} : {}),
     compiler_cache_configuration:compilerCache,
     language_test_mode:env.GC_UNIT_GATE_LANGUAGE_TESTS || 'all',
     commands:commands || [['python3','build.py','build','--target','native','--build-type',buildType,
