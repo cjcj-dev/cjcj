@@ -129,6 +129,37 @@ class OptionTest {
     }
 
     @TestCase
+    func ApcOptimizedDefaultNormalization(): Unit {
+        // Without an explicit APC option an optimized build (-O2 and above) is one partition; lower levels keep 4.
+        for (level in ["-O0", "-O1", "-O2", "-Os", "-Oz"]) {
+            println("INPUT optimized-default-apc level=${level} -j=7")
+            let parsed = parseArgs(iosLtoArgs(srcFile, [level, "-j", "7"]))
+            @Expect(parsed[0], true)
+            let opts = GlobalOptions()
+            @Expect(opts.ParseFromArgs(parsed[1]), true)
+            let expected = if (level == "-O0" || level == "-O1") { 4u64 } else { 1u64 }
+            println("NORMALIZED optimized-default-apc level=${level} value=${opts.aggressiveParallelCompile.value} expected=${expected}")
+            @Expect(opts.aggressiveParallelCompile.hasValue, true)
+            @Expect(opts.aggressiveParallelCompile.value, expected)
+        }
+        // An explicit option still decides at -O2.
+        for (apc in [["--apc"], ["--apc=3"], ["--apc-split-num", "5"]]) {
+            println("INPUT optimized-explicit-apc apc=${apc}")
+            let extra = ArrayList<String>()
+            extra.add(all: ["-O2", "-j", "7"])
+            extra.add(all: apc)
+            let parsed = parseArgs(iosLtoArgs(srcFile, extra.toArray()))
+            @Expect(parsed[0], true)
+            let opts = GlobalOptions()
+            @Expect(opts.ParseFromArgs(parsed[1]), true)
+            let expected = if (apc[0] == "--apc") { 7u64 } else if (apc[0] == "--apc=3") { 3u64 } else { 5u64 }
+            println("NORMALIZED optimized-explicit-apc apc=${apc} value=${opts.aggressiveParallelCompile.value} expected=${expected}")
+            @Expect(opts.aggressiveParallelCompile.hasValue, true)
+            @Expect(opts.aggressiveParallelCompile.value, expected)
+        }
+    }
+
+    @TestCase
     func ApcPlatformNormalization(): Unit {
         for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
             for (apc in [Array<String>(), ["--apc"], ["--apc=3"], ["--apc-split-num", "5"]]) {

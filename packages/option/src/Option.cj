@@ -1558,6 +1558,13 @@ public open class GlobalOptions <: Option {
         } else if (aggressiveParallelCompileSplitNum.hasValue) {
             aggressiveParallelCompile = aggressiveParallelCompileSplitNum
             UtilsSemaphore.Get().SetCount(Int64(jobs.value + 2u64))
+        } else if (enumIndex(optimizationLevel) >= enumIndex(OptimizationLevel.O2)) {
+            // -O2 and above: one partition, as the reference compiler builds an optimized package (ruling of
+            // 2026-11-10; for optimized builds only it takes precedence over the 0803 default below and gives up
+            // that compile-time gain). A partition is its own LLVM module: an instantiated generic or a
+            // package-internal function that lands in another partition is external there and cannot be inlined
+            // into its callers.
+            aggressiveParallelCompile = MaybeUInt64(1u64)
         } else {
             // 默认固定 4 个 APC 分区（0803 用户令）。仍是**固定**分区数，不随 -j 漂移。
             // 依据 apcwiden 三问实测（CJ-COMPILER-08 的根修复 1781d6b1 落地后重测）：
