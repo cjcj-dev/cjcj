@@ -335,7 +335,7 @@ class InstalledTest {
 `);
    const binary=path.join(work,name+native.exe);
    await compile(name+'-compile',input,binary,['--test']);
-   requireLine(await invoke(name+'-run',[binary]),name+'_BODY_EXECUTED');
+   requireLine(await invoke(name+'-run',[binary,'--no-progress']),name+'_BODY_EXECUTED');
   }
   // R mock_framework_getting_started.md uses mock<Interface>() and @On(...).
   // mock_framework_basics.md: --test enables mocking without extra flags.
@@ -356,7 +356,7 @@ class InstalledMockTest {
 `);
   const mockBin=path.join(work,'mock'+native.exe);
   await compile('mockmacro-compile',mock,mockBin,['--test']);
-  requireLine(await invoke('mockmacro-run',[mockBin]),'MOCKMACRO_BODY_EXECUTED value=42');
+  requireLine(await invoke('mockmacro-run',[mockBin,'--no-progress']),'MOCKMACRO_BODY_EXECUTED value=42');
   result.status='PASS';await record();return result;
  }catch(error){
   result.status='FAILED';result.error=error.message;result.rc=error.rc??null;
