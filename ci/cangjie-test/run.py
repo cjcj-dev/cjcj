@@ -51,8 +51,8 @@ def execute(command, cwd, env, log):
 # Reason text records the environment condition each signature points at.
 ENVIRONMENT_SIGNATURES = (
     ('No such directory:',
-     "compiler search path missing (the recipe consumes CANGJIE_STDX_PATH per "
-     "cangjie_build docs/linux.md:251-260; stdx libraries not found under it)"),
+     "compiler search path missing (stdx libraries not found under "
+     "the selected CANGJIE_STDX_PATH)"),
     ('can not find package',
      'package absent from the module search path (stdx/std extension or java '
      'interop binding not installed, or import path unset)'),

@@ -20,7 +20,7 @@ test('prepare consumes linked fixed worktrees and rejects a changed HEAD', async
     const pins = {};
     const worktrees = path.join(root, 'worktrees');
     await fs.mkdir(worktrees);
-    for (const name of ['cangjie_test', 'cangjie_test_framework', 'cangjie_build']) {
+    for (const name of ['cangjie_test', 'cangjie_test_framework']) {
       pins[name] = commit;
       git('worktree', 'add', '-q', '--detach', path.join(worktrees, name), commit);
     }

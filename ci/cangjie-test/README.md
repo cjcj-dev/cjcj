@@ -6,7 +6,9 @@ adding exclusions. Runtime product gates are not part of this CI package.
 
 Use the task-owned worktrees prepared by normal `cjops repo status` /
 `cjops repo sync` at the commits in `inputs.json`. Preparation reads their
-paths and HEAD commits; it does not fetch, export, or copy source trees:
+paths and HEAD commits; it does not fetch, export, or copy source trees.
+Only the test corpus and framework are inputs; the former build-guide pin had
+no content consumer in the runner and is no longer required:
 
 ```sh
 node ci/cangjie-test/prepare.mjs /path/to/fixed-worktrees /path/to/new-inputs.json
@@ -89,8 +91,7 @@ Each suite also writes `environment-failures.json`: the failed/unrun cases
 whose output matched an environment signature (`No such directory:`,
 `can not find package`, missing file/executable, timeout, memory, disk),
 each with the matched signatures, the reason (for example a compiler search
-path that consumes `CANGJIE_STDX_PATH`, per cangjie_build
-`docs/linux.md`), and the original error line as evidence. Cases without a
+path that consumes the selected `CANGJIE_STDX_PATH`), and the original error line as evidence. Cases without a
 signature stay only in `failures.json`. `verify_hints.py` exercises the
 matcher with one hit (`No such directory: '-lstdx.chir'` plus
 `can not find package 'stdx.net.http'`) and one non-hit and checks the
