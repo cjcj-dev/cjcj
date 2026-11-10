@@ -142,7 +142,9 @@ class OptionTest {
             @Expect(opts.aggressiveParallelCompile.hasValue, true)
             @Expect(opts.aggressiveParallelCompile.value, expected)
         }
-        // An explicit option still decides at -O2.
+        // An explicit option still decides at -O2. '-j' and '--apc=N' are limited to the hardware concurrency when
+        // they are parsed, '--apc' alone takes the job count, and '--apc-split-num' is taken as written.
+        let hardware = GetHardwareConcurrency()
         for (apc in [["--apc"], ["--apc=3"], ["--apc-split-num", "5"]]) {
             println("INPUT optimized-explicit-apc apc=${apc}")
             let extra = ArrayList<String>()
@@ -152,7 +154,8 @@ class OptionTest {
             @Expect(parsed[0], true)
             let opts = GlobalOptions()
             @Expect(opts.ParseFromArgs(parsed[1]), true)
-            let expected = if (apc[0] == "--apc") { 7u64 } else if (apc[0] == "--apc=3") { 3u64 } else { 5u64 }
+            let requested = if (apc[0] == "--apc") { 7u64 } else if (apc[0] == "--apc=3") { 3u64 } else { 5u64 }
+            let expected = if (apc[0] != "--apc-split-num" && requested > hardware) { hardware } else { requested }
             println("NORMALIZED optimized-explicit-apc apc=${apc} value=${opts.aggressiveParallelCompile.value} expected=${expected}")
             @Expect(opts.aggressiveParallelCompile.hasValue, true)
             @Expect(opts.aggressiveParallelCompile.value, expected)
