@@ -163,6 +163,23 @@ class OptionTest {
     }
 
     @TestCase
+    func ApcSerializedForIncrementalCache(): Unit {
+        // The serialized compile arguments decide whether an incremental cache is reused; they carry the partition count.
+        let cases = [(["-O1"], "apc:4"), (["-O2"], "apc:1"), (["-O2", "--apc-split-num", "5"], "apc:5"),
+            (["-O1", "--apc-split-num", "1"], "apc:1")]
+        for ((extra, expected) in cases) {
+            println("INPUT serialized-apc extra=${extra}")
+            let parsed = parseArgs(iosLtoArgs(srcFile, extra))
+            @Expect(parsed[0], true)
+            let opts = GlobalOptions()
+            @Expect(opts.ParseFromArgs(parsed[1]), true)
+            let serialized = opts.ToSerialized()
+            println("SERIALIZED serialized-apc extra=${extra} last=${serialized[serialized.size - 1]} expected=${expected}")
+            @Expect(serialized[serialized.size - 1], expected)
+        }
+    }
+
+    @TestCase
     func ApcPlatformNormalization(): Unit {
         for (target in ["x86_64-unknown-linux-gnu", "x86_64-w64-mingw32", "aarch64-apple-darwin", "aarch64-apple-ios"]) {
             for (apc in [Array<String>(), ["--apc"], ["--apc=3"], ["--apc-split-num", "5"]]) {

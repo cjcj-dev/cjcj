@@ -1751,6 +1751,17 @@ public open class GlobalOptions <: Option {
             BoolToSerializedString(interpMainNoLinkage),
             BoolToSerializedString(disableCodeGen),
             BoolToSerializedString(disableDeserializer),
+            AggressiveParallelCompileToSerializedString(),
         ]
+    }
+
+    // The partition count decides how many modules codegen caches and which cached objects the driver refreshes.
+    // A cache built with another count must not be reused: codegen would restore the cached count while the driver
+    // follows the current one, and a later unchanged build links an object that was not refreshed.
+    private func AggressiveParallelCompileToSerializedString(): String {
+        if (aggressiveParallelCompile.hasValue) {
+            return "apc:${aggressiveParallelCompile.value}"
+        }
+        return "apc:unset"
     }
 }
