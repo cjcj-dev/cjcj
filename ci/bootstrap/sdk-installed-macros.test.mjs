@@ -18,6 +18,8 @@ const originalFullRecording=JSON.parse(await fs.readFile(new URL('./sdk-installe
 function withSyntheticChain(data) {
  const copy=structuredClone(data);
  for(const row of copy.commands) {
+  // Project today's argv expectation without changing historical stdout/rc.
+  if(['explicit-testmacro-run','implicit-testmacro-run','mockmacro-run'].includes(row.name))row.argv.push('--no-progress');
   if(row.name==='chain-definition')row.stdout+='\nMACRO_BODY_EXECUTED\n';
   if(row.name==='chain-expansion')row.stdout+='\nMACRO_STD_TIME_EXECUTED\n';
  }
