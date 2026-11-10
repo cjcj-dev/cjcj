@@ -4,12 +4,13 @@ The same runner and `inputs.json` must be used for both SDK arms. It runs the
 upstream Linux x86_64 Conformance, HLT and LLT recipes without editing tests or
 adding exclusions. Runtime product gates are not part of this CI package.
 
-Prepare private, content-hashed input copies from repositories containing the
-pinned commits (preparation does not fetch or change shared checkouts):
+Use the task-owned worktrees prepared by normal `cjops repo status` /
+`cjops repo sync` at the commits in `inputs.json`. Preparation reads their
+paths and HEAD commits; it does not fetch, export, or copy source trees:
 
 ```sh
-python3 ci/cangjie-test/prepare.py /path/to/repositories /path/to/new-inputs
-python3 ci/cangjie-test/run.py /path/to/sdk /path/to/new-output 48 --compiler-jobs 1 --inputs /path/to/new-inputs
+node ci/cangjie-test/prepare.mjs /path/to/fixed-worktrees /path/to/new-inputs.json
+python3 ci/cangjie-test/run.py /path/to/sdk /path/to/new-output 48 --compiler-jobs 1 --inputs /path/to/fixed-worktrees
 ```
 
 Run with `ulimit -c 0` on a host that meets the limits below. SDK must contain `envsetup.sh` and `bin/cjc`; its environment
@@ -38,15 +39,18 @@ explicit test jobs argument is rewritten. CPU selection/validation lives in
 `--compiler-jobs` accepts 1 or 2 for Conformance's compiler flags. Maple uses
 the upstream compiler options, including diagnostic and explicit jobs tests.
 
-Verified pinned inputs are copied to `execution-inputs` in each output. Only
+Test cases, configurations and lists are read directly from the fixed worktrees.
+Only the mutable Conformance harness and Maple Python package are copied to
+`execution-harnesses` in each output; no test corpus or build-guide tree is
+copied. Only
 three scheduling entries are adapted: Maple `run_commands`, Conformance
 `DriverManager.do_compile` and `do_execute`. Each waits while load1 >160,
 before starting the upstream timeout clock; `admission.jsonl` records pause
 and resume with the case identity and observed load. Active cases drain.
 The copied Conformance reporter also deletes each passing executable after
 recording its result; Maple already removes passing case work directories.
-Failure artifacts and original input files are retained. Adapter hashes are
-part of the comparison identity. No test source, assertion or exclusion list
+Failure artifacts and original input files are retained. No file-inventory
+manifest or adapter hash authentication is used. No test source, assertion or exclusion list
 is modified. `verify_admission.py INPUTS SDK NEW_OUTPUT` exercises the actual
 upstream entries with controlled load readings in the fixture's Python
 processes; it never creates host overload.
@@ -157,8 +161,9 @@ Darwin loader transformations must be in the frozen producer recipe.
 
 
 The environment preparation copies `modules` into the private SDK's
-`tools/bin` as prescribed by the framework README:83–95. `run.py` sets the
-LSP server path only in its private execution-input copy. The environment
+`tools/bin` as prescribed by the framework README:83–95. `run.py` selects the
+LSP server path; Maple substitutes it only in the dependency copied into each
+case's private work directory. The environment
 adds the SDK's `third_party/llvm/lib` to the library path for cjdb and uses
 only explicitly supplied JDK/stdx paths. It records file hashes and runs
 JDK compile/execute and tool launch probes. Tool logs include loader traces;

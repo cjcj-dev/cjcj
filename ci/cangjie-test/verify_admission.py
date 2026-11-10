@@ -31,8 +31,7 @@ def main():
     args = parser.parse_args()
     args.inputs, args.sdk, args.output = (p.resolve() for p in (args.inputs, args.sdk, args.output))
     args.output.mkdir(parents=True)
-    test, framework, hashes = prepare(args.inputs, args.output)
-    harness = test / 'Conformance/Compiler/harness'
+    test, framework, harness = prepare(args.inputs, args.output)
     env = dict(os.environ, CANGJIE_HOME=str(args.sdk), CANGJIE_TEST=str(test),
                PATH=str(args.sdk / 'bin') + ':' + os.environ['PATH'],
                PYTHONDONTWRITEBYTECODE='1')
@@ -87,7 +86,7 @@ def main():
                    completed=completed, TARGET_ADMISSION_HELD=held, events=observed)
         rows.append(row)
         print(json.dumps(row), flush=True)
-    (args.output / 'verification.json').write_text(json.dumps(dict(hashes=hashes, rows=rows), indent=2))
+    (args.output / 'verification.json').write_text(json.dumps(dict(rows=rows), indent=2))
     return int(not all(row['completed'] and row['TARGET_ADMISSION_HELD'] for row in rows))
 
 

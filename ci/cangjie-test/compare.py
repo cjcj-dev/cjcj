@@ -8,8 +8,7 @@ from run import dump
 
 def compare(left, right):
     identities = [json.loads((root / 'identity.json').read_text()) for root in (left, right)]
-    for key in ('pins', 'jobs', 'compiler_jobs', 'recipe_sha256', 'source_manifest_sha256',
-                'adapter_hashes', 'adapter_source_sha256'):
+    for key in ('pins', 'jobs', 'compiler_jobs', 'recipe_sha256'):
         if identities[0][key] != identities[1][key]:
             raise ValueError('different comparison recipe: ' + key)
     if identities[0].get('environment_recipe_sha256') != identities[1].get('environment_recipe_sha256'):

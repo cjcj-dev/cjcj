@@ -173,13 +173,13 @@ def dump_case_rows(out, rows):
     return environmental
 
 
-def run_suite(suite, test, framework, output, env, jobs, scratch=None, compiler_jobs=1):
+def run_suite(suite, test, framework, output, env, jobs, scratch=None, compiler_jobs=1, harness=None):
     out = output / suite
     out.mkdir()
     bulk = scratch / suite if scratch else out
     bulk.mkdir(parents=True, exist_ok=True)
     if suite == 'Conformance':
-        harness = test / 'Conformance/Compiler/harness'
+        harness = harness or test / 'Conformance/Compiler/harness'
         command = [sys.executable, str(harness / 'harness.py'),
                    '--test-root', str(test / 'Conformance/Compiler/testsuite'),
                    '--work-dir', str(bulk / 'work'), '--cjc', env['CANGJIE_HOME'] + '/bin/cjc',
@@ -259,12 +259,8 @@ def main():
     for path in (test / 'Conformance/Compiler/harness/harness.py', framework / 'main.py'):
         if not path.is_file():
             parser.error('missing input: ' + str(path))
-    manifest = json.loads((inputs / 'source-manifest.json').read_text())
-    if manifest['pins'] != json.loads((HERE / 'inputs.json').read_text()):
-        parser.error('input pins differ from this runner')
-    for name, expected in manifest['files'].items():
-        if sha(inputs / name) != expected:
-            parser.error('input content changed: ' + name)
+    sources = json.loads(subprocess.check_output(
+        ['node', str(HERE / 'prepare.mjs'), str(inputs)], text=True))
     envelope = enter_envelope()
     if isinstance(envelope, int):
         return envelope
@@ -280,7 +276,7 @@ def main():
         parser.error(f'LOAD_ADMISSION: load1={load1:.1f} > 200; not starting new cases')
     if free_gib < 8:
         parser.error(f'DISK_ADMISSION: free={free_gib:.1f}GiB < 8GiB; not starting new cases')
-    test, framework, adapter_hashes = prepare_execution_inputs(inputs, output)
+    test, framework, harness = prepare_execution_inputs(inputs, output)
     stop_monitor = threading.Event()
 
     def monitor():
@@ -300,16 +296,13 @@ def main():
     loaded = subprocess.check_output(['bash', '-c', 'source "$1/envsetup.sh" >&2 && env -0',
                                       'sdk-environment', str(sdk)])
     env = dict(entry.decode().split('=', 1) for entry in loaded.split(b'\0') if entry)
+    env.pop('CANGJIE_TEST_LSP_TOOLS', None)
     environment = json.loads(args.environment.read_text()) if args.environment else None
     if environment:
         if environment['arm'] != args.arm:
             raise ValueError('environment arm mismatch')
         env = apply_environment(sdk, env, environment)
-        config = test / 'testsuites/HLT/Tools/cjlsp/lsp_config.txt'
-        text = config.read_text()
-        if text.count('${linux_lsp_server_path}') != 1:
-            raise ValueError('upstream LSP configuration anchor mismatch')
-        config.write_text(text.replace('${linux_lsp_server_path}', str(sdk / 'tools/bin')))
+        env['CANGJIE_TEST_LSP_TOOLS'] = str(sdk / 'tools/bin')
         dump(output / 'environment.json', environment)
     env['CANGJIE_HOME'] = str(sdk)
     env['CANGJIE_TEST'] = str(test)
@@ -321,10 +314,8 @@ def main():
                                    for p in sorted((sdk / 'runtime').rglob('*.so'))},
                 'pins': json.loads((HERE / 'inputs.json').read_text()),
                 'recipe_sha256': sha(HERE / 'run.py'),
-                'adapter_hashes': adapter_hashes,
                 'cpu_envelope': envelope,
-                'adapter_source_sha256': {p.name: sha(p) for p in sorted(HERE.glob('*.py'))},
-                'source_manifest_sha256': sha(inputs / 'source-manifest.json'),
+                'worktrees': sources['worktrees'],
                 'inputs': str(inputs), 'jobs': args.jobs, 'compiler_jobs': args.compiler_jobs,
                 'affinity': sorted(os.sched_getaffinity(0)), 'uname': list(platform.uname()),
                 'uptime_before': before}
@@ -358,7 +349,7 @@ def main():
     identity['suites'] = selected
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(selected)) as pool:
         futures = {name: pool.submit(run_suite, name, test, framework, output, env,
-                                     workers[name], scratch, args.compiler_jobs)
+                                     workers[name], scratch, args.compiler_jobs, harness)
                    for name in selected}
         summaries = {name: future.result() for name, future in futures.items()}
     stop_monitor.set()

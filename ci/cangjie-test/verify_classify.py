@@ -13,8 +13,8 @@ HERE = Path(__file__).resolve().parent
 
 def fixture(root, statuses):
     root.mkdir()
-    identity = dict.fromkeys(('pins', 'jobs', 'compiler_jobs', 'recipe_sha256', 'source_manifest_sha256',
-                             'adapter_hashes', 'adapter_source_sha256', 'compiler_sha256', 'runtime_sha256'), 'fixture')
+    identity = dict.fromkeys(('pins', 'jobs', 'compiler_jobs', 'recipe_sha256',
+                             'compiler_sha256', 'runtime_sha256'), 'fixture')
     (root / 'identity.json').write_text(json.dumps(identity))
     (root / 'environment.json').write_text(json.dumps({'tools': {'cjdb': {'ready': False, 'reason': 'missing loader'}}}))
     for suite in SUITES:
