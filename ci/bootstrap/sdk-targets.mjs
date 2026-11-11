@@ -68,6 +68,13 @@ export function stdInstallationExcludes(platform) {
 // These libraries are supplied by the selected AST and std installations.
 export const nativeTargetLibraryExcludes = ['libcangjie-ast-support.a','libboundscheck-static.a'];
 
+// An installed backend uses the SDK's retained executables, not the producer
+// prefix, which may already serve a later build. Share this choice with input
+// validation so the recipe copies exactly the files that were checked.
+export function backendArtifactPath(backend,rel) {
+  return backend.installed?path.join(backend.installed,'.native-tools/third_party/llvm',rel):path.join(backend.install,rel);
+}
+
 export function installationRecipe(selection,{compiler:product,std,bootstrap=false,hostObjects=false,final=false,nativeChecks,tools,layout}={}) {
   const {platform,bootstrapHost:host,compilerExecution:execution,targetComponents:target}=selection;
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
@@ -95,7 +102,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
         ...(hostObjects?[]:['modules','lib','runtime','bin','tools'])]},
     ]:[]),
     {from:llvm.install+'/third_party/llvm',to:'third_party/llvm',owner:'N',...(backend?{exclude:['bin/llc'+exe,'bin/opt'+exe]}:{})},
-    ...(backend?['llc','opt'].map(name=>({from:path.join(backend.install,'bin',name+exe),
+    ...(backend?['llc','opt'].map(name=>({from:backendArtifactPath(backend,'bin/'+name+exe),
       to:'third_party/llvm/bin/'+name+exe,owner:'target backend'})):[]),
     {from:llvm.install+'/tools',to:'tools',owner:'N'},
     ...(!hostObjects?[{from:llvm.install+'/lib/'+tuple,to:'lib/'+tuple,owner:'N',exclude:nativeTargetLibraryExcludes}]:[]),

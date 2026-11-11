@@ -10,7 +10,7 @@ import {execFile} from 'node:child_process';
 import {promisify, isDeepStrictEqual} from 'node:util';
 import {randomUUID} from 'node:crypto';
 import {atomicJson, readJson, privateRoot, fileDigest} from './sdk-flow.mjs';
-import {FIXED_INPUTS} from './sdk-targets.mjs';
+import {FIXED_INPUTS,backendArtifactPath} from './sdk-targets.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {stage2Input} from './sdk-stage2-input.mjs';
 import {receiveNativeRuntime} from './native-runtime-input.mjs';
@@ -319,7 +319,6 @@ export async function prepareInstallInputs(descriptor) {
   if(target.backend) {
     if(descriptor.layout==='native-output')throw Error('INSTALL_BACKEND_LAYOUT');
     const backend=target.backend;
-    backend.install=await fs.realpath(backend.install);
     const tools=['llc','opt'].map(name=>'bin/'+name+native.exe);
     let recorded;
     if(backend.installed) {
@@ -331,13 +330,15 @@ export async function prepareInstallInputs(descriptor) {
       const stage=await readJson(path.join(backend.installed,'STAGE-INPUTS.json'));
       const row=stage.selection?.targetComponents?.backend;
       if(!row||row.commit!==backend.commit||row.repository!==backend.repository||row.platform!==platform
-        ||stage.sources?.backend?.commit!==backend.commit||await fs.realpath(row.install)!==backend.install
+        ||stage.sources?.backend?.commit!==backend.commit||stage.sources?.backend?.repository!==backend.repository
+        ||path.resolve(backend.install)!==row.install
         ||(backend.build&&await fs.realpath(backend.build).catch(()=>path.resolve(backend.build))!==row.build)
         ||!row.configuration?.sourceRoot||!/^[a-f0-9]{40}$/.test(row.configuration.tree||'')
         ||!isDeepStrictEqual(row.artifacts?.map(item=>item.path),tools))
         throw Error('INSTALL_BACKEND_RECORD');
       backend.build=row.build;backend.configuration=row.configuration;recorded=row.artifacts;
     } else {
+      backend.install=await fs.realpath(backend.install);
       backend.build=await fs.realpath(backend.build);
       const cache=await fs.readFile(path.join(backend.build,'CMakeCache.txt'),'utf8');
       const value=name=>new RegExp('^'+name+':[^=]+=(.*)$','m').exec(cache)?.[1]?.trim();
@@ -352,7 +353,8 @@ export async function prepareInstallInputs(descriptor) {
     }
     backend.artifacts=[];
     for(const [index,rel] of tools.entries()) {
-      const name=['llc','opt'][index],file=path.join(backend.install,rel);
+      const name=['llc','opt'][index],file=backendArtifactPath(backend,rel);
+      if(recorded&&!(await fs.lstat(file)).isFile())throw Error('INSTALL_BACKEND_RECORD '+name);
       if(!recorded) {
         const manifest=await fs.readFile(path.join(backend.build,'install_manifest_'+name+'.txt'),'utf8');
         if(!manifest.split(/\r?\n/).some(row=>path.resolve(row)===file))throw Error('INSTALL_BACKEND_COMPONENT '+name);

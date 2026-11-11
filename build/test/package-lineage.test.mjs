@@ -440,27 +440,57 @@ endforeach()
     // another prefix, as a later backend stage does. A new installation of the
     // first backend then names the completed installation that consumed it.
     console.log('BACKEND_REUSE_ASSERTION_REACHED');
-    const other=root+'/backend-other-install',{prepareInstallInputs}=await import('../../ci/bootstrap/sdk-inputs.mjs');
+    const other=root+'/backend-other-install';
     await command(['cmake','-S',root+'/backend-source','-B',backend.build,'-DCMAKE_INSTALL_PREFIX='+other],{records});
     for(const tool of ['llc','opt'])await command(['cmake','--install',backend.build,'--component',tool],{records});
-    const reuse=extra=>{const next=structuredClone(descriptor);
+    let reuseIndex=0;
+    const reuse=async(extra,error)=>{const next=structuredClone(descriptor);
       Object.assign(next,{work:root+'/reuse-work',install:root+'/reuse-sdk'});
       for(const role of ['compilerExecution','targetComponents'])Object.assign(next.selection[role].backend,extra);
-      return prepareInstallInputs(next);};
-    await assert.rejects(reuse({}),/INSTALL_BACKEND_CMAKE/);
-    const recorded=JSON.parse(await fs.readFile(sdk+'/STAGE-INPUTS.json','utf8')).selection.targetComponents.backend;
-    const reused=(await reuse({installed:sdk})).selection.targetComponents.backend;
-    assert.deepEqual({build:reused.build,configuration:reused.configuration,artifacts:reused.artifacts},
-      {build:recorded.build,configuration:recorded.configuration,artifacts:recorded.artifacts});
+      const input=await write(root,'reuse-'+String(reuseIndex++)+'.json',JSON.stringify(next));
+      const args=[new URL('../cli.mjs',import.meta.url).pathname,'install','--inputs',input,'--no-package'];
+      const result=spawnSync(process.execPath,args,{encoding:'utf8',maxBuffer:8*1024*1024,
+        env:{...process.env,GC_UNIT_GATE_CONTRACT_SELFTEST:'1',GC_UNIT_GATE_SKIP:'0',MRT_TESTABLE_INTERNALS:'0',DIRECT_TRACE:root+'/reuse-language.jsonl'}});
+      console.log('BACKEND_REUSE_INSTALL_RESULT '+JSON.stringify({argv:args,rc:result.status,signal:result.signal,stdout:result.stdout,stderr:result.stderr}));
+      assert.equal(result.status,error?1:0,result.stderr);
+      if(error)assert.match(result.stderr,error);
+    };
+    await reuse({},/INSTALL_BACKEND_CMAKE/);
+    const stageBytes=await fs.readFile(sdk+'/STAGE-INPUTS.json');
+    const recorded=JSON.parse(stageBytes).selection.targetComponents.backend;
+    // A later build replaced the original producer's payloads. Only the SDK's
+    // retained tools still match its original commit/artifact facts.
+    for(const name of ['llc','opt'])await fs.appendFile(backend.install+'/bin/'+name,'later producer payload');
+    await reuse({installed:sdk});
+    const reused=JSON.parse(await fs.readFile(root+'/reuse-work/install-result.json','utf8')).selection.targetComponents.backend;
+    assert.deepEqual({install:reused.install,build:reused.build,configuration:reused.configuration,artifacts:reused.artifacts},
+      {install:recorded.install,build:recorded.build,configuration:recorded.configuration,artifacts:recorded.artifacts});
+    for(const name of ['llc','opt']) {
+      assert.equal(digest(await fs.readFile(root+'/reuse-sdk/.native-tools/third_party/llvm/bin/'+name)),recorded.artifacts.find(row=>row.path==='bin/'+name).sha256);
+      const result=spawnSync(root+'/reuse-sdk/third_party/llvm/bin/'+name,[],{encoding:'utf8'});
+      assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/BACKEND_COMPONENT_EXECUTED/);
+      assert.notEqual(digest(await fs.readFile(backend.install+'/bin/'+name)),recorded.artifacts.find(row=>row.path==='bin/'+name).sha256);
+    }
+    assert.deepEqual(await fs.readFile(sdk+'/STAGE-INPUTS.json'),stageBytes,'installed source facts remain unchanged');
     await fs.mkdir(root+'/reuse-empty');
-    await assert.rejects(reuse({installed:root+'/reuse-empty'}),/ENOENT/);
-    await assert.rejects(reuse({installed:sdk,install:other}),/INSTALL_BACKEND_RECORD/);
-    await assert.rejects(reuse({installed:sdk,commit:STAGE2}),/INSTALL_BACKEND_RECORD/);
-    await assert.rejects(reuse({installed:sdk,build:other}),/INSTALL_BACKEND_RECORD/);
-    const tool=backend.install+'/bin/opt',toolBytes=await fs.readFile(tool);
-    await fs.appendFile(tool,'changed backend');
-    await assert.rejects(reuse({installed:sdk}),/INSTALL_BACKEND_RECORD opt/);
-    await fs.writeFile(tool,toolBytes);
+    await reuse({installed:root+'/reuse-empty'},/ENOENT/);
+    await reuse({installed:sdk,install:other},/INSTALL_BACKEND_RECORD/);
+    await reuse({installed:sdk,commit:STAGE2},/INSTALL_BACKEND_RECORD/);
+    await reuse({installed:sdk,build:other},/INSTALL_BACKEND_RECORD/);
+    // Even a valid original prefix cannot mask a bad/missing retained tool.
+    for(const tool of ['llc','opt'])await command(['cmake','--install',backend.build,'--prefix',backend.install,'--component',tool],{records});
+    const tool=sdk+'/.native-tools/third_party/llvm/bin/opt',toolBytes=await fs.readFile(tool);
+    try {
+      await fs.appendFile(tool,'changed backend');
+      await reuse({installed:sdk},/INSTALL_BACKEND_RECORD opt/);
+      const wrong=Buffer.from(toolBytes),stamp=Buffer.from('CJLLVM-COMMIT:'+backend.commit),offset=wrong.indexOf(stamp);
+      assert.ok(offset>=0);Buffer.from('CJLLVM-COMMIT:'+STAGE2).copy(wrong,offset);
+      await fs.writeFile(tool,wrong);
+      await reuse({installed:sdk},/INSTALL_BACKEND_SOURCE opt/);
+      await fs.unlink(tool);
+      await reuse({installed:sdk},/ENOENT/);
+    } finally {await fs.writeFile(tool,toolBytes,{mode:0o755});}
+
   }
   assert.ok(r.artifacts.some(row=>row.path.endsWith('libcangjie-aio.a')));
   assert.ok(!r.artifacts.some(row=>row.path===statusRel));
