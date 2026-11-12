@@ -715,6 +715,11 @@ public func GenerateGetTypeForTypeParamIntrinsic(pkg: Package, typeManager: Type
     decl.funcBody = funcBody
     decl.EnableAttr(Attribute.INTRINSIC)
     decl.EnableAttr(Attribute.GENERIC)
+    // The synthesized intrinsic is package-local: exporting it lets importers see a second
+    // generated declaration with the same name (upstream TypeCheckUtil.cpp, cangjie_compiler !2363).
+    decl.EnableAttr(Attribute.PRIVATE)
+    decl.linkage = Linkage.INTERNAL
+    decl.doNotExport = true
 
     file.decls.add(decl, at: 0)
     return decl
