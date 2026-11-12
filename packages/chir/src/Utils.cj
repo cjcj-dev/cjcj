@@ -542,7 +542,10 @@ private func CheckPkgName(fn: Function, funcInfo: FuncInfo): Bool {
 }
 
 public func IsGetOrThrowFunction(expr: Expression): Bool {
-    if (expr.GetExprKind() != ExprKind.APPLY || expr.GetNumOfOperands() == 0) {
+    // Both Apply and TryApply carry the callee at operand 0 and the first argument at operand 1
+    // (upstream Analysis/Utils.cpp IsGetOrThrowFunction accepts ApplyBase, cangjie_compiler !2344).
+    let kind = expr.GetExprKind()
+    if ((kind != ExprKind.APPLY && kind != ExprKind.TRY_APPLY) || expr.GetNumOfOperands() == 0) {
         return false
     }
     if (let Some(callee) <- expr.GetOperand(0).AsFunction()) {
