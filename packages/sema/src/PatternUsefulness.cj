@@ -350,7 +350,19 @@ private class DestructedPattern {
         return false
     }
 
+    // Checks whether this pattern can participate in specialization by the given constructor.
+    // Besides constructor coverage, irrefutable tuples take part in wildcard column elimination
+    // (upstream PatternUsefulness.cpp CanSpecialize, cangjie_compiler !2359).
+    public func CanSpecialize(typeManager: TypeManager, otherCtor: PatternCtor): Bool {
+        return otherCtor.IsCoveredBy(typeManager, ctor) ||
+            (otherCtor.kind == PatternCtorKind.WILDCARD && AllWildcard())
+    }
+
     public func Specialize(otherCtor: PatternCtor): ArrayList<DestructedPattern> {
+        // Wildcard specialization removes the whole pattern without expanding its fields.
+        if (otherCtor.kind == PatternCtorKind.WILDCARD) {
+            return ArrayList<DestructedPattern>()
+        }
         if (ctor.kind == PatternCtorKind.WILDCARD) {
             return SpecializeWildcard(goalTy, otherCtor)
         }
@@ -605,7 +617,7 @@ private class PatternMatrix {
         let newMatrix = PatternMatrix()
         for (row in rows) {
             CJC_ASSERT(!row.IsEmpty())
-            if (ctor.IsCoveredBy(typeManager, row.Head().ctor)) {
+            if (row.Head().CanSpecialize(typeManager, ctor)) {
                 newMatrix.rows.add(row.Specialize(ctor))
             }
         }
