@@ -1,0 +1,79 @@
+name: Windows official host entry
+# Runs the public prepare-native-host entry on a Windows runner against the
+# pinned official host SDK (H, ci/host_sdk_pin.env): original archive download
+# and digest check, host compiler probe, and the ETW image-load capture of the
+# host's own llc in ci/bootstrap/select-native-host.mjs. The selected host is
+# then consumed from the PATH the entry exported. No N/AST installation is
+# selected here; those inputs come from the native producers.
+on:
+  workflow_dispatch:
+    inputs:
+      native_llvm_ref:
+        description: Paired LLVM (N) commit recorded with the selected host
+        required: true
+        type: string
+      native_runtime_ref:
+        description: Paired runtime (R) commit recorded with the selected host
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  prepare-native-host:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.1'
+      - name: Load host toolchain pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
+          node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
+      - name: Download the pinned official host archive
+        shell: bash
+        run: node ci/release/prepare_base_sdk.mjs --platform windows-x64 --toolchain "$CJCJ_TOOLCHAIN" --outdir "$RUNNER_TEMP/windows-native-host-inputs"
+      - name: Unpack the official host beside its original archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'windows-native-host-inputs'
+          $hostDir = Join-Path $root 'host'
+          New-Item -ItemType Directory -Path $hostDir | Out-Null
+          & (Join-Path $env:SystemRoot 'System32\tar.exe') -xf $env:BASE_SDK_ARCHIVE -C $hostDir
+          if ($LASTEXITCODE -ne 0) { throw "tar -xf official host archive failed: rc=$LASTEXITCODE" }
+          $sdk = @(Get-ChildItem -LiteralPath $hostDir -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'bin\cjc.exe') })
+          if ($sdk.Count -ne 1) { throw "official host archive must unpack to exactly one SDK root with bin\cjc.exe; found $($sdk.Count)" }
+          $version = $env:CJCJ_TOOLCHAIN -replace '^nightly-', ''
+          $locations = @{ platform = 'windows_x86_64'; host = @{ install = "host/$($sdk[0].Name)"; archive = (Split-Path -Leaf $env:BASE_SDK_ARCHIVE); version = $version } }
+          $locations | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $root 'locations.json') -Encoding utf8NoBOM
+          "CJCJ_NATIVE_HOST_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8NoBOM
+          Get-Content -LiteralPath (Join-Path $root 'locations.json')
+      - name: Select the official host through prepare-native-host
+        shell: bash
+        env:
+          CJCJ_NATIVE_INPUT_ROOT: ${{ runner.temp }}\windows-native-host-inputs
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+          CJCJ_SRCBUILD_TARGET: windows-x64
+        run: node ci/bootstrap/prepare-native-host.mjs
+      - name: Consume the selected host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CJCJ_ACTUAL_HOST_TOOLCHAIN" = "$CJCJ_TOOLCHAIN"
+          command -v cjc
+          cjc --version
+      - name: Upload host selection and ETW evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-native-host-entry
+          path: .srcbuild/host-execution
+          if-no-files-found: warn
+          retention-days: 14
