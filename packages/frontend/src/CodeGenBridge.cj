@@ -660,7 +660,7 @@ private class ToCHIR {
             RunRangePropagation(currentPackage)
             if (options.IsCHIROptimizationLevelOverO2()) {
                 UselessAllocateElimination.RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer,
-                    threadNum: Int64(options.GetJobs()))
+                    threadNum: Int64(options.GetJobs()), builder: Some(builder))
             }
             Devirtualization(currentPackage, devirtInfo)
             RunArrayLambdaOpt(currentPackage)
