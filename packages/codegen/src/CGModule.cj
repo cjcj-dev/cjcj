@@ -1316,13 +1316,14 @@ public class CGModule {
                     unitValue = unsafe { LLVMAddGlobal(moduleHandle.raw, unitType, unitName.value) }
                     addAttribute(unitValue, CJGLOBAL_VALUE_ATTR)
                     unsafe { LLVMSetInitializer(unitValue, LLVMGetUndef(unitType)) }
-                    let linkage = if (cgCtx.GetCompileOptions().target.IsMinGW()) {
-                        LLVMLinkage.Private
+                    // Local linkage must keep default visibility, otherwise the MinGW debug verifier asserts; only
+                    // the WeakODR definition is hidden (upstream CGModule.cpp, cangjie_compiler !2301).
+                    if (cgCtx.GetCompileOptions().target.IsMinGW()) {
+                        AddLinkageTypeMetadata(unitValue, LLVMLinkage.Private, false)
                     } else {
-                        LLVMLinkage.WeakODR
+                        AddLinkageTypeMetadata(unitValue, LLVMLinkage.WeakODR, false)
+                        unsafe { LLVMSetVisibility(unitValue, 1) } // LLVMHiddenVisibility
                     }
-                    AddLinkageTypeMetadata(unitValue, linkage, false)
-                    unsafe { LLVMSetVisibility(unitValue, 1) } // LLVMHiddenVisibility
                 }
             }
             return unitValue
