@@ -105,6 +105,10 @@ public class Ohos_CJNATIVE <: Linux_CJNATIVE {
         tool.AppendArg("-lc")
         tool.AppendArg("-lclang_rt.builtins")
         tool.AppendArg("-lunwind")
+        // The OHOS toolchain ships only the static libunwind.a, so -lunwind always pulls the unwinder into the
+        // output; hide those symbols so they do not interpose on other libraries' _Unwind_* calls
+        // (upstream Ohos_CJNATIVE.cpp, cangjie_compiler !2354).
+        tool.AppendArg("--exclude-libs=libunwind.a")
     }
 
     protected override func HandleSanitizerDependencies(tool: Tool): Unit {
