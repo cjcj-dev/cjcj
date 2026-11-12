@@ -641,12 +641,14 @@ public class CGModule {
         if (let Some(e) <- failure) { throw e }
     }
 
-    public func GetOrInsertCGFunction(chirValue: Value, forWrapper!: Bool = false): CGFunction {
+    public func GetOrInsertCGFunction(chirValue: Value, forWrapper!: Bool = false,
+        forWithTIWrapper!: Bool = false): CGFunction {
         let name = GetCodeGenGlobalName(chirValue)
         if (localValueMapping.contains(chirValue)) {
             return (localValueMapping[chirValue] as CGFunction).getOrThrow()
         }
-        let cgFuncType = CGType.GetOrCreateWithNode(this, chirValue, allowBasePtr: true, forWrapper: forWrapper)
+        let cgFuncType = CGType.GetOrCreateWithNode(this, chirValue, allowBasePtr: true,
+            forWrapper: forWrapper, forWithTIWrapper: forWithTIWrapper)
         let functionType = if (let Some(chirType) <- chirValue.GetType()) {
             if (let Some(funcTy) <- (chirType as FuncType)) {
                 if (funcTy.IsCFunc()) {
@@ -680,6 +682,9 @@ public class CGModule {
         }
         if (forWrapper) {
             AddFnAttr(rawFunction, "wrapper")
+        }
+        if (forWithTIWrapper) {
+            AddFnAttr(rawFunction, THIS_PARAM_HAS_TI_ATTR)
         }
         if (chirValue.TestAttr(Attribute.NO_INLINE)) {
             AddFnAttr(rawFunction, "noinline")
@@ -1133,15 +1138,24 @@ public class CGModule {
             var mappedArg = rawArg
             if (idx == 0) {
                 if (let Some(fnType) <- cgFunc.GetCGFunctionType()) {
-                    if (fnType.ReceiverNeedsValueCopy()) {
+                    let withTIBody = HasAttributeAtIndex(cgFunc.GetRawFunction(), UInt32.Max,
+                        THIS_PARAM_HAS_TI_ATTR)
+                    if (fnType.ReceiverNeedsValueCopy() || (withTIBody && fnType.HasHeaderedValueReceiver())) {
                         let entry = chirFunc.GetBody().getOrThrow().GetEntryBlock().getOrThrow()
                         try (builder = IRBuilder2(this)) {
                             builder.SetInsertCGFunction(cgFunc)
                             let block = CreateOrGetMappedBB(builder, cgFunc.GetRawFunction(), entry)
                             builder.SetInsertPoint(block)
-                            let payload = builder.GetPayloadFromObject(rawArg)
-                            let payloadType = fnType.GetParamType(0).GetLLVMType()
-                            mappedArg = builder.CreateBitCast(payload, payloadType, name: "this.copy.payload")
+                            if (withTIBody) {
+                                // Preserve the copying entry's value semantics, including
+                                // escaped methods. Keep the TI so this copy is a GC root.
+                                mappedArg = builder.CreateReceiverCopyFromHeader(rawArg,
+                                    DeRef(fnType.GetParamType(0).GetOriginal()))
+                            } else {
+                                let payload = builder.GetPayloadFromObject(rawArg)
+                                let payloadType = fnType.GetParamType(0).GetLLVMType()
+                                mappedArg = builder.CreateBitCast(payload, payloadType, name: "this.copy.payload")
+                            }
                         }
                     }
                 }

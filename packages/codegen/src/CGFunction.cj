@@ -15,6 +15,22 @@ foreign {
     func LLVMGetAllocatedType(alloca: LLVMValueRef): LLVMTypeRef
 }
 
+// !2316: declare the headered entry while the payload entry is still being
+// constructed. The temporary CHIR mapping selects this body during emission;
+// GetOrInsertCGFunction installs the outer entry after its constructor returns.
+private func CreateFunctionWrapperForWithTIBody(chirFunc: Function, cgMod: CGModule): LLVMValueRef {
+    let cgFunc = cgMod.GetOrInsertCGFunction(chirFunc, forWithTIWrapper: true)
+    cgMod.MapFunctionParameters(chirFunc, cgFunc)
+    let body = chirFunc.GetBody().getOrThrow()
+    try (unwindBlockScope = CodeGenUnwindBlockScope(cgMod, LLVMNullBasicBlock())) {
+        EmitBasicBlockIR(cgMod, body.GetEntryBlock().getOrThrow())
+    }
+    for (block in body.GetBlocks()) {
+        cgMod.SetOrUpdateMappedBB(block, LLVMNullBasicBlock())
+    }
+    return cgFunc.GetRawFunction()
+}
+
 private func CreateFunctionWrapperForNormalCases(function: LLVMValueRef, wrapperF: LLVMValueRef,
     cgType: CGFunctionType, cgMod: CGModule): Unit {
     cgMod.SetExceptionIntrinsicPersonality(wrapperF)
@@ -95,7 +111,8 @@ private func CreateFunctionWrapperForNormalCases(function: LLVMValueRef, wrapper
 
 private func CreateFunctionWrapper(function: LLVMValueRef, cgType: CGFunctionType, chirFunc: Value,
     cgMod: CGModule): LLVMValueRef {
-    if (HasAttributeAtIndex(function, UInt32.Max, "wrapper")) {
+    if (HasAttributeAtIndex(function, UInt32.Max, "wrapper") ||
+        HasAttributeAtIndex(function, UInt32.Max, THIS_PARAM_HAS_TI_ATTR)) {
         return function
     }
     let cgCtx = cgMod.GetCGContext()
@@ -115,6 +132,11 @@ private func CreateFunctionWrapper(function: LLVMValueRef, cgType: CGFunctionTyp
         unsafe { LLVMSetValueName2(function, nameCString.value, UIntNative(withoutTIName.size)) }
     }
     AddFnAttr(function, HAS_WITH_TI_WRAPPER_ATTR)
+
+    if (!cgCtx.GetCompileOptions().enableCompileDebug && !cgType.ReceiverHasBasePtr() &&
+        IsDynamicStruct(outerType) && !cgCtx.IsValueOfOtherLLVMModule(chirFunc)) {
+        return CreateFunctionWrapperForWithTIBody(functionValue, cgMod)
+    }
 
     let originalFunctionType = unsafe { LLVMGlobalGetValueType(function) }
     let paramDerefType = CGType.GetOrCreate(cgMod, DeRef(cgType.GetParamType(0).GetOriginal())).GetLLVMType()

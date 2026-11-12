@@ -110,6 +110,7 @@ public class TypeExtraInfo {
     public var isStaticMethod: Bool = false
     public var allowBasePtr: Bool = true
     public var forWrapper: Bool = false
+    public var forWithTIWrapper: Bool = false
     public let instantiatedParamTypes: ArrayList<Type> = ArrayList<Type>()
 
     public init() {}
@@ -132,7 +133,7 @@ public class TypeExtraInfo {
     public operator func ==(rhs: TypeExtraInfo): Bool {
         if (instantiatedParamTypes.size != rhs.instantiatedParamTypes.size || addrspace != rhs.addrspace ||
             isMethod != rhs.isMethod || isStaticMethod != rhs.isStaticMethod || allowBasePtr != rhs.allowBasePtr ||
-            forWrapper != rhs.forWrapper) {
+            forWrapper != rhs.forWrapper || forWithTIWrapper != rhs.forWithTIWrapper) {
             return false
         }
         var idx: Int64 = 0
@@ -461,7 +462,7 @@ public open class CGType {
     }
 
     public static func GetOrCreateWithNode(cgModule: CGModule, chirNode: Value, allowBasePtr!: Bool = true,
-        forWrapper!: Bool = false): CGType {
+        forWrapper!: Bool = false, forWithTIWrapper!: Bool = false): CGType {
         let functionNode = chirNode as Function
         let chirTy = if (let Some(fn) <- functionNode) {
             if (let Some(overrideTy) <- fn.GetOverrideSrcFuncType()) {
@@ -481,6 +482,7 @@ public open class CGType {
         } else if (let Some(fn) <- functionNode) {
             let typeExtra = TypeExtraInfo(0u32, false, false, allowBasePtr, ArrayList<Type>())
             typeExtra.forWrapper = forWrapper
+            typeExtra.forWithTIWrapper = forWithTIWrapper
             for (genericTy in fn.GetGenericTypeParams()) {
                 typeExtra.instantiatedParamTypes.add(genericTy)
             }

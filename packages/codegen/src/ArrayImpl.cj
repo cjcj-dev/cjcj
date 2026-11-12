@@ -701,6 +701,12 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         let storePlace = irBuilder.GetCGModule().GetMappedCGValue(lhs)
         let srcCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), rhs.GetType().getOrThrow())
         if (srcCGType.GetSize().isNone() && IsThisArgOfStructMethod(rhs)) {
+            let copySource = if (HasAttributeAtIndex(irBuilder.GetInsertFunction(), UInt32.Max,
+                THIS_PARAM_HAS_TI_ATTR)) {
+                irBuilder.GetPayloadFromObject(storeValue.GetRawValue())
+            } else {
+                storeValue.GetRawValue()
+            }
             let typeInfoOfSrc = irBuilder.CreateTypeInfo(srcCGType.GetOriginal())
             let size = irBuilder.GetLayoutSize32(srcCGType.GetOriginal(), srcCGType)
             let parameters = ArrayList<LLVMValueRef>()
@@ -712,11 +718,11 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
                 let args = ArrayList<LLVMValueRef>()
                 args.add(tmp)
                 args.add(payloadPtr)
-                args.add(storeValue.GetRawValue())
+                args.add(copySource)
                 args.add(size)
                 irBuilder.CallGCWriteAgg(srcCGType.GetLayoutType(), args)
             } else {
-                irBuilder.CreateMemCpy(payloadPtr, 0u32, storeValue.GetRawValue(), 0u32, size)
+                irBuilder.CreateMemCpy(payloadPtr, 0u32, copySource, 0u32, size)
             }
             let destAddr = irBuilder.CreateGEP(storePlace, path)
             let destElementType = destAddr.GetCGType().getOrThrow().GetPointerElementType().getOrThrow()
