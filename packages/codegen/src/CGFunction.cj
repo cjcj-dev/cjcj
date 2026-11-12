@@ -20,9 +20,11 @@ foreign {
 // GetOrInsertCGFunction installs the outer entry after its constructor returns.
 private func CreateFunctionWrapperForWithTIBody(chirFunc: Function, cgMod: CGModule): LLVMValueRef {
     let cgFunc = cgMod.GetOrInsertCGFunction(chirFunc, forWithTIWrapper: true)
-    cgMod.MapFunctionParameters(chirFunc, cgFunc)
     let body = chirFunc.GetBody().getOrThrow()
     try (unwindBlockScope = CodeGenUnwindBlockScope(cgMod, LLVMNullBasicBlock())) {
+        // Mapping our by-value receiver allocates its headered copy. A
+        // reentrant declaration must not inherit the caller's unwind target.
+        cgMod.MapFunctionParameters(chirFunc, cgFunc)
         EmitBasicBlockIR(cgMod, body.GetEntryBlock().getOrThrow())
     }
     for (block in body.GetBlocks()) {
