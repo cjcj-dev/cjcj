@@ -27,7 +27,7 @@ async function fixture(t, body) {
   const tuple='windows_x86_64_cjnative',preinstall=path.join(root,'cjthread-install'),runtime=path.join(source,'runtime'),build=path.join(runtime,'CMakebuild');
   put(path.join(build,'CMakeCache.txt'),`CMAKE_HOME_DIRECTORY:INTERNAL=${runtime}\nCMAKE_INSTALL_PREFIX:PATH=${preinstall}\nCMAKE_BUILD_TYPE:STRING=Release\nCANGJIE_COMPILER_CACHE:FILEPATH=${cache}\nCMAKE_C_COMPILER_LAUNCHER:STRING=${cache}\nCMAKE_CXX_COMPILER_LAUNCHER:STRING=${cache}\n`);
   put(path.join(build,'cjthread-build/CMakeCache.txt'),`CMAKE_HOME_DIRECTORY:INTERNAL=${runtime}/src/CJThread\nCMAKE_INSTALL_PREFIX:PATH=${preinstall}\nTARGET_ARCH:STRING=${tuple}\nCMAKE_BUILD_TYPE:STRING=Release\n`);
-  const archives=['thread','aio'].map(name=>path.join(preinstall,'lib',tuple,`libcangjie-${name}.a`));
+  const archives=['thread','aio'].map(name=>path.join(installRoot,'lib',tuple,`libcangjie-${name}.a`));
   archives.forEach((file,i)=>put(file,'installed '+['thread','aio'][i]));
   put(path.join(build,'cjthread-build/install_manifest.txt'),archives.join('\n'));
   const bounds=path.join(build,'runtime-staging/bin/x86_64_Release/libboundscheck.dll');

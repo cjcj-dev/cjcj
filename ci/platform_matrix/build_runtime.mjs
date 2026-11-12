@@ -84,7 +84,7 @@ if (completedBuild) {
   const childArgs = ['--install', path.join(build,'cjthread-build'), '--prefix', prefix];
   darwinCommand(path.join(root,'logs/native-runtime'), 'install-child', 'cmake', childArgs,
     {cwd:runtimeDirectory,env:process.env});
-  if (nativePair) installNativeRuntimeDependencies({source, installRoot, buildType});
+  if (nativePair) installNativeRuntimeDependencies({source, installRoot, buildType, manifestRoot: prefix});
   nativePython('install', ['build.py', 'install', '--prefix', installRoot]);
   installNativeRuntimeInputs({source,installRoot,gateStatus,selection});
   await recordNativeRuntime({source,installRoot,actualRef,version,buildType,selection,repository,completedBuild:true,

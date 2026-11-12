@@ -89,10 +89,12 @@ export function configureNativeRuntime({runtimeTarget,selection}, env = process.
   env.CMAKE_TOOLCHAIN_FILE = selectedToolchain;
 }
 
-// The main install and configure-time CJThread install are separate CMake
-// graphs. Transfer their actual installed archives and linked bounds target
-// through one normal CMake install component; never substitute a stale SDK.
-export function installNativeRuntimeDependencies({source, installRoot, buildType}) {
+// The parent install runs CJThread's child rules with the requested install
+// prefix, rewriting the child manifest. Consume that actual installation; the
+// configure-time prefix remains useful only for checking the paired caches.
+// A caller that reinstalled the child to its configure-time prefix passes that
+// prefix as manifestRoot.
+export function installNativeRuntimeDependencies({source, installRoot, buildType, manifestRoot = installRoot}) {
   const runtime = path.resolve(source, 'runtime'), build = path.join(runtime, 'CMakebuild');
   const tuple = `${hostPlatform()}_cjnative`;
   const cache = directory => {
@@ -111,7 +113,7 @@ export function installNativeRuntimeDependencies({source, installRoot, buildType
     assert.equal(value('CMAKE_BUILD_TYPE')?.toLowerCase(), buildType.toLowerCase(), 'NATIVE_CJTHREAD_INSTALL_CONFIGURATION');
   const manifest = fs.readFileSync(path.join(childBuild,'install_manifest.txt'),'utf8').trim().split(/\r?\n/).map(file=>path.resolve(file));
   const archives = ['thread','aio'].map(name => {
-    const file = path.join(prefix,'lib',tuple,`libcangjie-${name}.a`);
+    const file = path.resolve(manifestRoot,'lib',tuple,`libcangjie-${name}.a`);
     assert.ok(manifest.includes(path.resolve(file)), `NATIVE_CJTHREAD_INSTALL_MANIFEST: ${file}`);
     assert.ok(fs.existsSync(file) && fs.lstatSync(file).isFile(), `NATIVE_CJTHREAD_INSTALL_MISSING: ${file}`);
     return file;
