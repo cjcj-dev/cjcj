@@ -1,0 +1,275 @@
+<Events>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Guid="{9e814aad-3204-11d2-9a82-006008a86939}" />
+		<EventID>0</EventID>
+		<Version>2</Version>
+		<Level>0</Level>
+		<Task>0</Task>
+		<Opcode>0</Opcode>
+		<Keywords>0x0</Keywords>
+		<TimeCreated SystemTime="2026-11-12T14:24:28.819853000+00:00" />
+		<Correlation ActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="1496" ThreadID="2456" ProcessorID="0" KernelTime="30" UserTime="0" />
+		<Channel />
+		<Computer />
+	</System>
+	<EventData>
+		<Data Name="BufferSize">    8192</Data>
+		<Data Name="Version">83951626</Data>
+		<Data Name="ProviderVersion">   26100</Data>
+		<Data Name="NumberOfProcessors">       4</Data>
+		<Data Name="EndTime">134389670690623620</Data>
+		<Data Name="TimerResolution">  156250</Data>
+		<Data Name="MaxFileSize">       0</Data>
+		<Data Name="LogFileMode">0x2000080</Data>
+		<Data Name="BuffersWritten">     370</Data>
+		<Data Name="StartBuffers">       1</Data>
+		<Data Name="PointerSize">       8</Data>
+		<Data Name="EventsLost">       0</Data>
+		<Data Name="CPUSpeed">    2596</Data>
+		<Data Name="LoggerName">0xA</Data>
+		<Data Name="LogFileName">0x7</Data>
+		<Data Name="BootTime">134389669115000000</Data>
+		<Data Name="PerfFreq">10000000</Data>
+		<Data Name="StartTime">134389670688198530</Data>
+		<Data Name="ReservedFlags">0x1</Data>
+		<Data Name="BuffersLost">       0</Data>
+		<Data Name="SessionNameString">NT Kernel Logger</Data>
+		<Data Name="LogFileNameString">D:\a\cjcj\cjcj\.srcbuild\host-execution\windows-llvm-trace\host-llvm.etl</Data>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Opcode>Header</Opcode>
+		<Provider>MSNT_SystemTrace</Provider>
+		<EventName xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">EventTrace</EventName>
+	</RenderingInfo>
+	<ExtendedTracingInfo xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">
+		<EventGuid>{68fdd900-4a3e-11d1-84f4-0000f80464e3}</EventGuid>
+	</ExtendedTracingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Guid="{9e814aad-3204-11d2-9a82-006008a86939}" />
+		<EventID>0</EventID>
+		<Version>2</Version>
+		<Level>0</Level>
+		<Task>0</Task>
+		<Opcode>80</Opcode>
+		<Keywords>0x0</Keywords>
+		<TimeCreated SystemTime="2026-11-12T14:24:28.819853000+00:00" />
+		<Correlation ActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="1496" ThreadID="2456" ProcessorID="0" KernelTime="30" UserTime="0" />
+		<Channel />
+		<Computer />
+	</System>
+	<ProcessingErrorData>
+		<ErrorCode>15005</ErrorCode>
+		<DataItemName />
+		<EventPayload>000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000</EventPayload>
+	</ProcessingErrorData>
+	<RenderingInfo Culture="en-US">
+		<Opcode>PartitionInfoExtensionV2</Opcode>
+		<Provider>MSNT_SystemTrace</Provider>
+		<EventName xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">EventTrace</EventName>
+	</RenderingInfo>
+	<ExtendedTracingInfo xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">
+		<EventGuid>{68fdd900-4a3e-11d1-84f4-0000f80464e3}</EventGuid>
+	</ExtendedTracingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Guid="{9e814aad-3204-11d2-9a82-006008a86939}" />
+		<EventID>0</EventID>
+		<Version>4</Version>
+		<Level>0</Level>
+		<Task>0</Task>
+		<Opcode>1</Opcode>
+		<Keywords>0x0</Keywords>
+		<TimeCreated SystemTime="2026-11-12T14:24:28.866483600+00:00" />
+		<Correlation ActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="740" ThreadID="8020" ProcessorID="2" KernelTime="45" UserTime="270" />
+		<Channel />
+		<Computer />
+	</System>
+	<EventData>
+		<Data Name="UniqueProcessKey">0xFFFFBB07653EA0C0</Data>
+		<Data Name="ProcessId">0x27B0</Data>
+		<Data Name="ParentId">0x2E4</Data>
+		<Data Name="SessionId">       2</Data>
+		<Data Name="ExitStatus">259</Data>
+		<Data Name="DirectoryTableBase">0x25243C000</Data>
+		<Data Name="Flags">       0</Data>
+		<Data Name="UserSID">\\runnervmm7ud1\runneradmin</Data>
+		<Data Name="ImageFileName">llc.exe</Data>
+		<Data Name="CommandLine">D:\a\_temp\windows-native-host-inputs\host\cangjie\third_party\llvm\bin\llc.exe --version</Data>
+		<Data Name="PackageFullName"></Data>
+		<Data Name="ApplicationId"></Data>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Opcode>Start</Opcode>
+		<Provider>MSNT_SystemTrace</Provider>
+		<EventName xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">Process</EventName>
+	</RenderingInfo>
+	<ExtendedTracingInfo xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">
+		<EventGuid>{3d6fa8d0-fe05-11d0-9dda-00c04fd7ba7c}</EventGuid>
+	</ExtendedTracingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Guid="{9e814aad-3204-11d2-9a82-006008a86939}" />
+		<EventID>0</EventID>
+		<Version>3</Version>
+		<Level>0</Level>
+		<Task>0</Task>
+		<Opcode>10</Opcode>
+		<Keywords>0x0</Keywords>
+		<TimeCreated SystemTime="2026-11-12T14:24:28.867429900+00:00" />
+		<Correlation ActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="10160" ThreadID="1480" ProcessorID="0" KernelTime="0" UserTime="0" />
+		<Channel />
+		<Computer />
+	</System>
+	<EventData>
+		<Data Name="ImageBase">0x7FF7AAB90000</Data>
+		<Data Name="ImageSize">0x20000</Data>
+		<Data Name="ProcessId">   10160</Data>
+		<Data Name="ImageChecksum">       0</Data>
+		<Data Name="TimeDateStamp">       0</Data>
+		<Data Name="SignatureLevel">0</Data>
+		<Data Name="SignatureType">0</Data>
+		<Data Name="Reserved0">0</Data>
+		<Data Name="DefaultBase">0x7FF7AAB90000</Data>
+		<Data Name="Reserved1">       0</Data>
+		<Data Name="Reserved2">       0</Data>
+		<Data Name="Reserved3">       0</Data>
+		<Data Name="Reserved4">       0</Data>
+		<Data Name="FileName">\Device\HarddiskVolume5\a\_temp\windows-native-host-inputs\host\cangjie\third_party\llvm\bin\llc.exe</Data>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Opcode>Load</Opcode>
+		<Provider>MSNT_SystemTrace</Provider>
+		<EventName xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">Image</EventName>
+	</RenderingInfo>
+	<ExtendedTracingInfo xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">
+		<EventGuid>{2cb15d1d-5fc1-11d2-abe1-00a0c911f518}</EventGuid>
+	</ExtendedTracingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Guid="{9e814aad-3204-11d2-9a82-006008a86939}" />
+		<EventID>0</EventID>
+		<Version>3</Version>
+		<Level>0</Level>
+		<Task>0</Task>
+		<Opcode>10</Opcode>
+		<Keywords>0x0</Keywords>
+		<TimeCreated SystemTime="2026-11-12T14:24:28.869719100+00:00" />
+		<Correlation ActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="10160" ThreadID="1480" ProcessorID="2" KernelTime="0" UserTime="0" />
+		<Channel />
+		<Computer />
+	</System>
+	<EventData>
+		<Data Name="ImageBase">0x7FFDC7CA0000</Data>
+		<Data Name="ImageSize">0x1267000</Data>
+		<Data Name="ProcessId">   10160</Data>
+		<Data Name="ImageChecksum">       0</Data>
+		<Data Name="TimeDateStamp">       0</Data>
+		<Data Name="SignatureLevel">0</Data>
+		<Data Name="SignatureType">0</Data>
+		<Data Name="Reserved0">0</Data>
+		<Data Name="DefaultBase">0x7FFDC7CA0000</Data>
+		<Data Name="Reserved1">       0</Data>
+		<Data Name="Reserved2">       0</Data>
+		<Data Name="Reserved3">       0</Data>
+		<Data Name="Reserved4">       0</Data>
+		<Data Name="FileName">\Device\HarddiskVolume5\a\_temp\windows-native-host-inputs\host\cangjie\third_party\llvm\bin\libLLVM-Foundation-15.dll</Data>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Opcode>Load</Opcode>
+		<Provider>MSNT_SystemTrace</Provider>
+		<EventName xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">Image</EventName>
+	</RenderingInfo>
+	<ExtendedTracingInfo xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">
+		<EventGuid>{2cb15d1d-5fc1-11d2-abe1-00a0c911f518}</EventGuid>
+	</ExtendedTracingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Guid="{9e814aad-3204-11d2-9a82-006008a86939}" />
+		<EventID>0</EventID>
+		<Version>3</Version>
+		<Level>0</Level>
+		<Task>0</Task>
+		<Opcode>10</Opcode>
+		<Keywords>0x0</Keywords>
+		<TimeCreated SystemTime="2026-11-12T14:24:28.870037200+00:00" />
+		<Correlation ActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="10160" ThreadID="10152" ProcessorID="1" KernelTime="0" UserTime="0" />
+		<Channel />
+		<Computer />
+	</System>
+	<EventData>
+		<Data Name="ImageBase">0x7FFDAB7F0000</Data>
+		<Data Name="ImageSize">0x35C9000</Data>
+		<Data Name="ProcessId">   10160</Data>
+		<Data Name="ImageChecksum">       0</Data>
+		<Data Name="TimeDateStamp">       0</Data>
+		<Data Name="SignatureLevel">0</Data>
+		<Data Name="SignatureType">0</Data>
+		<Data Name="Reserved0">0</Data>
+		<Data Name="DefaultBase">0x7FFDAB7F0000</Data>
+		<Data Name="Reserved1">       0</Data>
+		<Data Name="Reserved2">       0</Data>
+		<Data Name="Reserved3">       0</Data>
+		<Data Name="Reserved4">       0</Data>
+		<Data Name="FileName">\Device\HarddiskVolume5\a\_temp\windows-native-host-inputs\host\cangjie\third_party\llvm\bin\libLLVM-15.dll</Data>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Opcode>Load</Opcode>
+		<Provider>MSNT_SystemTrace</Provider>
+		<EventName xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">Image</EventName>
+	</RenderingInfo>
+	<ExtendedTracingInfo xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">
+		<EventGuid>{2cb15d1d-5fc1-11d2-abe1-00a0c911f518}</EventGuid>
+	</ExtendedTracingInfo>
+</Event>
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+	<System>
+		<Provider Guid="{9e814aad-3204-11d2-9a82-006008a86939}" />
+		<EventID>0</EventID>
+		<Version>4</Version>
+		<Level>0</Level>
+		<Task>0</Task>
+		<Opcode>2</Opcode>
+		<Keywords>0x0</Keywords>
+		<TimeCreated SystemTime="2026-11-12T14:24:28.883431900+00:00" />
+		<Correlation ActivityID="{00000000-0000-0000-0000-000000000000}" />
+		<Execution ProcessID="10160" ThreadID="1480" ProcessorID="0" KernelTime="0" UserTime="0" />
+		<Channel />
+		<Computer />
+	</System>
+	<EventData>
+		<Data Name="UniqueProcessKey">0xFFFFBB07653EA0C0</Data>
+		<Data Name="ProcessId">0x27B0</Data>
+		<Data Name="ParentId">0x2E4</Data>
+		<Data Name="SessionId">       2</Data>
+		<Data Name="ExitStatus">0</Data>
+		<Data Name="DirectoryTableBase">0x25243C000</Data>
+		<Data Name="Flags">       0</Data>
+		<Data Name="UserSID">\\runnervmm7ud1\runneradmin</Data>
+		<Data Name="ImageFileName">llc.exe</Data>
+		<Data Name="CommandLine">D:\a\_temp\windows-native-host-inputs\host\cangjie\third_party\llvm\bin\llc.exe --version</Data>
+		<Data Name="PackageFullName"></Data>
+		<Data Name="ApplicationId"></Data>
+	</EventData>
+	<RenderingInfo Culture="en-US">
+		<Opcode>End</Opcode>
+		<Provider>MSNT_SystemTrace</Provider>
+		<EventName xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">Process</EventName>
+	</RenderingInfo>
+	<ExtendedTracingInfo xmlns="http://schemas.microsoft.com/win/2004/08/events/trace">
+		<EventGuid>{3d6fa8d0-fe05-11d0-9dda-00c04fd7ba7c}</EventGuid>
+	</ExtendedTracingInfo>
+</Event>
+</Events>

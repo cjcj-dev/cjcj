@@ -40,3 +40,20 @@ Schema references: [Image Load](https://learn.microsoft.com/en-us/windows/win32/
 [Process events](https://learn.microsoft.com/en-us/windows/win32/etw/process-typegroup1),
 [log header](https://learn.microsoft.com/en-us/windows/win32/etw/eventtrace-header),
 [tracerpt](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/tracerpt).
+
+The kernel tracerpt XML uses System/Provider GUID
+`9e814aad-3204-11d2-9a82-006008a86939` and a separate
+`ExtendedTracingInfo/EventGuid` for Header, Process and Image event classes.
+Both identities are retained; only kernel-provider events with the relevant
+class/opcode can qualify. Numeric padding is trimmed only while parsing numbers;
+raw payloads remain intact. Timestamp offsets and up to nine fractional digits
+are compared without losing precision. Other Process opcodes (rundown and
+performance metadata) cannot supply the Start/End lifetime.
+
+`native-windows-llvm-replay.test.mjs` replays seven byte-preserved events from
+run 43236671148 and tests loss, missing header/logs, GUID confusion, wrong loaded
+path and rundown rejection through the public decoder. Set
+`TRACE_REPLAY_ORIGINAL` to the original windows-llvm-trace directory to replay
+the complete XML with the same original capture record. This is offline replay;
+it does not execute the recorded Windows commands or qualify the native entry.
+See [Microsoft's tracerpt XML example](https://learn.microsoft.com/en-us/archive/msdn-magazine/2009/september/core-os-events-in-windows-7-part-1#event-tracing-for-windows).

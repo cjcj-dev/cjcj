@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {ETW_HEADER,ETW_PROCESS,ETW_IMAGE,traceWindowsPath} from './native-windows-llvm-decode.mjs';
+import {ETW_KERNEL,ETW_HEADER,ETW_PROCESS,ETW_IMAGE,traceWindowsPath} from './native-windows-llvm-decode.mjs';
 
 const entry=fileURLToPath(new URL('./native-windows-llvm-decode.mjs',import.meta.url));
 const executable=String.raw`C:\SDK & 测试\bin\llc.exe`,library=String.raw`C:\SDK & 测试\bin\libLLVM-15.dll`;
@@ -22,8 +22,8 @@ function original() {
 const escape=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
 function xml(rows) {
  return '<?xml version="1.0" encoding="UTF-8"?><Events xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'+rows.map(e=>
-  `<Event><System><Provider Guid="{${e.provider}}"/><Opcode>${e.opcode}</Opcode><TimeCreated SystemTime="${e.time}"/><Execution ProcessID="999"/></System><EventData>`+
-  Object.entries(e.data).map(([k,v])=>`<Data Name="${k}">${escape(v)}</Data>`).join('')+'</EventData></Event>').join('')+'</Events>';
+  `<Event><System><Provider Guid="{${ETW_KERNEL}}"/><Opcode>${e.opcode}</Opcode><TimeCreated SystemTime="${e.time}"/><Execution ProcessID="999"/></System><EventData>`+
+  Object.entries(e.data).map(([k,v])=>`<Data Name="${k}">${escape(v)}</Data>`).join('')+`</EventData><ExtendedTracingInfo xmlns="http://schemas.microsoft.com/win/2004/08/events/trace"><EventGuid>{${e.provider}}</EventGuid></ExtendedTracingInfo></Event>`).join('')+'</Events>';
 }
 async function cli(t,change=()=>{},textChange=x=>x) {
  const work=await fs.mkdtemp(path.join(process.env.TRACE_TEST_EVIDENCE||os.tmpdir(),'etw-decode-'));
@@ -73,4 +73,27 @@ test('DTD expansion is rejected by the actual XML reader',async t=>{
 test('NT path prefixes and actual SystemRoot mapping',()=>{
  for(const prefix of ['\\??\\','\\\\?\\'])assert.equal(traceWindowsPath(prefix+library,devices),library.toLowerCase());
  assert.equal(traceWindowsPath(String.raw`\SystemRoot\System32\ntdll.dll`,devices),'c:\\windows\\system32\\ntdll.dll');
+});
+test('tracerpt padded integers, nine-digit UTC offsets and UTF-16 XML preserve attribution',async t=>{
+ const p=await cli(t,e=>{
+  for(const event of e){event.opcode='  '+event.opcode+' ';event.time=event.time.replace('T12:','T20:').replace('Z','00+08:00');}
+  e[0].data.EventsLost='   0';e[1].data.ProcessId=' 0x48 ';
+ },x=>Buffer.from('\uFEFF'+x.replace('encoding="UTF-8"','encoding="UTF-16"'),'utf16le'));
+ assert.equal(p.status,0,p.stderr);assert.deepEqual(p.result.loaded,[library.toLowerCase()]);
+});
+for(const [name,time,rc] of [
+ ['last nanosecond before exit', '2026-10-20T12:00:00.009499999+00:00',0],
+ ['first nanosecond after exit', '2026-10-20T12:00:00.009500001+00:00',1],
+])test(name+' retains exact image lifetime comparison',async t=>{
+ const p=await cli(t,e=>e[3].time=time);assert.equal(p.status,rc,p.stderr);
+ if(rc)assert.match(p.stderr,/TRACE_LLVM_LOAD_MISMATCH/);
+});
+for(const [name,change,reason] of [
+ ['empty integer',e=>e[0].data.EventsLost='   ','TRACE_INTEGER'],
+ ['invalid integer',e=>e[0].data.EventsLost='0 0','TRACE_INTEGER'],
+ ['duplicate header',e=>e.push({...e[0]}),'TRACE_LOG_HEADER_REQUIRED'],
+ ['invalid UTC offset',e=>e[3].time='2026-10-20T12:00:00.002000000+99:00','TRACE_TIME'],
+ ['extra time precision',e=>e[3].time='2026-10-20T12:00:00.0020000001Z','TRACE_TIME'],
+])test(name+' is rejected',async t=>{
+ const p=await cli(t,change);assert.equal(p.status,1);assert.match(p.stderr,new RegExp(reason));
 });

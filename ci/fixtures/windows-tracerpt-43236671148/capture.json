@@ -1,0 +1,34 @@
+{
+  "execution": {
+    "argv": [
+      "D:\\a\\_temp\\windows-native-host-inputs\\host\\cangjie\\third_party\\llvm\\bin\\llc.exe",
+      "--version"
+    ],
+    "cwd": "D:\\a\\cjcj\\cjcj\\.srcbuild\\host-execution\\windows-llvm-trace",
+    "started": "2026-11-12T14:24:28.864Z",
+    "pid": 10160,
+    "rc": 0,
+    "signal": null,
+    "stdout": "host-llvm.stdout",
+    "stderr": "host-llvm.stderr",
+    "ended": "2026-11-12T14:24:28.884Z"
+  },
+  "parentPid": 740,
+  "argv": [
+    "D:\\a\\_temp\\windows-native-host-inputs\\host\\cangjie\\third_party\\llvm\\bin\\llc.exe",
+    "--version"
+  ],
+  "devices": {
+    "drives": [
+      {
+        "drive": "C:",
+        "device": "\\Device\\HarddiskVolume3"
+      },
+      {
+        "drive": "D:",
+        "device": "\\Device\\HarddiskVolume5"
+      }
+    ],
+    "systemRoot": "C:\\Windows"
+  }
+}
