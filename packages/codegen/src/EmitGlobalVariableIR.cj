@@ -6,6 +6,9 @@ import cjcj::chir.GlobalVar
 import cjcj::chir.StringLiteral
 import cjcj::chir.MangleType
 
+// Name of the internal 1-byte .bss guard emitted next to zero-sized globals (upstream !2302).
+private let ZERO_SIZE_GV_GUARD = ".cjzsguard"
+
 private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
     private let cgMod: CGModule
     private let chirGVs: ArrayList<GlobalVar>
@@ -117,7 +120,6 @@ private func AppendZeroSizeGVGuard(cgMod: CGModule): Unit {
     }
 }
 
-private let ZERO_SIZE_GV_GUARD = ".cjzsguard"
 
 public func EmitGlobalVariableIR(cgMod: CGModule, chirGVs: ArrayList<GlobalVar>, splitNum: Int64): Unit {
     let generator = GlobalVariableGeneratorImpl(cgMod, chirGVs, splitNum)
