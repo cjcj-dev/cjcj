@@ -3835,12 +3835,12 @@ public class CjoSignatureMaterializer {
             if (fileIndex == 0u32) { 0u64 } else { allFileIds[Int64(fileIndex) - 1] }
         } else {
             let importOffset = Int64(pkgIndex) - 1
-            let selfFileId = if (deserializingCommon && flatImports >= 0 && importOffset >= 0 &&
+            let selfFileId: Option<UInt64> = if (deserializingCommon && flatImports >= 0 && importOffset >= 0 &&
                 importOffset < reader.VectorLength(flatImports)) {
                 CommonPartSelfPackageFileId(reader.StringAt(reader.VectorOffsetElement(flatImports, importOffset)),
                     fileIndex)
             } else {
-                None
+                Option<UInt64>.None
             }
             if (let Some(selfId) <- selfFileId) {
                 selfId

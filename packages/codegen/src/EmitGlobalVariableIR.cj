@@ -82,8 +82,8 @@ private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
             // Latch: once this module holds a zero-sized zero-initialized (.bss) global,
             // the module gets one guard byte (EmitGlobalVariableIR.cpp, upstream !2302).
             if (!needZeroSizeGuard && unsafe { LLVMIsGlobalConstant(rawGlobal) } == 0) {
-                let init = unsafe { LLVMGetInitializer(rawGlobal) }
-                if (!init.isNull() && unsafe { LLVMIsNull(init) } != 0) {
+                let initValue = unsafe { LLVMGetInitializer(rawGlobal) }
+                if (!initValue.isNull() && unsafe { LLVMIsNull(initValue) } != 0) {
                     needZeroSizeGuard = cgMod.GetTypeSize(unsafe { LLVMGlobalGetValueType(rawGlobal) }) == 0u64
                 }
             }

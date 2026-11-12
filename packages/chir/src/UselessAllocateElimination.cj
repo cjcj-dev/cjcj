@@ -1,5 +1,6 @@
 package cjcj::chir
 
+import std.collection.ArrayList
 import cjcj::utils.StaticCast
 
 public class UselessAllocateElimination {
