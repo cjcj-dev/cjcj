@@ -371,7 +371,7 @@ test('both JavaScript entry points require the loaded environment value', async 
 const HOST_TOOLCHAIN_PINS = Object.freeze({
   'ci/host_sdk_pin.env': Object.freeze({
     host: 'ordinary CI and source-build host',
-    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml', 'srcbuild-target.yml']),
+    loaders: Object.freeze(['build-ast-support.yml', 'build-host-runtime.yml', 'srcbuild-target.yml', 'windows-native-host-entry.yml']),
   }),
 });
 
