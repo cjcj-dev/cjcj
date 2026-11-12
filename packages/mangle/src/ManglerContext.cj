@@ -170,9 +170,40 @@ public class ManglerContext {
     }
 
     public func GetIndexOfExtend(file: File, target: ExtendDecl): Option<Int64> {
-        let values = file2ExtendDecl[file][target.extendedType.getOrThrow().GetTy().getOrThrow().String()]
-        for (i in 0..values.size) { if (values[i] == target) { return i } }
+        let extendedTy = target.extendedType.getOrThrow().GetTy().getOrThrow().String()
+        let values = file2ExtendDecl[file][extendedTy]
+        for (i in 0..values.size) {
+            if (values[i] == target) {
+                return i + CountExtendsInLaterSameNamedFiles(file, extendedTy)
+            }
+        }
         return None
+    }
+
+    // Extend names carry the file name without its path, so files with the same name in one package must
+    // share an index space. Common-part files follow the specific-part files, so the extends of later
+    // same-named files are counted first; this keeps the names already used by the common CHIR
+    // (BaseMangler.cpp GetIndexOfExtend, upstream !2300).
+    private func CountExtendsInLaterSameNamedFiles(file: File, extendedTy: String): Int64 {
+        var count: Int64 = 0
+        if (let Some(curPackage) <- file.curPackage) {
+            var afterFile = false
+            for (other in curPackage.files) {
+                if (refEq(other, file)) {
+                    afterFile = true
+                    continue
+                }
+                if (!afterFile || other.fileName != file.fileName) {
+                    continue
+                }
+                if (let Some(otherFile) <- file2ExtendDecl.get(other)) {
+                    if (let Some(otherExtends) <- otherFile.get(extendedTy)) {
+                        count += otherExtends.size
+                    }
+                }
+            }
+        }
+        return count
     }
 
     public func GetIndexOfLocalWildcardVar(node: Node, target: VarWithPatternDecl): Option<Int64> {
