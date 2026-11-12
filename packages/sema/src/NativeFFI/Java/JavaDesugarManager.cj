@@ -360,8 +360,7 @@ public class JavaDesugarManager {
         ctx.FlushGeneratedDecls()
         DesugarJavaImplSuperConstructorCall(typeManager, BridgeLib(), BridgeJni(), diag, BridgeUtils()).Process(ctx)
         ctx.FlushGeneratedDecls()
-        GenerateInJavaImplReferenceWrapper(typeManager, importManager, BridgeLib(), Factory(),
-            BridgeUtils()).Process(ctx)
+        GenerateInJavaImplReferenceWrapper(typeManager, BridgeLib(), Factory(), BridgeUtils()).Process(ctx)
         ctx.FlushGeneratedDecls()
         DesugarJavaImplSuperMethodCall(BridgeLib(), Factory(), BridgeUtils()).Process(ctx)
         ctx.FlushGeneratedDecls()

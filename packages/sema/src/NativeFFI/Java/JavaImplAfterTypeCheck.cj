@@ -500,15 +500,12 @@ public class GenerateJavaImplRegistryCompanionReferenceField {
 
 public class GenerateInJavaImplReferenceWrapper {
     private let typeManager: TypeManager
-    private let importManager: SemaImportManager
     private let ilib: InteropLibBridge
     private let factory: ASTFactory
     private let utils: Utils
 
-    public init(typeManager: TypeManager, importManager: SemaImportManager, ilib: InteropLibBridge, factory: ASTFactory,
-        utils: Utils) {
+    public init(typeManager: TypeManager, ilib: InteropLibBridge, factory: ASTFactory, utils: Utils) {
         this.typeManager = typeManager
-        this.importManager = importManager
         this.ilib = ilib
         this.factory = factory
         this.utils = utils
@@ -713,11 +710,9 @@ public class GenerateInJavaImplReferenceWrapper {
 
     private func Process(refWrapper: ClassDecl, ctx: AfterTypeCheckContext): Unit {
         CJC_ASSERT(IsImplReferenceWrapper(refWrapper))
-        let registryCompanionName = GetImplRegistryCompanionClassName(refWrapper)
-        let registryCompanion = importManager.GetImportedDecl<ClassDecl>(refWrapper.fullPackageName,
-            registryCompanionName)
-        CJC_NULLPTR_CHECK(registryCompanion)
-        let registryCompanionClass = registryCompanion.getOrThrow()
+        // The companion generated for this package may be private, so it is not an importable decl;
+        // take it from the after-type-check context (GenerateInJavaImplReferenceWrapper.cpp, upstream !2365).
+        let registryCompanionClass = ctx.GetJavaImplRegistryCompanion(refWrapper).getOrThrow()
         let regCompanionRefField = ctx.GetJavaImplRegistryCompanionReferenceField(refWrapper)
         let wrappingCtor = ctx.GetJavaImplWrappingConstructor(refWrapper).getOrThrow()
         GenerateWrappingConstructorBody(wrappingCtor, regCompanionRefField, registryCompanionClass)
