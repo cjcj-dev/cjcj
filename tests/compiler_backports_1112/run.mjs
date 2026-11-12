@@ -22,14 +22,16 @@ function run(label, args, cwd = out) {
   return {rc: p.status, text};
 }
 function check(name, passed) { result.assertions.push({name, passed}); if (!passed) result.rc = 1; console.log(name + ' ' + (passed ? 'PASS' : 'FAIL')); }
-function chirCount(dir, needle) {
+// cjcj --dump-chir writes <output>_CHIR/<stage>_<Pass>.chirtxt; the highest stage number is the final CHIR.
+function chirCount(dir, pattern) {
   const files = [];
-  const walk = d => { for (const e of fs.readdirSync(d, {withFileTypes: true})) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.chir')) files.push(p); } };
+  const walk = d => { for (const e of fs.readdirSync(d, {withFileTypes: true})) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.chirtxt')) files.push(p); } };
   walk(dir);
   if (files.length === 0) return {files: 0, count: -1};
-  files.sort((a, b) => fs.statSync(a).mtimeMs - fs.statSync(b).mtimeMs);
+  const stage = p => Number(path.basename(p).split('_')[0]);
+  files.sort((a, b) => stage(a) - stage(b));
   const last = fs.readFileSync(files.at(-1), 'utf8');
-  return {files: files.length, last: files.at(-1), count: last.split(needle).length - 1};
+  return {files: files.length, last: files.at(-1), count: last.split('\n').filter(l => pattern.test(l)).length};
 }
 // !2359
 {
@@ -49,7 +51,7 @@ function chirCount(dir, needle) {
     if (c.rc !== 0) continue;
     const r = run('getorthrow.' + level + '.run', [elf], dir);
     check('getorthrow.' + level + '.runtime', r.rc === 0 && r.text.includes('GET_OR_THROW_OK'));
-    counts[level] = chirCount(dir, 'getOrThrow');
+    counts[level] = chirCount(dir, /Apply\(.*getOrThrow.*"getorthrow\.cj"/);
   }
   result.getOrThrowCounts = counts;
   check('getorthrow.chir-dump-present', (counts.O0?.count ?? -1) > 0 && (counts.O2?.count ?? -1) >= 0);
@@ -97,7 +99,7 @@ function chirCount(dir, needle) {
     if (c.rc !== 0) continue;
     const r = run('try_alloc.' + level + '.run', [elf], dir);
     check('try_alloc.' + level + '.runtime', r.rc === 0 && r.text.includes('TRY_ALLOC_OK 42'));
-    counts[level] = {tryAllocate: chirCount(dir, 'TryAllocate'), allocate: chirCount(dir, 'Allocate(')};
+    counts[level] = {tryAllocate: chirCount(dir, /TryAllocate\(.*"try_alloc_uae\.cj"/), allocate: chirCount(dir, /= Allocate\(.*"try_alloc_uae\.cj"/)};
   }
   result.tryAllocCounts = counts;
 }
