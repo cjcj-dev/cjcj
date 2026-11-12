@@ -9,10 +9,12 @@ import cjcj::chir.MangleType
 private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
     private let cgMod: CGModule
     private let chirGVs: ArrayList<GlobalVar>
+    private let splitNum: Int64
 
-    public init(cgMod: CGModule, chirGVs: ArrayList<GlobalVar>) {
+    public init(cgMod: CGModule, chirGVs: ArrayList<GlobalVar>, splitNum: Int64) {
         this.cgMod = cgMod
         this.chirGVs = chirGVs
+        this.splitNum = splitNum
     }
 
     public func EmitIR(): Unit {
@@ -20,6 +22,7 @@ private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
         for (chirGV in chirGVs) {
             quickGVs.add(chirGV)
         }
+        var needZeroSizeGuard = false
         for (chirGV in cgMod.GetCGContext().GetCHIRPackage().GetGlobalVarsWithInit()) {
             let globalValue = cgMod.GetOrInsertGlobalVariable(chirGV)
             let rawGlobal = globalValue.GetRawValue()
@@ -76,11 +79,47 @@ private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
                     LLVMSetGlobalMetadata(cgMod.GetLLVMContext(), rawGlobal, GC_GLOBAL_VAR_TYPE, metadata)
                 }
             }
+            // Latch: once this module holds a zero-sized zero-initialized (.bss) global,
+            // the module gets one guard byte (EmitGlobalVariableIR.cpp, upstream !2302).
+            if (!needZeroSizeGuard && unsafe { LLVMIsGlobalConstant(rawGlobal) } == 0) {
+                let init = unsafe { LLVMGetInitializer(rawGlobal) }
+                if (!init.isNull() && unsafe { LLVMIsNull(init) } != 0) {
+                    needZeroSizeGuard = cgMod.GetTypeSize(unsafe { LLVMGlobalGetValueType(rawGlobal) }) == 0u64
+                }
+            }
+        }
+        if (splitNum > 1 && needZeroSizeGuard) {
+            AppendZeroSizeGVGuard(cgMod)
         }
     }
 }
 
-public func EmitGlobalVariableIR(cgMod: CGModule, chirGVs: ArrayList<GlobalVar>): Unit {
-    let generator = GlobalVariableGeneratorImpl(cgMod, chirGVs)
+// A zero-sized global (e.g. a Unit-typed one) occupies no storage. If it is the last .bss
+// fragment after linking, its address equals the end of the output section, so no section
+// covers it and a debugger cannot apply the per-section PIE bias to its DW_OP_addr
+// ("read memory failed"). One internal 1-byte .bss guard per module, kept alive through
+// llvm.used, moves the section end past it.
+private func AppendZeroSizeGVGuard(cgMod: CGModule): Unit {
+    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+        try (guardName = unsafe { LibC.mallocCString(ZERO_SIZE_GV_GUARD) }.asResource()) {
+            let guardType = unsafe { LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw) }
+            var guardGlobal = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, guardName.value) }
+            if (guardGlobal.isNull()) {
+                guardGlobal = unsafe { LLVMAddGlobal(moduleHandle.raw, guardType, guardName.value) }
+            }
+            unsafe {
+                LLVMSetLinkage(guardGlobal, LLVMLinkageValue(LLVMLinkage.Internal))
+                LLVMSetAlignment(guardGlobal, 1u32)
+                LLVMSetInitializer(guardGlobal, LLVMConstNull(guardType))
+            }
+            cgMod.GetCGContext().AddLLVMUsedVars(ZERO_SIZE_GV_GUARD)
+        }
+    }
+}
+
+private let ZERO_SIZE_GV_GUARD = ".cjzsguard"
+
+public func EmitGlobalVariableIR(cgMod: CGModule, chirGVs: ArrayList<GlobalVar>, splitNum: Int64): Unit {
+    let generator = GlobalVariableGeneratorImpl(cgMod, chirGVs, splitNum)
     IRGenerator(generator).EmitIR()
 }
