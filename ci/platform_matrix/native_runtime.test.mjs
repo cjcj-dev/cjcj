@@ -357,3 +357,43 @@ test('legacy native public entry retains schema-1 CPP status through installatio
  for(const base of [install,unpack])assert.equal(fs.readFileSync(base+'/share/runtime-build/runtime/CMakebuild/gc-unit.status','utf8'),status);
  assert.ok(fs.existsSync(unpack+'/share/runtime-build/runtime/tests/gc_unit/installed-language-entry.mjs'));
 },{legacy:true}));
+
+// RUNTIME_PHASE=completed-install reinstalls CJThread to the configure-time
+// prefix first, which rewrites the child manifest back to that prefix. The
+// phase must check and consume the archives there (manifestRoot: prefix); the
+// installRoot default would reject the manifest the reinstall just wrote.
+test('completed-install consumes CJThread from its child reinstall at the configure prefix',{skip:process.platform!=='linux'},()=>fixture(({run,manifest,install,log,source,root})=>{
+  const built=run();assert.equal(built.status,0,built.stdout+built.stderr);
+  const build=path.join(source,'runtime/CMakebuild'),child=path.join(build,'cjthread-build');
+  const prefix=/^CMAKE_INSTALL_PREFIX:[^=]+=(.*)$/m.exec(fs.readFileSync(path.join(child,'CMakeCache.txt'),'utf8'))[1].trim();
+  const tuple=platform+'_cjnative',archives=['thread','aio'].map(name=>path.join(prefix,'lib',tuple,'libcangjie-'+name+'.a'));
+  // Precondition: the normal phase's parent install left the child manifest at installRoot.
+  const before=fs.readFileSync(path.join(child,'install_manifest.txt'),'utf8').trim().split('\n');
+  assert.ok(before.length===2&&before.every(file=>file.startsWith(install+path.sep)),before.join('\n'));
+  // The build phase deletes its own gate status; completed-install receives the retained copy.
+  const gate=path.join(root,'completed-gate.status');fs.copyFileSync(path.join(build,'gc-unit.status'),gate);
+  // Only the CJThread child reinstall is a command fixture; every other cmake call is real.
+  const real=spawnSync('sh',['-c','command -v cmake'],{encoding:'utf8'}).stdout.trim();assert.ok(path.isAbsolute(real),'real cmake');
+  fs.writeFileSync(path.join(root,'bin','cmake'),'#!'+process.execPath+'\n'+
+    "import fs from 'node:fs';import path from 'node:path';import {spawnSync} from 'node:child_process';\n"+
+    "const args=process.argv.slice(2);\n"+
+    "if(args[0]==='--install'&&path.basename(args[1])==='cjthread-build'){\n"+
+    " fs.appendFileSync(process.env.FIXTURE_LOG,JSON.stringify({name:'cmake',args})+'\\n');\n"+
+    " const prefix=args[args.indexOf('--prefix')+1],tuple=/^TARGET_ARCH:[^=]+=(.*)$/m.exec(fs.readFileSync(path.join(args[1],'CMakeCache.txt'),'utf8'))[1].trim();\n"+
+    " const files=['thread','aio'].map(name=>path.join(prefix,'lib',tuple,'libcangjie-'+name+'.a'));\n"+
+    " for(const file of files){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'reinstalled '+path.basename(file));}\n"+
+    " fs.writeFileSync(path.join(args[1],'install_manifest.txt'),files.join('\\n'));process.exit(0);\n"+
+    "}\n"+
+    'const r=spawnSync('+JSON.stringify(real)+",args,{stdio:'inherit'});process.exit(r.status??1);\n",{mode:0o755});
+  const r=run({RUNTIME_PHASE:'completed-install',RUNTIME_COMPLETED_GATE_STATUS:gate});
+  console.log('COMPLETED_INSTALL_CJTHREAD_TARGET_REACHED');
+  assert.doesNotMatch(r.stdout+r.stderr,/NATIVE_CJTHREAD_INSTALL_MANIFEST/);
+  assert.equal(r.status,0,r.stdout+r.stderr);
+  const reinstall=fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).filter(x=>x.name==='cmake');
+  assert.deepEqual(reinstall.map(x=>x.args),[['--install',child,'--prefix',prefix]]);
+  const marker='native_runtime_dependency_command=';
+  const consumed=r.stdout.split('\n').filter(line=>line.startsWith(marker)).map(line=>JSON.parse(line.slice(marker.length)).argv);
+  assert.ok(consumed.some(argv=>argv.includes('-DCJ_THREAD_ARCHIVE='+archives[0])&&argv.includes('-DCJ_AIO_ARCHIVE='+archives[1])),JSON.stringify(consumed));
+  const m=manifest();assert.equal(m.phase,'completed-install');
+  assert.deepEqual(m.commands[0],['cmake','--install',child,'--prefix',prefix]);
+}));
