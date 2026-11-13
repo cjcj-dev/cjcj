@@ -119,9 +119,10 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
     if(mode==='materialize')await materializeNativeJob({artifact:input,input:work});
     else if(mode==='build')await buildNativeCjdbJob({input,work});
     else if(mode==='package') {
+      const install=await privateRoot(input),destination=await privateRoot(work);
       const records=[];
-      try {await packageNativeCjdb({install:input,work,records});}
-      finally {await atomicJson(path.join(work,'commands.json'),records);}
+      try {await packageNativeCjdb({install,work:destination,records});}
+      finally {await atomicJson(path.join(destination,'commands.json'),records);}
     }
     else if(mode==='unpack')await unpackNativeCjdb({archive:input,install:work});
     else throw Error('usage: native-cjdb-job.mjs materialize ARTIFACT INPUT | build INPUT WORK | package INSTALL WORK | unpack ARCHIVE INSTALL');
