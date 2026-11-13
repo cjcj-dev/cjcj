@@ -32,3 +32,17 @@ test('public package rejects absent original Python facts before creating an arc
   await assert.rejects(ex(process.execPath,[entry,'package',root+'/install',root+'/package']),e=>e.code===1&&e.stderr.includes('NATIVE_JOB_PYTHON_SOURCE_REQUIRED'));
   await assert.rejects(fs.access(root+'/package/native-install.tar'),{code:'ENOENT'});
 });
+
+test('public package rejects a linked WORK without writing to its target',async()=>{
+  const root=await fs.mkdtemp(path.join(process.env.TMPDIR||os.tmpdir(),'native-package-link-'));
+  const install=root+'/install',target=root+'/target',work=root+'/package';
+  await fs.mkdir(install);await fs.mkdir(target);
+  const sentinel=Buffer.from('original commands sentinel\n');
+  await fs.writeFile(target+'/commands.json',sentinel);
+  await fs.symlink(target,work,'dir');
+  await assert.rejects(ex(process.execPath,[entry,'package',install,work]),e=>e.code===1&&e.stderr.includes('INSTALL_LINK'));
+  console.log('REJECTED_WORK_NO_WRITE_ASSERTION_REACHED');
+  assert.deepEqual(await fs.readFile(target+'/commands.json'),sentinel,'rejected WORK must preserve target commands bytes');
+  assert.deepEqual(await fs.readdir(target),['commands.json'],'rejected WORK must not create archives or temporary files');
+  assert.deepEqual(await fs.readdir(install),[],'rejected WORK must not modify INSTALL');
+});
