@@ -78,6 +78,15 @@ public abstract class Analysis<Domain> where Domain <: AbstractDomain<Domain> {
         return None
     }
 
+    // Propagates state along one control-flow edge and joins it into the successor entry state
+    // (upstream Analysis.h JoinSuccessorState, cangjie_compiler !2344).
+    public open func JoinSuccessorState(successorState: Domain, state: Domain, terminator: Expression,
+        successor: Block): Bool {
+        let _ = terminator
+        let _ = successor
+        return successorState.Join(state)
+    }
+
     public static func Filter(method: Function): Bool {
         let _ = method
         return true

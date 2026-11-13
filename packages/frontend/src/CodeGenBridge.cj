@@ -651,14 +651,16 @@ private class ToCHIR {
                 RedundantLoadElimination().RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer,
                     threadNum: Int64(options.GetJobs()))
             }
-            if (options.enableChirRGetOrThrowE) {
-                RedundantGetOrThrowElimination().RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer,
+            // Upstream CHIR.cpp RedundantGetOrThrowElimination runs at CHIR O2 and above (cangjie_compiler
+            // !2344); the historical opt-in flag still enables it at lower levels.
+            if (options.enableChirRGetOrThrowE || options.IsCHIROptimizationLevelOverO2()) {
+                RedundantGetOrThrowElimination(builder).RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer,
                     threadNum: Int64(options.GetJobs()))
             }
             RunRangePropagation(currentPackage)
             if (options.IsCHIROptimizationLevelOverO2()) {
                 UselessAllocateElimination.RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer,
-                    threadNum: Int64(options.GetJobs()))
+                    threadNum: Int64(options.GetJobs()), builder: Some(builder))
             }
             Devirtualization(currentPackage, devirtInfo)
             RunArrayLambdaOpt(currentPackage)

@@ -395,17 +395,18 @@ public class ActiveStatePool<VD> <: ValueStatePool<VD, ActiveStatePool<VD>>
     }
 
     public func Join(other: ActiveStatePool<VD>): Bool {
+        // Missing entries are TOP because they may have been evicted; only entries present in both pools keep a
+        // precise value after the join (upstream ActiveStatePool.h Join, cangjie_compiler !2357). Entries only
+        // present in `other` are not inserted: absence already means TOP here.
         var changed = false
-        for ((_, value) in data) {
-            if (value.IsRef()) {
-                value.SetRef(Ref.GetTopRefInstance())
-            }
-        }
-        for ((key, value) in other.data) {
-            if (let Some(current) <- data.get(key)) {
-                changed = current.Join(value) || changed
-            } else if (!value.IsRef()) {
-                Insert(key, value)
+        for ((key, value) in data) {
+            if (let Some(incoming) <- other.data.get(key)) {
+                changed = value.Join(incoming) || changed
+            } else if (value.IsRef()) {
+                // AbstractObject keys have no type; keep the REF kind of the existing domain.
+                changed = value.Join(VD.Create(Ref.GetTopRefInstance())) || changed
+            } else {
+                changed = value.Join(VD.Create(true)) || changed
             }
         }
         return changed

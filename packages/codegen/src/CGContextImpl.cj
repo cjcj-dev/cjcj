@@ -10,6 +10,7 @@ private func CGTypeCacheHash(extraInfo: TypeExtraInfo): Int64 {
     result = result * 131 + if (extraInfo.isStaticMethod) { 1 } else { 0 }
     result = result * 131 + if (extraInfo.allowBasePtr) { 1 } else { 0 }
     result = result * 131 + if (extraInfo.forWrapper) { 1 } else { 0 }
+    result = result * 131 + if (extraInfo.forWithTIWrapper) { 1 } else { 0 }
     for (ty in extraInfo.instantiatedParamTypes) {
         result = result * 131 + ty.hashCode()
     }
@@ -23,6 +24,7 @@ public struct CGTypeCacheKey <: Hashable & Equatable<CGTypeCacheKey> {
     private let isStaticMethod: Bool
     private let allowBasePtr: Bool
     private let forWrapper: Bool
+    private let forWithTIWrapper: Bool
     private let instantiatedParamTypes: Array<Type>
     private let hashValue: Int64
 
@@ -32,6 +34,7 @@ public struct CGTypeCacheKey <: Hashable & Equatable<CGTypeCacheKey> {
         isStaticMethod = extraInfo.isStaticMethod
         allowBasePtr = extraInfo.allowBasePtr
         forWrapper = extraInfo.forWrapper
+        forWithTIWrapper = extraInfo.forWithTIWrapper
         instantiatedParamTypes = extraInfo.instantiatedParamTypes.toArray()
         hashValue = CGTypeCacheHash(extraInfo)
     }
@@ -39,7 +42,8 @@ public struct CGTypeCacheKey <: Hashable & Equatable<CGTypeCacheKey> {
     public operator func ==(right: CGTypeCacheKey): Bool {
         if (instantiatedParamTypes.size != right.instantiatedParamTypes.size || addrspace != right.addrspace ||
             isMethod != right.isMethod || isStaticMethod != right.isStaticMethod ||
-            allowBasePtr != right.allowBasePtr || forWrapper != right.forWrapper) {
+            allowBasePtr != right.allowBasePtr || forWrapper != right.forWrapper ||
+            forWithTIWrapper != right.forWithTIWrapper) {
             return false
         }
         var idx: Int64 = 0
@@ -64,7 +68,7 @@ public struct CGTypeCacheKey <: Hashable & Equatable<CGTypeCacheKey> {
         if (instantiatedParamTypes.size != extraInfo.instantiatedParamTypes.size ||
             addrspace != extraInfo.addrspace || isMethod != extraInfo.isMethod ||
             isStaticMethod != extraInfo.isStaticMethod || allowBasePtr != extraInfo.allowBasePtr ||
-            forWrapper != extraInfo.forWrapper) {
+            forWrapper != extraInfo.forWrapper || forWithTIWrapper != extraInfo.forWithTIWrapper) {
             return false
         }
         var idx: Int64 = 0

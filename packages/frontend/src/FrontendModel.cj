@@ -1842,6 +1842,9 @@ public class CjoSignatureMaterializer {
         } else {
             CJC_ASSERT(Int64(pkgIndex - 1u32) < importedFullPackageNames.size)
             let fullPackageName = importedFullPackageNames[Int64(pkgIndex - 1u32)]
+            if (let Some(selfFileId) <- CommonPartSelfPackageFileId(fullPackageName, fileIndex)) {
+                return Position(selfFileId, Int64(line), Int64(column))
+            }
             if (let Some(packageDecl) <- packageDecls.get(fullPackageName)) {
                 CJC_ASSERT(Int64(fileIndex) < packageDecl.srcPackage.files.size)
                 let file = packageDecl.srcPackage.files[Int64(fileIndex)]
@@ -3831,7 +3834,17 @@ public class CjoSignatureMaterializer {
         let fileID = if (pkgIndex == 0u32) {
             if (fileIndex == 0u32) { 0u64 } else { allFileIds[Int64(fileIndex) - 1] }
         } else {
-            if (let Some(importedFile) <- ImportedFileByFlatPosition(reader, pkgIndex, fileIndex)) {
+            let importOffset = Int64(pkgIndex) - 1
+            let selfFileId: Option<UInt64> = if (deserializingCommon && flatImports >= 0 && importOffset >= 0 &&
+                importOffset < reader.VectorLength(flatImports)) {
+                CommonPartSelfPackageFileId(reader.StringAt(reader.VectorOffsetElement(flatImports, importOffset)),
+                    fileIndex)
+            } else {
+                Option<UInt64>.None
+            }
+            if (let Some(selfId) <- selfFileId) {
+                selfId
+            } else if (let Some(importedFile) <- ImportedFileByFlatPosition(reader, pkgIndex, fileIndex)) {
                 let importedFileID = importedFile.begin.fileID
                 if (!idToFileMap.contains(importedFileID)) {
                     idToFileMap[importedFileID] = importedFile
@@ -3842,6 +3855,17 @@ public class CjoSignatureMaterializer {
             }
         }
         return Position(fileID, line, column)
+    }
+
+    // Macro-expanded declarations can refer to their own package by name (ASTWriter SaveDecl). While the
+    // common part is deserialized that name resolves to the specific package, whose file list differs, so
+    // such positions use this package's own file ids (ASTLoader.cpp LoadPos, upstream !2300).
+    private func CommonPartSelfPackageFileId(fullPackageName: String, fileIndex: UInt32): Option<UInt64> {
+        if (!deserializingCommon || fullPackageName != packageName) {
+            return None
+        }
+        CJC_ASSERT(Int64(fileIndex) < allFileIds.size)
+        return allFileIds[Int64(fileIndex)]
     }
 
     private func ImportedFileByFlatPosition(reader: CjoFlatBuffer, pkgIndex: UInt32, fileIndex: UInt32): Option<File> {

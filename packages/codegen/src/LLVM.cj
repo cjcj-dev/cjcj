@@ -372,6 +372,7 @@ foreign {
     func LLVMInstructionEraseFromParent(inst: LLVMValueRef): Unit
     func LLVMMoveBasicBlockAfter(block: LLVMBasicBlockRef, movePos: LLVMBasicBlockRef): Unit
     func LLVMConstNull(valueType: LLVMTypeRef): LLVMValueRef
+    func LLVMIsNull(value: LLVMValueRef): Int32
     func LLVMGetUndef(valueType: LLVMTypeRef): LLVMValueRef
     func LLVMGetPoison(valueType: LLVMTypeRef): LLVMValueRef
     func LLVMConstInt(intType: LLVMTypeRef, value: UInt64, signExtend: Int32): LLVMValueRef

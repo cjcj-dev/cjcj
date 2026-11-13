@@ -141,4 +141,20 @@ public class GetOrThrowResultAnalysis <: Analysis<GetOrThrowResultDomain> {
         let _ = terminator
         return None
     }
+
+    // A getOrThrow TryApply only produces its result on the success edge; the error edge keeps the
+    // incoming state (upstream GetOrThrowResultAnalysis.cpp JoinSuccessorState, cangjie_compiler !2344).
+    public override func JoinSuccessorState(successorState: GetOrThrowResultDomain,
+        state: GetOrThrowResultDomain, terminator: Expression, successor: Block): Bool {
+        if (IsGetOrThrowFunction(terminator)) {
+            if (let Some(tryApply) <- (terminator as TryApply)) {
+                if (tryApply.GetSuccessBlock().nodeId == successor.nodeId) {
+                    let successState = state.Clone()
+                    PropagateExpressionEffect(successState, terminator)
+                    return successorState.Join(successState)
+                }
+            }
+        }
+        return successorState.Join(state)
+    }
 }

@@ -158,6 +158,12 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
         return objectValue
     }
     if (IsThisArgOfStructMethod(sourceValue)) {
+        let copySource = if (HasAttributeAtIndex(irBuilder.GetInsertFunction(), UInt32.Max,
+            THIS_PARAM_HAS_TI_ATTR)) {
+            irBuilder.GetPayloadFromObject(sourceRawValue)
+        } else {
+            sourceRawValue
+        }
         let sourceType = DeRef(sourceTy)
         let typeInfo = irBuilder.CreateTypeInfo(sourceType)
         let size = irBuilder.GetLayoutSize_32(sourceType)
@@ -167,11 +173,11 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
             let args = ArrayList<LLVMValueRef>()
             args.add(tmp)
             args.add(payloadPtr)
-            args.add(sourceRawValue)
+            args.add(copySource)
             args.add(size)
             irBuilder.CallGCWriteAgg(sourceCGType.GetLayoutType(), args)
         } else {
-            irBuilder.CallGCWriteGenericPayloadFromSrc(tmp, sourceRawValue, size, typeInfo)
+            irBuilder.CallGCWriteGenericPayloadFromSrc(tmp, copySource, size, typeInfo)
         }
         return tmp
     }

@@ -147,7 +147,7 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
             for (successor in successors) {
                 let successorState = entryStates.get(successor.nodeId) ??
                     throw IllegalStateException("Engine IterateSingleUnitToFixpoint expected successor state")
-                let hasChanged = successorState.Join(state)
+                let hasChanged = analysis.JoinSuccessorState(successorState, state, terminator, successor)
                 if (hasChanged) {
                     if (!worklistSet.contains(successor)) {
                         worklist.add(successor)
