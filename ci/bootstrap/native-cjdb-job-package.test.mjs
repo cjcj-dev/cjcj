@@ -15,6 +15,8 @@ test('public package preserves original Python input without rebuilding the nati
   await fs.writeFile(install+'/BUILD-INPUTS.json',JSON.stringify(facts));
   const before=await fs.readFile(install+'/BUILD-INPUTS.json');
   const result=await ex(process.execPath,[entry,'package',install,work]);
+  console.log('ORIGINAL_PYTHON_INPUT_CARRIED_ASSERTION_REACHED');
+  assert.equal(await fs.access(install+'/share/cjcj/build-inputs/python-original.json').then(()=>true,()=>false),true,'original Python input must be carried');
   assert.equal(await fs.readFile(install+'/share/cjcj/build-inputs/python-original.json','utf8'),await fs.readFile(original,'utf8'));
   assert.deepEqual(await fs.readFile(install+'/BUILD-INPUTS.json'),before);
   const members=(await ex('tar',['-tf',work+'/native-install.tar'])).stdout;
