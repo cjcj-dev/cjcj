@@ -34,6 +34,7 @@ class MacroInvoke {
     // Kept by macroInvokeTable until the corresponding R future is DONE.
     var argument = CPointer<Int64>()
     var resetArgument = CPointer<ResetNotify>()
+    var resetHostArgument = CPointer<ResetNotify>()
 
     init(mc: MacroCall) {
         macCall = Some(mc)

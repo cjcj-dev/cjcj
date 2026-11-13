@@ -591,6 +591,14 @@ private func OpenMacroInNamespace(path: String): Option<RuntimeHandle> {
     let handle = OpenInLinkMap(path, RuntimeInit.GetInstance().LinkMapId())
     if (handle.opened) {
         handle.retain = true
+        // The isolated map has its own libcangjie-std-ast.  Register the
+        // selfhost MacroCall adapters on this handle before exposing the
+        // macro entry point; otherwise CJ_CheckParentContext falls through
+        // to the legacy C++ MacroCall* interpretation of the id cell.
+        if (let Some(message) <- RegisterMacroHostDispatchInNamespace(handle)) {
+            Errorln(message)
+            return Some(RuntimeHandle(path))
+        }
     }
     return Some(handle)
 }
@@ -856,6 +864,9 @@ public class RuntimeInit {
     private var closeFailure: Option<Exception> = None
     public var taskOnOpenedRuntime: Bool = false
     private var hasLinkMap: Bool = false
+    private var hostCleanerSetter = CPointer<Unit>()
+    private var targetCleanerSetter = CPointer<Unit>()
+    private var hostCleanerRegistrar = CPointer<Unit>()
     private var linkMapId: Int64 = 0
 
     public init() {
@@ -872,6 +883,18 @@ public class RuntimeInit {
 
     public func HasLinkMap(): Bool {
         return hasLinkMap
+    }
+
+    public func HostCleanerSetter(): CPointer<Unit> { return hostCleanerSetter }
+
+    private func PrepareTargetCleanerOwner(): Unit {
+        if (!targetCleanerSetter.isNull()) {
+            let status = unsafe { CFunc<(CPointer<Unit>) -> Int32>(targetCleanerSetter)(hostCleanerRegistrar) }
+            if (status != 0) {
+                throw IllegalStateException("isolated target cleaner registrar conflict before runtime entry: " +
+                    status.toString())
+            }
+        }
     }
 
     public func LinkMapId(): Int64 {
@@ -894,6 +917,16 @@ public class RuntimeInit {
             handle = None
             return None<Bool>
         }
+        // Both directions must name the libc which owns this physical
+        // carrier before entering either runtime's first cleaner producer.
+        hostCleanerSetter = GetHostRuntimeMethodPointer("CJ_MRT_SetForeignThreadCleanerRegistrarV1")
+        targetCleanerSetter = GetMethodPointer(opened, "CJ_MRT_SetForeignThreadCleanerRegistrarV1")
+        hostCleanerRegistrar = GetHostRuntimeMethodPointer("__cxa_thread_atexit_impl")
+        if (hostCleanerSetter.isNull() || targetCleanerSetter.isNull() || hostCleanerRegistrar.isNull()) {
+            Errorln("isolated macro requires CJ_MRT_SetForeignThreadCleanerRegistrarV1 in both runtimes")
+            return Some(false)
+        }
+        PrepareTargetCleanerOwner()
         if (!PrepareRuntime(opened, initArgs)) {
             return Some(false)
         }
@@ -1020,18 +1053,31 @@ public class RuntimeInit {
 
     // Submission is serialized with close. The caller owns the returned future
     // and must retain its callback arguments until CompleteTask succeeds.
-    public func SubmitTask(callback: CPointer<Unit>, argument: CPointer<Unit>): CPointer<Unit> {
+    public func SubmitTask(callback: CPointer<Unit>, argument: CPointer<Unit>, hostCallback!: Bool = true): CPointer<Unit> {
         synchronized(lifecycleMutex) {
             if (closing || !initRuntime) {
                 throw IllegalStateException("macro task submitted to an unavailable runtime")
             }
-            let task = unsafe { InvokeNewTaskFromC(runtimeMethodFunc)(callback, argument) }
+            PrepareTargetCleanerOwner()
+            let task = SubmitTaskToRuntime(callback, argument, hostCallback)
             if (task.isNull()) {
                 throw IllegalStateException("macro runtime RunCJTask failed")
             }
             outstandingTasks++
             return task
         }
+    }
+
+    @When[os == "Linux"]
+    private func SubmitTaskToRuntime(callback: CPointer<Unit>, argument: CPointer<Unit>, hostCallback: Bool): CPointer<Unit> {
+        if (hasLinkMap && hostCallback) {
+            return SubmitNamespaceHostTask(runtimeMethodFunc, callback, argument)
+        }
+        return unsafe { InvokeNewTaskFromC(runtimeMethodFunc)(callback, argument) }
+    }
+    @When[os != "Linux"]
+    private func SubmitTaskToRuntime(callback: CPointer<Unit>, argument: CPointer<Unit>, hostCallback: Bool): CPointer<Unit> {
+        return unsafe { InvokeNewTaskFromC(runtimeMethodFunc)(callback, argument) }
     }
 
     public func CompleteTask(task: CPointer<Unit>): CPointer<Unit> {
@@ -1084,6 +1130,7 @@ public class RuntimeInit {
                 if (ownsInitializedRuntime) {
                     // Only this instance's successfully initialized independent
                     // runtime is finished; never the borrowed process host.
+                    PrepareTargetCleanerOwner()
                     FinishRuntime(handle.getOrThrow())
                     ownsInitializedRuntime = false
                 }

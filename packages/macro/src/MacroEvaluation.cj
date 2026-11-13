@@ -820,8 +820,19 @@ public class MacroEvaluation {
                         mInvoke.resetArgument.write(ResetNotify(CPointer<Unit>(ResetVariableFinishNotify),
                             CPointer<Unit>(mInvoke.argument)))
                     }
+                    if (runtimeInit.HasLinkMap()) {
+                        mInvoke.resetHostArgument = unsafe { LibC.malloc<ResetNotify>() }
+                        if (mInvoke.resetHostArgument.isNull()) {
+                            throw IllegalStateException("cannot allocate macro reset host notification")
+                        }
+                        unsafe {
+                            mInvoke.resetHostArgument.write(mInvoke.resetArgument.read())
+                            mInvoke.resetArgument.write(ResetNotify(NamespaceResetNotifyBridge(),
+                                CPointer<Unit>(mInvoke.resetHostArgument)))
+                        }
+                    }
                     task = runtimeInit.SubmitTask(CPointer<Unit>(initGlobalFunc),
-                        CPointer<Unit>(mInvoke.resetArgument))
+                        CPointer<Unit>(mInvoke.resetArgument), hostCallback: false)
                     let taskResult = runtimeInit.CompleteTask(task)
                     completed = true
                     synchronized(mInvoke.mtx) {
@@ -837,6 +848,7 @@ public class MacroEvaluation {
                     if (task.isNull() || completed) {
                         synchronized(macroInvokeTableLock) { macroInvokeTable.remove(id) }
                         unsafe {
+                            LibC.free(mInvoke.resetHostArgument)
                             LibC.free(mInvoke.resetArgument)
                             LibC.free(mInvoke.argument)
                         }

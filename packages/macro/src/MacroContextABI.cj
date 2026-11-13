@@ -586,7 +586,7 @@ public func CJ_AST_DiagReport(fptr: CPointer<Unit>, level: CPointer<Int32>, toke
 // host must register the same adapters before evaluating any macro.
 // Field order and layout mirror CJMacroHostCallbacks in
 // stdlib/libs/std/ast/native/ast_api.cpp; structSize rejects layout skew.
-@When[os == "Windows"]
+@When[os == "Linux" || os == "Windows"]
 @C
 struct CJMacroHostCallbacks {
     let structSize: UInt64
@@ -622,26 +622,25 @@ struct CJMacroHostCallbacks {
     }
 }
 
-@When[os == "Windows"]
+@When[os == "Linux" || os == "Windows"]
 private let STD_AST_LIBRARY_NAME = "libcangjie-std-ast.dll"
 
-@When[os == "Windows"]
+@When[os == "Linux" || os == "Windows"]
 private let macroHostDispatchLock = Mutex()
-@When[os == "Windows"]
+@When[os == "Linux" || os == "Windows"]
 private var macroHostDispatchDone = false
-@When[os == "Windows"]
+@When[os == "Linux" || os == "Windows"]
 private var macroHostDispatchError: Option<String> = None
 
-@When[os == "Windows"]
-private func TryRegisterMacroHostDispatch(): Option<String> {
-    let handle = OpenSymbolTable(STD_AST_LIBRARY_NAME)
+@When[os == "Linux" || os == "Windows"]
+private func RegisterMacroHostDispatch(handle: RuntimeHandle): Option<String> {
     if (!handle.opened) {
-        return Some("cannot load '" + STD_AST_LIBRARY_NAME + "' for macro host dispatch registration")
+        return Some("cannot register macro host dispatch on a closed std.ast handle")
     }
     let symbol = GetMethodPointer(handle, "CJ_MacroCall_RegisterHostCallbacks")
     if (symbol.isNull()) {
-        return Some("'" + STD_AST_LIBRARY_NAME + "' does not export CJ_MacroCall_RegisterHostCallbacks; " +
-            "macro evaluation on Windows requires the host-dispatch enabled std.ast library shipped with this compiler")
+        return Some("the loaded std.ast link map does not export CJ_MacroCall_RegisterHostCallbacks; " +
+            "macro evaluation requires the host-dispatch enabled std.ast library shipped with this compiler")
     }
     let register = CFunc<(CPointer<CJMacroHostCallbacks>) -> Bool>(symbol)
     let table = unsafe { LibC.malloc<CJMacroHostCallbacks>() }
@@ -655,9 +654,33 @@ private func TryRegisterMacroHostDispatch(): Option<String> {
     if (!accepted) {
         unsafe { LibC.free(table) }
         return Some("CJ_MacroCall_RegisterHostCallbacks rejected the host table " +
-            "(layout mismatch between the compiler and '" + STD_AST_LIBRARY_NAME + "')")
+            "(layout mismatch between the compiler and the loaded std.ast library)")
     }
     return None
+}
+
+@When[os == "Windows"]
+private func TryRegisterMacroHostDispatch(): Option<String> {
+    let handle = OpenSymbolTable(STD_AST_LIBRARY_NAME)
+    return RegisterMacroHostDispatch(handle)
+}
+
+// Linux macros are loaded with dlmopen into the admission runtime's link map.
+// Register against that exact handle so the callback table is consumed by the
+// libcangjie-std-ast instance in the same namespace, rather than the base map.
+@When[os == "Linux"]
+func RegisterMacroHostDispatchInNamespace(handle: RuntimeHandle): Option<String> {
+    return synchronized(macroHostDispatchLock) {
+        if (macroHostDispatchDone) {
+            return macroHostDispatchError
+        }
+        macroHostDispatchError = RegisterNamespaceCleanerBridge(handle)
+        if (macroHostDispatchError.isNone()) {
+            macroHostDispatchError = RegisterMacroHostDispatch(handle)
+        }
+        macroHostDispatchDone = true
+        macroHostDispatchError
+    }
 }
 
 // Returns None once the host table is registered; otherwise the diagnostic
@@ -679,3 +702,47 @@ func EnsureMacroHostDispatchRegistered(): Option<String> {
 func EnsureMacroHostDispatchRegistered(): Option<String> {
     return None
 }
+
+// These entries are native code in the macro's own link map. A Cangjie @C
+// trampoline would enter the host N2C stub before it could set the TLS owner.
+@When[os == "Linux"]
+private var namespaceHostTaskBridge = CPointer<Unit>()
+@When[os == "Linux"]
+private var namespaceResetNotifyBridge = CPointer<Unit>()
+
+@When[os == "Linux"]
+private func RegisterNamespaceCleanerBridge(handle: RuntimeHandle): Option<String> {
+    let registration = GetMethodPointer(handle, "CJ_MacroCall_RegisterCleanerOwnerV1")
+    let task = GetMethodPointer(handle, "CJ_MacroCall_RunHostTaskV1")
+    let reset = GetMethodPointer(handle, "CJ_MacroCall_ResetNotifyV1")
+    let setter = RuntimeInit.GetInstance().HostCleanerSetter()
+    if (registration.isNull() || task.isNull() || reset.isNull() || setter.isNull()) {
+        return Some("isolated macro requires the paired cleaner-owner runtime and std.ast ABI v1")
+    }
+    let accepted = unsafe { CFunc<(CPointer<Unit>) -> Bool>(registration)(setter) }
+    if (!accepted) {
+        return Some("isolated std.ast rejected the host cleaner-owner interface")
+    }
+    namespaceHostTaskBridge = task
+    namespaceResetNotifyBridge = reset
+    return None
+}
+
+@When[os == "Linux"]
+func SubmitNamespaceHostTask(run: CPointer<Unit>, callback: CPointer<Unit>, argument: CPointer<Unit>): CPointer<Unit> {
+    if (namespaceHostTaskBridge.isNull()) {
+        throw IllegalStateException("isolated macro host task bridge was not registered")
+    }
+    return unsafe { CFunc<(CPointer<Unit>, CPointer<Unit>, CPointer<Unit>) -> CPointer<Unit>>(
+        namespaceHostTaskBridge)(run, callback, argument) }
+}
+
+@When[os == "Linux"]
+func NamespaceResetNotifyBridge(): CPointer<Unit> {
+    if (namespaceResetNotifyBridge.isNull()) {
+        throw IllegalStateException("isolated macro reset bridge was not registered")
+    }
+    return namespaceResetNotifyBridge
+}
+@When[os != "Linux"]
+func NamespaceResetNotifyBridge(): CPointer<Unit> { return CPointer<Unit>() }
