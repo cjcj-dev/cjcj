@@ -17,6 +17,7 @@ import {stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
 import {resolveProductBinary} from '../srcbuild/lib/product-binary.mjs';
 import {acceptInstalledStd, flag, stdBuildType} from './sdk-std-resume.mjs';
 import {readInstalledNativeShim} from './native-shim-inputs.mjs';
+import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {materializeNativeSource, nativeSourceOptions} from './sdk-source.mjs';
 export {acceptInstalledStd} from './sdk-std-resume.mjs';
 // Runtime inputs are a private build input snapshot, not an install overlay.
@@ -125,10 +126,76 @@ export async function nativeStage(options, {signal} = {}) {
       note:'native target/install '+commit});
     } finally { await atomicJson(output+'.commands.json',records); }
   } else if(kind==='h1') {
-    if(!host||!options['private-tools'])throw new Error('H1_HOST_AND_NATIVE_ADAPTER_REQUIRED');
-    await command([process.execPath,path.join(options['private-tools'],'ts/src/sharedbuild/cjcj-stage1.mjs')],{
-      cwd:source,env:{...env,CANGJIE_HOME:host,SB_SOURCE:source,SB_OUTPUT:path.join(output,'bin'),SB_NATIVE_ROOT:sdk,
-        SB_SHA:commit,SB_PLATFORM:platform,SB_CC:options.cc,SB_OPTIMIZATION:'O1',SB_PARAMETERS_JSON:'{"compile_flags":""}'},records});
+    if(!host)throw new Error('H1_HOST_REQUIRED');
+    if(native.os!=='linux')throw new Error('H1_LINUX_PRODUCER_REQUIRED');
+    const shim=await readInstalledNativeShim({install:sdk});
+    const work=output+'.h1',inputs=path.join(work,'inputs'),productRoot=path.join(work,'out');
+    await fs.mkdir(inputs,{recursive:true});await fs.mkdir(productRoot,{recursive:true});
+    await fs.copyFile(path.join(sdk,shim.object.path),path.join(inputs,'llvm-shim.o'));
+    const parameters=path.join(work,'parameters.json');await atomicJson(parameters,{compile_flags:''});
+    const manifest=path.join(source,'cjpm.toml'),before=await fs.readFile(manifest);
+    const packageManifest=path.join(source,'packages/cjc/cjpm.toml'),packageBefore=await fs.readFile(packageManifest);
+    const hostRuntimeFile=path.join(host,'runtime/lib',native.tuple,'libcangjie-runtime'+native.shared);
+    const hostRuntimeSupportsConfigV1=(await nativeSymbolRows(hostRuntimeFile,{platform,runtime:true,defined:true})).includes('CJ_MRT_CjRuntimeInitWithConfigV1');
+    const startupConfiguration={hostRuntimeFile,hostRuntimeSupportsConfigV1};
+    let packageCompiled=packageBefore;
+    const lock=path.join(source,'cjpm.lock'),lockBefore=await fs.readFile(lock).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+    const h1env={...cleanSdkEnvironment(host,platform,process.env,host),cjHeapSize:resources.heap,
+      CANGJIE_BUILD_JOBS:jobs,CMAKE_BUILD_PARALLEL_LEVEL:jobs,CJCJ_COMMIT:commit,
+      CJCJ_SUPERVISOR_WORK:env.CJCJ_SUPERVISOR_WORK};
+    let compiled;
+    try {
+      // The normal Linux producer owns these operations here. Its installed N
+      // shim is already validated; only H1's own runtime configuration is built.
+      const params=await fs.readFile(parameters,'utf8').then(JSON.parse);
+      if(Object.keys(params).some(key=>key!=='compile_flags')||typeof params.compile_flags!=='string')throw Error('H1_PARAMETERS');
+      const compileOption='-O1 '+(params.compile_flags+' --trimpath '+source).trim();
+      let replacements=0;
+      const text=before.toString().replace(/^(\s*compile-option\s*=\s*)"[^"\n]*"/gm,(_,prefix)=>{
+        replacements++;return prefix+JSON.stringify(compileOption);
+      });
+      if(replacements!==1)throw Error('H1_WORKSPACE_COMPILE_OPTION');
+      if(!hostRuntimeSupportsConfigV1) {
+        // Legacy official hosts still need the compiler-only heap policy.
+        const hostOnly=new Set(['--wrap=CJ_MRT_CjRuntimeInitWithConfigV1']);
+        packageCompiled=Buffer.from(packageBefore.toString().replace(/^(\s*link-option\s*=\s*)"([^"\n]*)"/gm,
+          (_,prefix,value)=>prefix+JSON.stringify(value.split(/\s+/).filter(token=>!hostOnly.has(token)).join(' '))));
+      }
+      await fs.writeFile(packageManifest,packageCompiled);
+      await fs.writeFile(manifest,text);
+      await fs.copyFile(path.join(inputs,'llvm-shim.o'),path.join(source,'runtime_shim/cjselfhost_llvmshim.o'));
+      await command([...(process.env.CMAKE_C_COMPILER_LAUNCHER?[process.env.CMAKE_C_COMPILER_LAUNCHER]:[]),options.cc||'cc',
+        '-std=c11','-O2','-fPIC','-D_POSIX_C_SOURCE=200809L','-DCJCJ_COMMIT="'+commit+'"',
+        '-c',path.join(source,'runtime_shim/cjc_runtime_config.c'),'-o',path.join(source,'runtime_shim/cjc_runtime_config.o')],
+        // The system C compiler loads its own LLVM. H's LLVM loader is for
+        // cjpm/cjc and must not be injected into this native tool process.
+        {cwd:source,env:{...h1env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''},records});
+      await command([...(process.env.CMAKE_C_COMPILER_LAUNCHER?[process.env.CMAKE_C_COMPILER_LAUNCHER]:[]),options.cc||'cc',
+        '-std=c11','-O2','-fPIC',...(!hostRuntimeSupportsConfigV1?['-DCJCJ_LEGACY_HOST_RUNTIME']:[]),
+        '-c',path.join(source,'runtime_shim/cjc_heap_defaults.c'),
+        '-o',path.join(source,'runtime_shim/cjc_heap_defaults.o')],
+        {cwd:source,env:{...h1env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''},records});
+      await command([path.join(host,'tools/bin/cjpm'),'build','-j'+jobs],{cwd:source,env:h1env,records});
+      const built=await resolveProductBinary(path.join(source,'target/release/bin'),'h1');
+      await fs.copyFile(built,path.join(productRoot,'cjcj-stage1'));
+      await fs.cp(path.join(source,'target/release'),path.join(productRoot,'release'),{recursive:true,dereference:true});
+      compiled=await fs.readFile(manifest);
+    } finally {
+      await fs.writeFile(manifest,before);
+      await fs.writeFile(packageManifest,packageBefore);
+      const {sha256}=await import('./sdk-io.mjs');
+      await atomicJson(path.join(work,'startup-configuration.json'),{...startupConfiguration,sourceChanges:{
+        'packages/cjc/cjpm.toml':{beforeSha256:sha256(packageBefore),buildSha256:sha256(packageCompiled)}}});
+      if(lockBefore!==null)await fs.writeFile(lock,lockBefore);else await fs.rm(lock,{force:true});
+      await atomicJson(output+'.commands.json',records);
+    }
+    const bin=path.join(output,'bin');await fs.mkdir(bin,{recursive:true});
+    const product=path.join(bin,'cjcj-stage1');
+    await fs.copyFile(path.join(productRoot,'cjcj-stage1'),product);
+    const {sha256}=await import('./sdk-io.mjs');
+    await atomicJson(path.join(bin,'build-inputs.json'),{producer:'sdk-native-stage:h1',source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,startupConfiguration,
+      sourceChanges:{'cjpm.toml':{beforeSha256:sha256(before),buildSha256:sha256(compiled)},
+        'packages/cjc/cjpm.toml':{beforeSha256:sha256(packageBefore),buildSha256:sha256(packageCompiled)}},sha256:await fileDigest(product)});
   } else if(kind==='compiler') {
     const target=await privateRoot(options['target-dir']||path.join(source,'target'));
     if(options.phase==='stage3')await assertFinalStdInput({sdk,std:sdk,runtime:sdk,
@@ -181,7 +248,7 @@ export async function nativeStage(options, {signal} = {}) {
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies'].map(k=>[k,{type:'string'}]));
+    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies'].map(k=>[k,{type:'string'}]));
     spec['resume-installed']={type:'boolean'};
     nativeSourceOptions(process.argv); // Reject duplicate identity flags before parseArgs.
     const {values}=parseArgs({options:spec});

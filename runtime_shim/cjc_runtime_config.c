@@ -206,11 +206,11 @@ static size_t GetStackSizeFromEnv(const char* name)
 /* Heap syntax follows the consumed runtime's CString::ParseSizeFromEnv,
  * not the independent coroutine-stack parser above. In particular, positive
  * digit strings are converted with base 0 (a leading zero means octal). */
-__attribute__((visibility("hidden"))) int CJCJ_CompilerHeapAboveSoftDefault(const char* hard)
+static int CompilerHeapKilobytes(const char* hard, size_t* result)
 {
     if (hard == NULL) return 0;
     char* compact = malloc(strlen(hard) + 1);
-    if (compact == NULL) return 0;
+    if (compact == NULL) abort();
     size_t n = 0;
     for (size_t i = 0; hard[i] != '\0'; ++i) {
         if (hard[i] != ' ') compact[n++] = hard[i];
@@ -234,7 +234,21 @@ __attribute__((visibility("hidden"))) int CJCJ_CompilerHeapAboveSoftDefault(cons
     free(compact);
     if (unit == 'm') kilobytes *= KB;
     if (unit == 'g') kilobytes *= MB;
-    return kilobytes <= SIZE_MAX / KB && kilobytes > 8 * MB;
+    if (kilobytes > SIZE_MAX / KB) return 0;
+    *result = kilobytes;
+    return 1;
+}
+
+__attribute__((visibility("hidden"))) int CJCJ_CompilerHeapAboveSoftDefault(const char* hard)
+{
+    size_t size;
+    return CompilerHeapKilobytes(hard, &size) && size > 8 * MB;
+}
+
+__attribute__((visibility("hidden"))) int CJCJ_CompilerHeapBelowMinimum(const char* hard)
+{
+    size_t size;
+    return hard == NULL || (CompilerHeapKilobytes(hard, &size) && size < 4 * MB);
 }
 #endif
 

@@ -37,6 +37,7 @@ void CJ_MRT_CjRuntimeInitWithConfigV1(const Entry* e, size_t n) {
     seen = getenv("cjSoftMaxHeapSize");
     for (size_t i=0; i<n; ++i) if (!seenHard && !strcmp(e[i].name,"cjHeapSize")) seenHard=e[i].value;
     for (size_t i=0; i<n; ++i) if (!seen && !strcmp(e[i].name,"cjSoftMaxHeapSize")) seen=e[i].value;
+    if (seenHard) seenHard=strdup(seenHard);
 }
 void CJ_MRT_CjRuntimeInit(void) {CJ_MRT_CjRuntimeInitWithConfigV1(NULL,0);}
 `);
@@ -64,7 +65,7 @@ int main(int argc,char** argv) {
     }
     const char* expected=NULL;
     const char* hardExpected=getenv("cjHeapSize");
-    if (!hardExpected) hardExpected="4GB";
+    if (!hardExpected || !strcmp(hardExpected,"2GB") || !strcmp(hardExpected,"256MB")) hardExpected="4GB";
     if (!strcmp(argv[1],"linked-soft")) {
         const Entry entries[]={{"cjSoftMaxHeapSize","12GB"}};
         CJ_MRT_CjRuntimeInitWithConfigV1(entries,1); expected="12GB";
@@ -73,7 +74,7 @@ int main(int argc,char** argv) {
         CJ_MRT_CjRuntimeInitWithConfigV1(entries,1); hardExpected="invalid";
     } else if (!strcmp(argv[1],"linked-low-hard")) {
         const Entry entries[]={{"cjHeapSize","256MB"}};
-        CJ_MRT_CjRuntimeInitWithConfigV1(entries,1); hardExpected="256MB";
+        CJ_MRT_CjRuntimeInitWithConfigV1(entries,1); hardExpected="4GB";
     } else if (!strcmp(argv[1],"env-over-table")) {
         const Entry entries[]={{"cjHeapSize","16GB"}};
         CJ_MRT_CjRuntimeInitWithConfigV1(entries,1);
