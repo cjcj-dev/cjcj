@@ -49,8 +49,21 @@ test('fixed products keep actual source labels and reject different identities',
  const input=inputs('linux_x86_64');input.host.version='different';assert.throws(()=>createBootstrapTargets(input),/TARGET_HOST_VERSION/);
 });
 test('H1 execution and N target backend use explicit different library directories',()=>{
- const c=createBootstrapTargets(inputs('linux_x86_64'));
- for(const id of ['stage0-run','stage1-initial','stage1-std'])assert.ok(c.stages.find(s=>s.id===id).entries[0].libraries.some(dir=>dir.startsWith('.host/runtime/')));
+ const input=inputs('linux_x86_64'),c=createBootstrapTargets(input);
+ for(const id of ['stage0-run','stage1-initial','stage1-std']) {
+  const stage=c.stages.find(s=>s.id===id),execution=stage.metadata.selection.compilerExecution;
+  assert.equal(execution.role,'separate');assert.equal(execution.runtime.install,input.host.install);
+  assert.equal(execution.std.install,input.host.install);assert.equal(execution.llvm.install,input.llvm.install);
+  assert.ok(stage.entries[0].libraries.includes('.compiler-exec/runtime/lib/linux_x86_64_cjnative'));
+  assert.ok(stage.entries[0].libraries.includes('.compiler-exec/third_party/llvm/lib'));
+  assert.ok(!stage.entries[0].libraries.includes('.host/third_party/llvm/lib'));
+  assert.equal(stage.copies.find(row=>row.to==='.compiler-exec/third_party/llvm/lib/libLLVM-15.so').from,
+   input.llvm.install+'/third_party/llvm/lib/libLLVM-15.so');
+ }
+ const wrong=structuredClone(c);
+ wrong.stages.find(s=>s.id==='stage0-run').metadata.selection.compilerExecution.llvm.install=input.host.install;
+ assert.throws(()=>validateBootstrapTargets(wrong),/BOOTSTRAP_TARGET_INPUT_MISMATCH/);
+ assert.doesNotThrow(()=>validateBootstrapTargets(c));
  for(const id of ['stage2','stage3'])assert.ok(c.stages.find(s=>s.id===id).entries[0].libraries.includes('runtime/lib/linux_x86_64_cjnative'));
  const finalStd=c.stages.find(s=>s.id==='stage3-std').test.commands[0].argv;
  assert.equal(finalStd[finalStd.indexOf('--host')+1],'/fixture/H','colour comparison retains the actual bootstrap reference');
@@ -99,8 +112,9 @@ test('target SDKs overlay the std-built flatbuffers cjo after the AST toolchain 
 });
 test('macro runtime link follows the compiler process runtime, not a second image',()=>{
   const c=createBootstrapTargets(inputs('linux_x86_64'));
+  // H1 runs with the H runtime image copied into its own execution prefix.
   for(const id of ['stage0-run','stage1-initial','stage1-std'])
-    assert.equal(c.stages.find(s=>s.id===id).links['libexec/runtime'],'../.host/runtime');
+    assert.equal(c.stages.find(s=>s.id===id).links['libexec/runtime'],'../.compiler-exec/runtime');
   for(const id of ['stage2','stage3'])
     assert.equal(c.stages.find(s=>s.id===id).links['libexec/runtime'],'../runtime');
   assert.equal(c.stages.find(s=>s.id==='stage2-target-sdk').links['libexec/runtime'],'../.compiler-exec/runtime');
@@ -436,4 +450,13 @@ test('explicit std policy reaches every native std producer; historical release-
  const input=inputs('linux_x86_64');input.buildType='release';
  assert.ok(!JSON.stringify(createBootstrapTargets(input).stages).includes('--build-type'));
  for(const type of ['Release','minsizerel','',null])assert.throws(()=>createBootstrapTargets({...input,stdBuildType:type}),/STD_BUILD_TYPE/);
+});
+
+test('Linux fresh H1 command needs no retired private tools',()=>{
+ const input=inputs('linux_x86_64');delete input.h1.product;delete input.tools.privateRoot;
+ const graph=createBootstrapTargets(input),command=graph.stages.find(s=>s.id==='stage0').commands[0].argv;
+ assert.equal(command.includes('--private-tools'),false);
+ assert.equal(command[command.indexOf('--host')+1],input.host.install);
+ assert.equal(command[command.indexOf('--sdk')+1],input.llvm.install);
+ assert.doesNotThrow(()=>validateBootstrapTargets(graph));
 });

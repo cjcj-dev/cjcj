@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 import {embeddedStamp} from '../../build/lib/toolchain-identity.mjs';
 import {readInstalledNativeShim} from './native-shim-inputs.mjs';
+import {nativeSymbolRows} from './std-runtime-colour.mjs';
 // Turn received native installations and real Git objects into build inputs.
 // The descriptor contains locations, not producer receipts or SDK authorities.
 import fs from 'node:fs/promises';
@@ -101,8 +102,9 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   const platform = descriptor.platform || hostPlatform(), native = sdkPlatform(platform);
   if (platform !== hostPlatform()) throw new Error('NATIVE_RUNNER_REQUIRED ' + platform);
   const work = await privateRoot(descriptor.work), install = await privateRoot(descriptor.install);
-  const {sources, installations, tools} = descriptor;
-  if (!sources || !installations || !tools?.privateRoot) throw new Error('NATIVE_INPUT_LOCATIONS_REQUIRED');
+  const {sources, installations, tools: suppliedTools = {}} = descriptor;
+  const tools = {...suppliedTools};
+  if (!sources || !installations) throw new Error('NATIVE_INPUT_LOCATIONS_REQUIRED');
   // Resolve all source choices before validating or preparing any installation.
   // The local checkout is a transport location; repository is the source identity.
   const compilerDefault=(await execute('git',['-C',sources.compiler,'rev-parse','HEAD'])).stdout.trim();
@@ -217,16 +219,39 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     const facts=await readJson(reused.buildInputs), commands=await readJson(reused.buildResult);
     if(facts.source!==h1Commit||facts.host!==host.install||facts.native!==rows.llvm.install
       ||!facts.sourceChanges||facts.sha256!==await fileDigest(product)
-      ||path.resolve(reused.buildInputs)!==path.join(path.dirname(product),'build-inputs.json')
-      ||!Array.isArray(commands)||commands.length!==1||commands[0].rc!==0||commands[0].signal
-      ||commands[0].cwd!==rows.h1.repository
+      ||path.resolve(reused.buildInputs)!==path.join(path.dirname(product),'build-inputs.json'))
+      throw new Error('H1_REUSE_PRODUCER_MISMATCH');
+    if(native.os==='linux') {
+      const hostRuntimeFile=path.join(host.install,'runtime/lib',native.tuple,'libcangjie-runtime'+native.shared);
+      const hostRuntimeSupportsConfigV1=(await nativeSymbolRows(hostRuntimeFile,{platform,runtime:true,defined:true})).includes('CJ_MRT_CjRuntimeInitWithConfigV1');
+      // The current producer compiles both config and heap adapter, including
+      // legacy hosts. Reuse its real three commands, never a private-script receipt.
+      if(facts.producer!=='sdk-native-stage:h1'||!path.isAbsolute(facts.sourceRoot||'')
+        ||!facts.sourceChanges?.['packages/cjc/cjpm.toml']
+        ||!isDeepStrictEqual(facts.startupConfiguration,{hostRuntimeFile,hostRuntimeSupportsConfigV1})
+        ||!isDeepStrictEqual(facts.nativeShim,await readInstalledNativeShim({install:rows.llvm.install}))
+        ||!Array.isArray(commands)||commands.length!==3
+        ||commands.some(row=>row.rc!==0||row.signal||row.cwd!==facts.sourceRoot)
+        ||!commands[0].argv?.includes(path.join(facts.sourceRoot,'runtime_shim/cjc_runtime_config.c'))
+        ||!commands[0].argv?.includes('-DCJCJ_COMMIT="'+h1Commit+'"')
+        ||!commands[1].argv?.includes(path.join(facts.sourceRoot,'runtime_shim/cjc_heap_defaults.c'))
+        ||commands[1].argv.includes('-DCJCJ_LEGACY_HOST_RUNTIME')===hostRuntimeSupportsConfigV1
+        ||commands[2].argv?.[0]!==path.join(host.install,'tools/bin/cjpm')||commands[2].argv?.[1]!=='build')
+        throw new Error('H1_REUSE_PRODUCER_MISMATCH');
+    } else if(!tools.privateRoot||!Array.isArray(commands)||commands.length!==1
+      ||commands[0].rc!==0||commands[0].signal||commands[0].cwd!==rows.h1.repository
       ||commands[0].argv?.[1]!==path.join(path.resolve(tools.privateRoot),'ts/src/sharedbuild/cjcj-stage1.mjs'))
       throw new Error('H1_REUSE_PRODUCER_MISMATCH');
     rows.h1={...rows.h1,product,configuration:facts,buildResult:path.resolve(reused.buildResult)};
   }
-  tools.privateRoot = path.resolve(tools.privateRoot);
-  for (const rel of installations.stage2 ? [] : ['cjcj-stage1.mjs', 'stage1-transform.mjs'])
-    await fs.stat(path.join(tools.privateRoot, 'ts/src/sharedbuild', rel));
+  // Only the unchanged non-Linux producer still consumes private tools.
+  // Linux preparation and H1 reuse must not require retired private scripts.
+  if(native.os!=='linux'&&!installations.stage2) {
+    if(!tools.privateRoot)throw Error('NATIVE_H1_PRIVATE_PRODUCER_REQUIRED');
+    tools.privateRoot=path.resolve(tools.privateRoot);
+    for(const rel of ['cjcj-stage1.mjs','stage1-transform.mjs'])
+      await fs.stat(path.join(tools.privateRoot,'ts/src/sharedbuild',rel));
+  }
   const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,
     ...(descriptor.stdDependencies?{stdDependencies:await stdDependencyInputs(descriptor.stdDependencies)}:{}),
     ...(descriptor.stdBuildType === undefined ? {} : {stdBuildType:stdBuildType(descriptor.stdBuildType)}),

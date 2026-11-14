@@ -71,8 +71,7 @@ endforeach()
  }
  const nativeFacts=native+'/finite-build.json';write(nativeFacts,JSON.stringify({finiteFixture:true,platform,commits:{compiler:commit,llvm:commit},
   astInstallation:{platform,source:{commit},library,files,build:{target:'cangjie-ast-support',configuration:{stdSupport:'ON',finiteFixture:true}}}}));
- for(const member of ['cjcj-stage1.mjs','stage1-transform.mjs'])write(root+'/private/ts/src/sharedbuild/'+member,'// unexecuted finite stage boundary\n');
- const descriptor={platform,work:root+'/work',install:root+'/sdk-not-built',host:{install:host,version},tools:{privateRoot:root+'/private'},
+ const descriptor={platform,work:root+'/work',install:root+'/sdk-not-built',host:{install:host,version},tools:{},
   sources:Object.fromEntries(['compiler','h1','ast','llvm','runtime'].map(name=>[name,source])),
   ...Object.fromEntries(['compiler','h1','ast','llvm','runtime'].map(name=>[name+'Commit',commit])),
   nativePair:{llvm:commit,runtime:commit,hostVersion:version},
