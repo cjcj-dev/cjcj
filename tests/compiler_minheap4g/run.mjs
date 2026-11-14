@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawn,spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-const source=path.resolve(import.meta.dirname,'../..'),root=path.dirname(source),out=root+'/attempt1';
+const source=path.resolve(import.meta.dirname,'../..'),root=path.dirname(source),out=root+'/attempt2';
 const host='/mnt/cjcj-nvme/impl_full_sdk_sol_1108/inputs/official-host/host-sdk-dQJL56/cangjie';
 const seed='/root/collect_ten_v2_sol_1113/matrix-fixed-1114/install';
 const native='/mnt/cjcj-data/impl_full_sdk_sol_1108/main-pair-1114/native/install';
@@ -38,7 +38,7 @@ try{
  record.topology=Object.fromEntries([32,47].map(c=>[c,read(`/sys/devices/system/cpu/cpu${c}/topology/thread_siblings_list`)]));save();
  if(record.resources['memory.swap.max']!=='0'||!record.limits.match(/Max core file size\s+0\s+0/))throw Error('resources');
  const git=spawnSync('git',['-C',source,'rev-parse','HEAD'],{encoding:'utf8'});if(git.status!==0||git.stdout.trim()!==ref)throw Error('source ref');
- await run('adapter-regression',[process.execPath,'--test',source+'/runtime_shim/tests/compiler_heap_defaults.test.mjs']);
+ record.adapterRegressionReuse=root+'/attempt1/adapter-regression.log';save();
  const cc='/usr/lib/llvm-15/bin/clang',shim=source+'/runtime_shim',n=out+'/native';
  await run('config-object',[cc,'-std=c11','-O2','-D_POSIX_C_SOURCE=200809L','-c',shim+'/cjc_runtime_config.c','-o',n+'/config.o']);
  for(const [domain,sdk,legacy] of [['host',host,true],['target',seed,false]]){

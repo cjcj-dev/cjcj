@@ -5,7 +5,7 @@
 #include <string.h>
 extern int CJ_ScheduleManagerInit(void);
 extern void CJ_MRT_CjRuntimeInit(void);
-extern void CJ_MRT_CjRuntimeFini(void);
+extern int FiniCJRuntime(void);
 extern size_t CJ_MCC_GetMaxHeapSize(void);
 int main(int argc, char** argv)
 {
@@ -20,7 +20,9 @@ int main(int argc, char** argv)
     printf("REAL_RUNTIME_HEAP bytes=%zu restored=%d\n", actual, restored);
     fflush(stdout);
     int rc = actual == strtoull(argv[1], NULL, 10) && restored ? 0 : 4;
-    CJ_MRT_CjRuntimeFini();
+    int fini = FiniCJRuntime();
+    printf("RUNTIME_FINI rc=%d\n", fini);
+    if (fini != 0) rc = 5;
     free(saved);
     return rc;
 }
