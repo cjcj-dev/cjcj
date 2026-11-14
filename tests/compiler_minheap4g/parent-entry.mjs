@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawn,spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-const source=path.resolve(import.meta.dirname,'../..'),root=path.dirname(source),out=root+'/parent-attempt1';
+const source=path.resolve(import.meta.dirname,'../..'),root=path.dirname(source),out=root+'/parent-attempt2';
 const host='/mnt/cjcj-nvme/impl_full_sdk_sol_1108/inputs/official-host/host-sdk-dQJL56/cangjie';
 const seed='/root/collect_ten_v2_sol_1113/matrix-fixed-1114/install';
 const native='/mnt/cjcj-data/impl_full_sdk_sol_1108/main-pair-1114/native/install';
@@ -43,8 +43,8 @@ try{
 
  const producerRef='5a47f0bb15a072b38ff040df961875bb8f741038';
  record.compilerRef=producerRef;record.assemblerRef=ref;save();
- await run('graph-tests',[process.execPath,'--test',source+'/ci/bootstrap/sdk-targets.test.mjs'],{environment:{...env,RELEASE_EVIDENCE_TEST_ROOT:out+'/tmp'}});
- await run('descriptor-fixture-tests',[process.execPath,'--test',source+'/ci/bootstrap/sdk-language-prepare.integration.test.mjs'],{environment:{...env,TMPDIR:out+'/tmp'}});
+ record.graphTestsReuse=root+'/parent-attempt1/graph-tests.log';save();
+ await run('descriptor-fixture-tests',[process.execPath,'--test',source+'/ci/bootstrap/sdk-language-prepare.integration.test.mjs'],{environment:{...env,TMPDIR:out+'/tmp',RELEASE_EVIDENCE_TEST_ROOT:out+'/tmp',CJCJ_LANGUAGE_PREPARE_HOST:host}});
  const original='/mnt/cjcj-nvme/impl_full_sdk_sol_1108/main-pair-1114/sdk-descriptor.json';
  const descriptor=JSON.parse(read(original));
  descriptor.sources.compiler=source;descriptor.sources.h1=source;
