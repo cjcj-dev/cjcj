@@ -68,7 +68,8 @@ export async function configureGhaInputs(env=process.env) {
   if (pair && (path.resolve(selectedHost.install) !== path.resolve(env.CJCJ_BOOTSTRAP_BASE)
     || !selectedHost.archive || path.resolve(selectedHost.archive) !== path.resolve(env.CJCJ_BOOTSTRAP_BASE_ARCHIVE || '')))
     throw new Error('GHA_NATIVE_SELECTED_HOST_CHANGED');
-  const tools={...locations.tools,privateRoot:member(locations.tools.privateRoot),
+  const tools={...locations.tools,
+    ...(locations.tools?.privateRoot===undefined?{}:{privateRoot:member(locations.tools.privateRoot)}),
     cc:env.CC||'clang',cxx:env.CXX||'clang++',launcher:env.CMAKE_CXX_COMPILER_LAUNCHER||'sccache',zx:'zx'};
   if(env.GITHUB_ENV)await fs.appendFile(env.GITHUB_ENV,'CJCJ_BOOTSTRAP_WORK='+path.join(workspace,'native-bootstrap')+'\n');
   return prepareNativeInputs({platform,sources,installations,tools,sourceSelection:selection,
