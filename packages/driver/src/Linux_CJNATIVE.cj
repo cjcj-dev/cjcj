@@ -48,6 +48,12 @@ public open class Linux_CJNATIVE <: Gnu {
             tool.AppendArg("noexecstack")
         }
         tool.AppendArgIf(driverOptions.stripSymbolTable, "-s")
+        // This tool only links final executables and shared libraries (static archives, objects and
+        // `ld -r` package objects take other paths and keep their debug data for later `-g` links).
+        // Their DWARF follows this invocation: without `-g` the linker discards the non-allocated
+        // `.debug*` input sections, including those of the DWARF-carrying standard library, while
+        // symbols, relocations, `.eh_frame` and Cangjie metadata stay. `-s` already implies it.
+        tool.AppendArgIf(!driverOptions.stripSymbolTable && !driverOptions.enableCompileDebug, "--strip-debug")
         tool.AppendArg("-m")
         tool.AppendArg(GetEmulation())
         tool.AppendArg("--hash-style=both")
