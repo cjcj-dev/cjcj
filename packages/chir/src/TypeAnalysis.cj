@@ -287,7 +287,10 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         let callee = apply.GetCallee()
         if (!callee.IsFuncWithBody()) { HandleDefaultExpr(state, apply.GetRawExpr()); return }
         let knownRetTy = realRetTyMap.get(callee.nodeId)
-        if (knownRetTy.isNone()) { return }
+        // No narrower return summary still preserves the declared result type.
+        // In particular, a final-class constructor/factory returns exactly that
+        // class; leaving the fresh result object at Top loses this fact on upcast.
+        if (knownRetTy.isNone()) { HandleDefaultExpr(state, apply.GetRawExpr()); return }
         var realRetTy = knownRetTy.getOrThrow()
         if (realRetTy.IsGenericRelated()) {
             if (let Some(plain) <- (apply.GetRawExpr() as Apply)) {
