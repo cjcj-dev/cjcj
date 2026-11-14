@@ -333,7 +333,8 @@ export async function archiveInstall({install, archive, format = 'tar.gz', test,
   } finally { if(parked)await fs.rename(parked,install); }
   const sha256 = await fileDigest(pending);
   await fs.writeFile(pending+'.sha256', sha256+'  '+path.basename(archive)+'\n');
-  await publishPaths(['', '.sha256', '.unpacked'].map(suffix=>({pending:pending+suffix,destination:archive+suffix})));
+  // Previous packages live outside the SDK; retain them after successful replacement.
+  await publishPaths(['', '.sha256', '.unpacked'].map(suffix=>({pending:pending+suffix,destination:archive+suffix})),{retainReplaced:true});
   result.status='COMPLETE';return {archive,sha256,commandsFile};
   } catch(error) {result.status='FAILED';result.error=error.message;result.rc=error.rc??null;throw error;}
   finally {result.commands=records.slice(firstCommand);await atomicJson(commandsFile,result);}
@@ -341,7 +342,10 @@ export async function archiveInstall({install, archive, format = 'tar.gz', test,
 // An exact, small write set (package files or component directory boundaries).
 // Prepare everything first; retain old members and roll back every moved member
 // if any rename fails. This never backs up an SDK tree or certifies its contents.
-export async function publishPaths(paths) {
+// After every member is in place the replaced members are removed: inside an
+// installation they would otherwise be carried by its next archive. Callers whose
+// members live outside an installation (archiveInstall) pass retainReplaced.
+export async function publishPaths(paths, {retainReplaced = false} = {}) {
   const moved=[],published=[],suffix='.previous-'+crypto.randomUUID();
   try {
     for(const {pending,destination} of paths) {
@@ -359,6 +363,7 @@ export async function publishPaths(paths) {
     if(errors.length>1)throw new AggregateError(errors,'INSTALL_PARTS_RESTORE '+suffix);
     throw error;
   }
+  if(!retainReplaced)for(const destination of moved)await fs.rm(destination+suffix,{recursive:true,force:true});
 }
 export async function buildFlow(config, options = {}) {
   return supervisionWork.run(path.resolve(config.work), () => buildFlowInWork(config, options));

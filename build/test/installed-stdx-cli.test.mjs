@@ -25,7 +25,7 @@ test('public stdx entry installs into SDK and the next public build consumes tha
  invoke();
  console.log('STDX_REINSTALL_ROLLBACK_BOUNDARY_REACHED');
  assert.equal(fs.readdirSync(sdk,{recursive:true}).some(name=>name.includes('.previous-')),false,'stdx installed root excludes rollback members');
- assert.ok(fs.readdirSync(root).filter(name=>name.startsWith('sdk.stdx-pending-')).some(name=>fs.existsSync(path.join(root,name,'previous/stdx',tuple,'static/stdx/stdx.base.cjo'))),'previous stdx is retained outside SDK');
+ assert.equal(fs.readdirSync(root).some(name=>name.startsWith('sdk.stdx-pending-')),false,'successful stdx publication removes its empty pending root');
  console.log('STDX_CONSUMER_ASSERT_REACHED');
  const selected=fs.readFileSync(path.join(root,'consumer.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
  assert.equal(selected[0],'');assert.equal(selected[1],path.join(sdk,'stdx',tuple,'static/stdx'));

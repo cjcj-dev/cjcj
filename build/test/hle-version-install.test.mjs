@@ -105,7 +105,7 @@ test('HLE rejects unsupported versions, absent/wrong sources and invalid payload
  }finally {await write(path.join(f.work,'commands.json'),JSON.stringify(f.commands,null,2));}
 });
 
-test('HLE reinstallation keeps rollback outside SDK and restores a partially published transaction',async()=>{
+test('HLE reinstallation cleans replaced members and restores a partially published transaction',async()=>{
  const f=await setup('0.3.6');
  try {
   await f.install();
@@ -115,11 +115,7 @@ test('HLE reinstallation keeps rollback outside SDK and restores a partially pub
   await f.install();
   console.log('HLE_REINSTALL_ROLLBACK_BOUNDARY_REACHED');
   assert.equal((await fs.readdir(f.sdk,{recursive:true})).some(name=>name.includes('.previous-')),false,'HLE installed root excludes rollback members');
-  const pending=(await fs.readdir(f.work)).filter(name=>name.startsWith('sdk.hle-pending-'));
-  assert.ok((await Promise.all(pending.map(async name=>{
-   try{return await fs.readFile(path.join(f.work,name,'previous/tools/dtsparser/old-success'),'utf8')==='first installation';}
-   catch(error){if(error.code==='ENOENT')return false;throw error;}
-  }))).some(Boolean),'previous HLE is retained outside SDK');
+  assert.equal(await fs.stat(marker).catch(()=>null),null,'superseded HLE payload is removed only after success');
   await fs.writeFile(marker,'second installation');
   const node=path.join(f.sdk,'tools/bin/node'),saved=node+'.saved';
   await fs.rename(node,saved);await fs.symlink(path.basename(saved),node);

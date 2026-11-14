@@ -16,7 +16,11 @@ for(const readOnlySource of [false,true])test(`archive CLI readOnlySource=${read
  const input={install,archive,readOnlySource,test:{commands:[{argv:[process.execPath,check,install,'\${install}']}]}};
  const request=path.join(root,'request.json');await fs.writeFile(request,JSON.stringify(input));
  const cli=fileURLToPath(new URL('./sdk-build.mjs',import.meta.url));
- const run=()=>spawnSync(process.execPath,[cli,'--archive-inputs',request],{encoding:'utf8'});
+ const calls=[];
+ const run=()=>{const argv=[cli,'--archive-inputs',request],r=spawnSync(process.execPath,argv,{encoding:'utf8'});
+  calls.push({argv,rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr});
+  return r;
+ };
  let r=run();assert.equal(r.status,0,r.stderr);assert.match(r.stdout,/ARCHIVE_SOURCE_MODE_ASSERT_REACHED/);
  const first=await fs.readFile(archive);assert.equal(await fs.readFile(archive+'.unpacked/sdk/payload','utf8'),'installed');
  input.test.commands[0].env={REJECT_ARCHIVE:'1'};await fs.writeFile(request,JSON.stringify(input));
@@ -27,4 +31,15 @@ for(const readOnlySource of [false,true])test(`archive CLI readOnlySource=${read
  const bad=spawnSync(process.execPath,[cli,'--archive-inputs',request,'--no-package'],{encoding:'utf8'});
  assert.equal(bad.status,1);assert.match(bad.stderr,/ARCHIVE_ARGUMENT_CONFLICT/);
  console.log('ARCHIVE_REJECTION_PRESERVED_SOURCE_AND_PRIOR_PACKAGE');
+ delete input.test.commands[0].env;await fs.writeFile(request,JSON.stringify(input));
+ r=run();assert.equal(r.status,0,r.stderr);
+ const members=await fs.readdir(root);
+ for(const suffix of ['', '.sha256', '.unpacked']) {
+  const kept=members.filter(n=>n.startsWith('sdk.tar.gz'+suffix+'.previous-'));
+  assert.equal(kept.length,1,'previous archive member retained: '+suffix);
+  if(!suffix)assert((await fs.readFile(path.join(root,kept[0]))).equals(first));
+  if(suffix==='.unpacked')assert.equal(await fs.readFile(path.join(root,kept[0],'sdk/payload'),'utf8'),'installed');
+ }
+ await fs.writeFile(path.join(root,'invocations.json'),JSON.stringify(calls,null,2));
+ console.log('ARCHIVE_REPLACED_TRIPLET_RETAINED');
 });

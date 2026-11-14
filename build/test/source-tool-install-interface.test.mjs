@@ -74,6 +74,25 @@ test('A8 controlled HLE inputs and ten installed tool interfaces retain configur
  finally{await fs.rename(moved,sdk);}
  await installSourceTools(config,undefined,{consume});
  for(const [name]of rows){const r=spawnSync(path.join(sdk,'tools/bin',name),[],{encoding:'utf8'});assert.equal(r.status,0);assert.equal(r.stdout.trim(),name+':42','installed public entry survives reentry');}
+ // Reject after the first two real component renames, then restore every
+ // published payload. This patches the syscall boundary, not the product API.
+ const oldFacts=await fs.readFile(path.join(sdk,'TOOLS-INPUTS.json'));
+ const marker=path.join(sdk,'tools/old-success');await write(marker,'usable');
+ const rename=fs.rename;let hit=0;
+ fs.rename=async(from,to)=>{
+  if(to===path.join(sdk,'TOOLS-INPUTS.json')&&String(from).includes('.tools-pending-')){
+   hit++;throw Object.assign(Error('TOOL_PUBLICATION_EIO'),{code:'EIO'});
+  }
+  return rename(from,to);
+ };
+ try{await assert.rejects(installSourceTools(config,undefined,{consume}),/TOOL_PUBLICATION_EIO/);}
+ finally{fs.rename=rename;}
+ assert.equal(hit,1);assert.equal(await fs.readFile(marker,'utf8'),'usable');
+ assert.deepEqual(await fs.readFile(path.join(sdk,'TOOLS-INPUTS.json')),oldFacts);
+ await consume(sdk);
+ await installSourceTools(config,undefined,{consume});
+ assert.equal((await fs.readdir(sdk,{recursive:true})).some(n=>n.includes('.previous-')),false,'successful tools publication excludes old members from packages');
+ await consume(sdk);console.log('TOOLS_PARTIAL_PUBLICATION_ROLLBACK_AND_CLEANUP_REACHED');
  const foreignRecipe=path.join(sdk,'tools/bin/cjpm.entry'),savedRecipe=await fs.readFile(foreignRecipe,'utf8');
  try{await fs.writeFile(foreignRecipe,savedRecipe.replace('.target-tools/tools/bin/cjpm','.target-tools/tools/bin/foreign'));await assert.rejects(installSourceTools(config,undefined,{consume}),/SOURCE_TOOL_OWNERSHIP cjpm/);}
  finally{await fs.writeFile(foreignRecipe,savedRecipe);}
