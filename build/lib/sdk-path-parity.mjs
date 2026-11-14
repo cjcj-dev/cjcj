@@ -137,6 +137,21 @@ export function compareSdkPathSets(officialRoot, candidateRoot, {target} = {}) {
       && candidate.get('bin/cjc-frontend')?.symlinkTarget === 'cjcj-stage1') continue;
     if (officialEntry.type === candidateEntry.type
       && officialEntry.symlinkTarget === candidateEntry.symlinkTarget) continue;
+    // Native shared-library producers may update the version behind the same
+    // public loader-name link. Compare the actual ELF SONAME, retaining the
+    // relative, in-SDK file requirement on both sides. This is path parity,
+    // not a claim of full ABI compatibility between the two libraries.
+    if (nativeLinux && officialEntry.type === 'symlink' && candidateEntry.type === 'symlink'
+      && relative.includes('.so')
+      && !path.isAbsolute(officialEntry.symlinkTarget) && !path.isAbsolute(candidateEntry.symlinkTarget)
+      && installedFile(officialRoot, relative) && installedFile(candidateRoot, relative)) {
+      const name = path.posix.basename(relative);
+      if (soname(path.join(officialRoot, relative)) === name
+        && soname(path.join(candidateRoot, relative)) === name) {
+        counterparts.push({official:relative, candidate:relative, soname:name});
+        continue;
+      }
+    }
     if (officialEntry.type === 'file' && candidateEntry.type === 'symlink'
       && !['bin/cjc', 'bin/cjc-frontend'].includes(relative)
       && !path.isAbsolute(candidateEntry.symlinkTarget)

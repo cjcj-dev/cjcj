@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {
   assertSdkPathParity,
   collectRelativePaths,
@@ -232,3 +234,102 @@ test('private cjlint config requires its actual entry and every former config; c
   fs.unlinkSync(path.join(candidate, '.target-tools/tools/cjlint/config/cjlint_rule_list.json'));
   await assert.rejects(assertSdkPathParity(candidate, options), /missing-official-path\ttools\/config\/cjlint_rule_list.json/);
 });
+
+function sharedLibrary(root, relative, name) {
+  const file = put(root, relative, '');
+  const result = spawnSync('cc', ['-shared', '-fPIC', '-x', 'c', '-', '-Wl,-soname,' + name, '-o', file],
+    {input:'int sdk_parity_fixture(void) { return 0; }\n', encoding:'utf8'});
+  assert.equal(result.status, 0, result.stderr);
+  return file;
+}
+
+test('native Linux loader-name links accept changed internal versions and reject invalid identities', async t => {
+  const {root, official, candidate} = fixture(t);
+  const lib = 'third_party/llvm/lib/', name = 'libxml2.so.16';
+  sharedLibrary(official, lib + 'libxml2.so.2.14.0', name);
+  const selected = sharedLibrary(candidate, lib + 'libxml2.so.16.1.4', name);
+  const link = path.join(candidate, lib, name);
+  fs.symlinkSync('libxml2.so.2.14.0', path.join(official, lib, name));
+  fs.symlinkSync('libxml2.so.16.1.4', link);
+  const good = fs.readFileSync(selected);
+  for (const target of ['linux-x64', 'linux-aarch64']) {
+    const result = await assertSdkPathParity(candidate, {officialRoot:official, target});
+    assert.ok(result.counterparts.some(row => row.official === lib + name && row.soname === name));
+  }
+  for (const target of [undefined, 'windows-x64'])
+    await assert.rejects(assertSdkPathParity(candidate, {officialRoot:official, target}), /type-mismatch\tthird_party\/llvm\/lib\/libxml2.so.16/);
+  const options = {officialRoot:official, target:'linux-x64'};
+  sharedLibrary(candidate, lib + 'libxml2.so.16.1.4', 'libxml2.so.17');
+  await assert.rejects(assertSdkPathParity(candidate, options), /type-mismatch\tthird_party\/llvm\/lib\/libxml2.so.16/);
+  fs.writeFileSync(selected, 'not an ELF');
+  await assert.rejects(assertSdkPathParity(candidate, options), /type-mismatch\tthird_party\/llvm\/lib\/libxml2.so.16/);
+  fs.rmSync(selected);
+  await assert.rejects(assertSdkPathParity(candidate, options), /package-link-invalid/);
+  fs.mkdirSync(selected);
+  await assert.rejects(assertSdkPathParity(candidate, options), /type-mismatch/);
+  fs.rmdirSync(selected);
+  const outside = put(root, 'outside.so', good);
+  fs.unlinkSync(link);
+  fs.symlinkSync(path.relative(path.dirname(link), outside), link);
+  await assert.rejects(assertSdkPathParity(candidate, options), /package-link-outside/);
+  fs.unlinkSync(link);
+  fs.writeFileSync(selected, good);
+  fs.symlinkSync(selected, link);
+  await assert.rejects(assertSdkPathParity(candidate, options), /package-link-outside/);
+  fs.unlinkSync(link);
+  fs.symlinkSync('libxml2.so.16.1.4', link);
+  await assertSdkPathParity(candidate, options);
+});
+
+// Exercise the actual public package path on retained installed products.
+// Stop just after the real parity call, before consumers or SDK writes; 78
+// records arrival at this finite boundary, never successful packaging.
+test('public package reaches native path parity and rejects a different real ELF SONAME',
+  {skip: !process.env.PACKAGE_PARITY_SDK || !process.env.PACKAGE_PARITY_OFFICIAL_SDK}, t => {
+    const {root, official} = fixture(t);
+    const repo = fileURLToPath(new URL('../../', import.meta.url));
+    const targetModule = new URL('../../ci/srcbuild/lib/package-install.mjs', import.meta.url).href;
+    const observer = put(root, 'observer.mjs', `export async function load(url, context, nextLoad) {
+ const loaded = await nextLoad(url, context);
+ if (url !== ${JSON.stringify(targetModule)}) return loaded;
+ const anchor = 'await assertSdkPathParity(sdk,{officialRoot:officialSdkRoot,target:target.spec.key});';
+ const source = String(loaded.source);
+ if (source.split(anchor).length !== 2) throw Error('PARITY_OBSERVATION_ANCHOR');
+ return {...loaded, source:source.replace(anchor, anchor+'console.log("PACKAGE_PARITY_READONLY_BOUNDARY");process.exit(78);')};
+}\n`);
+    const lib = 'third_party/llvm/lib/';
+    sharedLibrary(official, lib + 'libxml2.so.2.14.0', 'libxml2.so.17');
+    fs.symlinkSync('libxml2.so.2.14.0', path.join(official, lib, 'libxml2.so.16'));
+    const runs = [];
+    for (const [arm, reference, target] of [
+      ['default', process.env.PACKAGE_PARITY_OFFICIAL_SDK, null],
+      ['explicit', process.env.PACKAGE_PARITY_OFFICIAL_SDK, 'linux-x64'],
+      ['wrong-soname', official, 'linux-x64'],
+    ]) {
+      const args = ['--experimental-loader', observer, 'build/cli.mjs', '--workspace', path.join(root, arm),
+        '--official-sdk-root', reference, '--build-type', 'release', '--stdx-profile', 'full',
+        '--cangjie-version', '1.2.0-alpha.20260721165458'];
+      if (target) args.push('--target', target);
+      args.push('package');
+      const env = {...process.env, CJCJ_SRCBUILD_CONSUMER_SDK:process.env.PACKAGE_PARITY_SDK};
+      for (const key of ['NODE_OPTIONS', 'CANGJIE_BUILD_DRY_RUN', 'LD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_AUDIT']) delete env[key];
+      const start = new Date().toISOString();
+      const result = spawnSync(process.execPath, args, {cwd:repo, env, encoding:'utf8', maxBuffer:8*1024*1024});
+      const row = {arm, argv:[process.execPath,...args], cwd:repo, start, end:new Date().toISOString(),
+        rc:result.status, signal:result.signal, stdout:result.stdout, stderr:result.stderr};
+      if (process.env.PACKAGE_PARITY_EVIDENCE) {
+        fs.mkdirSync(process.env.PACKAGE_PARITY_EVIDENCE, {recursive:true});
+        fs.writeFileSync(path.join(process.env.PACKAGE_PARITY_EVIDENCE, arm + '.json'), JSON.stringify(row,null,2)+'\n', {flag:'wx'});
+      }
+      runs.push(row);
+    }
+    for (const row of runs) assert.equal(row.signal, null);
+    for (const row of runs.slice(0,2)) {
+      assert.equal(row.rc, 78, row.stderr);
+      assert.match(row.stdout, /SDK_COLOUR_ABI_ASSERT_PASS/);
+      assert.match(row.stdout, /PACKAGE_PARITY_READONLY_BOUNDARY/);
+    }
+    assert.equal(runs[2].rc, 1, runs[2].stderr);
+    assert.match(runs[2].stderr, /type-mismatch\tthird_party\/llvm\/lib\/libxml2.so.16/);
+    assert.doesNotMatch(runs[2].stdout, /PACKAGE_PARITY_READONLY_BOUNDARY/);
+  });
