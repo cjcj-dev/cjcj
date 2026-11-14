@@ -9,6 +9,8 @@ import {spawnSync} from 'node:child_process';
 import {buildConfig} from '../lib/config.mjs';
 import {installSourceTools} from '../srcbuild/install-tools.mjs';
 import {installHleDependencies} from '../srcbuild/hle-dependencies.mjs';
+import {fileDigest} from '../../ci/bootstrap/sdk-flow.mjs';
+import {toolOutputs,privateToolPayload,nativeToolBuildPayloads,toolProducerDirectory} from '../srcbuild/tool-layout.mjs';
 import {hlePayloadFixture} from './hle-payload-fixture.mjs';
 const parent=process.env.RELEASE_EVIDENCE_TEST_ROOT;
 if(!parent)throw new Error('RELEASE_EVIDENCE_TEST_ROOT required');
@@ -32,6 +34,23 @@ test('A8 controlled HLE inputs and ten installed tool interfaces retain configur
  const input={platform:'linux_x86_64',node:{path:process.execPath,source:'controlled native Node input',version:process.version},modules:{path:path.join(dependencyRoot,'tools/dtsparser/node_modules'),source:'controlled npm boundary',version:'fixture'},cjbind:{path:process.execPath,source:'controlled executable boundary, not actual cjbind',version:'v1.1.0-alpha.53.1'}};
  await installHleDependencies({toolsRoot:tools,sdk,platform:'linux_x86_64',input});
  const consume=async pending=>{for(const [name]of rows){const r=spawnSync(path.join(pending,'tools/bin',name),[],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);assert.equal(r.stdout.trim(),name+':42');}};
+ // Controlled producer facts for these script doubles satisfy the current
+ // runtime-closure contract without claiming a real Cangjie build or SDK.
+ const runtime=path.join(work,'fixture-runtime/libcangjie-runtime.so'),llvm=path.join(work,'fixture-llvm.so');
+ await write(runtime,'controlled runtime payload');await write(llvm,'controlled llvm payload');
+ await write(path.join(tools,'packages/cjprof/static/index.html'),'controlled page');
+ for(const name of ['libcjprof-cangjie.so','libcjprof-jni.so','cjprof.jar'])await write(path.join(config.buildRoot,'cjprof',name),'controlled '+name);
+ for(const row of toolOutputs(config)){
+  const name=row.producer;if(privateToolPayload(name))continue;
+  const directory=toolProducerDirectory(config,name),nativeConfiguration={};
+  if(['cjfmt','cjprof','cjcompat'].includes(name)){
+   const file=path.join(directory,name==='cjprof'?'build-facts.json':'inputs.json'),values=name==='cjcompat'?{llvm}:{};
+   await write(file,JSON.stringify(values));nativeConfiguration.cangjie={path:file,values};
+  }
+  if(name==='cjtrace-recover'){const file=path.join(directory,'CMakeCache.txt');await write(file,'');nativeConfiguration.native={path:file,values:{}};}
+  const payloads={};for(const p of await nativeToolBuildPayloads(config,name))payloads[p.to]={source:p.from,sha256:await fileDigest(p.from)};
+  await write(path.join(workspace,'build/tools',name,'build-inputs.json'),JSON.stringify({source:{status:'unresolved',reason:'controlled interface fixture has no qualified source',repository:'fixture-only',commit:'a'.repeat(40)},artifact:{sha256:await fileDigest(row.from)},build:{rc:0,platform:config.target.spec.llvmPlatform,nativeConfiguration,payloads,inputs:{artifacts:{runtime:{path:runtime,sha256:await fileDigest(runtime)}}}}}));
+ }
  const installed=await installSourceTools(config,undefined,{consume});
  const recorded=JSON.parse(await fs.readFile(path.join(sdk,'TOOLS-INPUTS.json'),'utf8'));
  assert.equal(await fs.readFile(path.join(sdk,'.target-tools/tools/config/static/index.html'),'utf8'),'explicit interface payload packages/cjprof/dist/config/static/index.html');

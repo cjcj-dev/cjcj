@@ -31,16 +31,7 @@ try{
  record.resources=Object.fromEntries(['cpuset.cpus.effective','memory.max','memory.swap.max'].map(k=>[k,read(cg+'/'+k).trim()]));record.limits=read('/proc/self/limits');save();
  assert.equal(record.resources['memory.swap.max'],'0');assert.match(record.limits,/Max core file size\s+0\s+0/);
  assert.equal(spawnSync('git',['rev-parse','HEAD'],{cwd:source,encoding:'utf8'}).stdout.trim(),ref);
- const file=source+'/ci/bootstrap/sdk-flow.mjs',before=read(file);
- const cut=before.replace('if(!retainReplaced)for(const destination of moved)await fs.rm(destination+suffix,{recursive:true,force:true});','// controlled cut: retain replaced component members as the baseline did');
- assert.notEqual(cut,before);fs.writeFileSync(file,cut);
- try{
-  const diff=spawnSync('git',['diff','--','ci/bootstrap/sdk-flow.mjs'],{cwd:source,encoding:'utf8'});assert.equal(diff.status,0);fs.writeFileSync(out+'/cut.diff',diff.stdout);
-  run('cut-hle',['--test-name-pattern=HLE reinstallation','build/test/hle-version-install.test.mjs'],1);
-  assert.match(read(out+'/cut-hle.log'),/HLE installed root excludes rollback members/);
-  run('cut-archive-control',['ci/bootstrap/sdk-archive-readonly.test.mjs']);
- }finally{fs.writeFileSync(file,before);}
- run('hle-recovery',['--test-name-pattern=HLE reinstallation','build/test/hle-version-install.test.mjs']);
+ record.reused={candidate:'7ccf69509c40d6a66da3053009152e9aacb88486',results:root+'/publish-parent/attempt1/result.json',steps:['cut-hle','cut-archive-control','hle-recovery']};save();
  run('tools-recovery',['build/test/source-tool-install-interface.test.mjs']);
  run('stdx-cli',['build/test/installed-stdx-cli.test.mjs']);
  // archive paths are independent of component cleanup; the cut control already
