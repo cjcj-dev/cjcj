@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawn,spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-const source=path.resolve(import.meta.dirname,'../..'),root=path.dirname(source),out=root+'/parent-attempt2';
+const source=path.resolve(import.meta.dirname,'../..'),root=path.dirname(source),out=root+'/parent-attempt3';
 const host='/mnt/cjcj-nvme/impl_full_sdk_sol_1108/inputs/official-host/host-sdk-dQJL56/cangjie';
 const seed='/root/collect_ten_v2_sol_1113/matrix-fixed-1114/install';
 const native='/mnt/cjcj-data/impl_full_sdk_sol_1108/main-pair-1114/native/install';
@@ -44,12 +44,16 @@ try{
  const producerRef='5a47f0bb15a072b38ff040df961875bb8f741038';
  record.compilerRef=producerRef;record.assemblerRef=ref;save();
  record.graphTestsReuse=root+'/parent-attempt1/graph-tests.log';save();
- await run('descriptor-fixture-tests',[process.execPath,'--test',source+'/ci/bootstrap/sdk-language-prepare.integration.test.mjs'],{environment:{...env,TMPDIR:out+'/tmp',RELEASE_EVIDENCE_TEST_ROOT:out+'/tmp',CJCJ_LANGUAGE_PREPARE_HOST:host}});
+ record.descriptorTestsReuse=root+'/parent-attempt2/descriptor-fixture-tests.log';save();
  const original='/mnt/cjcj-nvme/impl_full_sdk_sol_1108/main-pair-1114/sdk-descriptor.json';
  const descriptor=JSON.parse(read(original));
  descriptor.sources.compiler=source;descriptor.sources.h1=source;
  descriptor.compilerCommit=producerRef;descriptor.h1Commit=producerRef;
  delete descriptor.archive;delete descriptor.tools.privateRoot;
+ // This bounded public traversal stops at stage0-run: it does not build std.
+ // The old descriptor's pcre2 source failed verification; retain that failure,
+ // do not claim it repaired or weaken stdDependencyInputs validation.
+ record.unusedStdDependencies=descriptor.stdDependencies;delete descriptor.stdDependencies;
  record.originalDescriptor=original;save();
  const prepare=async(label,reuse=false,extraTools={})=>{
   const d=structuredClone(descriptor);d.work=out+'/'+label+'/work';d.install=out+'/'+label+'/final-sdk';Object.assign(d.tools,extraTools);
@@ -68,8 +72,9 @@ try{
  const inputFile=source+'/ci/bootstrap/sdk-inputs.mjs',before=fs.readFileSync(inputFile,'utf8');
  const cut=before.replace('if (!sources || !installations)', 'if (!sources || !installations || !tools?.privateRoot)');
  if(before===cut)throw Error('cut anchor');
- fs.writeFileSync(out+'/cut.diff','--- sdk-inputs.mjs\n+++ sdk-inputs.mjs (controlled cut)\n@@\n-  if (!sources || !installations)\n+  if (!sources || !installations || !tools?.privateRoot)\n');
  fs.writeFileSync(inputFile,cut);
+ const diff=spawnSync('git',['-C',source,'diff','--','ci/bootstrap/sdk-inputs.mjs'],{encoding:'utf8'});
+ fs.writeFileSync(out+'/cut.diff',diff.stdout);if(diff.status!==0){fs.writeFileSync(inputFile,before);throw Error('cut diff');}
  try{
   const c=await prepare('cut-missing-private');await run('cut-parent',c.argv,{environment:c.e,expected:1});
   if(!read(out+'/cut-parent.log').includes('NATIVE_INPUT_LOCATIONS_REQUIRED'))throw Error('cut missed target');
