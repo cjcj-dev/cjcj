@@ -7,11 +7,6 @@ import std.core.Option as CoreOption
 
 private let OPTION_WIDTH: Int64 = 28
 
-// Mirrors the C++ build flag CANGJIE_VISIBLE_OPTIONS_ONLY, which defaults to ON
-// (CMakeLists.txt:52). When enabled, the option table only recognizes VISIBLE-group options
-// (src/Option/OptionTable.cpp:74-78). The reference cjc is built with this ON.
-private let CANGJIE_VISIBLE_OPTIONS_ONLY: Bool = true
-
 private func printIndentOnly(indent: Int64, numSpaces!: Int64 = 2): Unit {
     BasicPrintIndentOnly(UInt64(indent), numSpaces: UInt64(numSpaces))
 }

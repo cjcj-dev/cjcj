@@ -19,6 +19,7 @@ import {acceptInstalledStd, flag, stdBuildType} from './sdk-std-resume.mjs';
 import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {materializeNativeSource, nativeSourceOptions} from './sdk-source.mjs';
+import {visibleOptionsOnly,configureOptionVisibility} from './compiler-option-visibility.mjs';
 export {acceptInstalledStd} from './sdk-std-resume.mjs';
 // Runtime inputs are a private build input snapshot, not an install overlay.
 // Re-entry may reuse equal bytes or publish a complete new snapshot. Keep the
@@ -54,6 +55,9 @@ export async function nativeStage(options, {signal} = {}) {
   if (options['accept-records'] && !options['resume-installed']) throw new Error('STD_RESUME_ARGUMENTS');
   if (options['resume-installed'] && (options.kind !== 'std' || options['compiler-runtime'] !== 'target')) throw new Error('STD_RESUME_ARGUMENTS');
   const {kind, source, sdk, runtime, output, platform, host} = options;
+  if(kind!=='h1'&&kind!=='compiler'&&options['visible-options-only']!==undefined)
+    throw Error('COMPILER_OPTION_CONFIGURATION_KIND');
+  const optionVisibility=visibleOptionsOnly(options['visible-options-only']);
   if (kind !== 'std' && options['build-type'] !== undefined) throw new Error('STD_BUILD_TYPE_KIND');
   const buildType = kind === 'std' ? stdBuildType(options['build-type']) : undefined;
   const commit = await materializeNativeSource(options,command,{signal});
@@ -79,6 +83,9 @@ export async function nativeStage(options, {signal} = {}) {
       link:output+'.runtime-input', platform, compilerRuntime:options['compiler-runtime'], heap:options.heap, previous, expected, buildType});
   }
   await fs.mkdir(output,{recursive:true});
+  const restoreOptionVisibility=kind==='h1'||kind==='compiler'
+    ?await configureOptionVisibility(source,optionVisibility):async()=>{};
+  try {
   if(kind==='std') {
     try {
     await verifyStdBuildInputs(sdk,platform);
@@ -199,7 +206,7 @@ export async function nativeStage(options, {signal} = {}) {
     const product=path.join(bin,'cjcj-stage1');
     await fs.copyFile(path.join(productRoot,'cjcj-stage1'),product);
     const {sha256}=await import('./sdk-io.mjs');
-    await atomicJson(path.join(bin,'build-inputs.json'),{producer:'sdk-native-stage:h1',source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,startupConfiguration,
+    await atomicJson(path.join(bin,'build-inputs.json'),{producer:'sdk-native-stage:h1',source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,startupConfiguration,visibleOptionsOnly:optionVisibility,
       sourceChanges:{'cjpm.toml':{beforeSha256:sha256(before),buildSha256:sha256(compiled)},
         'packages/cjc/cjpm.toml':{beforeSha256:sha256(packageBefore),buildSha256:sha256(packageCompiled)}},sha256:await fileDigest(product)});
     }
@@ -237,17 +244,18 @@ export async function nativeStage(options, {signal} = {}) {
       // absolute path out of the tree, which the install guard rejects as escape.
       {from:path.join(target,'release'),to:'share/cjcj/cjo',exclude:['bin','runtime']},
       ...['cjselfhost_llvmshim.o','cjc_runtime_config.o','cjc_heap_defaults.o'].map(name=>({from:path.join(source,'runtime_shim',name),to:'share/cjcj/runtime_shim/'+name}))]);
-    await atomicJson(path.join(destination,'compiler-inputs.json'),{commit,nativeShim:shim,version:process.env.SOURCE_SDK_VERSION,parentSha256:await fileDigest(await compilerProducer(sdk)),
+    await atomicJson(path.join(destination,'compiler-inputs.json'),{commit,nativeShim:shim,visibleOptionsOnly:optionVisibility,version:process.env.SOURCE_SDK_VERSION,parentSha256:await fileDigest(await compilerProducer(sdk)),
       stdSha256:await stdIdentity(options['std-input']||sdk, options['std-input']||sdk, {sourceSdk:sdk}),
       stdCoreSha256:await fileDigest(path.join(sdk,'lib',native.tuple,'libcangjie-std-core.a')),
       compileConfigurationBeforeSha256:(await import('./sdk-io.mjs')).sha256(before),compilerSha256:await fileDigest(product)});
     }, signal);
   } else throw new Error('NATIVE_TARGET_KIND '+kind);
   await atomicJson(output+'.commands.json',records);
+  } finally {await restoreOptionVisibility();}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies'].map(k=>[k,{type:'string'}]));
+    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies','visible-options-only'].map(k=>[k,{type:'string'}]));
     spec['resume-installed']={type:'boolean'};
     nativeSourceOptions(process.argv); // Reject duplicate identity flags before parseArgs.
     const {values}=parseArgs({options:spec});

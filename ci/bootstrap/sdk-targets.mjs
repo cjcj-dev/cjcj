@@ -1,6 +1,7 @@
 // The eight public bootstrap phases are an ordinary target dependency table.
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import {visibleOptionsOnly} from './compiler-option-visibility.mjs';
 import {relative} from './sdk-flow.mjs';
 import {isDeepStrictEqual} from 'node:util';
 import {fileURLToPath} from 'node:url';
@@ -238,6 +239,7 @@ export function createBootstrapTargets(input) {
   const stageArg=(kind,source,sdk,output,phase,compilerRuntime)=>({argv:[process.execPath,stageEntry,'--kind',kind,'--source',source,
     '--sdk',sdk,'--runtime',runtime.install,'--output',output,'--platform',platform,
     '--commit',kind==='h1'?h1.commit:kind==='std'?stdlib.commit:compiler.commit,
+    ...(kind==='h1'||kind==='compiler'?['--visible-options-only',String(visibleOptionsOnly(input.visibleOptionsOnly))]:[]),
     ...(kind==='compiler' && compiler.shimInstall ? ['--shim-install',compiler.shimInstall] : []),
     ...(kind==='std' && input.stdBuildType !== undefined ? ['--build-type',input.stdBuildType] : []),
     ...(kind==='std' && input.stdDependencies ? ['--std-dependencies',JSON.stringify(input.stdDependencies)] : []),

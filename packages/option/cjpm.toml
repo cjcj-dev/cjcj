@@ -8,7 +8,7 @@
   script-dir = ""
   src-dir = "src"
   output-type = "static"
-  compile-option = ""
+  compile-option = "--cfg CANGJIE_VISIBLE_OPTIONS_ONLY=true"
   override-compile-option = ""
   link-option = ""
   package-configuration = {}

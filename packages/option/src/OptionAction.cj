@@ -17,7 +17,6 @@ import cjcj::utils.TryParseInt as UtilsTryParseInt
 import cjcj::utils.ValidOverflowStrategy
 import std.collection.*
 
-private let CANGJIE_VISIBLE_OPTIONS_ONLY: Bool = true
 
 public class ActionResult {
     public let handled: Bool

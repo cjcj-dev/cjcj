@@ -2,6 +2,7 @@
 import {embeddedStamp} from '../../build/lib/toolchain-identity.mjs';
 import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
+import {visibleOptionsOnly,requireOptionVisibility} from './compiler-option-visibility.mjs';
 // Turn received native installations and real Git objects into build inputs.
 // The descriptor contains locations, not producer receipts or SDK authorities.
 import fs from 'node:fs/promises';
@@ -101,6 +102,7 @@ export async function validateSourceInputs(input) {
     throw Error('FINAL_STD_REUSE_INPUT_CHANGED');
 }
 export async function prepareNativeInputs(descriptor, env = process.env) {
+  const optionVisibility=visibleOptionsOnly(descriptor.visibleOptionsOnly);
   const platform = descriptor.platform || hostPlatform(), native = sdkPlatform(platform);
   if (platform !== hostPlatform()) throw new Error('NATIVE_RUNNER_REQUIRED ' + platform);
   const work = await privateRoot(descriptor.work), install = await privateRoot(descriptor.install);
@@ -223,6 +225,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     if(!reused.product||!reused.buildInputs||!reused.buildResult)throw new Error('H1_REUSE_LOCATIONS_REQUIRED');
     const product=path.resolve(reused.product);
     const facts=await readJson(reused.buildInputs), commands=await readJson(reused.buildResult);
+    requireOptionVisibility(facts.visibleOptionsOnly,optionVisibility);
     if(facts.source!==h1Commit||facts.host!==host.install||facts.native!==rows.llvm.install
       ||!facts.sourceChanges||facts.sha256!==await fileDigest(product)
       ||path.resolve(reused.buildInputs)!==path.join(path.dirname(product),'build-inputs.json'))
@@ -258,7 +261,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     for(const rel of ['cjcj-stage1.mjs','stage1-transform.mjs'])
       await fs.stat(path.join(tools.privateRoot,'ts/src/sharedbuild',rel));
   }
-  const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,
+  const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,visibleOptionsOnly:optionVisibility,
     ...(descriptor.stdDependencies?{stdDependencies:await stdDependencyInputs(descriptor.stdDependencies)}:{}),
     ...(descriptor.stdBuildType === undefined ? {} : {stdBuildType:stdBuildType(descriptor.stdBuildType)}),
     ...(descriptor.nativePair ? {nativePair:descriptor.nativePair} : {}), ...rows, stdlib:stdlib??rows.runtime,

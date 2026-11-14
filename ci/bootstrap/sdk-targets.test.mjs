@@ -1,6 +1,17 @@
 import test from'node:test';import assert from'node:assert/strict';import {createBootstrapTargets,validateBootstrapTargets,FIXED_INPUTS,BOOTSTRAP_PHASES}from'./sdk-targets.mjs';import {targetOrder}from'./sdk-flow.mjs';import {PLATFORMS}from'./sdk-io.mjs';import{readHostToolchainPin}from'../host-toolchain-pin.mjs';
 import {bootstrap} from './bootstrap.mjs';
 function inputs(platform){const row=(commit,name)=>({commit,tree:'a'.repeat(40),repository:'/fixture/'+name+'.git',install:'/fixture/'+name,configuration:{fixture:true},buildResult:'/fixture/'+name+'/result.json',sourceRoot:'/fixture/'+name+'-producer'});const runtime=row(FIXED_INPUTS.runtime,'R');return{platform,work:'/fixture/work',install:'/fixture/install',host:{version:readHostToolchainPin(platform).replace(/^nightly-/, ''),install:'/fixture/H'},llvm:row(FIXED_INPUTS.llvm,'N'),runtime,ast:row(FIXED_INPUTS.compiler,'AST'),h1:{...row(FIXED_INPUTS.h1,'H1'),product:'/fixture/H1/compiler'},compiler:row('b'.repeat(40),'C'),stdlib:{...runtime,install:'/fixture/std',buildResult:'/fixture/std/result.json',sourceRoot:'/fixture/std-producer'},tools:{privateRoot:'/fixture/tools'}};}
+test('the public bootstrap graph forwards one option policy to H1 and both compiler stages',()=>{
+ for(const setting of [undefined,true,false]) {
+  const input=inputs('linux_x86_64');delete input.h1.product;
+  if(setting!==undefined)input.visibleOptionsOnly=setting;
+  const commands=createBootstrapTargets(input).stages.flatMap(stage=>stage.commands??[]).map(row=>row.argv);
+  const producers=commands.filter(argv=>['h1','compiler'].includes(argv[argv.indexOf('--kind')+1]));
+  assert.equal(producers.length,3);
+  for(const argv of producers)assert.equal(argv[argv.indexOf('--visible-options-only')+1],String(setting??true));
+  for(const argv of commands.filter(argv=>argv[argv.indexOf('--kind')+1]==='std'))assert.equal(argv.includes('--visible-options-only'),false);
+ }
+});
 test('public native fact copy and C2 reuse retain one input writer',async()=>{
  const fs=await import('node:fs/promises'),path=await import('node:path'),os=await import('node:os'),{spawnSync}=await import('node:child_process');
  const base=process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir();await fs.mkdir(base,{recursive:true});

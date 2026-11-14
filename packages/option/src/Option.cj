@@ -23,7 +23,6 @@ private let CHIR_EXTENSION: String = "chir"
 private let ARCHIVE_EXTENSION: String = "a"
 private let OBJECT_EXTENSION: String = "o"
 private let COFF_OBJECT_EXTENSION: String = "obj"
-private let CANGJIE_VISIBLE_OPTIONS_ONLY: Bool = true
 
 private func emitOptionDiag(kind: BasicDiagKindRefactor): Unit {
     let diag = BasicDiagnosticEngine()
