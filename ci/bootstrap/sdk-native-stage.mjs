@@ -126,8 +126,14 @@ export async function nativeStage(options, {signal} = {}) {
       note:'native target/install '+commit});
     } finally { await atomicJson(output+'.commands.json',records); }
   } else if(kind==='h1') {
+    if(native.os!=='linux') {
+      // Keep the existing native producer for platforms without the ELF --wrap adapter.
+      if(!host||!options['private-tools'])throw new Error('H1_HOST_AND_NATIVE_ADAPTER_REQUIRED');
+      await command([process.execPath,path.join(options['private-tools'],'ts/src/sharedbuild/cjcj-stage1.mjs')],{
+        cwd:source,env:{...env,CANGJIE_HOME:host,SB_SOURCE:source,SB_OUTPUT:path.join(output,'bin'),SB_NATIVE_ROOT:sdk,
+          SB_SHA:commit,SB_PLATFORM:platform,SB_CC:options.cc,SB_OPTIMIZATION:'O1',SB_PARAMETERS_JSON:'{"compile_flags":""}'},records});
+    } else {
     if(!host)throw new Error('H1_HOST_REQUIRED');
-    if(native.os!=='linux')throw new Error('H1_LINUX_PRODUCER_REQUIRED');
     const shim=await readInstalledNativeShim({install:sdk});
     const work=output+'.h1',inputs=path.join(work,'inputs'),productRoot=path.join(work,'out');
     await fs.mkdir(inputs,{recursive:true});await fs.mkdir(productRoot,{recursive:true});
@@ -196,6 +202,7 @@ export async function nativeStage(options, {signal} = {}) {
     await atomicJson(path.join(bin,'build-inputs.json'),{producer:'sdk-native-stage:h1',source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,startupConfiguration,
       sourceChanges:{'cjpm.toml':{beforeSha256:sha256(before),buildSha256:sha256(compiled)},
         'packages/cjc/cjpm.toml':{beforeSha256:sha256(packageBefore),buildSha256:sha256(packageCompiled)}},sha256:await fileDigest(product)});
+    }
   } else if(kind==='compiler') {
     const target=await privateRoot(options['target-dir']||path.join(source,'target'));
     if(options.phase==='stage3')await assertFinalStdInput({sdk,std:sdk,runtime:sdk,
