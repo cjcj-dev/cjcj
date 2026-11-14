@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {compilerNativeShim} from '../../ci/bootstrap/native-shim-inputs.mjs';
 const source=path.resolve(import.meta.dirname,'../..'),root=path.dirname(source);
-const [ref,attempt='attempt1']=process.argv.slice(2);
+const [ref,attempt='attempt1']=globalThis.argv?._ ?? process.argv.slice(2);
 const out=root+'/dependency-parent/'+attempt,sol='/mnt/cjcj-data/impl_full_sdk_sol_1108/integrated-gc-1114';
 fs.mkdirSync(out,{recursive:true});for(const name of ['home','tmp'])fs.mkdirSync(out+'/'+name);
 const env={PATH:'/usr/local/bin:/usr/bin:/bin',HOME:out+'/home',TMPDIR:out+'/tmp',LANG:'C.UTF-8',LC_ALL:'C.UTF-8',RELEASE_EVIDENCE_TEST_ROOT:out+'/tmp'};
