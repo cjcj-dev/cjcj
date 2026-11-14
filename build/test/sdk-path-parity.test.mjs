@@ -243,7 +243,8 @@ function sharedLibrary(root, relative, name) {
   return file;
 }
 
-test('native Linux loader-name links accept changed internal versions and reject invalid identities', async t => {
+test('native Linux loader-name links accept changed internal versions and reject invalid identities',
+  {skip: process.platform !== 'linux'}, async t => {
   const {root, official, candidate} = fixture(t);
   const lib = 'third_party/llvm/lib/', name = 'libxml2.so.16';
   sharedLibrary(official, lib + 'libxml2.so.2.14.0', name);
@@ -285,7 +286,7 @@ test('native Linux loader-name links accept changed internal versions and reject
 // Stop just after the real parity call, before consumers or SDK writes; 78
 // records arrival at this finite boundary, never successful packaging.
 test('public package reaches native path parity and rejects a different real ELF SONAME',
-  {skip: !process.env.PACKAGE_PARITY_SDK || !process.env.PACKAGE_PARITY_OFFICIAL_SDK}, t => {
+  {skip: process.platform !== 'linux' || !process.env.PACKAGE_PARITY_SDK || !process.env.PACKAGE_PARITY_OFFICIAL_SDK}, t => {
     const {root, official} = fixture(t);
     const repo = fileURLToPath(new URL('../../', import.meta.url));
     const targetModule = new URL('../../ci/srcbuild/lib/package-install.mjs', import.meta.url).href;
