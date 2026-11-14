@@ -70,6 +70,10 @@ public class Ohos_CJNATIVE <: Linux_CJNATIVE {
         tool.AppendArg("-z")
         tool.AppendArg("pack-relative-relocs")
         tool.AppendArgIf(driverOptions.stripSymbolTable, "-s")
+        // Final executables and shared libraries follow this invocation's -g: without it ld.lld discards the
+        // non-allocated `.debug*` input sections, including those of the DWARF-carrying standard library,
+        // while symbols, relocations, `.eh_frame` and Cangjie metadata stay. `-s` already implies it.
+        tool.AppendArgIf(!driverOptions.stripSymbolTable && !driverOptions.enableCompileDebug, "--strip-debug")
         tool.AppendArg("--hash-style=gnu")
         tool.AppendArg("-m")
         tool.AppendArg(GetEmulation())

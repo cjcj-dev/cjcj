@@ -91,6 +91,10 @@ public class IOS_CJNATIVE <: Darwin_CJNATIVE {
         if (driverOptions.stripSymbolTable) {
             tool.AppendArg("-install_name", GetOutputFileInfo(objFiles).filePath)
         }
+        // ld64 never copies DWARF into the output; it emits a STABS debug map pointing at the input objects,
+        // including the DWARF-carrying standard library archives, which dsymutil turns into the .dSYM for -g.
+        // Without -g the final binary omits that debug map (-S); the symbol table is unchanged.
+        tool.AppendArgIf(!driverOptions.stripSymbolTable && !driverOptions.enableCompileDebug, "-S")
         HandleLLVMLinkOptions(objFiles, tool)
         GenerateRuntimePath(tool)
         backendCmds.add(MakeSingleToolBatch(tool))

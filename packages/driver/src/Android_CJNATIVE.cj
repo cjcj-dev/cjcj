@@ -121,6 +121,10 @@ public class Android_CJNATIVE <: Linux_CJNATIVE {
             tool.AppendArg("noexecstack")
         }
         tool.AppendArgIf(driverOptions.stripSymbolTable, "-s")
+        // Final executables and shared libraries follow this invocation's -g: without it ld.lld discards the
+        // non-allocated `.debug*` input sections, including those of the DWARF-carrying standard library,
+        // while symbols, relocations, `.eh_frame` and Cangjie metadata stay. `-s` already implies it.
+        tool.AppendArgIf(!driverOptions.stripSymbolTable && !driverOptions.enableCompileDebug, "--strip-debug")
         tool.AppendArg("--hash-style=both")
         tool.AppendArg("-EL")
         tool.AppendArg("-m")

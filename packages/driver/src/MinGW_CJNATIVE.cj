@@ -113,6 +113,10 @@ public class MinGW_CJNATIVE <: Gnu {
         tool.AppendArg("-o")
         tool.AppendArg(GetOutputFileInfo(objFiles).filePath)
         tool.AppendArgIf(driverOptions.stripSymbolTable, "-s")
+        // The lld MinGW driver links DWARF by default (-debug:dwarf). Without -g a final EXE/DLL drops the
+        // `.debug_*` input sections, including the standard library's, through --strip-debug
+        // (-debug:symtab), which keeps the COFF symbol table. `-s` (-debug:none) already implies it.
+        tool.AppendArgIf(!driverOptions.stripSymbolTable && !driverOptions.enableCompileDebug, "--strip-debug")
         tool.AppendArg("--nxcompat")
         tool.AppendArg("--dynamicbase")
         tool.AppendArg("--high-entropy-va")
