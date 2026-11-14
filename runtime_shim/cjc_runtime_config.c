@@ -228,12 +228,19 @@ static int CompilerHeapKilobytes(const char* hard, size_t* result)
     for (size_t i = firstDigit; i < n - 2; ++i) {
         if (compact[i] < '0' || compact[i] > '9') { free(compact); return 0; }
     }
-    /* Match runtime conversion, including its base-0 partial conversion and
-     * size_t unit arithmetic; leave invalid sizes to normal runtime validation. */
-    size_t kilobytes = (size_t)strtoul(compact, NULL, 0);
+    /* Preserve runtime base-0 conversion (including partial conversion), but
+     * never turn zero or overflowing requests into valid compiler defaults.
+     * Unrecognized requests must reach the original runtime unchanged. */
+    const int savedErrno = errno;
+    errno = 0;
+    const unsigned long parsed = strtoul(compact, NULL, 0);
+    const int overflow = errno == ERANGE;
+    errno = savedErrno;
     free(compact);
-    if (unit == 'm') kilobytes *= KB;
-    if (unit == 'g') kilobytes *= MB;
+    if (overflow || parsed == 0 || parsed > SIZE_MAX) return 0;
+    const size_t scale = unit == 'g' ? MB : unit == 'm' ? KB : 1;
+    if (parsed > SIZE_MAX / scale) return 0;
+    const size_t kilobytes = (size_t)parsed * scale;
     if (kilobytes > SIZE_MAX / KB) return 0;
     *result = kilobytes;
     return 1;

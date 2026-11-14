@@ -72,6 +72,10 @@ int main(int argc,char** argv) {
     } else if (!strcmp(argv[1],"linked-invalid-hard")) {
         const Entry entries[]={{"cjHeapSize","invalid"}};
         CJ_MRT_CjRuntimeInitWithConfigV1(entries,1); hardExpected="invalid";
+    } else if (!strcmp(argv[1],"linked-preserved-hard")) {
+        const char* requested=getenv("CJCJ_TEST_TABLE_HARD"); assert(requested);
+        const Entry entries[]={{"cjHeapSize",requested}};
+        CJ_MRT_CjRuntimeInitWithConfigV1(entries,1); hardExpected=requested;
     } else if (!strcmp(argv[1],"linked-low-hard")) {
         const Entry entries[]={{"cjHeapSize","256MB"}};
         CJ_MRT_CjRuntimeInitWithConfigV1(entries,1); hardExpected="4GB";
@@ -132,5 +136,14 @@ int main(int argc,char** argv) {
   // Neither environment nor embedded-table selection may add an 8 GiB soft.
   run('octal-hard',[exe,'low'],{...env,cjHeapSize:'010000MB'});
   run('linked-octal-hard',[exe,'linked-octal-hard'],linked);
+  // Invalid zero/base-0/overflow requests must reach runtime validation
+  // unchanged, through either configuration source. This ABI stand-in only
+  // verifies forwarding; the generated-entry regression checks real rejection.
+  for (const hard of ['0GB', '+0GB', '08GB', '17592186044416GB',
+    '17592186044417GB', '18014398509481984MB', '18446744073709551616KB']) {
+    run('preserve-env-'+hard,[exe,'low'],{...linked,cjHeapSize:hard});
+    run('preserve-table-'+hard,[exe,'linked-preserved-hard'],
+      {...linked,CJCJ_TEST_TABLE_HARD:hard});
+  }
   console.log('COMPILER_HEAP_DEFAULTS_EVIDENCE '+dir);
 });
