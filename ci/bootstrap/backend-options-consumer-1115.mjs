@@ -18,8 +18,8 @@ async function execute(tag,argv,{env=process.env,cwd=root,expected=0}={}) {
  function sample(pid){try {
   const exe=fs.readlinkSync('/proc/'+pid+'/exe'),cmdline=fs.readFileSync('/proc/'+pid+'/cmdline','utf8').split('\0').filter(Boolean);
   if(/(?:cjcj-stage1|\/llc|\/opt|\/ld)$/.test(exe)) {
-   const key=pid+':'+JSON.stringify(cmdline);
-   if(!observed.has(key))observed.set(key,{pid,exe,argv:cmdline,maps:fs.readFileSync('/proc/'+pid+'/maps','utf8').split('\n').filter(l=>/libLLVM|libcangjie-runtime|libboundscheck/.test(l))});
+   const key=pid+':'+exe+':'+JSON.stringify(cmdline);
+   observed.set(key,{pid,exe,argv:cmdline,maps:fs.readFileSync('/proc/'+pid+'/maps','utf8').split('\n').filter(l=>/libLLVM|libcangjie-runtime|libboundscheck/.test(l))});
   }
   for(const child of fs.readFileSync('/proc/'+pid+'/task/'+pid+'/children','utf8').trim().split(/\s+/).filter(Boolean))sample(child);
  }catch{}}
