@@ -3,12 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawn,spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-const source=path.resolve(import.meta.dirname,'../..'),root=path.dirname(source),out=root+'/attempt5-r1';
+const source=path.resolve(import.meta.dirname,'../..'),root=path.dirname(source),out=root+'/attempt6-r1';
 const host='/mnt/cjcj-nvme/impl_full_sdk_sol_1108/inputs/official-host/host-sdk-dQJL56/cangjie';
 const seed='/root/collect_ten_v2_sol_1113/matrix-fixed-1114/install';
 const native='/mnt/cjcj-data/impl_full_sdk_sol_1108/main-pair-1114/native/install';
 const cache='/root/impl_managed_output_sol_1113/merge-matrix-type-fallback/cjcj-source/target';
-const ref=process.argv[2],zx=root+'/r1-tools/node_modules/.bin/zx';
+const ref=globalThis.argv?._?.[0] ?? process.argv[2],zx=root+'/r1-tools/node_modules/.bin/zx';
 fs.mkdirSync(out);for(const d of ['home','tmp','native','hashmap'])fs.mkdirSync(out+'/'+d);
 const env={PATH:'/usr/local/bin:/usr/bin:/bin',HOME:out+'/home',TMPDIR:out+'/tmp',LANG:'C.UTF-8',LC_ALL:'C.UTF-8'};
 const record={ref,source,out,host,seed,native,cache,start:new Date().toISOString(),steps:[],claims:[]};
@@ -38,7 +38,7 @@ try{
  record.resources=Object.fromEntries(['cpuset.cpus.effective','memory.max','memory.swap.max','cpu.max'].map(k=>[k,read(cg+'/'+k)]));record.limits=read('/proc/self/limits');
  record.topology=Object.fromEntries([32,47].map(c=>[c,read(`/sys/devices/system/cpu/cpu${c}/topology/thread_siblings_list`)]));save();
  if(record.resources['memory.swap.max']!=='0'||!record.limits.match(/Max core file size\s+0\s+0/))throw Error('resources');
- const git=spawnSync('git',['-C',source,'rev-parse','HEAD'],{encoding:'utf8'});if(git.status!==0||git.stdout.trim()!==ref)throw Error('source ref');
+ const git=spawnSync('git',['-C',source,'rev-parse','HEAD'],{encoding:'utf8'});record.sourceCheck={rc:git.status,stdout:git.stdout,stderr:git.stderr,ref};save();if(git.status!==0||git.stdout.trim()!==ref)throw Error('source ref');
 
  const cc='/usr/lib/llvm-15/bin/clang',shim=source+'/runtime_shim',n=out+'/native';
  await run('source-clean',['git','diff','--exit-code'],{cwd:source});
@@ -61,7 +61,9 @@ try{
   await rejection('old-'+label,root+'/attempt4/native/target-cj',request,false);
   await rejection('runtime-control-'+label,root+'/attempt4/native/target-cj-cut',request,true);
  }
- const stage=[zx,source+'/ci/bootstrap/sdk-native-stage.mjs','--kind','h1','--source',source,'--sdk',native,'--runtime',host,'--host',host,'--platform','linux_x86_64','--commit',ref,'--jobs','16','--heap','16GB','--cc',cc];
+ const stage=[process.execPath,source+'/ci/bootstrap/sdk-native-stage.mjs','--kind','h1','--source',source,'--sdk',native,'--runtime',host,'--host',host,'--platform','linux_x86_64','--commit',ref,'--jobs','16','--heap','16GB','--cc',cc];
+ // The production CLI detects process.argv[1]; retain its normal Node entry.
+ if(fs.existsSync(cache)&&!fs.existsSync(source+'/target'))await run('cache-copy',['cp','-a','--reflink=auto',cache,source+'/target']);
  await run('normal-h1-build',[...stage,'--output',out+'/compiler']);
  record.product={path:out+'/compiler/bin/cjcj-stage1',sha256:hash(out+'/compiler/bin/cjcj-stage1')};save();
  await run('private-install',['cp','-a','--reflink=auto',root+'/attempt3/install',out+'/install']);
