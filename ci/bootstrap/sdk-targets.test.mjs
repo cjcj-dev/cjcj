@@ -460,3 +460,16 @@ test('Linux fresh H1 command needs no retired private tools',()=>{
  assert.equal(command[command.indexOf('--sdk')+1],input.llvm.install);
  assert.doesNotThrow(()=>validateBootstrapTargets(graph));
 });
+
+test('independent compiler shim reaches C2 and C3 only; default retains native SDK selection',()=>{
+ const input=inputs('linux_x86_64');
+ for(const id of ['stage2','stage3'])assert.ok(!createBootstrapTargets(input).stages.find(s=>s.id===id).commands[0].argv.includes('--shim-install'));
+ input.compiler.shimInstall='/fixture/compiler-shim';
+ const stages=createBootstrapTargets(input).stages;
+ for(const id of ['stage2','stage3']) {
+  const a=stages.find(s=>s.id===id).commands[0].argv;
+  assert.equal(a[a.indexOf('--shim-install')+1],input.compiler.shimInstall);
+ }
+ for(const s of stages.filter(s=>!['stage2','stage3'].includes(s.id)))
+  for(const c of s.commands||[])assert.ok(!c.argv.includes('--shim-install'));
+});

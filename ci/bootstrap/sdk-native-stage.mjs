@@ -16,7 +16,7 @@ import {writeStdProvenance} from '../../build/lib/provenance.mjs';
 import {stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
 import {resolveProductBinary} from '../srcbuild/lib/product-binary.mjs';
 import {acceptInstalledStd, flag, stdBuildType} from './sdk-std-resume.mjs';
-import {readInstalledNativeShim} from './native-shim-inputs.mjs';
+import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {materializeNativeSource, nativeSourceOptions} from './sdk-source.mjs';
 export {acceptInstalledStd} from './sdk-std-resume.mjs';
@@ -210,15 +210,7 @@ export async function nativeStage(options, {signal} = {}) {
     if(process.env.SOURCE_SDK_VERSION)await injectCangjieVersion(source,process.env.SOURCE_SDK_VERSION);
     const before=await fs.readFile(path.join(source,'cjpm.toml'));
     const shimInstall=options['shim-install']||sdk;
-    const shim=await readInstalledNativeShim({install:shimInstall});
-    if(shim.source.commit!==commit)throw Error('NATIVE_SHIM_COMPILER_SOURCE '+shim.source.commit+' != '+commit);
-    // A separate shim installation may update compiler-owned glue, but must
-    // still target this SDK's LLVM and compiler schema dependency pair.
-    if(options['shim-install']) {
-      const sdkShim=await readInstalledNativeShim({install:sdk});
-      if(shim.llvm.commit!==sdkShim.llvm.commit||shim.compiler.commit!==sdkShim.compiler.commit)
-        throw Error('NATIVE_SHIM_DEPENDENCY_PAIR');
-    }
+    const shim=await compilerNativeShim({install:options['shim-install'],nativeInstall:sdk,compilerCommit:commit});
     env.CJCJ_LLVM_SHIM_O=path.join(shimInstall,shim.object.path);
     await command([options.zx||'zx',path.join(source,'runtime_shim/build_shim.mjs')],{cwd:source,env,records});
     try {

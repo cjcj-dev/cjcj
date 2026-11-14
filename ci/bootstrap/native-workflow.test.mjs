@@ -123,3 +123,13 @@ test('formal Windows release package key needs an explicit pair and its native s
  const run=selected=>spawnSync('bash',['-e','-c',std.run],{cwd:repo,encoding:'utf8',env:{...env,EXPECTED_STD_ARTIFACT:'final-std-native-windows-x64',SELECTED_STD_ARTIFACT:selected}});
  assert.equal(run('final-std-native-windows-x64').status,0);assert.equal(run('final-std-windows-x64').status,1);
 });
+
+test('transport preserves optional independent shim location without changing native N',async()=>{
+ const root='/fixture/received';
+ const selected=await nativeInstallationLocations(root,{installations:{
+  llvm:{install:'N',buildResult:'N/BUILD-INPUTS.json'},shim:{install:'compiler-shim'}}},{});
+ assert.equal(selected.shim.install,root+'/compiler-shim');
+ assert.equal(selected.llvm.install,root+'/N');
+ await assert.rejects(()=>nativeInstallationLocations(root,{installations:{shim:{install:'../escape'}}},{}));
+ assert.equal((await nativeInstallationLocations(root,{},{})).shim,undefined);
+});

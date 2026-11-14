@@ -1,6 +1,6 @@
 #!/usr/bin/env zx
 import {embeddedStamp} from '../../build/lib/toolchain-identity.mjs';
-import {readInstalledNativeShim} from './native-shim-inputs.mjs';
+import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 // Turn received native installations and real Git objects into build inputs.
 // The descriptor contains locations, not producer receipts or SDK authorities.
@@ -68,6 +68,8 @@ export async function installedFinalStd(supplied, input) {
 // Validate the actual selected source objects, including an explicit inputs file.
 // The compiler's macro consumer must be this paired source, not an older C tree.
 export async function validateSourceInputs(input) {
+  if(input.compiler.shimInstall)await compilerNativeShim({install:input.compiler.shimInstall,
+    nativeInstall:input.llvm.install,compilerCommit:input.compiler.commit});
   if(input.stdDependencies&&!isDeepStrictEqual(await stdDependencyInputs(input.stdDependencies),input.stdDependencies))throw Error('STD_DEPENDENCY_INPUT_CHANGED');
   if(input.stage2?.mode==='ordinary-cjpm') {
     const native=sdkPlatform(input.platform);
@@ -208,6 +210,10 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
         await fs.access(path.join(rows[name].sourceRoot,member));
       await fs.access(rows[name].gateStatus);
     }
+  }
+  if(installations.shim) {
+    if(!installations.shim.install)throw Error('NATIVE_SHIM_INSTALL_REQUIRED');
+    rows.compiler.shimInstall=await privateRoot(installations.shim.install);
   }
   // Optional reuse is an original H1 producer, not a copied flow directory.
   // A new candidate/configuration gets a new work domain while retaining the

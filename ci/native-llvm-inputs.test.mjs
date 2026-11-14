@@ -108,3 +108,10 @@ test('retired aliases alone preserve the default pair through public environment
  }
  for(const key of Object.keys(poisoned))assert.equal(Object.hasOwn(rows,key),false,key);
 }));
+test('source pins keep keys containing digits for fixed std dependencies',async()=>{
+ const {readSourcePins}=await import('./native-llvm-inputs.mjs');
+ const {stdDependencySources}=await import('./bootstrap/stdlib-build.mjs');
+ const text=fs.readFileSync('ci/source_pin.env','utf8'),pin=key=>new RegExp(`^${key}=(.+)$`,'m').exec(text)[1];
+ assert.equal(readSourcePins().source.PCRE2_REF,pin('PCRE2_REF'));
+ assert.deepEqual(stdDependencySources().pcre2,{repository:pin('PCRE2_SRC_URL'),commit:pin('PCRE2_REF')});
+});

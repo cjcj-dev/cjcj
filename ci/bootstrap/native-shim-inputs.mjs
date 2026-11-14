@@ -25,3 +25,16 @@ export async function readInstalledNativeShim({install,facts,objectFile}) {
   throw Error('NATIVE_SHIM_INSTALLED_BYTES '+object);
  return shim;
 }
+
+// Both public preparation and the compiler producer select the same ordinary
+// object. A separate install changes only compiler-owned glue, never N's pair.
+export async function compilerNativeShim({install, nativeInstall, compilerCommit}) {
+ const shim=await readInstalledNativeShim({install:install||nativeInstall});
+ if(shim.source.commit!==compilerCommit)throw Error('NATIVE_SHIM_COMPILER_SOURCE '+shim.source.commit+' != '+compilerCommit);
+ if(install) {
+  const original=await readInstalledNativeShim({install:nativeInstall});
+  if(shim.llvm.commit!==original.llvm.commit||shim.compiler.commit!==original.compiler.commit)
+   throw Error('NATIVE_SHIM_DEPENDENCY_PAIR');
+ }
+ return shim;
+}

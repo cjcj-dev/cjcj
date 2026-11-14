@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export function readSourcePins(repo=root) {
   const read=file=>Object.fromEntries(fs.readFileSync(path.join(repo,'ci',file),'utf8').split(/\r?\n/)
-    .filter(line=>/^[A-Z_]+=/.test(line)).map(line=>{const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)];}));
+    .filter(line=>/^[A-Z][A-Z0-9_]*=/.test(line)).map(line=>{const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)];}));
   const source=read('source_pin.env');
   return {source,runtime:read('runtime_pin.env'),llvm:{...read('llvm_pin.env'),
     CANGJIE_COMPILER_URL:source.COMPILER_SRC_URL,CANGJIE_COMPILER_SHA:source.COMPILER_REF}};

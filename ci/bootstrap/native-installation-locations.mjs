@@ -11,6 +11,7 @@ export async function nativeInstallationLocations(root, locations, env=process.e
     if(row)result[name]={...row,install:member(row.install),buildResult:member(row.buildResult),
       ...(row.sourceRoot?{sourceRoot:member(row.sourceRoot)}:{})};
   }
+  if(locations.installations?.shim)result.shim={install:member(locations.installations.shim.install)};
   if(env.CJCJ_NATIVE_CJDB_INSTALL) {
     const install=await privateRoot(env.CJCJ_NATIVE_CJDB_INSTALL);
     const buildResult=path.join(install,'BUILD-INPUTS.json');

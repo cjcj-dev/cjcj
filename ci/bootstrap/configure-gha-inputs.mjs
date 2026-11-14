@@ -62,6 +62,7 @@ export async function configureGhaInputs(env=process.env) {
     if(!row)throw Error('GHA_NATIVE_INSTALLATION_REQUIRED '+name);
     return [name,row];
   }));
+  if(resolved.shim)installations.shim=resolved.shim;
   const selectedHost = pair && locations.host ? {...locations.host, install:member(locations.host.install),
     ...(locations.host.archive ? {archive:member(locations.host.archive)} : {})} : {install:env.CJCJ_BOOTSTRAP_BASE,
     archive:env.CJCJ_BOOTSTRAP_BASE_ARCHIVE, version:readHostToolchainPin(platform).replace(/^nightly-/,'')};
