@@ -1,9 +1,10 @@
 #!/usr/bin/env zx
 import fs from 'node:fs';import path from 'node:path';import {spawn} from 'node:child_process';import {createHash} from 'node:crypto';
 import {cleanSdkEnvironment} from './sdk-platform.mjs';
-const [mode,root,producer]=process.argv.slice(2);
-if(!['install','consume'].includes(mode)||![root,producer].every(p=>p&&path.isAbsolute(p)))throw Error('mode root producer');
-const source=path.resolve(import.meta.dirname,'../..'),sdk=root+'/install';
+const [mode,root,producer,installed]=process.argv.slice(2);
+if(!['install','consume','backend'].includes(mode)||![root,producer].every(p=>p&&path.isAbsolute(p))
+ ||mode==='backend'&&(!installed||!path.isAbsolute(installed)))throw Error('mode root producer [installed]');
+const source=path.resolve(import.meta.dirname,'../..'),sdk=installed??root+'/install';
 const frozen='/root/collect_ten_v2_sol_1113/current-integrated-1114/install';
 const app='/root/collect_ten_v2_sol_1113/current-integrated-1114/src-v2/hashmap_count.cj';
 const facts=JSON.parse(fs.readFileSync(producer+'/bin/build-inputs.json','utf8'));
@@ -21,9 +22,9 @@ async function execute(tag,argv,{env=process.env,cwd=root,expected=0}={}) {
    const key=pid+':'+exe+':'+JSON.stringify(cmdline);
    observed.set(key,{pid,exe,argv:cmdline,maps:fs.readFileSync('/proc/'+pid+'/maps','utf8').split('\n').filter(l=>/libLLVM|libcangjie-runtime|libboundscheck/.test(l))});
   }
-  for(const child of fs.readFileSync('/proc/'+pid+'/task/'+pid+'/children','utf8').trim().split(/\s+/).filter(Boolean))sample(child);
  }catch{}}
- const timer=setInterval(()=>sample(p.pid),10);
+ const group='/sys/fs/cgroup'+fs.readFileSync('/proc/self/cgroup','utf8').trim().split('::').at(-1);
+ const timer=setInterval(()=>{for(const pid of fs.readFileSync(group+'/cgroup.procs','utf8').trim().split(/\s+/))sample(pid);},10);
  const result=await new Promise((resolve,reject)=>{p.on('error',reject);p.on('exit',(rc,signal)=>resolve({rc,signal}));});
  clearInterval(timer);fs.closeSync(out);fs.closeSync(err);Object.assign(row,result,{end:new Date().toISOString(),observed:[...observed.values()]});save();
  if(result.rc!==expected||result.signal)throw Error('FIRST_FAILURE '+tag+' '+JSON.stringify(result));
@@ -48,6 +49,8 @@ if(mode==='install') {
  if(resources['memory.swap.max']!=='0'||!limits.match(/Max core file size\s+0\s+0/))throw Error('RESOURCE_CONTRACT');
  const ids=['libexec/compiler/cjcj-stage1','.compiler-exec/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','.compiler-exec/third_party/llvm/lib/libLLVM-15.so','third_party/llvm/lib/libLLVM-15.so','.native-tools/third_party/llvm/bin/llc','runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so'];
  fs.writeFileSync(root+'/consumer-inputs.json',JSON.stringify({facts,resources,limits,source:identity(app),identities:ids.map(p=>identity(sdk+'/'+p)),entry:fs.readFileSync(sdk+'/bin/cjcj-stage1.entry','utf8')},null,2));
+ if(identity(sdk+'/libexec/compiler/cjcj-stage1').sha256!==facts.sha256)throw Error('INSTALLED_COMPILER_CHANGED');
+ if(mode!=='backend') {
  await execute('help',[sdk+'/bin/cjc','--help'],{env});
  if(fs.readFileSync(root+'/help.stdout','utf8').includes('--llc-options')===facts.visibleOptionsOnly)throw Error('HELP_VISIBILITY');
  const hello=source+'/ci/bootstrap/fixtures/backend-options-hello.cj';
@@ -57,9 +60,11 @@ if(mode==='install') {
  if(facts.visibleOptionsOnly) {
   await execute('hidden-rejected',[sdk+'/bin/cjc','--static-std','-O2','--llc-options','-cj-safepoint-poll-max-registers-for-gc-values=0',app,'-o',root+'/rejected'],{env,expected:1});
   if(!fs.readFileSync(root+'/hidden-rejected.stderr','utf8').includes('invalid option'))throw Error('HIDDEN_DIAGNOSTIC');
- } else {
+ }
+ }
+ if(!facts.visibleOptionsOnly) {
   for(const budget of [null,0,64]) {
-   const tag=budget===null?'default-backend':'b'+budget,arm=root+'/'+tag;fs.mkdirSync(arm);
+   const tag=budget===null?'default-backend':'b'+budget,arm=root+'/'+tag;fs.mkdirSync(arm);fs.mkdirSync(arm+'/temps');
    const argv=[sdk+'/bin/cjc','--static-std','-O2','-V','--save-temps',arm+'/temps',...(budget===null?[]:['--llc-options','-cj-safepoint-poll-max-registers-for-gc-values='+budget]),'--link-option','-Map='+arm+'/link.map',app,'-o',arm+'/hashmap_count'];
    const row=await execute(tag,argv,{env,cwd:arm});
    const llc=row.observed.filter(p=>p.exe.endsWith('/llc'));
