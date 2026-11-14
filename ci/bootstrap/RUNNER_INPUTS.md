@@ -9,6 +9,12 @@ The installed compiler does not read an environment override. Help, option
 lookup, option-value validation and option actions use the same compiled policy;
 the separate experimental/stable checks still apply. Reusing a compiler produced
 with a different policy is rejected. No setting is forwarded to std producers.
+Each producer selects the requested value from the actual option manifest,
+including default builds reentering after an interrupted development build.
+Normal completion or failure restores the incoming manifest bytes. Legacy
+sources without the switch are accepted only for `true` and only when the
+three option implementations match the known hardcoded-true 8e9 source bytes;
+unknown legacy implementations are rejected before build commands.
 
 Both runners resolve bootstrap inputs with
 `ci/release/prepare_bootstrap_inputs.mjs` before entering
