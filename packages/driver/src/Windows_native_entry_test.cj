@@ -40,7 +40,7 @@ private func CheckNativeEntry(mode: OutputMode, windows: Bool, explicitSysroot: 
             let driver = Driver(["cjc"], diag)
             driver.cangjieHome = "/selected runtime"
             let chain: Gnu = if (windows) { MinGW_CJNATIVE(driver, options, commands) }
-                else { Gnu(driver, options, commands) }
+                else { Linux_CJNATIVE(driver, options, commands) }
             chain.ldPath = "selected-ld"
             chain.arPath = "selected-ar"
             @Assert(chain.ProcessGeneration(modules), true)
