@@ -488,6 +488,10 @@ public open class Gnu <: ToolChain {
         }
         if (driverOptions.target.os == OSType.WINDOWS) {
             tool.AppendArg(FileUtil.JoinPath(cangjieLibPath, "section.o"))
+            if (driverOptions.outputMode == OutputMode.SHARED_LIB) {
+                // Keep the DLL CRT dependency out of common cjstart.o/exe.
+                tool.AppendArg(FileUtil.JoinPath(cangjieLibPath, "cjstartdllentry.o"))
+            }
         } else {
             tool.AppendArg("-T")
             tool.AppendArg(FileUtil.JoinPath(cangjieLibPath, cjldScript))

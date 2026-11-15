@@ -126,7 +126,9 @@ public class MinGW_CJNATIVE <: Gnu {
         tool.AppendArg("-Bdynamic")
         if (driverOptions.outputMode == OutputMode.SHARED_LIB) {
             tool.AppendArg("-e")
-            tool.AppendArg("DllMainCRTStartup")
+            // Paired with the selected runtime's cjstartdllentry.o. It forwards
+            // the full CRT entry before confirming this image's native attach.
+            tool.AppendArg("__CJ_DllMainCRTStartupV1")
             tool.AppendArg("--export-all-symbols")
         }
         if (driverOptions.outputMode == OutputMode.EXECUTABLE ||
