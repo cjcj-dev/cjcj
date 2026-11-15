@@ -65,7 +65,8 @@ if(mode==='build') {
  args.push('--link-options=--start-group '+archives.join(' ')+' --end-group '+libs+'/share/cjcj/runtime_shim/cjselfhost_llvmshim.o '+libs+'/share/cjcj/runtime_shim/cjc_runtime_config.o -L'+selected+'/third_party/llvm/lib -lLLVM-15 -lstdc++');
  const contract=await run('contract-compile',args,{env,required:false});
  if(contract.rc===0)await run('contract-run',[out+'/contract'],{env,required:false});
- write(out+'/result.json',{mode,rows});
+ const identity=json(selected+'/STAGE-INPUTS.json');
+ write(out+'/result.json',{mode,harnessCommit:commit,compilerCommit:identity.compilerCommit,compilerSha256:identity.compilerSha256,rows});
  if(!old&&rows.some(r=>r.rc!==0||r.signal))process.exitCode=1;
 } else if(mode==='consumer') {
  const selected=production+'/install',interop=task+'/interop-source',prefix=out+'/install';
@@ -85,7 +86,8 @@ if(mode==='build') {
  await run('simple',['/usr/bin/python3','-B',adapted.framework+'/main.py','--test_cfg',out+'/interop_test.cfg','-j','1','--timeout=180','--fail_exit','--keep_temp','--progress=silent','--json_output',out+'/consumer-results.json','--output',out+'/consumer-results.txt','--temp_dir',out+'/consumer-temp','--log_dir',out+'/consumer-logs',interop+'/java/test/LLT/java/1-simple/1-simple.info'],{cwd:adapted.framework,env:runEnv});
  const tests=json(out+'/consumer-results.json').flatMap(x=>x.tests);
  if(tests.length!==1||tests[0].result!=='PASS')throw Error('ORIGINAL_SIMPLE_NOT_PASSED');
- write(out+'/result.json',{rc:0,commit,ref,selected,prefix,tests});
+ const identity=json(selected+'/STAGE-INPUTS.json');
+ write(out+'/result.json',{rc:0,harnessCommit:commit,compilerCommit:identity.compilerCommit,compilerSha256:identity.compilerSha256,ref,selected,prefix,tests});
 } else {
 const args=['-Woff','unused','-Woff','parser','-Woff','deprecated','--import-path='+src+'/dist',
  '--output-dir='+out,'--int-overflow=wrapping','--disable-reflection','--link-options','-z relro',
