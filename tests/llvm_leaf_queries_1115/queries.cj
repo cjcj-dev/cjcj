@@ -54,7 +54,9 @@ func queryProgress(context: LLVMContextRef, suppressCompletion: Bool): Unit {
     let worker = spawn { =>
         while (started.load() == 0) { }
         for (i in 0..8) {
+            let before = getGCCount()
             gc(heavy: true)
+            requireLeaf(getGCCount() > before, "actual-gc-counter")
             collections.store(Int64(i + 1))
         }
         if (!suppressCompletion) { completed.store(1) }
@@ -93,7 +95,9 @@ func ordinaryNativeProgress(): Unit {
     unsafe { leaf_control_reset() }
     let worker = spawn { =>
         requireLeaf(unsafe { leaf_control_wait_started() } == 1, "ordinary-started")
+        let before = getGCCount()
         gc(heavy: true)
+        requireLeaf(getGCCount() > before, "ordinary-actual-gc-counter")
         unsafe { leaf_control_complete() }
     }
     // Intentionally ordinary C2N: waiting native code must not pin managed GC.
