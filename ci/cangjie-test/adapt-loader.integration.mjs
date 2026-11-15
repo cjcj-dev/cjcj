@@ -47,8 +47,8 @@ try {
     const env = {...baseEnv};
     if (explicitLibrary) env.LD_LIBRARY_PATH += path.delimiter + bin;
     invoke(['/usr/bin/python3', '-B', path.join(selected.harness, 'harness.py'),
-      '--test-root', source, '--work-dir', path.join(root, 'work'), '--binary-output-path', bin,
-      '--test-run-output-path', path.join(root, 'artifacts'), '--run-mode', 'execute',
+      '--test-root', source, '--work-dir', path.join(root, 'work'), '--bin-output', bin,
+      '--test-output', path.join(root, 'artifacts'), '--run-mode', 'execute',
       '--cjc', path.join(sdk, 'bin/cjc'), '--comp-threads', '1', '--exec-threads', '1',
       '--base-timeout', '30', '--log-file', path.join(root, 'results.log'), '--no-color', '--log-mode', 'short'],
       selected.harness, env, name + '-execute');
