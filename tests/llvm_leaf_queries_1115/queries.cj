@@ -103,7 +103,7 @@ main(args: Array<String>): Int64 {
     try {
         querySemantics(context)
         ordinaryNativeProgress()
-        queryProgress(context, args.size > 1 && args[1] == "suppress-completion")
+        queryProgress(context, args.size > 0 && args[0] == "suppress-completion")
         println("LLVM_LEAF_QUERIES_OK")
         return 0
     } finally { unsafe { LLVMContextDispose(context) } }
