@@ -107,7 +107,14 @@ public class CGFunctionType <: CGType {
     public func GetReceiverIndex(): Int64 { return if (HasSRet()) { 1 } else { 0 } }
     public func ReceiverHasBasePtr(): Bool {
         Complete()
-        return HasStructReceiver() && structParamNeedsBasePtr.contains(GetReceiverIndex())
+        // A CHIR mut-interface adapter still receives a payload/base pair.
+        // HasStructReceiver excludes it for value-copy/wrapper generation only;
+        // using that predicate here loses the backend's derived-root relation.
+        if (let Some(fn) <- chirFunc) {
+            return !fn.TestAttr(Attribute.STATIC) && IsStructOrExtendMethod(fn) &&
+                structParamNeedsBasePtr.contains(GetReceiverIndex())
+        }
+        return false
     }
 
     public func HasSRet(): Bool { Complete(); return hasSRet }

@@ -5,7 +5,7 @@ import {spawn,execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {cleanSdkEnvironment} from './sdk-platform.mjs';
 const [mode,out] = process.argv.slice(2);
-if(!['old','new','build'].includes(mode)||!out)throw Error('mode/output');
+if(!['old','new','build','old-control'].includes(mode)||!out)throw Error('mode/output');
 fs.mkdirSync(out,{recursive:false});
 const root='/mnt/cjcj-data/impl_full_sdk_sol_1108/integrated-llvm-1115';
 const sdk=root+'/test-sdk';
@@ -53,15 +53,20 @@ if(mode==='build') {
  await run('public',[process.execPath,source+'/ci/bootstrap/sdk-verify-install.mjs','--sdk',out+'/install','--work',out+'/public','--platform','linux_x86_64','--compiler-only'],{env});
  write(out+'/result.json',{rc:0,commit,install:out+'/install'});
  } else {
- const selected=mode==='old'?sdk:production+'/install';
+ const selected=mode.startsWith('old')?sdk:production+'/install';
  const env=cleanSdkEnvironment(selected,'linux_x86_64',process.env,selected);
  const cases=JSON.parse(fs.readFileSync(source+'/tests/interface_record_gc_abi/original-cases.json'));
  const utils=root+'/cangjie-test-conformance/Conformance/work/bin/utils';
- for(const item of cases){
+ for(const item of (mode==='old-control'?[]:cases)){
   const work=out+'/'+item.name;fs.mkdirSync(work);fs.mkdirSync(work+'/temps');
   const argv=[selected+'/bin/cjc','--jobs=1','--import-path',item.importPath,item.test_path,'-L',utils,'-lutils_utils','--import-path',utils,'--output-dir',work,'-o',item.name,'--save-temps',work+'/temps','--dump-chir'];
   const result=await run(item.name+'-compile',argv,{cwd:work,env,required:false});
   if(result.rc===0)await run(item.name+'-run',[work+'/'+item.name],{cwd:work,env,required:false});
+ }
+ for(const name of (mode==='old-control'?['control']:mode==='new'?['control','reference']:[])) {
+  const work=out+'/'+name;fs.mkdirSync(work);fs.mkdirSync(work+'/temps');
+  const result=await run(name+'-compile',[selected+'/bin/cjc',source+'/tests/interface_record_gc_abi/'+name+'.cj','--save-temps',work+'/temps','-o',work+'/app'],{cwd:work,env,required:false});
+  if(result.rc===0)await run(name+'-run',[work+'/app'],{cwd:work,env,required:false});
  }
  write(out+'/result.json',{mode,commit,rows});
  if(mode==='new'&&rows.some(r=>r.rc!==0||r.signal))process.exitCode=1;
