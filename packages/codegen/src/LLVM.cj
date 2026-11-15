@@ -205,6 +205,7 @@ foreign {
     func LLVMIsOpaqueStruct(structTy: LLVMTypeRef): Int32
     func LLVMTypeIsSized(ty: LLVMTypeRef): Int32
     func LLVMFunctionType(returnType: LLVMTypeRef, paramTypes: CPointer<LLVMTypeRef>, paramCount: UInt32, isVarArg: Int32): LLVMTypeRef
+    @FastNative
     func LLVMGetTypeKind(valueType: LLVMTypeRef): Int32
     func LLVMCountStructElementTypes(structTy: LLVMTypeRef): UInt32
     func LLVMStructGetTypeAtIndex(structTy: LLVMTypeRef, index: UInt32): LLVMTypeRef
@@ -403,7 +404,9 @@ foreign {
     func LLVMHasMetadata(value: LLVMValueRef): Int32
     func LLVMGetMetadata(value: LLVMValueRef, kindID: UInt32): LLVMValueRef
     func LLVMSetMetadata(value: LLVMValueRef, kindID: UInt32, node: LLVMValueRef): Unit
+    @FastNative
     func LLVMTypeOf(value: LLVMValueRef): LLVMTypeRef
+    @FastNative
     func LLVMGetTypeContext(ty: LLVMTypeRef): LLVMContextRef
     func LLVMGetValueContext(value: LLVMValueRef): LLVMContextRef
     func LLVMIsAMDNode(value: LLVMValueRef): LLVMValueRef
@@ -419,6 +422,7 @@ foreign {
     func LLVMIsAGetElementPtrInst(value: LLVMValueRef): LLVMValueRef
     func LLVMIsABitCastInst(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAAddrSpaceCastInst(value: LLVMValueRef): LLVMValueRef
+    @FastNative
     func LLVMGetIntTypeWidth(integerTy: LLVMTypeRef): UInt32
 
     func LLVMCreateBuilderInContext(context: LLVMContextRef): LLVMBuilderRef
@@ -452,6 +456,7 @@ foreign {
         srcAlign: UInt32, size: LLVMValueRef): LLVMValueRef
     func LLVMBuildMemMove(builder: LLVMBuilderRef, dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef,
         srcAlign: UInt32, size: LLVMValueRef): LLVMValueRef
+    @FastNative
     func LLVMGetPointerAddressSpace(pointerType: LLVMTypeRef): UInt32
     func LLVMBuildAdd(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildSub(builder: LLVMBuilderRef, left: LLVMValueRef, right: LLVMValueRef, name: CString): LLVMValueRef
