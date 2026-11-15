@@ -158,6 +158,12 @@ public class Android_CJNATIVE <: Linux_CJNATIVE {
     }
 
     protected override func GenerateLinkOptions(tool: Tool): Unit {
+        if (driverOptions.outputMode == OutputMode.SHARED_LIB) {
+            // Retention belongs to this loaded ELF instance, including copies
+            // loaded by Android FORCE_LOAD or through another namespace.
+            tool.AppendArg("-z")
+            tool.AppendArg("nodelete")
+        }
         tool.AppendArg("-lclang_rt.builtins-" + driverOptions.target.ArchToString() + "-android")
         tool.AppendArg("-l:libcangjie-runtime.so")
         tool.AppendArg("-lboundscheck")

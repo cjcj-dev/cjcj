@@ -102,6 +102,12 @@ public class Ohos_CJNATIVE <: Linux_CJNATIVE {
     }
 
     protected override func GenerateLinkOptions(tool: Tool): Unit {
+        if (driverOptions.outputMode == OutputMode.SHARED_LIB) {
+            // The actual final image supplies the process-lifetime proof;
+            // pathname lookup cannot identify a different loader namespace.
+            tool.AppendArg("-z")
+            tool.AppendArg("nodelete")
+        }
         tool.AppendArg("-l:libcangjie-runtime.so")
         tool.AppendArg("-L" + FileUtil.JoinPath(driver.cangjieHome, "lib/" + driverOptions.GetCangjieLibTargetPathName()))
         tool.AppendArg("-lboundscheck")
