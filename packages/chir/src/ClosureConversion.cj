@@ -1278,6 +1278,17 @@ public class ClosureConversion {
             callWithException.SetInstantiatedTypeArgs(
                 SubstituteGenericTypeArgs(callWithException.GetInstantiatedTypeArgs(), genericMap))
         }
+        // Intrinsics carry type arguments but are not FuncCall subclasses.
+        // Lift their lexical generics together with the body/signature so
+        // codegen can resolve them from the lifted function's TypeInfo params.
+        if (let Some(intrinsic) <- (expr as Intrinsic)) {
+            intrinsic.SetInstantiatedTypeArgs(
+                SubstituteGenericTypeArgs(intrinsic.GetInstantiatedTypeArgs(), genericMap))
+        }
+        if (let Some(tryIntrinsic) <- (expr as TryIntrinsic)) {
+            tryIntrinsic.SetInstantiatedTypeArgs(
+                SubstituteGenericTypeArgs(tryIntrinsic.GetInstantiatedTypeArgs(), genericMap))
+        }
     }
 
     // Mirror C++ ReplaceThisTypeInApplyAndInvoke
