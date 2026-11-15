@@ -8,7 +8,7 @@ const [mode,out] = process.argv.slice(2);
 if(!['old','new','build'].includes(mode)||!out)throw Error('mode/output');
 fs.mkdirSync(out,{recursive:false});
 const root='/mnt/cjcj-data/impl_full_sdk_sol_1108/integrated-llvm-1115';
-const sdk=root+'/final/install',src=root+'/sources/interop-5985/java';
+const sdk=root+'/test-sdk';
 const source=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const task=path.dirname(out),production=task+'/build-r1';
 const json=p=>JSON.parse(fs.readFileSync(p,'utf8'));
