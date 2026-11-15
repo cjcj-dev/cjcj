@@ -33,6 +33,15 @@ export async function prepare(inputs, output) {
   }
   await replaceOnce(path.join(harness, 'core/task_manager.py'), '        self.reporter.write_test_result(test)\n',
     '        self.reporter.write_test_result(test)\n        from admission import cleanup_executable\n        cleanup_executable(test, self.cfg)\n');
+  if (process.platform === 'linux') {
+    // Custom C-interop cases build shared libraries beside the executable and
+    // execute there. Keep the selected SDK libraries first; add only this case.
+    const call = '      result = _exec(cmd, timeout=self.cfg.base_timeout * test.timeout_factor, shell=False, cwd=output_dir, env=self.env)\n';
+    await replaceOnce(path.join(harness, 'drivers/runner/simple_py_runner.py'), call,
+      '      env = dict(self.env)\n' +
+      '      env["LD_LIBRARY_PATH"] = os.pathsep.join(filter(None, [env.get("LD_LIBRARY_PATH"), output_dir]))\n' +
+      call.replace('env=self.env', 'env=env'));
+  }
   // Maple already copies each case's declared dependencies into its work dir.
   // Configure that private LSP dependency instead of writing the source tree.
   await replaceOnce(path.join(framework, 'maple_test/task.py'), '                shutil.copy(str(file), str(dest))\n',
