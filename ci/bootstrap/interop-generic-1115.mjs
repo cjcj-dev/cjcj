@@ -5,7 +5,7 @@ import {spawn,execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {cleanSdkEnvironment} from './sdk-platform.mjs';
 const [mode,out] = process.argv.slice(2);
-if(!['dump','build','controls-old','controls-new','consumer'].includes(mode)||!out)throw Error('mode/output');
+if(!['dump','build','controls-old','controls-new','consumer','simple'].includes(mode)||!out)throw Error('mode/output');
 fs.mkdirSync(out,{recursive:false});
 const root='/mnt/cjcj-data/impl_full_sdk_sol_1108/integrated-llvm-1115';
 const sdk=root+'/final/install',src=root+'/sources/interop-5985/java';
@@ -68,17 +68,26 @@ if(mode==='build') {
  const identity=json(selected+'/STAGE-INPUTS.json');
  write(out+'/result.json',{mode,harnessCommit:commit,compilerCommit:identity.compilerCommit,compilerSha256:identity.compilerSha256,rows});
  if(!old&&rows.some(r=>r.rc!==0||r.signal))process.exitCode=1;
-} else if(mode==='consumer') {
- const selected=production+'/install',interop=task+'/interop-source',prefix=out+'/install';
+} else if(mode==='consumer'||mode==='simple') {
+ const selected=production+'/install',interop=task+'/interop-source',prefix=(mode==='simple'?task+'/consumer-r1':out)+'/install';
  const env={...process.env,HOME:'/root',LANG:'C.UTF-8',LC_ALL:'C.UTF-8',PYTHONDONTWRITEBYTECODE:'1',CANGJIE_HOME:selected,
   JAVA_HOME:'/mnt/cjcj-nvme/impl_full_sdk_sol_1108/dependencies/java/jdk',TMPDIR:out,
   PATH:selected+'/bin:/mnt/cjcj-nvme/impl_full_sdk_sol_1108/dependencies/java/jdk/bin:/usr/lib/llvm-15/bin:/usr/local/bin:/usr/bin:/bin'};
  for(const k of ['LD_LIBRARY_PATH','LD_PRELOAD','LD_AUDIT','CANGJIE_PATH','cjHeapSize','LIBRARY_PATH','CPATH'])delete env[k];
  const ref=execFileSync('git',['-C',interop,'rev-parse','HEAD'],{encoding:'utf8'}).trim();
  if(ref!=='5985a72fd7b366219a830bf6dd2b4300010d3e37')throw Error('INTEROP_SOURCE');
+ if(mode==='consumer') {
  await run('target-lib',['/usr/bin/python3','-B','build/build.py','build','-t','release','--target-lib','linux_x86_64_cjnative','--target','x86_64-linux-gnu'],{cwd:interop+'/java',env});
  await run('target-install',['/usr/bin/python3','-B','build/build.py','install','--target','linux_x86_64','--prefix',prefix],{cwd:interop+'/java',env});
+ } else {
+  const previous=json(task+'/consumer-r1/commands.json');
+  for(const label of ['target-lib','target-install']) {
+   const row=previous.find(r=>r.label===label);
+   if(!row||row.rc!==0||row.signal)throw Error('INCOMPLETE_TARGET_PRODUCTION '+label);
+  }
+ }
  const {prepare}=await import('../cangjie-test/adapt.mjs');
+ fs.mkdirSync(out+'/consumer-adapt');
  const adapted=await prepare('/mnt/cjcj-data/impl_full_sdk_sol_1108/mainline-test-1111',out+'/consumer-adapt');
  const config=fs.readFileSync(interop+'/java/test/LLT/interop_test.cfg','utf8').replace('compiler = cjc -j4','compiler = cjc -j4 --import-path='+prefix+'/modules/linux_x86_64_cjnative -L'+prefix+'/lib/linux_x86_64_cjnative -L'+prefix+'/runtime/lib/linux_x86_64_cjnative').replace('${CANGJIE_HOME}/lib/library-loader.jar',prefix+'/lib/library-loader.jar');
  fs.writeFileSync(out+'/interop_test.cfg',config);
