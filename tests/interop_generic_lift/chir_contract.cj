@@ -56,11 +56,12 @@ main(): Int64 {
     let lifted = generic.GetTopLevelFunc().getOrThrow()
     require(lifted.IsLambda(), "lifted lambda was not reached")
     let newTy = generic.GetInstantiatedTypeArgs()[0]
+    require(concrete.GetInstantiatedTypeArgs()[0] == ctx.GetInt64Ty(), "concrete type changed")
+    println("CONCRETE_INTRINSIC_CONTROL_OK")
     require(newTy != old, "INTRINSIC_RETAINED_OUTER_GENERIC")
     require(lifted.GetGenericTypeParams().contains((newTy as GenericType).getOrThrow()),
         "intrinsic has no lifted TypeInfo parameter")
     require(exceptional.GetInstantiatedTypeArgs()[0] == newTy, "TRY_INTRINSIC_RETAINED_OUTER_GENERIC")
-    require(concrete.GetInstantiatedTypeArgs()[0] == ctx.GetInt64Ty(), "concrete type changed")
     println("LIFTED_INTRINSIC_AND_TRY_PROVIDER_OK concrete=Int64")
     return 0
 }

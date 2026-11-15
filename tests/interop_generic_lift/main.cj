@@ -8,12 +8,10 @@ struct Triple {
 }
 
 // The escaped lambda must obtain T's TypeInfo in its new generic scope.
-@NeverInline
 func makeSize<T>(): () -> UIntNative where T <: CType {
     return { => sizeOf<T>() }
 }
 
-@NeverInline
 func concreteSize(): () -> UIntNative {
     return { => sizeOf<Int64>() }
 }
