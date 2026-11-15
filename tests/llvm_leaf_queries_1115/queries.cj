@@ -24,10 +24,10 @@ func querySemantics(context: LLVMContextRef): Unit {
     for (width in [1u32, 8u32, 32u32, 64u32]) {
         let ty = unsafe { LLVMIntTypeInContext(context, width) }
         let value = unsafe { LLVMConstInt(ty, 1, 0) }
-        requireLeaf(unsafe { LLVMTypeOf(value) } == ty, "type-of")
+        requireLeaf(unsafe { LLVMTypeOf(value) }.toUIntNative() == ty.toUIntNative(), "type-of")
         requireLeaf(unsafe { LLVMGetTypeKind(ty) } == 8, "integer-kind")
         requireLeaf(unsafe { LLVMGetIntTypeWidth(ty) } == width, "integer-width")
-        requireLeaf(unsafe { LLVMGetTypeContext(ty) } == context, "context")
+        requireLeaf(unsafe { LLVMGetTypeContext(ty) }.toUIntNative() == context.toUIntNative(), "context")
         for (space in [0u32, 1u32, 7u32]) {
             let ptr = unsafe { LLVMPointerType(ty, space) }
             requireLeaf(unsafe { LLVMGetTypeKind(ptr) } == 12, "pointer-kind")
@@ -36,11 +36,11 @@ func querySemantics(context: LLVMContextRef): Unit {
     }
     let fp = unsafe { LLVMDoubleTypeInContext(context) }
     let real = unsafe { LLVMConstReal(fp, 1.25) }
-    requireLeaf(unsafe { LLVMTypeOf(real) } == fp, "real-type")
+    requireLeaf(unsafe { LLVMTypeOf(real) }.toUIntNative() == fp.toUIntNative(), "real-type")
     requireLeaf(unsafe { LLVMGetTypeKind(fp) } == 3, "double-kind")
     let structure = unsafe { LLVMStructTypeInContext(context, CPointer<LLVMTypeRef>(), 0, 0) }
     requireLeaf(unsafe { LLVMGetTypeKind(structure) } == 10, "structure-kind")
-    requireLeaf(unsafe { LLVMGetTypeContext(structure) } == context, "structure-context")
+    requireLeaf(unsafe { LLVMGetTypeContext(structure) }.toUIntNative() == context.toUIntNative(), "structure-context")
 }
 
 func queryProgress(context: LLVMContextRef, suppressCompletion: Bool): Unit {
@@ -70,7 +70,8 @@ func queryProgress(context: LLVMContextRef, suppressCompletion: Bool): Unit {
         let width = unsafe { LLVMGetIntTypeWidth(actual) }
         let owner = unsafe { LLVMGetTypeContext(actual) }
         let space = unsafe { LLVMGetPointerAddressSpace(ptr) }
-        if (actual != ty || kind != 8 || width != 64 || owner != context || space != 7) {
+        if (actual.toUIntNative() != ty.toUIntNative() || kind != 8 || width != 64 ||
+            owner.toUIntNative() != context.toUIntNative() || space != 7) {
             throw Exception("LEAF_ASSERT query-loop-values")
         }
         checksum += UInt64(width + space)
