@@ -77,8 +77,12 @@ func queryProgress(context: LLVMContextRef, suppressCompletion: Bool): Unit {
         checksum += UInt64(width + space)
         iterations++
     }
+    // Capture before Future.get(): joining the worker is itself a safepoint and
+    // must not turn a stalled collector into an apparent in-loop success.
+    let completedInLoop = completed.load() == 1 && collections.load() == 8 &&
+        iterations > 0 && iterations < 50000000
     worker.get()
-    requireLeaf(completed.load() == 1 && collections.load() == 8 && iterations > 0,
+    requireLeaf(completedInLoop,
         "query-gc-progress")
     requireLeaf(checksum == UInt64(iterations) * 71, "query-checksum")
     requireLeaf(root.check(), "managed-root-after-gc")
