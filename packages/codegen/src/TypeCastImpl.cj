@@ -475,8 +475,21 @@ public func GenerateTupleTypeCast(irBuilder: IRBuilder2, sourceCGValue: CGValue,
     targetCGType: CGType): LLVMValueRef {
     let sourceLLVMType = sourceCGValue.GetLLVMType()
     let addressSpace = unsafe { LLVMGetPointerAddressSpace(sourceLLVMType) }
-    let targetPointerType = unsafe { LLVMPointerType(targetCGType.GetLLVMType(), addressSpace) }
-    return irBuilder.CreateBitOrPointerCast(sourceCGValue.GetRawValue(), targetPointerType)
+    let targetLLVMType = targetCGType.GetLLVMType()
+    let targetPointerType = unsafe { LLVMPointerType(targetLLVMType, addressSpace) }
+    let castedSource = irBuilder.CreateBitOrPointerCast(sourceCGValue.GetRawValue(), targetPointerType)
+    // A stack tuple viewed through a pointer bitcast keeps the allocation type of
+    // the source tuple. Later whole-value copies (for example the Some(tuple)
+    // payload store) would then copy managed references from an address whose
+    // complete typed provenance names a different tuple type, which the CJ IR
+    // verifier rejects as a bare reference memcpy. Tuples are immutable values,
+    // so materialize the target-typed value with the existing typed aggregate copy.
+    if (addressSpace == 0u32 && irBuilder.IsTypeContainsRef(targetLLVMType)) {
+        let targetValue = irBuilder.CreateEntryAlloca(targetCGType)
+        irBuilder.CopyNativeAggregate(targetLLVMType, castedSource, targetValue)
+        return targetValue
+    }
+    return castedSource
 }
 
 public func GenerateTypeCast(irBuilder: IRBuilder2, typeCast: TypeCast): LLVMValueRef {
