@@ -1,10 +1,13 @@
 package cjcj::driver
 
 import std.collection.*
+import cjcj::basic.Errorln
 import cjcj::utils.{ConcurrencyBudget, ProfileRecorder, Semaphore}
 
 // Mirrors Driver/Job.cpp:30-69.
-private func CheckExecuteResult(checklist: TreeMap<Int64, ToolFuture>,
+// Failures are reported through Errorln with the failed tool's command string, as the C++ driver does
+// with Errorf; the numeric task id only keys the checklist.
+private func CheckExecuteResult(checklist: TreeMap<Int64, ToolFuture>, tools: HashMap<Int64, Tool>,
     returnIfAnyToolFinished!: Bool = false, succeeded!: ArrayList<Int64> = ArrayList<Int64>()): Bool {
     var success = true
     while (!checklist.isEmpty()) {
@@ -16,7 +19,8 @@ private func CheckExecuteResult(checklist: TreeMap<Int64, ToolFuture>,
                 if (!ConcurrencyBudget.Get().IsEnabled()) {
                     Semaphore.Get().Release()
                 }
-                eprintln("backend task ${command}: command failed with exit code ${future.exitCode} (use -V to see invocation)")
+                let commandString = tools.get(command)?.GetCommandString() ?? "backend task ${command}"
+                Errorln("${commandString}: command failed with exit code ${future.exitCode} (use -V to see invocation)")
                 finishedCommands.add(command)
                 success = false
             } else if (state == ToolFutureState.SUCCESS) {
@@ -95,7 +99,7 @@ public class Job {
                             break
                         }
                         if (next == pending.size) {
-                            success = CheckExecuteResult(childWorkers, returnIfAnyToolFinished: true,
+                            success = CheckExecuteResult(childWorkers, runningTools, returnIfAnyToolFinished: true,
                                 succeeded: succeeded)
                             continue
                         }
@@ -108,7 +112,7 @@ public class Job {
                                 success = false
                                 break
                             }
-                            success = CheckExecuteResult(childWorkers, returnIfAnyToolFinished: true,
+                            success = CheckExecuteResult(childWorkers, runningTools, returnIfAnyToolFinished: true,
                                 succeeded: succeeded)
                             continue
                         }
@@ -121,7 +125,7 @@ public class Job {
                         }
                         if (!future.spawnErrorMessage.isEmpty()) {
                             // The failed spawn already returned its admission; only live children need draining.
-                            eprintln("${command.GetCommandString()}: command failed (${future.spawnErrorMessage})")
+                            Errorln("${command.GetCommandString()}: command failed (${future.spawnErrorMessage})")
                             success = false
                             break
                         }
@@ -132,7 +136,7 @@ public class Job {
                 } finally {
                     // On every exit, including a spawn error or exception, join all children before
                     // temporary-file cleanup and return every acquired token exactly once.
-                    success = CheckExecuteResult(childWorkers) && success
+                    success = CheckExecuteResult(childWorkers, runningTools) && success
                 }
                 if (!success) {
                     return false
