@@ -205,8 +205,9 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
             case ExprKind.EXP =>
                 return HandleExpOp(state, binaryExpr)
             case ExprKind.LSHIFT | ExprKind.RSHIFT | ExprKind.BITAND | ExprKind.BITXOR | ExprKind.BITOR =>
-                let _ = HandleBitwiseOp(state, binaryExpr, kind)
-                return ConstExceptionKind.NA
+                // C++ ConstAnalysis.h HandleBinaryExpr keeps this result, so a shift proven in range is
+                // marked never-overflow (and DCE can then report it as an unused operator result).
+                return HandleBitwiseOp(state, binaryExpr, kind)
             case ExprKind.LT | ExprKind.GT | ExprKind.LE | ExprKind.GE | ExprKind.EQUAL | ExprKind.NOTEQUAL =>
                 HandleRelationalOp(state, binaryExpr)
                 return ConstExceptionKind.NA

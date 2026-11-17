@@ -1719,7 +1719,9 @@ public class Translator {
             if (let Some(varDecl) <- (target as AstVarDecl)) {
                 if (IsInstanceMember(varDecl)) {
                     let leftValueInfo = TranslateInstanceFieldRefAsLeftValue(varDecl)
-                    return LoadLeftValue(leftValueInfo, chirTy.TranslateType(RequireAstTy(expr)))
+                    // C++ TranslateVarRef creates the member read at the RefExpr location.
+                    return LoadLeftValue(leftValueInfo, chirTy.TranslateType(RequireAstTy(expr)),
+                        loc: TranslateLocation(expr))
                 }
             }
             let value = GetSymbolTable(target)
@@ -10415,7 +10417,8 @@ public class Translator {
         return RequireResult(createdFieldByName9655)
     }
 
-    private func LoadLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Option<Value> {
+    private func LoadLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type,
+        loc!: Option<DebugLocation> = None): Option<Value> {
         let base = info.base.getOrThrow()
         if (info.path.isEmpty()) {
             return GetDerefedValue(base)
@@ -10429,11 +10432,18 @@ public class Translator {
             let memberRef = RequireResult(createdGetElementByName9667)
             let createdLoad9668 = builder.CreateLoad(expectedTy, memberRef, CurrentBlock())
             CurrentBlock().AppendExpression(createdLoad9668)
+            if (let Some(at) <- loc) {
+                createdGetElementByName9667.SetDebugLocation(at)
+                createdLoad9668.SetDebugLocation(at)
+            }
             return RequireResult(createdLoad9668)
         }
         if (baseTy.IsValueOrGenericTypeWithRefDims(0)) {
             let createdFieldByName9671 = builder.CreateFieldByName(expectedTy, base, info.path, CurrentBlock())
             CurrentBlock().AppendExpression(createdFieldByName9671)
+            if (let Some(at) <- loc) {
+                createdFieldByName9671.SetDebugLocation(at)
+            }
             return RequireResult(createdFieldByName9671)
         }
         throw IllegalStateException("faithful AST2CHIR unsupported member left value base type: ${baseTy.ToString()}")
