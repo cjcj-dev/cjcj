@@ -14,6 +14,10 @@ dist/
 .cjpm-cache/
 cjpm.lock.tmp
 
+# Generated CI state: colour SDK selection and the installed-SDK check work tree
+# (its *_test.cj probes must not be discovered as unregistered repository tests)
+/.platform-ci/
+
 # Logs / scratch
 *.log
 /tmp/
