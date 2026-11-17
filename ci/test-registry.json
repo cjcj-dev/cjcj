@@ -1166,5 +1166,45 @@
     "file": "tests/sema_backports_1105/mock_test.cj",
     "executor": "manual",
     "reason": "Input fixture for tests/sema_backports_1105/run.mjs mock case (compiled with --test --mock=on), not a workspace package. Run npx --yes zx@8 tests/sema_backports_1105/run.mjs <compiler> <sdk> <out> mock with a built compiler and matching SDK; no workflow provisions those inputs."
+  },
+  {
+    "file": "ci/bootstrap/compiler-option-visibility.test.mjs",
+    "executor": "zx",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/native-cjdb-job-package.test.mjs",
+    "executor": "zx",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/native-windows-llvm-replay.test.mjs",
+    "executor": "zx",
+    "args": []
+  },
+  {
+    "file": "ci/bootstrap/compiler-option-reentry.test.mjs",
+    "executor": "manual",
+    "reason": "Refuses to start without an owned absolute RELEASE_EVIDENCE_TEST_ROOT. Script-entry regression of compiler option visibility on first build and default reentry through a bounded observer compiler; no CJ/LLVM build or SDK installation."
+  },
+  {
+    "file": "ci/bootstrap/output-debug-policy.integration.mjs",
+    "executor": "manual",
+    "reason": "Requires an installed Linux SDK whose standard library carries DWARF, passed as --cjc <sdk>/bin/cjc with a new --work directory. Links real executables, shared libraries and static archives through the public cjc entry and checks DWARF retention against -g; installed std inputs stay byte-identical."
+  },
+  {
+    "file": "ci/cangjie-test/adapt-loader.integration.mjs",
+    "executor": "manual",
+    "reason": "Bounded real-upstream regression: requires prepared cangjie_test inputs, an installed SDK, a retained failed case ELF/.so and a baseline adapter as positional arguments. Runs the public adapter and upstream harness CLI on that one case; never rewrites the original work directory or reruns the source inventory."
+  },
+  {
+    "file": "packages/driver/src/Elf_image_retention_test.cj",
+    "executor": "cjpm",
+    "member": "packages/driver"
+  },
+  {
+    "file": "packages/driver/src/Windows_native_entry_test.cj",
+    "executor": "cjpm",
+    "member": "packages/driver"
   }
 ]
