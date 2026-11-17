@@ -161,9 +161,17 @@ await phase('selfcheck', async () => {
     'modules', 'driver', 'meta_transformation', 'lex', 'ast', 'frontend', 'cjc', 'basic', 'codegen', 'macro',
   ];
   const failedPackages = [];
+  // Each package keeps its own cjpm.toml compile-option (for example the
+  // option package selects CANGJIE_VISIBLE_OPTIONS_ONLY); compile it the same way.
+  const packageOptions = async pkg => {
+    const manifest = await fs.readFile(path.join(root, 'packages', pkg, 'cjpm.toml'), 'utf8');
+    const entry = manifest.match(/^[\t ]*compile-option[\t ]*=[\t ]*"([^"\n]*)"/m);
+    return entry ? entry[1].split(/\s+/).filter(Boolean) : [];
+  };
   for (const pkg of packages) {
     console.log(`[selfcheck] package ${pkg}`);
-    const compiled = await $({nothrow: noFailFast})`${timeoutCommand} 900 ${self} --package ${root}/packages/${pkg}/src --module-name cjcj --import-path ${sdk}/share/cjcj/cjo --output-type=staticlib -o ${work}/${pkg}.a`;
+    const options = await packageOptions(pkg);
+    const compiled = await $({nothrow: noFailFast})`${timeoutCommand} 900 ${self} ${options} --package ${root}/packages/${pkg}/src --module-name cjcj --import-path ${sdk}/share/cjcj/cjo --output-type=staticlib -o ${work}/${pkg}.a`;
     if (!noFailFast) continue;
     if (compiled.exitCode === 0) {
       console.log(`[selfcheck] package ${pkg} PASS`);
