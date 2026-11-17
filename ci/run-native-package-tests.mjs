@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {command} from './bootstrap/sdk-flow.mjs';
+import {selectBuildResources} from './build-resources.mjs';
 import {colourEnvironment} from './prepare-colour-sdk.mjs';
 import {PRODUCT_NAMES} from './srcbuild/lib/product-binary.mjs';
 try {
@@ -11,7 +12,10 @@ try {
   if (!work) throw new Error('RUNNER_TEMP required');
   await command(['npx', '--yes', 'zx@8', 'runtime_shim/build_shim.mjs'], {env});
   const output = path.join(work, 'objc-producer');
-  await command(['cjpm', 'build', `-j${os.availableParallelism()}`, '--target-dir', output], {env});
+  // The producer is the compiler itself; build it with the same heap selection as sdk-native-stage, since
+  // the compiler-only 4GB default cannot hold packages such as cjcj::chir. Tests keep their own environment.
+  const {heap} = await selectBuildResources();
+  await command(['cjpm', 'build', `-j${os.availableParallelism()}`, '--target-dir', output], {env: {...env, cjHeapSize: heap}});
   const products = [];
   for (const name of PRODUCT_NAMES) {
     const file = path.join(output, 'release/bin', name);
