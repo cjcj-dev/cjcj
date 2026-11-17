@@ -153,6 +153,7 @@ export const GATING = Object.freeze([
   'ci/srcbuild/tests/pin-compiler-llvm.test.mjs',
   'ci/srcbuild/tests/product-binary.test.mjs',
   'ci/srcbuild/tests/sccache-contract.test.mjs',
+  'ci/srcbuild/tests/package-options.test.mjs',
   'ci/srcbuild/tests/verify-sdk.test.mjs',
   'ci/srcbuild/tests/build-shim-output.test.mjs',
   'ci/srcbuild/tests/workflow-inputs.test.mjs',

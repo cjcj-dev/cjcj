@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {assertPackagedLineage} from '../../../build/lib/package-lineage.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
+import {packageCompileOptions} from '../package-options.mjs';
 import {verifyRepeatedCjo} from '../verify-repeated-cjo.mjs';
 import {verifyInstall} from '../../bootstrap/sdk-verify-install.mjs';
 
@@ -164,9 +165,8 @@ await phase('selfcheck', async () => {
   // Each package keeps its own cjpm.toml compile-option (for example the
   // option package selects CANGJIE_VISIBLE_OPTIONS_ONLY); compile it the same way.
   const packageOptions = async pkg => {
-    const manifest = await fs.readFile(path.join(root, 'packages', pkg, 'cjpm.toml'), 'utf8');
-    const entry = manifest.match(/^[\t ]*compile-option[\t ]*=[\t ]*"([^"\n]*)"/m);
-    return entry ? entry[1].split(/\s+/).filter(Boolean) : [];
+    const manifest = path.join(root, 'packages', pkg, 'cjpm.toml');
+    return packageCompileOptions(await fs.readFile(manifest, 'utf8'), manifest);
   };
   for (const pkg of packages) {
     console.log(`[selfcheck] package ${pkg}`);
