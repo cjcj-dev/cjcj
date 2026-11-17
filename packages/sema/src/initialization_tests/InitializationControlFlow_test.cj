@@ -1253,4 +1253,50 @@ public class InitializationControlFlowTest {
             }
             """)
     }
+
+    @TestCase
+    public func ConstantTrueIfWithoutElseDoesNotInitialize(): Unit {
+        ExpectInitializationDiagnostic("""
+            main() {
+                var a: String
+                if (true) {
+                    a = "Alleluia"
+                }
+                print("INTERPOLATE") // expected-init-error
+            }
+            """.replace("INTERPOLATE", "$" + "{a}"))
+    }
+
+    @TestCase
+    public func ParenthesizedConstantTrueIfDoesNotInitializeReturn(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(): Int64 {
+                var x: Int64
+                if ((true)) { x = 1 }
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func ConstantFalseIfStillNeedsThenBranchInitialization(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(): Int64 {
+                var x: Int64
+                if (false) {} else { x = 1 }
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func ConstantTrueIfInitializingBothBranchesIsLegal(): Unit {
+        ExpectInitializationAccepted("""
+            func read(): Int64 {
+                var x: Int64
+                if (true) { x = 1 } else { x = 2 }
+                return x
+            }
+            """)
+    }
 }

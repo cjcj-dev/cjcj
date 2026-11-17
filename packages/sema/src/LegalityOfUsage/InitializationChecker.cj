@@ -2201,20 +2201,20 @@ public class InitializationChecker {
         return result
     }
 
-    private func CheckConditionFlow(expr: Option<Expr>): InitConditionFlow {
+    private func CheckConditionFlow(expr: Option<Expr>, foldBoolLiterals!: Bool = true): InitConditionFlow {
         if (let None <- expr) {
             return InitConditionFlow(SaveFlow(), InitFlowState(false), true)
         }
         let value = expr.getOrThrow()
         TrackFlowDecls(value)
         if (let Some(paren) <- (value as ParenExpr)) {
-            return CheckConditionFlow(paren.expr)
+            return CheckConditionFlow(paren.expr, foldBoolLiterals: foldBoolLiterals)
         }
         if (let Some(binary) <- (value as BinaryExpr)) {
             if (binary.op == TokenKind.AND || binary.op == TokenKind.OR) {
-                let left = CheckConditionFlow(binary.leftExpr)
+                let left = CheckConditionFlow(binary.leftExpr, foldBoolLiterals: foldBoolLiterals)
                 RestoreFlow(if (binary.op == TokenKind.AND) { left.onTrue } else { left.onFalse })
-                let right = CheckConditionFlow(binary.rightExpr)
+                let right = CheckConditionFlow(binary.rightExpr, foldBoolLiterals: foldBoolLiterals)
                 if (binary.op == TokenKind.AND) {
                     return InitConditionFlow(right.onTrue, MergeFlow(left.onFalse, right.onFalse),
                         left.valid && right.valid)
@@ -2230,6 +2230,9 @@ public class InitializationChecker {
             return InitConditionFlow(SaveFlow(), onFalse, valid)
         }
         let valid = CheckInitInExpr(value)
+        if (!foldBoolLiterals) {
+            return InitConditionFlow(SaveFlow(), SaveFlow(), valid)
+        }
         if (let Some(literal) <- (value as LitConstExpr)) {
             if (literal.kind == LitConstKind.BOOL) {
                 if (literal.stringValue == "true") {
@@ -2299,7 +2302,10 @@ public class InitializationChecker {
 
     private func CheckInitInIfExpr(ifExpr: IfExpr): Bool {
         TrackFlowDecls(ifExpr)
-        let condition = CheckConditionFlow(ifExpr.condExpr)
+        // C++ InitializationChecker::CheckInitInIfExpr merges branch
+        // initialization structurally: a literal true/false condition still
+        // leaves both edges, so `if (true) { x = v }` does not initialize x.
+        let condition = CheckConditionFlow(ifExpr.condExpr, foldBoolLiterals: false)
         RestoreFlow(condition.onTrue)
         CheckBlockOption(ifExpr.thenBody)
         let thenExit = SaveFlow()
