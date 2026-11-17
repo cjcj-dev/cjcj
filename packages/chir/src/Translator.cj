@@ -3765,8 +3765,12 @@ public class Translator {
             let baseBlock = CurrentBlock()
             let tryAstBlock = RequireBlock(expr.tryBlock, "try block")
             let tryValue = TranslateExprArg(tryAstBlock)
+            // C++ TranslateTryExpr.cpp:54/70 creates both try GoTos at the try location; the exit GoTo is
+            // skipped by DCE so a dead fall-through after `return`/`throw` in the try body is not reported.
+            let tryLoc = TranslateLocation(expr)
             if (baseBlock.GetTerminator().isNone()) {
                 let createdGoTo3631 = builder.CreateGoTo(GetBlockByAST(tryAstBlock), baseBlock)
+                createdGoTo3631.SetDebugLocation(tryLoc)
                 baseBlock.AppendExpression(createdGoTo3631)
             }
             let tryValueLoc = if (let Some(localVar) <- tryValue.AsLocalVar()) {
@@ -3783,6 +3787,8 @@ public class Translator {
             }
             if (CurrentBlock().GetTerminator().isNone()) {
                 let createdGoTo3646 = builder.CreateGoTo(endBlock, CurrentBlock())
+                createdGoTo3646.SetDebugLocation(tryLoc)
+                createdGoTo3646.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
                 CurrentBlock().AppendExpression(createdGoTo3646)
             }
             tryCatchContext.remove(at: tryCatchContext.size - 1)
