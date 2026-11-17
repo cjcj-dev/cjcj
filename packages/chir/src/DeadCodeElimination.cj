@@ -302,6 +302,9 @@ public class DeadCodeElimination {
     private func DiagUnusedVariableForLocalVar(expr: Debug, isDebug: Bool, users: ArrayList<Expression>): Unit {
         let operand = expr.GetOperand(0)
         let localOperand = (operand as LocalVar).getOrThrow()
+        if (DeadCodeElimination.IsForwardedConstructorReceiver(localOperand)) {
+            return
+        }
         let debugExprIsSelf = if (let Some(debugExpr) <- localOperand.GetDebugExpr()) {
             refEq(debugExpr, expr)
         } else {
@@ -352,6 +355,23 @@ public class DeadCodeElimination {
         } else if (operand.IsLocalVar()) {
             DiagUnusedVariableForLocalVar(debugExpr, isDebug, users)
         }
+    }
+
+    // Class constructors forward their receiver (ConstructorReturnsReceiver), so `let x = C(...)`
+    // binds the constructor call result instead of the Allocate. In the reference CHIR the binding
+    // is the Allocate itself, whose constructor Apply is a real use, so no unused-variable warning
+    // is issued for such bindings; keep the same verdict for the receiver-forwarding shape.
+    private static func IsForwardedConstructorReceiver(local: LocalVar): Bool {
+        let expr = local.GetExpr() ?? return false
+        let callee = if (let Some(apply) <- (expr as Apply)) {
+            apply.GetCallee()
+        } else if (let Some(tryApply) <- (expr as TryApply)) {
+            tryApply.GetCallee()
+        } else {
+            return false
+        }
+        let fn = (callee as Function) ?? return false
+        return ConstructorReturnsReceiver(fn)
     }
 
     private func CheckOneUsers(users: ArrayList<Expression>): Bool {
