@@ -1299,4 +1299,63 @@ public class InitializationControlFlowTest {
             }
             """)
     }
+
+    @TestCase
+    public func ConstantTrueWhileBreakDoesNotInitialize(): Unit {
+        ExpectInitializationDiagnostic("""
+            main() {
+                var x: Int64
+                while (true) {
+                    x = 1
+                    break
+                }
+                println(x) // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func ParenthesizedConstantTrueWhileBreakDoesNotInitialize(): Unit {
+        ExpectInitializationDiagnostic("""
+            func read(): Int64 {
+                var x: Int64
+                var i = 0
+                while ((true)) {
+                    i++
+                    if (i > 2) {
+                        x = 1
+                        break
+                    }
+                }
+                return x // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func ConstantTrueWhileWithoutBreakStillChecksRead(): Unit {
+        ExpectInitializationDiagnostic("""
+            main() {
+                var x: Int64
+                while (true) {
+                    x = 1
+                }
+                println(x) // expected-init-error
+            }
+            """)
+    }
+
+    @TestCase
+    public func DoWhileTrueBodyStillInitializes(): Unit {
+        ExpectInitializationAccepted("""
+            func read(flag: Bool): Int64 {
+                var x: Int64
+                do {
+                    x = 1
+                    if (flag) { break }
+                } while (true)
+                return x
+            }
+            """)
+    }
 }

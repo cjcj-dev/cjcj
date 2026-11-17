@@ -1959,7 +1959,10 @@ public class InitializationChecker {
     private func CheckInitInWhileExpr(whileExpr: WhileExpr): Bool {
         TrackFlowDecls(whileExpr)
         let start = flowExits.size
-        let condition = CheckConditionFlow(whileExpr.condExpr)
+        // Like the official checker, a literal loop condition still has a
+        // structural exit edge: writes reached only before a break do not
+        // initialize the variable after the loop.
+        let condition = CheckConditionFlow(whileExpr.condExpr, foldBoolLiterals: false)
         RestoreFlow(condition.onTrue)
         CheckBlockOption(whileExpr.body)
         let (outgoing, backedge) = MergeLoopExits(whileExpr, start, condition.onFalse, SaveFlow())
