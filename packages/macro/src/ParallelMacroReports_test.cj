@@ -3,6 +3,7 @@ package cjcj::macro_pkg
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
+import cjcj::basic.Range as BasicRange
 
 @Test
 class ParallelMacroReportsTest {
@@ -12,8 +13,8 @@ class ParallelMacroReportsTest {
         let second = MacroCall(MacroExpandExpr())
         first.deferReports = true
         second.deferReports = true
-        first.DiagReport(0, Range(Position(1, 2, 3), Position(1, 2, 4)), "first", "hint-a")
-        second.DiagReport(1, Range(Position(1, 2, 3), Position(1, 2, 4)), "second", "hint-b")
+        first.DiagReport(0, BasicRange(Position(1, 2, 3), Position(1, 2, 4)), "first", "hint-a")
+        second.DiagReport(1, BasicRange(Position(1, 2, 3), Position(1, 2, 4)), "second", "hint-b")
         for ((call, message, hint) in [(first, "first", "hint-a"), (second, "second", "hint-b")]) {
             let bytes = ArrayList<UInt8>()
             @Assert(MacroEvalMsgSerializer().SerializeMacroCallResultMsg(call, bytes))
@@ -29,8 +30,8 @@ class ParallelMacroReportsTest {
     func DeferredReportPreservesIgnoredSeverities(): Unit {
         let call = MacroCall(MacroExpandExpr())
         call.deferReports = true
-        call.DiagReport(2, Range(), "ignored-note", "")
-        call.DiagReport(3, Range(), "ignored-hint", "")
+        call.DiagReport(2, BasicRange(), "ignored-note", "")
+        call.DiagReport(3, BasicRange(), "ignored-hint", "")
         let bytes = ArrayList<UInt8>()
         @Assert(MacroEvalMsgSerializer().SerializeMacroCallResultMsg(call, bytes))
         let reports = ArrayList<Diagnostic>()
