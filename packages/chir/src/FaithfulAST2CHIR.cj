@@ -934,12 +934,19 @@ func GetDeclLoc(context: CHIRContext, decl: AstDecl): DebugLocation {
     return TranslateLocationWithoutScope(context, begin, decl.identifier.End())
 }
 
+// C++: CHIR/AST2CHIR/Utils.cpp:96-101 converts the AST int line/column with unsigned(), which wraps
+// synthesized negative positions instead of failing.
+func AsUnsignedPosition(value: Int64): UInt32 {
+    return UInt32(value & 0xFFFF_FFFF)
+}
+
 func TranslateLocationWithoutScope(context: CHIRContext, beginPos: AstPosition,
     endPos: AstPosition): DebugLocation {
     let fileId = UInt32(beginPos.fileID)
     return DebugLocation(context.GetSourceFileName(fileId), fileId,
-        Position(UInt32(beginPos.line), UInt32(beginPos.column)),
-        Position(UInt32(endPos.line), UInt32(endPos.column)), scopeInfo: ArrayList<Int64>([0]))
+        Position(AsUnsignedPosition(Int64(beginPos.line)), AsUnsignedPosition(Int64(beginPos.column))),
+        Position(AsUnsignedPosition(Int64(endPos.line)), AsUnsignedPosition(Int64(endPos.column))),
+        scopeInfo: ArrayList<Int64>([0]))
 }
 
 public class FaithfulAST2CHIRBuilder {

@@ -1707,7 +1707,7 @@ public class Translator {
             return value
         }
         if (expr.isThis || expr.isSuper) {
-            return GetCurrentThisObject()
+            return TranslateThisOrSuperRef(expr)
         }
         if (let Some(target) <- expr.ref.target) {
             if (target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
@@ -10054,6 +10054,25 @@ public class Translator {
             thisParam = TypeCastOrBoxIfNeeded(thisParam, superType, TranslateLocation(refExpr))
         }
         return FaithfulLeftValueInfo(thisParam, ArrayList<String>())
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:132-147. A value-typed receiver
+    // held by reference (struct init, mut function, setter) is read with a located Load.
+    private func TranslateThisOrSuperRef(refExpr: AstRefExpr): Value {
+        CJC_ASSERT(refExpr.isThis || refExpr.isSuper)
+        let loc = TranslateLocation(refExpr)
+        let thisLeftValueInfo = TranslateThisOrSuperRefAsLeftValue(refExpr)
+        CJC_ASSERT(thisLeftValueInfo.path.isEmpty())
+        let thisLeftValueBase = thisLeftValueInfo.base.getOrThrow()
+        let thisLeftValueBaseTy = thisLeftValueBase.GetType().getOrThrow()
+        if (thisLeftValueBaseTy.IsValueOrGenericTypeWithRefDims(1)) {
+            let baseTy = (thisLeftValueBaseTy as RefType).getOrThrow().GetBaseType()
+            let loadThis = builder.CreateLoad(baseTy, thisLeftValueBase, CurrentBlock())
+            CurrentBlock().AppendExpression(loadThis)
+            loadThis.SetDebugLocation(loc)
+            return RequireResult(loadThis)
+        }
+        return thisLeftValueBase
     }
 
     // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:32-42.
