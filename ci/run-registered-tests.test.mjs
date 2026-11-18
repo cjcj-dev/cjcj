@@ -305,6 +305,7 @@ test('runCangjie carries directed argv and fixture environment to its actual chi
   const work = await fs.mkdtemp(path.join(evidence || os.tmpdir(), 'objc-child-'));
   const oldHome = process.env.CANGJIE_HOME;
   const oldProducer = process.env.OBJC_PREAMBLE_PRODUCER;
+  const oldHeap = process.env.CJ_HEAP;
   try {
     const root = path.join(work, 'tree');
     const sdk = path.join(work, 'sdk');
@@ -343,7 +344,7 @@ from pathlib import Path
 a=sys.argv[1:]
 p=Path(next(x.split('=',1)[1] for x in a if x.startswith('--report-path=')))
 p.mkdir(parents=True)
-(p/'observed.json').write_text(json.dumps({'args':a,'imports':os.environ.get('OBJC_PREAMBLE_IMPORTS'),'tmp':os.environ.get('TMPDIR'),'path':os.environ.get('PATH'),'ld':os.environ.get('LD_LIBRARY_PATH')}))
+(p/'observed.json').write_text(json.dumps({'args':a,'imports':os.environ.get('OBJC_PREAMBLE_IMPORTS'),'tmp':os.environ.get('TMPDIR'),'path':os.environ.get('PATH'),'ld':os.environ.get('LD_LIBRARY_PATH'),'heap':os.environ.get('cjHeapSize')}))
 (p/'target.xml').write_text('<testsuite><testcase classname="cjcj::compiler_unittest.ObjCPreambleTest" name="ordinaryFrontendControl" assertions="1"/><testcase classname="cjcj::compiler_unittest.ObjCPreambleTest" name="mirrorImplementationFiles" assertions="5"/></testsuite>')
 `, {mode: 0o755});
     await fs.chmod(path.join(sdk, 'tools/bin/cjpm'), 0o755);
@@ -354,6 +355,7 @@ p.mkdir(parents=True)
     await fs.writeFile(elf, bytes);
     process.env.CANGJIE_HOME = sdk;
     process.env.OBJC_PREAMBLE_PRODUCER = producer;
+    process.env.CJ_HEAP = '7GB';
     const output = path.join(work, 'output'); await fs.mkdir(output);
     const results = await runCangjie(root, [{file: source, member: 'packages/compiler_unittest'}], output,
       {member: 'packages/compiler_unittest', filter: '*ObjCPreambleTest*', skipBuild: true, targetDir: target, elfSha256: digest(elf)});
@@ -368,6 +370,7 @@ p.mkdir(parents=True)
     assert.ok(observed.path.startsWith(`${sdk}/bin:${sdk}/tools/bin:`));
     assert.ok(observed.ld.startsWith(`${sdk}/third_party/llvm/lib:${sdk}/runtime/lib/linux_x86_64_cjnative:${sdk}/tools/lib`));
     assert.equal(results[0].loadingDomain, observed.ld);
+    assert.equal(observed.heap, '7GB', 'cjpm test compiles the compiler with the selected build heap');
     const fixture = results[0].fixture;
     assert.equal(fixture.phase, 'complete');
     for (const [name, stub] of Object.entries(fixture.stubs)) {
@@ -386,7 +389,7 @@ p.mkdir(parents=True)
     }
     await fs.writeFile(path.join(work, 'combined-result.json'), JSON.stringify({results, observed}, null, 2));
   } finally {
-    for (const [key, value] of [['CANGJIE_HOME', oldHome], ['OBJC_PREAMBLE_PRODUCER', oldProducer]]) {
+    for (const [key, value] of [['CANGJIE_HOME', oldHome], ['OBJC_PREAMBLE_PRODUCER', oldProducer], ['CJ_HEAP', oldHeap]]) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
     if (!evidence) await fs.rm(work, {recursive: true, force: true});

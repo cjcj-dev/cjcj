@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {selectBuildResources} from './build-resources.mjs';
 import {REGISTERED, repoRoot, validateManifest} from './test-manifest.mjs';
 
 export function digest(file) {
@@ -191,7 +192,11 @@ export async function runCangjie(root, entries, output, selection) {
   }
   const temporary = path.join(output, 'tmp');
   fs.mkdirSync(temporary, {recursive: true});
-  const env = {...process.env,
+  // cjpm test compiles the workspace, which is the compiler itself: give that compile the same hard heap selection
+  // as the producer build (run-native-package-tests.mjs), since the compiler-only 4GB default cannot hold packages
+  // such as cjcj::sema. An explicit CJ_HEAP/cjHeapSize still wins; cjHeapSize is a maximum, not a soft limit or RSS.
+  const {heap} = await selectBuildResources();
+  const env = {...process.env, cjHeapSize: heap,
     TMPDIR: temporary, OBJC_PREAMBLE_IMPORTS: path.join(fixture, 'imports')};
   const result = await executeCangjie(command, root, output, sdk, env);
   const reports = path.join(output, 'reports');
