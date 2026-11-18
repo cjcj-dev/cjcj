@@ -200,8 +200,10 @@ int main(int argc, char **argv) {
 #endif
         // The bundled Python is also a runner for caller-built native programs.
         // Keep SDK libraries first for Python itself, then pass the caller's
-        // helper-library directories through to its subprocesses. Compiler and
-        // other native entries continue to use only their selected libraries.
+        // helper-library directories through to its subprocesses. cjpm runs
+        // caller-built programs the same way (cjpm run, cjpm test), so it gets
+        // the same treatment. Compiler and other native entries continue to use
+        // only their selected libraries.
         const auto name = real.filename().string();
         const auto version = name.size() >= 6 ? name.substr(6) : std::string();
         const bool python = name == "python" ||
@@ -210,7 +212,8 @@ int main(int argc, char **argv) {
              std::all_of(version.begin(), version.end(), [](unsigned char c) {
                  return std::isdigit(c) || c == '.';
              }));
-        if (real.parent_path() == root / ".native-tools/third_party/llvm/bin" && python) {
+        const bool packageRunner = lines[2] == ".target-tools/tools/bin/cjpm";
+        if ((real.parent_path() == root / ".native-tools/third_party/llvm/bin" && python) || packageRunner) {
             const char *callerLibraries = getenv(loader);
             if (callerLibraries && *callerLibraries) libraries += ":" + std::string(callerLibraries);
         }

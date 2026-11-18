@@ -36,6 +36,30 @@ test('bundled Python passes caller helper libraries to subprocesses while compil
  }
  await check();const moved=path.join(work,'relocated SDK');await fs.rename(sdk,moved);sdk=moved;await check();
 });
+test('cjpm passes caller library directories to the programs it runs while other tool entries remain isolated',
+ {skip:process.platform!=='linux'},async()=>{
+ const work=await fs.mkdtemp(path.join(parent,'cjpm-loader-'));let sdk=path.join(work,'SDK with spaces');
+ const caller=path.join(work,'caller libraries');await fs.mkdir(caller);
+ await fs.mkdir(path.join(sdk,'tools/bin'),{recursive:true});await fs.mkdir(path.join(sdk,'tools/lib'));const records=[];
+ const ok=(argv,opts={})=>{const r=spawnSync(argv[0],argv.slice(1),{encoding:'utf8',timeout:60000,...opts});assert.equal(r.status,0,r.stdout+r.stderr);return r;};
+ await fs.writeFile(path.join(work,'env.c'),'#include <stdio.h>\n#include <stdlib.h>\nint main(void){puts(getenv("LD_LIBRARY_PATH"));return 0;}\n');
+ ok(['cc',path.join(work,'env.c'),'-o',path.join(sdk,'tools/bin/cjpm')]);
+ await fs.copyFile(path.join(sdk,'tools/bin/cjpm'),path.join(sdk,'tools/bin/cjfmt'));
+ await installEntries({root:sdk,build:path.join(work,'entry-build'),platform:'linux_x86_64',records,groups:[
+  {directory:'tools/bin',retain:'.target-tools/tools/bin',libraries:['tools/lib']} ]});
+ await fs.writeFile(path.join(work,'install-commands.json'),JSON.stringify(records,null,2));
+ const results=[];
+ async function check(){
+  const env={...process.env,LD_LIBRARY_PATH:caller};
+  const r=ok([path.join(sdk,'tools/bin/cjpm')],{env});results.push({name:'tools/bin/cjpm',sdk,rc:r.status,stdout:r.stdout});
+  console.log('CJPM_CALLER_LIBRARIES_REACHED',r.status,r.stdout.trim());
+  assert.equal(r.stdout.trim(),path.join(sdk,'tools/lib')+':'+caller,'SDK libraries precede caller directories for cjpm');
+  const control=ok([path.join(sdk,'tools/bin/cjfmt')],{env});results.push({name:'tools/bin/cjfmt',sdk,rc:control.status,stdout:control.stdout});
+  assert.equal(control.stdout.trim(),path.join(sdk,'tools/lib'),'other tool entries retain loader isolation');
+  await fs.writeFile(path.join(work,'consumer-results.json'),JSON.stringify(results,null,2));
+ }
+ await check();const moved=path.join(work,'relocated SDK');await fs.rename(sdk,moved);sdk=moved;await check();
+});
 test('public compiler argv0 selects target resources while retained execution loads the host',async()=>{
  const work=await fs.realpath(await fs.mkdtemp(path.join(parent,'compiler argv0-')));
  let sdk=path.join(work,'SDK with spaces');
