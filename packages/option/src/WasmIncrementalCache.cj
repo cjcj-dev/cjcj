@@ -12,9 +12,9 @@ import cjcj::utils.SipHash
 // Fixed-size chunks keep memory bounded and give the same key after relocation.
 @When[os == "Linux"]
 internal func GetWasmCompilerCacheIdentity(): CoreOption<String> {
+    let chunks = StringBuilder()
     try (file = File("/proc/self/exe", OpenMode.Read)) {
         let buffer = Array<UInt8>(1024 * 1024, repeat: 0u8)
-        let chunks = StringBuilder()
         while (true) {
             var size: Int64 = 0
             while (size < buffer.size) {
@@ -28,11 +28,11 @@ internal func GetWasmCompilerCacheIdentity(): CoreOption<String> {
             chunks.append(UInt64ToHex(SipHash.GetHashValue(buffer[..size])))
             chunks.append(":")
         }
-        let manifest = chunks.toString()
-        return if (manifest.isEmpty()) { None } else { Some(StableHashString(manifest)) }
     } catch (_: Exception) {
         return None
     }
+    let manifest = chunks.toString()
+    return if (manifest.isEmpty()) { None } else { Some(StableHashString(manifest)) }
 }
 
 // Leave incremental use off when the running image cannot be identified.
