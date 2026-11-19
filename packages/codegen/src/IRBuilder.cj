@@ -4729,7 +4729,7 @@ public class IRBuilder2 <: Resource {
             [associatedValueTypeTI, sizeOfAssociatedValueType]))
         let typeInfo = CreateTypeInfo(enumType)
         let associatedValOffset = CallIntrinsicGetFieldOffset(ArrayList<LLVMValueRef>(
-            [typeInfo, GetInt64(1), GetInt32(8)]))
+            [typeInfo, GetInt64(1), GetInt32(Int64(GetPayloadOffset()))]))
         let associatedValPtr = CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) },
             enumValueWithTI, ArrayList<LLVMValueRef>([associatedValOffset]))
         CallGCReadGeneric(nonRefResult, enumValueWithTI, associatedValPtr, sizeOfAssociatedValueType)
