@@ -228,6 +228,9 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
         for (cgModule in cgModules) {
             SetSymbolLinkageType(cgModule)
             cgModule.EraseUselessGVAndFunctions()
+            if (options.target.IsWasm()) {
+                EmitWasmRoots(cgModule)
+            }
         }
         if (options.NeedDumpIRToScreen()) {
             for (cgModule in cgModules) {
@@ -1489,7 +1492,7 @@ private func SetLLVMValueName(parent: LLVMValueRef, paramIndex: UInt32, name: St
     }
 }
 
-private func BuildLLVMFunctionType(returnType: LLVMTypeRef, paramTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
+internal func BuildLLVMFunctionType(returnType: LLVMTypeRef, paramTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
     if (paramTypes.isEmpty()) {
         return unsafe { LLVMFunctionType(returnType, CPointer<LLVMTypeRef>(), 0u32, 0) }
     }
@@ -1846,7 +1849,7 @@ private func HasStaticGIPartialOrder(partialOrder: HashMap<UIntNative, HashSet<U
     return partialOrder[smallerKey].contains(bigger.toUIntNative())
 }
 
-private func ConstLLVMArray(elementType: LLVMTypeRef, values: ArrayList<LLVMValueRef>): LLVMValueRef {
+internal func ConstLLVMArray(elementType: LLVMTypeRef, values: ArrayList<LLVMValueRef>): LLVMValueRef {
     if (values.isEmpty()) {
         return unsafe { LLVMConstArray(elementType, CPointer<LLVMValueRef>(), 0u32) }
     }

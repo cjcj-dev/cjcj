@@ -1,0 +1,8 @@
+[package]
+name = "wasm_roots"
+version = "1.0.0"
+cjc-version = "1.2.0"
+output-type = "executable"
+
+[target.wasm32-unknown-wasi]
+compile-option = "-O0"

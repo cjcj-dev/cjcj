@@ -291,7 +291,10 @@ foreign {
     func LLVMGetCalledValue(inst: LLVMValueRef): LLVMValueRef
     func LLVMGetInstructionParent(inst: LLVMValueRef): LLVMBasicBlockRef
     func LLVMGetInstructionOpcode(inst: LLVMValueRef): Int32
+    func LLVMIsTailCall(call: LLVMValueRef): Int32
     func LLVMGetFirstUse(value: LLVMValueRef): LLVMUseRef
+    func LLVMGetNextUse(useRef: LLVMUseRef): LLVMUseRef
+    func LLVMGetUser(useRef: LLVMUseRef): LLVMValueRef
     func LLVMSelfhostGetNearestCommonAncestorOfBasicBlocks(basicBlocks: CPointer<LLVMBasicBlockRef>,
         count: UInt32): LLVMBasicBlockRef
     func LLVMSelfhostCreateLoopInfo(fn: LLVMValueRef): LLVMSelfhostLoopInfoRef
