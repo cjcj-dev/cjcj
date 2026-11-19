@@ -19,6 +19,8 @@ if (process.argv[2] === 'consume') {
   const sdk = process.env.CANGJIE_HOME;
   assert.ok(sdk, 'source the private C6 SDK envsetup before running');
   await mkdir(out);
+  const cjcTemps = join(out, 'cjc-temps');
+  await mkdir(cjcTemps);
   await cp(join(import.meta.dirname, 'src'), join(out, 'src'), { recursive: true });
   await cp(join(import.meta.dirname, 'cjpm.toml'), join(out, 'cjpm.toml'));
 
@@ -45,6 +47,7 @@ if (process.argv[2] === 'consume') {
     return text.split('\n').filter(line => line.includes(`"${name}" {`)).length;
   }
 
+  const hookFailures = [];
   async function verify(label, file) {
     const trace = await run(label, [process.execPath, '--trace-wasm', '--no-turbo-fast-api-calls',
       import.meta.filename, 'consume', file], { ...process.env, CJ_WASM_GC_STATS: '1' });
@@ -57,13 +60,21 @@ if (process.argv[2] === 'consume') {
     const pops = calls(trace, 'cjw_root_frame_pop');
     console.log(`${label}: target reached static=${registrations} push=${pushes} pop=${pops}`);
     assert.equal(pushes, pops, 'shadow frame balance');
-    // The cut arms still reach all semantic and runtime assertions above.
-    // A normal invocation of either cut arm uses "candidate" and fails here.
-    assert.equal(registrations > 0, expected !== 'baseline' && expected !== 'without-static', 'static table registration');
-    assert.equal(pushes > 0, expected !== 'baseline' && expected !== 'without-shadow', 'call-site shadow frames');
+    // Finish both public entrypoints and check both hooks even when a cut
+    // arm, run against candidate expectations, fails one of the hooks.
+    for (const [actual, want, invariant] of [
+      [registrations > 0, expected !== 'baseline' && expected !== 'without-static', 'static table registration'],
+      [pushes > 0, expected !== 'baseline' && expected !== 'without-shadow', 'call-site shadow frames'],
+    ]) {
+      try {
+        assert.equal(actual, want, `${label}: ${invariant}`);
+      } catch (error) {
+        hookFailures.push(error);
+      }
+    }
   }
 
-  await run('cjc', [join(sdk, 'bin/cjc'), '--target=wasm32-wasi', '-O0', '-V', '--save-temps',
+  await run('cjc', [join(sdk, 'bin/cjc'), '--target=wasm32-wasi', '-O0', '-V', `--save-temps=${cjcTemps}`,
     'src/main.cj', '-o', 'standalone.wasm']);
   await verify('cjc-node', join(out, 'standalone.wasm'));
   const cjpm = [join(sdk, 'tools/bin/cjpm'), 'build', '-V', '--target', 'wasm32-wasi'];
@@ -72,4 +83,5 @@ if (process.argv[2] === 'consume') {
   const built = await findWasm(join(out, 'target'));
   assert.ok(built, 'cjpm produced a Wasm executable');
   await verify('cjpm-node', built);
+  if (hookFailures.length) throw new AggregateError(hookFailures, 'Wasm root hooks');
 }
