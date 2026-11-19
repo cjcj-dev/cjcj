@@ -7,7 +7,7 @@ import std.collection.*
 // the Cangjie objects, the std archives built for wasi_wasm32_cjnative, the
 // wasm runtime archive (runtime/lib/wasi_wasm32_cjnative/libcangjie-runtime.a)
 // and wasi-libc from the pinned sysroot (third_party/wasi-sysroot).
-// There is no `ld -r`/objcopy step, no crtbegin/crtend, no pthread/dl and no
+// Partitions are merged by `wasm-ld -r` + llvm-objcopy like Gnu; there is no crtbegin/crtend, no pthread/dl and no
 // dynamic library output.
 public class Wasm_CJNATIVE <: Gnu {
     public init(driver: Driver, driverOptions: DriverOptions, backendCmds: ArrayList<ToolBatch>) {
@@ -46,10 +46,10 @@ public class Wasm_CJNATIVE <: Gnu {
         return true
     }
 
-    // wasm objects need no partial link: wasm-ld consumes every module directly.
-    public override func ProcessGeneration(input: ArrayList<TempFileInfo>): Bool {
-        return FinishGeneration(input)
-    }
+    // ProcessGeneration is inherited from Gnu: parallel codegen partitions of one package are merged
+    // with `wasm-ld -r` and the package-private copies of imported symbols are localized with the
+    // bundled llvm-objcopy (wasm --localize-symbols), as for ELF. Without it a user package and a
+    // statically linked std package both define the same global-init functions.
 
     protected override func GenerateLinking(objFiles: ArrayList<TempFileInfo>): Bool {
         let cangjieLibPath = FileUtil.JoinPath(FileUtil.JoinPath(driver.cangjieHome, "lib"),
