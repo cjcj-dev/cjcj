@@ -1,5 +1,7 @@
 package cjcj::option
 
+import std.core.Option as CoreOption
+
 @When[os == "Linux"]
 import std.fs.{File, OpenMode}
 @When[os == "Linux"]
@@ -9,7 +11,7 @@ import cjcj::utils.SipHash
 // launcher) or the language version (which is shared by many compilers).
 // Fixed-size chunks keep memory bounded and give the same key after relocation.
 @When[os == "Linux"]
-internal func GetWasmCompilerCacheIdentity(): Option<String> {
+internal func GetWasmCompilerCacheIdentity(): CoreOption<String> {
     try (file = File("/proc/self/exe", OpenMode.Read)) {
         let buffer = Array<UInt8>(1024 * 1024, repeat: 0u8)
         let chunks = StringBuilder()
@@ -35,6 +37,6 @@ internal func GetWasmCompilerCacheIdentity(): Option<String> {
 
 // Leave incremental use off when the running image cannot be identified.
 @When[os != "Linux"]
-internal func GetWasmCompilerCacheIdentity(): Option<String> {
+internal func GetWasmCompilerCacheIdentity(): CoreOption<String> {
     return None
 }
