@@ -14,13 +14,15 @@ internal func GetWasmCompilerCacheIdentity(): Option<String> {
         let buffer = Array<UInt8>(1024 * 1024, repeat: 0u8)
         let chunks = StringBuilder()
         while (true) {
-            var size = 0
+            var size: Int64 = 0
             while (size < buffer.size) {
                 let read = file.read(buffer[size..])
                 if (read == 0) { break }
                 size += read
             }
             if (size == 0) { break }
+            chunks.append(size.toString())
+            chunks.append(":")
             chunks.append(UInt64ToHex(SipHash.GetHashValue(buffer[..size])))
             chunks.append(":")
         }
