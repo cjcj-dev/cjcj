@@ -877,7 +877,12 @@ public class IRBuilder2 <: Resource {
     }
 
     public func GetPayloadOffset(): UInt64 {
-        return if (GetCGContext().GetCompileOptions().target.Is32BitPointer()) {
+        let target = GetCGContext().GetCompileOptions().target
+        // wasm32 objects carry one 4-byte TypeInfo* header slot, the same single slot that
+        // GetPayloadFromObject skips; byte-offset paths must agree with that typed path.
+        return if (target.IsWasm()) {
+            GetPtrSize()
+        } else if (target.Is32BitPointer()) {
             GetPtrSize() + 4u64
         } else {
             RuntimeLayout.ObjectHeaderSize
