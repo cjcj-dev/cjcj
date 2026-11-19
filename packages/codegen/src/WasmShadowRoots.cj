@@ -133,17 +133,17 @@ private func IsWasmKnownBase(value: LLVMValueRef, bases: WasmCallBases): Bool {
         if (bases.arguments.contains(current.toUIntNative()) ||
             !unsafe { LLVMIsAConstantPointerNull(current) }.isNull()) { return true }
         if (unsafe { LLVMIsAInstruction(current) }.isNull()) { return false }
-        match (unsafe { LLVMGetInstructionOpcode(current) }) {
-            case WASM_ROOT_BITCAST => current = unsafe { LLVMGetOperand(current, 0u32) }
-            case WASM_ROOT_CALL =>
-                if (IsWasmAllocation(current) ||
-                    bases.results.contains(unsafe { LLVMGetCalledValue(current) }.toUIntNative())) { return true }
-                if (unsafe { LLVMGetMetadata(current, bases.constructorMetadata) }.isNull()) { return false }
-                // This constructor forwards a managed receiver, which is a base
-                // only if the producer can prove that its incoming object is one.
-                current = unsafe { LLVMGetOperand(current, 0u32) }
-            case _ => return false
+        let opcode = unsafe { LLVMGetInstructionOpcode(current) }
+        if (opcode == WASM_ROOT_CALL) {
+            if (IsWasmAllocation(current) ||
+                bases.results.contains(unsafe { LLVMGetCalledValue(current) }.toUIntNative())) { return true }
+            if (unsafe { LLVMGetMetadata(current, bases.constructorMetadata) }.isNull()) { return false }
+            // This constructor forwards a managed receiver, which is a base
+            // only if the producer can prove that its incoming object is one.
+        } else if (opcode != WASM_ROOT_BITCAST) {
+            return false
         }
+        current = unsafe { LLVMGetOperand(current, 0u32) }
     }
     return false
 }
