@@ -10,11 +10,14 @@ private let LLVM_POINTER_KIND: Int32 = 12
 // This file emits roots only. It must not declare precise collection: neither a
 // single LLVM partition nor the presence of these symbols proves that other
 // partitions, std.core, libraries and the stack lowering cover all roots.
-internal func EmitWasmRoots(cgMod: CGModule): Unit {
-    let module = cgMod.GetLLVMModule().getOrThrow()
-    try (builder = IRBuilder2(cgMod)) {
-        EmitWasmShadowRoots(cgMod, module, builder)
-        EmitWasmStaticRoots(cgMod, module, builder)
+internal func EmitWasmRoots(modules: ArrayList<CGModule>, localizedNames: HashSet<String>): Unit {
+    let bases = InferWasmCallBases(modules, localizedNames)
+    for (cgMod in modules) {
+        let module = cgMod.GetLLVMModule().getOrThrow()
+        try (builder = IRBuilder2(cgMod)) {
+            EmitWasmShadowRoots(cgMod, module, builder, bases)
+            EmitWasmStaticRoots(cgMod, module, builder)
+        }
     }
 }
 

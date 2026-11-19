@@ -228,9 +228,9 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
         for (cgModule in cgModules) {
             SetSymbolLinkageType(cgModule)
             cgModule.EraseUselessGVAndFunctions()
-            if (options.target.IsWasm()) {
-                EmitWasmRoots(cgModule)
-            }
+        }
+        if (options.target.IsWasm()) {
+            EmitWasmRoots(cgModules, cgPkgContext.GetLocalizedSymbols())
         }
         if (options.NeedDumpIRToScreen()) {
             for (cgModule in cgModules) {
