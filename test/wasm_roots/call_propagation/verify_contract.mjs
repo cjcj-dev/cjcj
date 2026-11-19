@@ -38,7 +38,7 @@ async function compile(dir, sdk, split) {
   const temps = join(dir, 'temps');
   await mkdir(dir);
   await mkdir(temps);
-  const result = await run(dir, 'cjc', sdk, [join(sdk, 'bin/cjc'), '--target=wasm32-wasi', '-O0', '-V',
+  const result = await run(dir, 'cjc', sdk, [join(sdk, 'bin/cjc'), '--target=wasm32-wasi', '--experimental', '-O0', '-V',
     '--output-type=obj', '--apc-split-num', String(split), '--save-temps=' + temps, source, '-o', join(dir, 'calls.o')]);
   const files = (await readdir(temps)).filter(file => file.endsWith('.bc') && !file.endsWith('.opt.bc')).sort();
   assert.equal(files.length, split, 'saved raw partitions');
@@ -86,10 +86,13 @@ for (const split of [1, 8]) {
   for (const line of returns) assert.match(line.split(' @')[0], fact, 'proven AS1 return on each reference');
   console.log('WASM_ROOT_PROVENANCE_REACHED split=' + split);
   if (split === 1) {
+    // An explicit archive takes the driver's binary-input path and provides
+    // std.core for the final link without adding a fresh source partition.
+    const std = join(newSdk, 'lib/wasi_wasm32_cjnative/libcangjie-std-core.a');
     for (const [label, path, marked] of [['external-old', old.partitions[0], false],
       ['external-v1', partitions[0], true]]) {
-      const external = await run(out, label, newSdk, [join(newSdk, 'bin/cjc'), '--target=wasm32-wasi',
-        '--output-type=obj', '-O0', '-V', path, '-o', join(out, label + '.o')]);
+      const external = await run(out, label, newSdk, [join(newSdk, 'bin/cjc'), '--target=wasm32-wasi', '--experimental',
+        '-O0', '-V', path, std, '-o', join(out, label + '.wasm')]);
       if (marked) {
         checkOptRejected(external);
       } else {
