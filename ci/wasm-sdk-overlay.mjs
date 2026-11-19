@@ -16,6 +16,39 @@ export const NATIVE_LLVM_BIN = '.native-tools/third_party/llvm/bin';
 export const LLVM_ENTRY_BIN = 'third_party/llvm/bin';
 const REPLACED_LLVM_TOOLS = Object.freeze(['llc', 'opt', 'llvm-objcopy']);
 
+// SDK manifests (top-level *.json / *.jsonl) pin files by sha256 as {"path": p, "sha256": h} or {"<p>": {"sha256": h}}.
+// Returns the sdk-relative paths whose current content no longer matches a pinned hash.
+export function manifestDrift(sdk) {
+  const drift = {};
+  const pairs = function* walk(node, key) {
+    if (Array.isArray(node)) { for (const v of node) yield* walk(v, undefined); return; }
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.sha256 === 'string') {
+      const rel = typeof node.path === 'string' ? node.path : key;
+      if (rel) yield [rel, node.sha256];
+    }
+    for (const [k, v] of Object.entries(node)) yield* walk(v, k);
+  };
+  for (const name of fs.readdirSync(sdk).sort()) {
+    const file = path.join(sdk, name);
+    if (!fs.statSync(file).isFile() || !/\.jsonl?$/.test(name) || name === OVERLAY_PROVENANCE) continue;
+    const text = fs.readFileSync(file, 'utf8');
+    const docs = name.endsWith('.jsonl') ? text.split('\n').filter(Boolean).map(line => JSON.parse(line)) : [JSON.parse(text)];
+    const bad = new Set();
+    for (const doc of docs) {
+      for (const [rel, sha] of pairs(doc, undefined)) {
+        if (path.isAbsolute(rel) || !/^[0-9a-f]{64}$/.test(sha)) continue;
+        const target = path.join(sdk, rel);
+        if (fs.existsSync(target) && fs.statSync(target).isFile() && sha256File(target) !== sha) bad.add(rel);
+      }
+    }
+    if (bad.size) drift[name] = [...bad].sort();
+  }
+  return drift;
+}
+
+export const OVERLAY_PROVENANCE = 'WASM-SDK-OVERLAY.json';
+
 function requireFile(file, what) {
   if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error(`${what} is missing: ${file}`);
 }
@@ -77,8 +110,17 @@ export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, std
   for (const [name, file] of Object.entries({cjc, runtimeArchive, lld: path.join(llvmBin, 'lld'), ...(cjpm ? {cjpm} : {})})) {
     inputs[name] = {path: path.resolve(file), sha256: sha256File(file)};
   }
-  const provenance = {schema: 'cjcj-wasm-sdk-overlay-v1', target: 'wasm32-unknown-wasi', pin, inputs, outputs};
-  fs.writeFileSync(path.join(dest, 'WASM-SDK-OVERLAY.json'), JSON.stringify(provenance, null, 2) + '\n');
+  // The base SDK's release manifests still describe the files replaced here; record exactly which entries the
+  // overlay superseded (drift present in dest but not in base) so nothing treats this SDK as release-verifiable.
+  const baseDrift = manifestDrift(baseSdk);
+  const superseded = {};
+  for (const [name, paths] of Object.entries(manifestDrift(dest))) {
+    const fresh = paths.filter(rel => !(baseDrift[name] ?? []).includes(rel));
+    if (fresh.length) superseded[name] = fresh;
+  }
+  const provenance = {schema: 'cjcj-wasm-sdk-overlay-v1', target: 'wasm32-unknown-wasi', releaseVerifiable: false,
+    supersededManifestEntries: superseded, pin, inputs, outputs};
+  fs.writeFileSync(path.join(dest, OVERLAY_PROVENANCE), JSON.stringify(provenance, null, 2) + '\n');
   return {dest, provenance, check: checkWasmSdk(dest, {pin})};
 }
 

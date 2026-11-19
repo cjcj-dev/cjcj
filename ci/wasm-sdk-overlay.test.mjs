@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import {LLVM_ENTRY_BIN, NATIVE_LLVM_BIN, overlayWasmSdk, wasmLdEntry} from './wasm-sdk-overlay.mjs';
+import {LLVM_ENTRY_BIN, NATIVE_LLVM_BIN, manifestDrift, overlayWasmSdk, wasmLdEntry} from './wasm-sdk-overlay.mjs';
 import {parseWasiPin} from './wasi-toolchain.mjs';
 
 const LLC_ENTRY = ['cjcj-sdk-entry-v1', '3', `${NATIVE_LLVM_BIN}/llc`, 'linux', 'native-target:x64', 'third_party/llvm/lib', ''].join('\n');
@@ -22,6 +22,11 @@ function fixture() {
   write(path.join(base, 'libexec/compiler/cjcj-stage1'), 'native cjc', 0o755);
   write(path.join(base, '.target-tools/tools/bin/cjpm'), 'native cjpm', 0o755);
   write(path.join(base, 'tools/bin/node'), '#!/bin/sh\necho v22.23.3\n', 0o755);
+  const sha = text => createHash('sha256').update(text).digest('hex');
+  // release manifest pins the native compiler; a TOOLS-INPUTS entry that is already stale in the base must not be blamed on the overlay
+  write(path.join(base, 'RELEASE-MANIFEST.jsonl'), JSON.stringify({component: 'compiler', artifacts: [
+    {path: 'libexec/compiler/cjcj-stage1', sha256: sha('native cjc')}, {path: `${LLVM_ENTRY_BIN}/llvm-ar`, sha256: sha('launcher')}]}) + '\n');
+  write(path.join(base, 'TOOLS-INPUTS.json'), JSON.stringify({files: {'tools/bin/node': {sha256: sha('stale')}}}));
   const inputs = path.join(dir, 'inputs');
   for (const tool of ['llc', 'opt', 'llvm-objcopy', 'lld']) write(path.join(inputs, 'llvm', tool), `wasm ${tool}`, 0o755);
   write(path.join(inputs, 'cjc'), 'wasm cjc', 0o755);
@@ -64,6 +69,9 @@ test('overlay produces a layout that passes the wasm SDK check and records prove
   assert.equal(provenance.target, 'wasm32-unknown-wasi');
   assert.match(provenance.outputs['libexec/compiler/cjcj-stage1'], /^[0-9a-f]{64}$/);
   assert.equal(provenance.inputs.sysrootTarball.sha256, args.pin.WASI_SYSROOT_SHA256);
+  assert.equal(provenance.releaseVerifiable, false);
+  assert.deepEqual(provenance.supersededManifestEntries, {'RELEASE-MANIFEST.jsonl': ['libexec/compiler/cjcj-stage1']});
+  assert.deepEqual(manifestDrift(base), {'TOOLS-INPUTS.json': ['tools/bin/node']}, 'pre-existing base drift is reported, not attributed');
 });
 
 test('a missing input fails before any output exists', () => {
