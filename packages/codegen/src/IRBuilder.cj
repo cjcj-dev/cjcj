@@ -3238,7 +3238,7 @@ public class IRBuilder2 <: Resource {
         }
         let callInst = CreateIntrinsicCallNoInvoke(SET_LOCATION_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(),
             ArrayList<LLVMValueRef>())
-        if (!callInst.isNull() && GetCGContext().GetCompileOptions().!GetCGContext().GetCompileOptions().target.IsArm32() &&
+        if (!callInst.isNull() && !GetCGContext().GetCompileOptions().target.IsArm32() &&
             !GetCGContext().GetCompileOptions().target.IsWasm()) {
             unsafe { LLVMSelfhostSetAnyRegCallingConv(callInst) }
         }
