@@ -5,16 +5,18 @@ import { cp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { WASI } from 'node:wasi';
 
-if (process.argv[2] === 'consume') {
-  const file = process.argv[3];
+const args = globalThis.argv?._ ?? process.argv.slice(2);
+
+if (args[0] === 'consume') {
+  const file = args[1];
   const wasi = new WASI({ version: 'preview1', args: [file], env: process.env, returnOnExit: true });
   const module = await WebAssembly.compile(await readFile(file));
   const instance = await WebAssembly.instantiate(module, wasi.getImportObject());
   process.exitCode = wasi.start(instance);
 } else {
   const { $ } = globalThis.$ ? globalThis : await import('zx');
-  const out = resolve(process.argv[2]);
-  const expected = process.argv[3] ?? 'candidate';
+  const out = resolve(args[0]);
+  const expected = args[1] ?? 'candidate';
   assert.ok(['candidate', 'baseline', 'without-static', 'without-shadow'].includes(expected));
   const sdk = process.env.CANGJIE_HOME;
   assert.ok(sdk, 'source the private C6 SDK envsetup before running');

@@ -8,7 +8,13 @@ private let WASM_ROOT_LOAD: Int32 = 27
 private let WASM_ROOT_STORE: Int32 = 28
 private let WASM_ROOT_BITCAST: Int32 = 41
 private let WASM_ROOT_ICMP: Int32 = 42
-private let WASM_ROOT_CALL: Int32 = 45
+internal let WASM_ROOT_CALL: Int32 = 45
+internal let WASM_CONSTRUCTOR_RESULT_MD = "cj.wasm.constructor_receiver"
+private let WASM_ROOT_INVOKE: Int32 = 5
+private let WASM_ROOT_RESUME: Int32 = 58
+private let WASM_ROOT_LANDINGPAD: Int32 = 59
+private let WASM_ROOT_CLEANUPRET: Int32 = 61
+private let WASM_ROOT_CATCHSWITCH: Int32 = 65
 
 private class WasmLocalRoot {
     let base: LLVMValueRef
@@ -51,6 +57,145 @@ private func IsWasmAllocation(call: LLVMValueRef): Bool {
         name == MALLOC_ARRAY_GENERIC_INTRINSIC_NAME
 }
 
+
+private class WasmCallBases {
+    let constructorMetadata: UInt32
+    let arguments = HashSet<UIntNative>()
+    let results = HashSet<UIntNative>()
+
+    init(context: LLVMContextHandle) {
+        this.constructorMetadata = LLVMGetMDKindID(context, WASM_CONSTRUCTOR_RESULT_MD)
+    }
+}
+
+private class WasmLocalCalls {
+    let function: LLVMValueRef
+    let arguments = ArrayList<(UInt32, LLVMValueRef)>()
+    let returns = ArrayList<LLVMValueRef>()
+    let callers: Option<ArrayList<LLVMValueRef>>
+
+    init(function: LLVMValueRef) {
+        this.function = function
+        let count = unsafe { LLVMCountParams(function) }
+        for (index in 0u32..count) {
+            let argument = unsafe { LLVMGetParam(function, index) }
+            if (IsWasmManagedPointer(unsafe { LLVMTypeOf(argument) })) {
+                this.arguments.add((index, argument))
+            }
+        }
+        this.callers = if (this.arguments.isEmpty()) { None } else { FindWasmDirectCallers(function, count) }
+        let functionType = unsafe { LLVMGlobalGetValueType(function) }
+        if (IsWasmManagedPointer(unsafe { LLVMGetReturnType(functionType) })) {
+            var block = unsafe { LLVMGetFirstBasicBlock(function) }
+            while (!block.isNull()) {
+                let terminator = unsafe { LLVMGetBasicBlockTerminator(block) }
+                if (!terminator.isNull() && unsafe { LLVMGetInstructionOpcode(terminator) } == WASM_ROOT_RET) {
+                    this.returns.add(unsafe { LLVMGetOperand(terminator, 0u32) })
+                }
+                block = unsafe { LLVMGetNextBasicBlock(block) }
+            }
+        }
+    }
+}
+
+// Parameter facts require the complete set of calls to a local definition.
+// Reject aliases, function pointers, invoke, varargs and operand bundles.
+// CallBase puts normal arguments at the first operand positions, then its
+// other data and the callee (LLVM InstrTypes.h).
+private func FindWasmDirectCallers(function: LLVMValueRef, count: UInt32): Option<ArrayList<LLVMValueRef>> {
+    if (unsafe { LLVMIsFunctionVarArg(LLVMGlobalGetValueType(function)) } != 0) { return None }
+    let calls = ArrayList<LLVMValueRef>()
+    var useRef = unsafe { LLVMGetFirstUse(function) }
+    while (!useRef.isNull()) {
+        let user = unsafe { LLVMGetUser(useRef) }
+        if (unsafe { LLVMIsAInstruction(user) }.isNull() ||
+            unsafe { LLVMGetInstructionOpcode(user) } != WASM_ROOT_CALL ||
+            unsafe { LLVMGetCalledValue(user) }.toUIntNative() != function.toUIntNative() ||
+            Int64(unsafe { LLVMGetNumOperands(user) }) != Int64(count) + 1) { return None }
+        for (index in 0u32..count) {
+            if (unsafe { LLVMGetOperand(user, index) }.toUIntNative() == function.toUIntNative()) { return None }
+        }
+        calls.add(user)
+        useRef = unsafe { LLVMGetNextUse(useRef) }
+    }
+    return if (calls.isEmpty()) { None } else { Some(calls) }
+}
+
+private func IsWasmKnownBase(value: LLVMValueRef, bases: WasmCallBases): Bool {
+    var current = value
+    while (!current.isNull() && IsWasmManagedPointer(unsafe { LLVMTypeOf(current) })) {
+        if (bases.arguments.contains(current.toUIntNative()) ||
+            !unsafe { LLVMIsAConstantPointerNull(current) }.isNull()) { return true }
+        if (unsafe { LLVMIsAInstruction(current) }.isNull()) { return false }
+        match (unsafe { LLVMGetInstructionOpcode(current) }) {
+            case WASM_ROOT_BITCAST => current = unsafe { LLVMGetOperand(current, 0u32) }
+            case WASM_ROOT_CALL =>
+                if (IsWasmAllocation(current) ||
+                    bases.results.contains(unsafe { LLVMGetCalledValue(current) }.toUIntNative())) { return true }
+                if (unsafe { LLVMGetMetadata(current, bases.constructorMetadata) }.isNull()) { return false }
+                // This constructor forwards a managed receiver, which is a base
+                // only if the producer can prove that its incoming object is one.
+                current = unsafe { LLVMGetOperand(current, 0u32) }
+            case _ => return false
+        }
+    }
+    return false
+}
+
+private func AllWasmReturnsAreBases(values: ArrayList<LLVMValueRef>, bases: WasmCallBases): Bool {
+    if (values.isEmpty()) { return false }
+    for (value in values) {
+        if (!IsWasmKnownBase(value, bases)) { return false }
+    }
+    return true
+}
+
+private func AllWasmInputsAreBases(calls: ArrayList<LLVMValueRef>, index: UInt32, bases: WasmCallBases): Bool {
+    for (call in calls) {
+        if (!IsWasmKnownBase(unsafe { LLVMGetOperand(call, index) }, bases)) { return false }
+    }
+    return true
+}
+
+// Grow base facts from recognized allocations and null, never assuming that
+// an arbitrary AS1 pointer starts at the object. An unseeded cycle, external
+// definition, or derived pointer cannot supply a fact through this pass.
+private func InferWasmCallBases(module: LLVMModuleHandle, context: LLVMContextHandle): WasmCallBases {
+    let bases = WasmCallBases(context)
+    let definitions = ArrayList<WasmLocalCalls>()
+    var function = unsafe { LLVMGetFirstFunction(module.raw) }
+    while (!function.isNull()) {
+        let linkage = unsafe { LLVMGetLinkage(function) }
+        if (unsafe { LLVMIsDeclaration(function) == 0 } && !HasWasmUnwind(function) &&
+            (linkage == LLVMLinkageValue(LLVMLinkage.Internal) || linkage == LLVMLinkageValue(LLVMLinkage.Private))) {
+            let summary = WasmLocalCalls(function)
+            if (!summary.returns.isEmpty() || summary.callers.isSome()) { definitions.add(summary) }
+        }
+        function = unsafe { LLVMGetNextFunction(function) }
+    }
+    var changed = true
+    while (changed) {
+        changed = false
+        for (summary in definitions) {
+            let key = summary.function.toUIntNative()
+            if (!bases.results.contains(key) && AllWasmReturnsAreBases(summary.returns, bases)) {
+                bases.results.add(key)
+                changed = true
+            }
+            if (let Some(calls) <- summary.callers) {
+                for ((index, argument) in summary.arguments) {
+                    let argKey = argument.toUIntNative()
+                    if (!bases.arguments.contains(argKey) && AllWasmInputsAreBases(calls, index, bases)) {
+                        bases.arguments.add(argKey)
+                        changed = true
+                    }
+                }
+            }
+        }
+    }
+    return bases
+}
+
 private func IsWasmRootCall(call: LLVMValueRef): Bool {
     if (unsafe { LLVMIsTailCall(call) } != 0) { return false }
     let name = CalledWasmName(call) ?? return true
@@ -59,8 +204,9 @@ private func IsWasmRootCall(call: LLVMValueRef): Bool {
     return !name.startsWith("llvm.") || name.startsWith("llvm.cj.")
 }
 
-// A first, local liveness case: a recognized heap allocation, with all uses
-// in the defining block, including uses of address-preserving bitcasts.
+// Local liveness for a proven base with all uses in the defining block,
+// or in any one block for a dominating parameter. Address-preserving casts
+// retain the same base.
 // Following arbitrary AS1 values would also pick up derived pointers. A GEP,
 // phi, memory escape, or other unmodelled use stops this proof for the value.
 // Argument-only use of a base at a call counts: the callee may allocate before
@@ -98,7 +244,13 @@ private func FindWasmLocalRoot(base: LLVMValueRef, defIndex: Int64,
     return Some(root)
 }
 
-private func PlanWasmBlockRoots(block: LLVMBasicBlockRef): WasmBlockRoots {
+private func RecordWasmRoot(plan: WasmBlockRoots, candidates: ArrayList<WasmLocalRoot>, root: WasmLocalRoot): Unit {
+    candidates.add(root)
+    for (alias in root.aliases) { plan.owners[alias.toUIntNative()] = root }
+}
+
+private func PlanWasmBlockRoots(block: LLVMBasicBlockRef, parameters: ArrayList<LLVMValueRef>,
+    bases: WasmCallBases): WasmBlockRoots {
     let plan = WasmBlockRoots()
     let positions = HashMap<UIntNative, Int64>()
     var inst = unsafe { LLVMGetFirstInstruction(block) }
@@ -108,6 +260,11 @@ private func PlanWasmBlockRoots(block: LLVMBasicBlockRef): WasmBlockRoots {
         inst = unsafe { LLVMGetNextInstruction(inst) }
     }
     let candidates = ArrayList<WasmLocalRoot>()
+    for (argument in parameters) {
+        if (let Some(root) <- FindWasmLocalRoot(argument, -1, positions)) {
+            RecordWasmRoot(plan, candidates, root)
+        }
+    }
     for (i in 0..plan.instructions.size) {
         let call = plan.instructions[i]
         if (unsafe { LLVMGetInstructionOpcode(call) } != WASM_ROOT_CALL) { continue }
@@ -119,35 +276,59 @@ private func PlanWasmBlockRoots(block: LLVMBasicBlockRef): WasmBlockRoots {
             if (!live.isEmpty()) { plan.sites.add(WasmCallRoots(i, live)) }
         }
         // The result of this call is not live during the call itself.
-        if (IsWasmManagedPointer(unsafe { LLVMTypeOf(call) }) && IsWasmAllocation(call)) {
+        if (IsWasmKnownBase(call, bases)) {
             if (let Some(root) <- FindWasmLocalRoot(call, i, positions)) {
-                candidates.add(root)
-                for (alias in root.aliases) { plan.owners[alias.toUIntNative()] = root }
+                RecordWasmRoot(plan, candidates, root)
             }
         }
     }
     return plan
 }
 
+// A personality is attached even to ordinary CJ functions. Reject actual
+// unwinding edges until lowering can restore the shadow top on those edges.
+private func HasWasmUnwind(function: LLVMValueRef): Bool {
+    if (unsafe { LLVMHasPersonalityFn(function) } == 0) { return false }
+    var block = unsafe { LLVMGetFirstBasicBlock(function) }
+    while (!block.isNull()) {
+        var inst = unsafe { LLVMGetFirstInstruction(block) }
+        while (!inst.isNull()) {
+            let opcode = unsafe { LLVMGetInstructionOpcode(inst) }
+            if (opcode == WASM_ROOT_INVOKE || opcode == WASM_ROOT_RESUME || opcode == WASM_ROOT_LANDINGPAD ||
+                (opcode >= WASM_ROOT_CLEANUPRET && opcode <= WASM_ROOT_CATCHSWITCH)) { return true }
+            inst = unsafe { LLVMGetNextInstruction(inst) }
+        }
+        block = unsafe { LLVMGetNextBasicBlock(block) }
+    }
+    return false
+}
+
 internal func EmitWasmShadowRoots(cgMod: CGModule, module: LLVMModuleHandle, builder: IRBuilder2): Unit {
+    let bases = InferWasmCallBases(module, cgMod.GetLLVMContext())
     var function = unsafe { LLVMGetFirstFunction(module.raw) }
-    // The C6 target has no unwinding. Do not instrument functions with an EH
-    // personality until the compiler can restore the shadow top on that edge.
     while (!function.isNull()) {
         let next = unsafe { LLVMGetNextFunction(function) }
-        if (unsafe { LLVMIsDeclaration(function) == 0 && LLVMHasPersonalityFn(function) == 0 }) {
-            LowerWasmFunctionRoots(cgMod, builder, function)
+        if (unsafe { LLVMIsDeclaration(function) == 0 } && !HasWasmUnwind(function)) {
+            LowerWasmFunctionRoots(cgMod, builder, function, bases)
         }
         function = next
     }
 }
 
-private func LowerWasmFunctionRoots(cgMod: CGModule, builder: IRBuilder2, function: LLVMValueRef): Unit {
+private func LowerWasmFunctionRoots(cgMod: CGModule, builder: IRBuilder2, function: LLVMValueRef,
+    bases: WasmCallBases): Unit {
     let plans = ArrayList<WasmBlockRoots>()
     var capacity: Int64 = 0
-    var block = unsafe { LLVMGetFirstBasicBlock(function) }
+    let entry = unsafe { LLVMGetEntryBasicBlock(function) }
+    let parameters = ArrayList<LLVMValueRef>()
+    let count = unsafe { LLVMCountParams(function) }
+    for (index in 0u32..count) {
+        let argument = unsafe { LLVMGetParam(function, index) }
+        if (bases.arguments.contains(argument.toUIntNative())) { parameters.add(argument) }
+    }
+    var block = entry
     while (!block.isNull()) {
-        let plan = PlanWasmBlockRoots(block)
+        let plan = PlanWasmBlockRoots(block, parameters, bases)
         if (!plan.sites.isEmpty()) {
             plans.add(plan)
             for (site in plan.sites) {

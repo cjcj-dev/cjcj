@@ -3,6 +3,7 @@ package cjcj::codegen
 import std.collection.*
 import cjcj::chir.Attribute
 import cjcj::chir.Apply
+import cjcj::chir.ConstructorReturnsReceiver
 import cjcj::chir.TryApply
 import cjcj::chir.CustomType
 import cjcj::chir.Expression
@@ -22,8 +23,22 @@ public func EmitCallLikeExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         let apply = CHIRApplyWrapper(applyExpr)
         irBuilder.SetCHIRExpr(apply)
         irBuilder.EmitLocation(apply)
-        return GenerateApply(irBuilder, applyExpr.GetCallee(), applyExpr.GetArgs(),
+        let callee = applyExpr.GetCallee()
+        let result = GenerateApply(irBuilder, callee, applyExpr.GetArgs(),
             thisType: applyExpr.GetThisType(), instTypeArgs: applyExpr.GetInstantiatedTypeArgs())
+        if (irBuilder.GetCGContext().GetCompileOptions().target.IsWasm() &&
+            !result.isNull() && IsWasmManagedPointer(unsafe { LLVMTypeOf(result) })) {
+            if (let Some(function) <- callee.AsFunction()) {
+                if (ConstructorReturnsReceiver(function) && !unsafe { LLVMIsAInstruction(result) }.isNull() &&
+                    unsafe { LLVMGetInstructionOpcode(result) } == WASM_ROOT_CALL &&
+                    !unsafe { LLVMIsAFunction(LLVMGetCalledValue(result)) }.isNull()) {
+                    let context = irBuilder.GetLLVMContext()
+                    LLVMSetInstructionMetadata(context, result, WASM_CONSTRUCTOR_RESULT_MD,
+                        LLVMCreateMDTupleFromString(context, "receiver"))
+                }
+            }
+        }
+        return result
     }
     if (let Some(tryApplyExpr) <- (chirExpr as TryApply)) {
         let apply = CHIRApplyWrapper(tryApplyExpr)
