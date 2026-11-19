@@ -1,22 +1,34 @@
 package cjcj::codegen
 
 import std.collection.*
+import cjcj::option.{WASM_ROOT_CONTRACT_KEY, WASM_ROOT_CONTRACT_VERSION}
 
 private let LLVM_STRUCT_KIND: Int32 = 10
 private let LLVM_ARRAY_KIND: Int32 = 11
 private let LLVM_POINTER_KIND: Int32 = 12
 
-// CjwRootFrame and cjw_static_root_table_register belong to the wasm32 C6 ABI.
-// This file emits roots only. It must not declare precise collection: neither a
-// single LLVM partition nor the presence of these symbols proves that other
-// partitions, std.core, libraries and the stack lowering cover all roots.
+// Emit the C6 static table and the provenance facts consumed by the paired
+// LLVM. Only LLVM can publish transient frames after classifying allocations.
 internal func EmitWasmRoots(modules: ArrayList<CGModule>, localizedNames: HashSet<String>): Unit {
-    let bases = InferWasmCallBases(modules, localizedNames)
+    EmitWasmBaseAttributes(modules, localizedNames)
     for (cgMod in modules) {
         let module = cgMod.GetLLVMModule().getOrThrow()
+        MarkWasmRootContract(cgMod, module)
         try (builder = IRBuilder2(cgMod)) {
-            EmitWasmShadowRoots(cgMod, module, builder, bases)
             EmitWasmStaticRoots(cgMod, module, builder)
+        }
+    }
+}
+
+// LLVMModuleFlagBehaviorError in the C API maps to Error (1) in LLVM IR.
+private let WASM_ROOT_MODULE_FLAG_ERROR: Int32 = 0
+
+private func MarkWasmRootContract(cgMod: CGModule, module: LLVMModuleHandle): Unit {
+    let version = CreateUInt32Metadata(cgMod.GetLLVMContext(), WASM_ROOT_CONTRACT_VERSION)
+    try (key = unsafe { LibC.mallocCString(WASM_ROOT_CONTRACT_KEY) }.asResource()) {
+        unsafe {
+            LLVMAddModuleFlag(module.raw, WASM_ROOT_MODULE_FLAG_ERROR, key.value,
+                UIntNative(WASM_ROOT_CONTRACT_KEY.size), version)
         }
     }
 }

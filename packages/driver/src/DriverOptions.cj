@@ -26,6 +26,7 @@ public class DriverOptions <: GlobalOptions {
     public var useRuntimeRpath: Bool = false
     public var sanitizerEnableRpath: Bool = false
     public var incrementalCompileNoChange: Bool = false
+    let wasmRootContractInputs = HashSet<String>()
     public var enableObfAll: Bool = false
     public var enableObfExportSyms: Option<Bool> = None
     public var enableObfLineNumber: Option<Bool> = None

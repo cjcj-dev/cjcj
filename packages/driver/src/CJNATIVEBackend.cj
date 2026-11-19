@@ -1,6 +1,7 @@
 package cjcj::driver
 
 import std.collection.*
+import cjcj::option.WASM_ROOT_CONTRACT_VERSION
 import cjcj::utils.CJC_ASSERT_WITH_MSG
 
 public class CJNATIVEBackend <: Backend {
@@ -283,6 +284,10 @@ public class CJNATIVEBackend <: Backend {
             tool.AppendArg(bitCodeFile.filePath)
             PreprocessOfNewPassManager(tool)
             OPTSetOptions({ option: String => tool.AppendArg(option) }, driverOptions)
+            if (driverOptions.target.IsWasm() && (!bitCodeFile.isForeignInput ||
+                driverOptions.wasmRootContractInputs.contains(bitCodeFile.filePath))) {
+                tool.AppendArg("--cj-wasm-root-version=${WASM_ROOT_CONTRACT_VERSION}")
+            }
             OPTSetVerifyOptions({ option: String => tool.AppendArg(option) }, driverOptions)
             OPTSetTripleOptions({ option: String => tool.AppendArg(option) }, driverOptions)
             OPTSetCodeObfuscationOptions({ option: String => tool.AppendArg(option) }, driverOptions)
