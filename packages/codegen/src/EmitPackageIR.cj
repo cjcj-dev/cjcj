@@ -730,7 +730,7 @@ private func EmitRuntimeConfigInit(cgMod: CGModule, moduleHandle: LLVMModuleHand
     }
 
     let entryPtrType = unsafe { LLVMPointerType(entryType, 0u32) }
-    let sizeType = if (options.target.arch == ArchType.ARM32) {
+    let sizeType = if (options.target.Is32BitPointer()) {
         unsafe { LLVMInt32TypeInContext(llvmContext) }
     } else {
         unsafe { LLVMInt64TypeInContext(llvmContext) }

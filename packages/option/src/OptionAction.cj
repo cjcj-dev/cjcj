@@ -1012,6 +1012,21 @@ private func parseJobs(opts: GlobalOptions, arg: OptionArgInstance, aggressive: 
     return handled()
 }
 
+// wasm32 WASI preview1: wasm32-wasi | wasm32-wasip1 | wasm32-unknown-wasi | wasm32-unknown-wasip1.
+private func ParseWasmTargetTriple(opts: GlobalOptions, parts: Array<String>): Bool {
+    let sys = parts[parts.size - 1]
+    let vendorOk = parts.size == 2 || (parts.size == 3 && parts[1] == "unknown")
+    if (!vendorOk || (sys != "wasi" && sys != "wasip1")) {
+        Errorln("The wasm32 target must be one of wasm32-wasi, wasm32-wasip1, wasm32-unknown-wasi, wasm32-unknown-wasip1.")
+        return false
+    }
+    opts.target.arch = ArchType.WASM32
+    opts.target.vendor = Vendor.UNKNOWN
+    opts.target.os = OSType.WASI
+    opts.target.env = EnvironmentType.NOT_AVAILABLE
+    return true
+}
+
 private func parseAppleTargetTriple(opts: GlobalOptions, parts: Array<String>): Bool {
     if (parts.size < 3) {
         return false
@@ -1043,6 +1058,9 @@ private func parseAppleTargetTriple(opts: GlobalOptions, parts: Array<String>): 
 
 public func ParseTargetTriple(opts: GlobalOptions, triple: String): Bool {
     let parts = SplitString(triple, "-")
+    if (parts.size >= 2 && parts[0] == "wasm32") {
+        return ParseWasmTargetTriple(opts, parts)
+    }
     if (parts.size != 3 && parts.size != 4) {
         Errorln("The target must be in either form of {ARCH}-{VENDOR}-{SYSTEM}-{ENV} or {ARCH}-{SYSTEM}-{ENV}.")
         return false

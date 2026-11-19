@@ -445,6 +445,7 @@ public open class ToolChain {
             case ArchType.AARCH64 => "lib64"
             case ArchType.ARM64 => "lib64"
             case ArchType.ARM32 => "lib"
+            case ArchType.WASM32 => "lib"
             case ArchType.UNKNOWN => ""
         }
     }

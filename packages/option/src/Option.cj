@@ -1091,6 +1091,7 @@ public open class GlobalOptions <: Option {
             case OSType.DARWIN => ".dylib"
             case OSType.IOS => ".dylib"
             case OSType.LINUX => ".so"
+            case OSType.WASI => ".a"
             case OSType.UNKNOWN => ".so"
         }
     }
@@ -1314,7 +1315,7 @@ public open class GlobalOptions <: Option {
         if (!SetupConditionalCompilationCfg(this)) { return false }
         if (!ReprocessOutputs()) { return false }
         if (!ReprocessInputs()) { return false }
-        if (target.IsMacOS() || target.IsArm32()) { disableReflection = true }
+        if (target.IsMacOS() || target.IsArm32() || target.IsWasm()) { disableReflection = true }
         if (compileMacroPackage && enableOutputType) {
             Errorln("using both '--compile-macro' and '--output-type' is not allowed.")
             return false

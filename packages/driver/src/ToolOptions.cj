@@ -181,7 +181,8 @@ public func LLCSetOptions(setOptionHandler: (String) -> Unit, driverOptions: Dri
     setOptionHandler("--cangjie-pipeline")
     SetOptionIf(setOptionHandler, !driverOptions.enableCompileDebug && !driverOptions.enableCoverage &&
         driverOptions.displayLineInfo, "-disable-debug-info-print")
-    setOptionHandler("--relocation-model=pic")
+    // wasm32-wasi links one static module; PIC would require the dynamic-linking ABI.
+    setOptionHandler(if (driverOptions.target.IsWasm()) { "--relocation-model=static" } else { "--relocation-model=pic" })
     SetOptionIf(setOptionHandler,
         driverOptions.target.os == OSType.IOS && driverOptions.target.arch == ArchType.AARCH64,
         "--code-model=large")

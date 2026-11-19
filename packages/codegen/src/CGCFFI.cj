@@ -1412,7 +1412,7 @@ public class WindowsAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
     }
 }
 
-public class LinuxOhosArm32CJNativeCGCFFI <: LinuxAarch64CJNativeCGCFFI {
+public open class LinuxOhosArm32CJNativeCGCFFI <: LinuxAarch64CJNativeCGCFFI {
     protected let paramTypeMap: ArrayList<(Type, ABIArgInfo)> = ArrayList<(Type, ABIArgInfo)>()
 
     public init(cgMod: CGModule) {
@@ -1878,5 +1878,15 @@ public func AddAlignAttributeAtIndex(value: LLVMValueRef, idx: UInt32, align: UI
         unsafe { LLVMAddAttributeAtIndex(value, idx, attr) }
     } else {
         unsafe { LLVMAddCallSiteAttribute(value, idx, attr) }
+    }
+}
+
+// wasm32-wasi C ABI. Scalars and pointers are passed directly with the same
+// 32-bit widths as the base classifier (i64 is a native wasm type).
+// Known gap (explicit, tracked for M2): struct-by-value C FFI follows the
+// wasm BasicCABI (aggregates indirect), which this class does not model yet.
+public class Wasm32CJNativeCGCFFI <: LinuxOhosArm32CJNativeCGCFFI {
+    public init(cgMod: CGModule) {
+        super(cgMod)
     }
 }

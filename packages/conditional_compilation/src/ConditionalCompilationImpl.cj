@@ -120,6 +120,7 @@ class ConditionalCompilationImpl {
             case OSType.IOS => return "iOS"
             case OSType.WINDOWS => return "Windows"
             case OSType.LINUX => return "Linux"
+            case OSType.WASI => return "WASI"
             case OSType.UNKNOWN => return triple.OSToString()
         }
     }
