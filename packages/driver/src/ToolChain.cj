@@ -281,7 +281,7 @@ public open class ToolChain {
         return None
     }
 
-    private func LibCangjieFormat(pkg: String, extension: String): Option<String> {
+    protected func LibCangjieFormat(pkg: String, extension: String): Option<String> {
         if (let Some(base) <- LibCangjieBaseFormat(pkg)) {
             return "lib" + base + extension
         }

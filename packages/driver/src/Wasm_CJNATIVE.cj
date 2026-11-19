@@ -52,9 +52,15 @@ public class Wasm_CJNATIVE <: Gnu {
     }
 
     protected override func GenerateLinking(objFiles: ArrayList<TempFileInfo>): Bool {
+        let cangjieLibPath = FileUtil.JoinPath(FileUtil.JoinPath(driver.cangjieHome, "lib"),
+            driverOptions.GetCangjieLibTargetPathName())
+        let runtimeLib = FileUtil.JoinPath(FileUtil.JoinPath(FileUtil.JoinPath(driver.cangjieHome, "runtime/lib"),
+            driverOptions.GetCangjieLibTargetPathName()), "libcangjie-runtime.a")
         let tool = Tool(ldPath, ToolType.BACKEND, driverOptions.environment.allVariables)
         tool.AppendArg("-o")
         tool.AppendArg(GetOutputFileInfo(objFiles).filePath)
+        // wasm-ld turns signature mismatches into warnings plus trapping stubs; never accept that.
+        tool.AppendArg("--fatal-warnings")
         tool.AppendArgIf(driverOptions.stripSymbolTable, "--strip-all")
         tool.AppendArgIf(!driverOptions.stripSymbolTable && !driverOptions.enableCompileDebug, "--strip-debug")
         // Command module: wasi-libc crt1-command.o provides `_start`, which runs
@@ -62,15 +68,40 @@ public class Wasm_CJNATIVE <: Gnu {
         tool.AppendArg(FileUtil.JoinPath(WasiSysrootLibPath(), "crt1-command.o"))
         tool.AppendArg("-z")
         tool.AppendArg("stack-size=1048576")
-        let cangjieLibPath = FileUtil.JoinPath(FileUtil.JoinPath(driver.cangjieHome, "lib"),
-            driverOptions.GetCangjieLibTargetPathName())
-        HandleLibrarySearchPaths(tool, cangjieLibPath)
+        // wasm-ld 15 has no -l:<file>, --start-group or -rpath-link; archives are
+        // passed by path and resolved order-independently.
+        for (path in driverOptions.librarySearchPaths) {
+            tool.AppendArg("-L" + path)
+        }
+        tool.AppendArg("-L" + cangjieLibPath)
         SortInputlibraryFileAndAppend(tool, objFiles)
-        GenerateLinkOptionsOfBuiltinLibs(tool)
-        tool.AppendArg("-l:libcangjie-runtime.a")
+        let missing = ArrayList<String>()
+        let stdArchives = ArrayList<String>()
+        for (pkg in driverOptions.directBuiltinDependencies) { AddWasmStdArchive(pkg, cangjieLibPath, stdArchives, missing) }
+        for (pkg in driverOptions.indirectBuiltinDependencies) { AddWasmStdArchive(pkg, cangjieLibPath, stdArchives, missing) }
+        if (!missing.isEmpty()) {
+            for (pkg in missing) {
+                eprintln("error: std package '" + pkg + "' is not available for the wasm32-wasi target yet")
+            }
+            return false
+        }
+        AppendSortedLinkOrderedSet(tool, stdArchives)
+        tool.AppendArg(runtimeLib)
         tool.AppendArg("-L" + WasiSysrootLibPath())
         tool.AppendArg("-lc")
         backendCmds.add(MakeSingleToolBatch(tool))
         return true
+    }
+
+    private func AddWasmStdArchive(pkg: String, cangjieLibPath: String, archives: ArrayList<String>,
+        missing: ArrayList<String>): Unit {
+        if (let Some(staticLib) <- LibCangjieFormat(pkg, ".a")) {
+            let path = FileUtil.JoinPath(cangjieLibPath, staticLib)
+            if (FileUtil.FileExist(path)) {
+                AddLinkOrderedSetValue(archives, path)
+            } else {
+                missing.add(pkg)
+            }
+        }
     }
 }
