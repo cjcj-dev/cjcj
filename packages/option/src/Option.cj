@@ -283,6 +283,7 @@ public open class GlobalOptions <: Option {
     public var enIncrementalCompilation: Bool = false
     public var printIncrementalInfo: Bool = false
     public var compilationCachedPath: String = ""
+    private var compilationCacheNamespace = ".cached"
     public var compilationCachedDir: String = ""
     public var compilationCachedFileName: String = ""
     public var executablePath: String = ""
@@ -460,6 +461,7 @@ public open class GlobalOptions <: Option {
         enIncrementalCompilation = other.enIncrementalCompilation
         printIncrementalInfo = other.printIncrementalInfo
         compilationCachedPath = other.compilationCachedPath
+        compilationCacheNamespace = other.compilationCacheNamespace
         compilationCachedDir = other.compilationCachedDir
         compilationCachedFileName = other.compilationCachedFileName
         executablePath = other.executablePath
@@ -896,6 +898,15 @@ public open class GlobalOptions <: Option {
             compilationCachedPath = GetDirPath(output)
         }
         CJC_ASSERT(!compilationCachedPath.isEmpty())
+        compilationCacheNamespace = ".cached"
+        if (target.IsWasm() && enIncrementalCompilation) {
+            if (let Some(identity) <- GetWasmCompilerCacheIdentity()) {
+                compilationCacheNamespace = ".cached-wasm-" + identity
+            } else {
+                enIncrementalCompilation = false
+                Warningln("Wasm compiler image is unavailable; compiling without the incremental cache.")
+            }
+        }
     }
 
     public func GetCacheRelativeFilePath(filePath: String): String {
@@ -918,7 +929,7 @@ public open class GlobalOptions <: Option {
             }
             fileName = joinSortedStrings(sortedSrcFiles)
         }
-        let folder = JoinPath(compilationCachedPath, ".cached")
+        let folder = JoinPath(compilationCachedPath, compilationCacheNamespace)
         return CachePathName(folder, StableHashString(fileName))
     }
 
@@ -930,7 +941,7 @@ public open class GlobalOptions <: Option {
 
     public func GenerateCachedPathNameForCodeGen(subModuleName: String, extension: String): String {
         let hashedFileName = if (codegenDebugMode) { subModuleName } else { StableHashString(subModuleName) }
-        let folder = JoinPath(compilationCachedPath, ".cached")
+        let folder = JoinPath(compilationCachedPath, compilationCacheNamespace)
         if (!FileExist(folder)) { let _ = CreateDirectory(folder) }
         return JoinPath(folder, hashedFileName + extension)
     }
