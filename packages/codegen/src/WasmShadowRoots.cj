@@ -18,15 +18,30 @@ private let WASM_ROOT_LANDINGPAD: Int32 = 59
 private let WASM_ROOT_CLEANUPRET: Int32 = 61
 private let WASM_ROOT_CATCHSWITCH: Int32 = 65
 
+private class WasmRootSpill {
+    let base: LLVMValueRef
+    let initializeBefore: LLVMValueRef
+    var address = LLVMNullValue()
+    var needed = false
+
+    init(base: LLVMValueRef, initializeBefore: LLVMValueRef) {
+        this.base = base
+        this.initializeBefore = initializeBefore
+    }
+}
+
 private class WasmLocalRoot {
     let base: LLVMValueRef
-    let aliases: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
-    var lastUse: Int64
+    let defIndex: Int64
+    let lastUse: Int64
+    let spill: Option<WasmRootSpill>
     var current: LLVMValueRef
 
-    init(base: LLVMValueRef, index: Int64) {
+    init(base: LLVMValueRef, defIndex: Int64, lastUse: Int64, spill: Option<WasmRootSpill>) {
         this.base = base
-        this.lastUse = index
+        this.defIndex = defIndex
+        this.lastUse = lastUse
+        this.spill = spill
         this.current = base
     }
 }
@@ -42,9 +57,16 @@ private class WasmCallRoots {
 }
 
 private class WasmBlockRoots {
+    let block: LLVMBasicBlockRef
     let instructions: ArrayList<LLVMValueRef> = ArrayList<LLVMValueRef>()
+    let predecessors = ArrayList<Int64>()
+    let candidates = ArrayList<WasmLocalRoot>()
     let sites: ArrayList<WasmCallRoots> = ArrayList<WasmCallRoots>()
     let owners: HashMap<UIntNative, WasmLocalRoot> = HashMap<UIntNative, WasmLocalRoot>()
+
+    init(block: LLVMBasicBlockRef) {
+        this.block = block
+    }
 }
 
 private func WasmValueName(value: LLVMValueRef): String {
@@ -306,97 +328,135 @@ private func IsWasmRootCall(call: LLVMValueRef): Bool {
     return !name.startsWith("llvm.") || name.startsWith("llvm.cj.")
 }
 
-// Local liveness for a proven base with all uses in the defining block,
-// or in any one block for a dominating parameter. Address-preserving casts
-// retain the same base.
-// Following arbitrary AS1 values would also pick up derived pointers. A GEP,
-// phi, memory escape, or other unmodelled use stops this proof for the value.
-// Argument-only use of a base at a call counts: the callee may allocate before
-// the caller gets control back, even if the caller will not read it again.
-private func FindWasmLocalRoot(base: LLVMValueRef, defIndex: Int64,
-    positions: HashMap<UIntNative, Int64>): Option<WasmLocalRoot> {
-    let root = WasmLocalRoot(base, defIndex)
+// Only follow aliases that still name the start of the object. A GEP, phi,
+// memory escape or other unmodelled use stops the proof for the whole value.
+private func CollectWasmRootUses(aliases: ArrayList<LLVMValueRef>, uses: HashMap<Int64, Int64>,
+    positions: HashMap<UIntNative, (Int64, Int64)>): Bool {
     let seen = HashSet<UIntNative>()
-    root.aliases.add(base)
-    seen.add(base.toUIntNative())
+    seen.add(aliases[0].toUIntNative())
     var i: Int64 = 0
-    while (i < root.aliases.size) {
-        let alias = root.aliases[i]
+    while (i < aliases.size) {
+        let alias = aliases[i]
         var useRef = unsafe { LLVMGetFirstUse(alias) }
         while (!useRef.isNull()) {
             let user = unsafe { LLVMGetUser(useRef) }
-            let useIndex = positions.get(user.toUIntNative()) ?? return None
+            let (block, index) = positions.get(user.toUIntNative()) ?? return false
             let opcode = unsafe { LLVMGetInstructionOpcode(user) }
             if (opcode == WASM_ROOT_BITCAST && IsWasmManagedPointer(unsafe { LLVMTypeOf(user) })) {
                 if (!seen.contains(user.toUIntNative())) {
                     seen.add(user.toUIntNative())
-                    root.aliases.add(user)
+                    aliases.add(user)
                 }
             } else if (opcode != WASM_ROOT_CALL && opcode != WASM_ROOT_ICMP && opcode != WASM_ROOT_LOAD &&
                 opcode != WASM_ROOT_RET &&
                 !(opcode == WASM_ROOT_STORE &&
                     unsafe { LLVMGetOperand(user, 0u32).toUIntNative() } != alias.toUIntNative())) {
-                return None
+                return false
             }
-            if (useIndex > root.lastUse) { root.lastUse = useIndex }
+            if (index > (uses.get(block) ?? -1)) { uses[block] = index }
             useRef = unsafe { LLVMGetNextUse(useRef) }
         }
         i++
     }
-    return Some(root)
+    return !uses.isEmpty()
 }
 
-private func RecordWasmRoot(plan: WasmBlockRoots, candidates: ArrayList<WasmLocalRoot>, root: WasmLocalRoot): Unit {
-    candidates.add(root)
-    for (alias in root.aliases) { plan.owners[alias.toUIntNative()] = root }
-}
-
-private func PlanWasmBlockRoots(block: LLVMBasicBlockRef, parameters: ArrayList<LLVMValueRef>,
-    bases: WasmCallBases, trace: Bool): WasmBlockRoots {
-    let plan = WasmBlockRoots()
-    let positions = HashMap<UIntNative, Int64>()
-    var inst = unsafe { LLVMGetFirstInstruction(block) }
-    while (!inst.isNull()) {
-        positions[inst.toUIntNative()] = plan.instructions.size
-        plan.instructions.add(inst)
-        inst = unsafe { LLVMGetNextInstruction(inst) }
-    }
-    let candidates = ArrayList<WasmLocalRoot>()
-    for (argument in parameters) {
-        if (let Some(root) <- FindWasmLocalRoot(argument, -1, positions)) {
-            RecordWasmRoot(plan, candidates, root)
+private func CollectWasmRootBlocks(entry: LLVMBasicBlockRef, plans: ArrayList<WasmBlockRoots>,
+    positions: HashMap<UIntNative, (Int64, Int64)>): Unit {
+    let blocks = HashMap<UIntNative, Int64>()
+    blocks[entry.toUIntNative()] = 0
+    plans.add(WasmBlockRoots(entry))
+    var i: Int64 = 0
+    while (i < plans.size) {
+        let plan = plans[i]
+        var inst = unsafe { LLVMGetFirstInstruction(plan.block) }
+        while (!inst.isNull()) {
+            positions[inst.toUIntNative()] = (i, plan.instructions.size)
+            plan.instructions.add(inst)
+            inst = unsafe { LLVMGetNextInstruction(inst) }
         }
+        let term = unsafe { LLVMGetBasicBlockTerminator(plan.block) }
+        let count = unsafe { LLVMGetNumSuccessors(term) }
+        for (j in 0u32..count) {
+            let successor = unsafe { LLVMGetSuccessor(term, j) }
+            let key = successor.toUIntNative()
+            let next = if (let Some(existing) <- blocks.get(key)) {
+                existing
+            } else {
+                let index = plans.size
+                blocks[key] = index
+                plans.add(WasmBlockRoots(successor))
+                index
+            }
+            plans[next].predecessors.add(i)
+        }
+        i++
     }
+}
+
+private func PlanWasmValue(base: LLVMValueRef, defBlock: Int64, defIndex: Int64,
+    plans: ArrayList<WasmBlockRoots>, positions: HashMap<UIntNative, (Int64, Int64)>,
+    spills: ArrayList<WasmRootSpill>): Unit {
+    let aliases = ArrayList<LLVMValueRef>([base])
+    let uses = HashMap<Int64, Int64>()
+    if (!CollectWasmRootUses(aliases, uses, positions)) { return }
+
+    var spill: Option<WasmRootSpill> = None
+    if (uses.size > 1 || uses.get(defBlock).isNone()) {
+        // SSA dominance holds for all accepted uses (no PHIs). Walk backwards
+        // from those uses; a path through the definition kills the old value.
+        // The entry-reachable graph excludes dead predecessors.
+        let work = ArrayList<Int64>()
+        for ((block, _) in uses) { work.add(block) }
+        let liveIn = HashSet<Int64>()
+        var i: Int64 = 0
+        while (i < work.size) {
+            let block = work[i]
+            if (block != defBlock && !liveIn.contains(block)) {
+                liveIn.add(block)
+                for (pred in plans[block].predecessors) {
+                    uses[pred] = plans[pred].instructions.size
+                    work.add(pred)
+                }
+            }
+            i++
+        }
+        let storage = WasmRootSpill(base, plans[defBlock].instructions[defIndex + 1])
+        spills.add(storage)
+        spill = Some(storage)
+    }
+    for ((block, lastUse) in uses) {
+        let plan = plans[block]
+        let start = if (block == defBlock) { defIndex } else { -1 }
+        let root = WasmLocalRoot(base, start, lastUse, spill)
+        plan.candidates.add(root)
+        for (alias in aliases) { plan.owners[alias.toUIntNative()] = root }
+    }
+}
+
+private func PlanWasmBlockSites(plan: WasmBlockRoots, trace: Bool): Unit {
     if (trace) {
-        let name = LLVMCStringToString(unsafe { LLVMGetBasicBlockName(block) }) ?? ""
-        eprintln("CJCJ_WASM_ROOTS block=${name} instructions=${plan.instructions.size} parameterRoots=${candidates.size}")
+        let name = LLVMCStringToString(unsafe { LLVMGetBasicBlockName(plan.block) }) ?? ""
+        eprintln("CJCJ_WASM_ROOTS block=${name} instructions=${plan.instructions.size} candidates=${plan.candidates.size}")
     }
     for (i in 0..plan.instructions.size) {
         let call = plan.instructions[i]
-        if (unsafe { LLVMGetInstructionOpcode(call) } != WASM_ROOT_CALL) { continue }
-        let rootCall = IsWasmRootCall(call)
-        if (rootCall) {
-            let live = ArrayList<WasmLocalRoot>()
-            for (root in candidates) {
-                if (root.lastUse >= i) { live.add(root) }
-            }
-            if (!live.isEmpty()) { plan.sites.add(WasmCallRoots(i, live)) }
-        }
-        // The result of this call is not live during the call itself.
-        let knownBase = IsWasmKnownBase(call, bases)
-        if (knownBase) {
-            if (let Some(root) <- FindWasmLocalRoot(call, i, positions)) {
-                RecordWasmRoot(plan, candidates, root)
+        if (unsafe { LLVMGetInstructionOpcode(call) } != WASM_ROOT_CALL || !IsWasmRootCall(call)) { continue }
+        let live = ArrayList<WasmLocalRoot>()
+        for (root in plan.candidates) {
+            // A call's result is unavailable until it returns. An argument
+            // used at the call is live during it, even with no later use.
+            if (root.defIndex < i && root.lastUse >= i) {
+                live.add(root)
+                if (let Some(spill) <- root.spill) { spill.needed = true }
             }
         }
+        if (!live.isEmpty()) { plan.sites.add(WasmCallRoots(i, live)) }
         if (trace) {
             let name = CalledWasmName(call) ?? "indirect"
-            let managed = IsWasmManagedPointer(unsafe { LLVMTypeOf(call) })
-            eprintln("CJCJ_WASM_ROOTS call=${name} i=${i} managed=${managed} base=${knownBase} " +
-                "safepoint=${rootCall} candidates=${candidates.size} sites=${plan.sites.size}")
+            eprintln("CJCJ_WASM_ROOTS call=${name} i=${i} roots=${live.size}")
         }
     }
-    return plan
 }
 
 // A personality is attached even to ordinary CJ functions. Reject actual
@@ -436,24 +496,32 @@ internal func EmitWasmShadowRoots(cgMod: CGModule, module: LLVMModuleHandle, bui
 private func LowerWasmFunctionRoots(cgMod: CGModule, builder: IRBuilder2, function: LLVMValueRef,
     bases: WasmCallBases, trace: Bool): Unit {
     let plans = ArrayList<WasmBlockRoots>()
+    let positions = HashMap<UIntNative, (Int64, Int64)>()
+    let spills = ArrayList<WasmRootSpill>()
     var capacity: Int64 = 0
     let entry = unsafe { LLVMGetEntryBasicBlock(function) }
-    let parameters = ArrayList<LLVMValueRef>()
+    CollectWasmRootBlocks(entry, plans, positions)
     let count = unsafe { LLVMCountParams(function) }
     for (index in 0u32..count) {
         let argument = unsafe { LLVMGetParam(function, index) }
-        if (bases.arguments.contains(argument.toUIntNative())) { parameters.add(argument) }
+        if (bases.arguments.contains(argument.toUIntNative())) {
+            PlanWasmValue(argument, 0, -1, plans, positions, spills)
+        }
     }
-    var block = entry
-    while (!block.isNull()) {
-        let plan = PlanWasmBlockRoots(block, parameters, bases, trace)
-        if (!plan.sites.isEmpty()) {
-            plans.add(plan)
-            for (site in plan.sites) {
-                if (site.roots.size > capacity) { capacity = site.roots.size }
+    for (block in 0..plans.size) {
+        let plan = plans[block]
+        for (i in 0..plan.instructions.size) {
+            let call = plan.instructions[i]
+            if (unsafe { LLVMGetInstructionOpcode(call) } == WASM_ROOT_CALL && IsWasmKnownBase(call, bases)) {
+                PlanWasmValue(call, block, i, plans, positions, spills)
             }
         }
-        block = unsafe { LLVMGetNextBasicBlock(block) }
+    }
+    for (plan in plans) {
+        PlanWasmBlockSites(plan, trace)
+        for (site in plan.sites) {
+            if (site.roots.size > capacity) { capacity = site.roots.size }
+        }
     }
     if (capacity == 0) { return }
 
@@ -469,18 +537,39 @@ private func LowerWasmFunctionRoots(cgMod: CGModule, builder: IRBuilder2, functi
         ArrayList<LLVMTypeRef>([bytePtr]))
     let push = cgMod.GetOrInsertFunction("cjw_root_frame_push", hookType)
     let pop = cgMod.GetOrInsertFunction("cjw_root_frame_pop", hookType)
-    builder.SetInsertPointBefore(unsafe { LLVMGetFirstInstruction(LLVMGetEntryBasicBlock(function)) })
-    let frame = builder.CreateEntryAlloca(frameType, name: "wasm.root.frame")
-    for (plan in plans) {
-        LowerWasmBlockRoots(builder, plan, frame, frameType, slotsType, bytePtr, hookType, push, pop)
+    let first = plans[0].instructions[0]
+    builder.SetInsertPointBefore(first)
+    let frame = builder.CreateAllocaAtCurrentPoint(frameType, "wasm.root.frame")
+    // A cross-block spill carries the latest post-call reload across incoming
+    // edges. Only the frame slots, never these spills, are published to C6.
+    for (spill in spills) {
+        if (!spill.needed) { continue }
+        builder.SetInsertPointBefore(first)
+        spill.address = builder.CreateAllocaAtCurrentPoint(unsafe { LLVMTypeOf(spill.base) }, "wasm.root.spill")
+        builder.SetInsertPointBefore(spill.initializeBefore)
+        builder.CreateStore(spill.base, spill.address)
     }
+    for (plan in plans) {
+        if (!plan.owners.isEmpty()) {
+            LowerWasmBlockRoots(builder, plan, frame, frameType, slotsType, bytePtr, hookType, push, pop)
+        }
+    }
+}
+
+private func CurrentWasmRoot(builder: IRBuilder2, root: WasmLocalRoot): LLVMValueRef {
+    if (let Some(spill) <- root.spill) {
+        if (!spill.address.isNull()) {
+            return builder.CreateLoad(unsafe { LLVMTypeOf(root.base) }, spill.address, name: "wasm.root.current")
+        }
+    }
+    return root.current
 }
 
 private func LowerWasmBlockRoots(builder: IRBuilder2, plan: WasmBlockRoots, frame: LLVMValueRef,
     frameType: LLVMTypeRef, slotsType: LLVMTypeRef, bytePtr: LLVMTypeRef, hookType: LLVMTypeRef,
     push: LLVMValueRef, pop: LLVMValueRef): Unit {
     var siteIndex: Int64 = 0
-    var i = plan.sites[0].callIndex
+    var i: Int64 = 0
     while (i < plan.instructions.size) {
         let inst = plan.instructions[i]
         builder.SetInsertPointBefore(inst)
@@ -488,8 +577,9 @@ private func LowerWasmBlockRoots(builder: IRBuilder2, plan: WasmBlockRoots, fram
         for (op in 0..count) {
             let value = unsafe { LLVMGetOperand(inst, UInt32(op)) }
             if (let Some(root) <- plan.owners.get(value.toUIntNative())) {
-                if (root.current.toUIntNative() != root.base.toUIntNative()) {
-                    let fresh = builder.CreateBitCast(root.current, unsafe { LLVMTypeOf(value) })
+                let current = CurrentWasmRoot(builder, root)
+                if (current.toUIntNative() != root.base.toUIntNative()) {
+                    let fresh = builder.CreateBitCast(current, unsafe { LLVMTypeOf(value) })
                     unsafe { LLVMSetOperand(inst, UInt32(op), fresh) }
                 }
             }
@@ -507,7 +597,7 @@ private func LowerWasmBlockRoots(builder: IRBuilder2, plan: WasmBlockRoots, fram
                     ArrayList<LLVMValueRef>([builder.GetInt32(0), builder.GetInt32(idx)]))
                 let typedAddress = builder.CreateBitCast(address, unsafe { LLVMPointerType(LLVMTypeOf(root.base), 0u32) })
                 addresses.add(typedAddress)
-                builder.CreateStore(root.current, typedAddress, isVolatile: true)
+                builder.CreateStore(CurrentWasmRoot(builder, root), typedAddress, isVolatile: true)
             }
             builder.CreateCall(push, hookType, args)
             builder.SetInsertPointBefore(plan.instructions[i + 1])
@@ -517,7 +607,11 @@ private func LowerWasmBlockRoots(builder: IRBuilder2, plan: WasmBlockRoots, fram
                     let reload = builder.CreateLoad(unsafe { LLVMTypeOf(root.base) }, addresses[idx],
                         name: "wasm.root.reload")
                     unsafe { LLVMSetVolatile(reload, 1) }
-                    root.current = reload
+                    if (let Some(spill) <- root.spill) {
+                        builder.CreateStore(reload, spill.address)
+                    } else {
+                        root.current = reload
+                    }
                 }
             }
             builder.CreateCall(pop, hookType, args)

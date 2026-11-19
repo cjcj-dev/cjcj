@@ -943,7 +943,7 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
-    private func CreateAllocaAtCurrentPoint(valueType: LLVMTypeRef, name: String): LLVMValueRef {
+    internal func CreateAllocaAtCurrentPoint(valueType: LLVMTypeRef, name: String): LLVMValueRef {
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildAlloca(builder.raw, valueType, nameCString.value) }
