@@ -1492,7 +1492,7 @@ private func SetLLVMValueName(parent: LLVMValueRef, paramIndex: UInt32, name: St
     }
 }
 
-internal func BuildLLVMFunctionType(returnType: LLVMTypeRef, paramTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
+private func BuildLLVMFunctionType(returnType: LLVMTypeRef, paramTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
     if (paramTypes.isEmpty()) {
         return unsafe { LLVMFunctionType(returnType, CPointer<LLVMTypeRef>(), 0u32, 0) }
     }

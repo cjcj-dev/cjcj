@@ -23,24 +23,27 @@ internal func IsWasmManagedPointer(ty: LLVMTypeRef): Bool {
 }
 
 internal func WasmStructType(context: LLVMContextRef, fields: Array<LLVMTypeRef>): LLVMTypeRef {
+    var result = LLVMNullType()
     try (types = LibC.malloc<LLVMTypeRef>(count: fields.size).asResource()) {
         for (i in 0..fields.size) {
             unsafe { (types.value + i).write(fields[i]) }
         }
-        return unsafe { LLVMStructTypeInContext(context, types.value, UInt32(fields.size), 0) }
+        result = unsafe { LLVMStructTypeInContext(context, types.value, UInt32(fields.size), 0) }
     }
+    return result
 }
 
 private func AddWasmRootGlobal(module: LLVMModuleHandle, name: String, initValue: LLVMValueRef,
     linkage: LLVMLinkage): LLVMValueRef {
+    var global = LLVMNullValue()
     try (cname = unsafe { LibC.mallocCString(name) }.asResource()) {
         unsafe {
-            let global = LLVMAddGlobal(module.raw, LLVMTypeOf(initValue), cname.value)
+            global = LLVMAddGlobal(module.raw, LLVMTypeOf(initValue), cname.value)
             LLVMSetInitializer(global, initValue)
             LLVMSetLinkage(global, LLVMLinkageValue(linkage))
-            return global
         }
     }
+    return global
 }
 
 // Enumerate storage, not values seen in static write barriers. A slot can also
@@ -98,8 +101,8 @@ private func EmitWasmStaticRoots(cgMod: CGModule, module: LLVMModuleHandle, buil
         LLVMLinkage.Private)
     unsafe { LLVMSetGlobalConstant(table, 1) }
     let voidType = unsafe { LLVMVoidTypeInContext(context) }
-    let ctorType = BuildLLVMFunctionType(voidType, ArrayList<LLVMTypeRef>())
-    let registerType = BuildLLVMFunctionType(voidType,
+    let ctorType = CGType.GetCodeGenFunctionType(cgMod.GetLLVMContext(), voidType)
+    let registerType = CGType.GetCodeGenFunctionType(cgMod.GetLLVMContext(), voidType,
         ArrayList<LLVMTypeRef>([tablePtr, unsafe { LLVMInt32TypeInContext(context) }]))
     let register = cgMod.GetOrInsertFunction("cjw_static_root_table_register", registerType)
     let ctor = cgMod.GetOrInsertFunction(".cj.wasm.register_static_roots", ctorType)

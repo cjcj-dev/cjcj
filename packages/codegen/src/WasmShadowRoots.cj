@@ -166,7 +166,8 @@ private func LowerWasmFunctionRoots(cgMod: CGModule, builder: IRBuilder2, functi
     // pointer type to avoid casting the reference itself out of AS1.
     let frameType = WasmStructType(context, [bytePtr, bytePtr, unsafe { LLVMInt32TypeInContext(context) },
         slotsType])
-    let hookType = BuildLLVMFunctionType(unsafe { LLVMVoidTypeInContext(context) }, ArrayList<LLVMTypeRef>([bytePtr]))
+    let hookType = CGType.GetCodeGenFunctionType(cgMod.GetLLVMContext(), unsafe { LLVMVoidTypeInContext(context) },
+        ArrayList<LLVMTypeRef>([bytePtr]))
     let push = cgMod.GetOrInsertFunction("cjw_root_frame_push", hookType)
     let pop = cgMod.GetOrInsertFunction("cjw_root_frame_pop", hookType)
     builder.SetInsertPointBefore(unsafe { LLVMGetFirstInstruction(LLVMGetEntryBasicBlock(function)) })
