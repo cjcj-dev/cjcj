@@ -249,20 +249,30 @@ class LocalModeAnalysis {
         }
     }
 
+    private func IsOwnReceiver(value: Expr): Bool {
+        if (let Some(paren) <- (value as ParenExpr)) { return paren.expr.map({ e => IsOwnReceiver(e) }) ?? false }
+        return (value as RefExpr).map({ r => r.isThis || r.isSuper }) ?? false
+    }
+
     private func CheckStore(left: Expr, right: Expr): Unit {
-        Check(right, left.resolvedMode)
-        if (CopyNode(left) || left.resolvedMode == ASTMode.NOT) { return }
         if (let Some(paren) <- (left as ParenExpr)) {
             if (let Some(inner) <- paren.expr) { CheckStore(inner, right) }
             return
         }
-        if (left.resolvedMode == ASTMode.HALF && right.resolvedMode != ASTMode.NOT &&
-            (left.GetTarget().map({ target => target.IsMemberDecl() }) ?? false)) {
+        if (CopyNode(left)) { return }
+        Check(right, left.resolvedMode)
+        if (left.resolvedMode == ASTMode.NOT) { return }
+        if (left.resolvedMode == ASTMode.HALF && (let Some(index) <- (left as SubscriptExpr)) &&
+            index.IsVArrayAccess()) {
+            DiagMismatchedTypesWithFoundTy(diag, right, "a VArray element in a known region", "local? destination")
+            return
+        }
+        if (left.resolvedMode == ASTMode.HALF && (left.GetTarget().map({ target => target.IsMemberDecl() }) ?? false)) {
             let fd: Option<FuncDecl> = if (scopes.isEmpty()) { None } else { scopes[scopes.size - 1].funcDecl }
             let allowed = fd.map({ f => f.IsFinalizer() || (f.TestAttr(Attribute.CONSTRUCTOR) &&
                 GetReceiverMode(f) == ASTMode.HALF) }) ?? false
             let own = if (let Some(ma) <- (left as MemberAccess)) {
-                if ((let Some(base) <- ma.baseExpr) && (let Some(r) <- (base as RefExpr))) { r.isThis || r.isSuper } else { false }
+                ma.baseExpr.map({ base => IsOwnReceiver(base) }) ?? false
             } else { left is RefExpr }
             if (!allowed || !own) { DiagMismatchedTypesWithFoundTy(diag, right, "a field in the destination region", "local? field") }
         }
