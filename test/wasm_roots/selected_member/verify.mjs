@@ -147,6 +147,6 @@ for (const [label, libraries, alternateWins] of [['cache-first', [known, alterna
   const result = await buildApp(label, 'cache', known, libraries, [], ['--incremental-compile'], false);
   assert.equal(result.output.includes(updated), alternateWins);
   assert.doesNotMatch(result.log, /--cj-wasm-import-return-bases=|PublishWasmReturnBaseLink/);
-  console.log(`${label}: optExecuted=${result.log.includes('--cj-wasm-root-version=1')}`);
+  console.log(`${label}: optExecuted=${result.log.includes('/llvm/bin/opt')}`);
 }
 console.log(`WASM_SELECTED_MEMBER_ASSERTIONS_REACHED ${mode}`);

@@ -3,7 +3,6 @@ package cjcj::driver
 import std.collection.*
 import std.convert.*
 import cjcj::basic.DiagKindRefactor
-import cjcj::option.WASM_ROOT_CONTRACT_KEY
 
 private type DriverLLVMContextRef = CPointer<Unit>
 private type DriverLLVMModuleRef = CPointer<Unit>
@@ -26,30 +25,27 @@ foreign {
     ): Int32
     func LLVMDisposeModule(module: DriverLLVMModuleRef): Unit
     func LLVMGetSourceFileName(module: DriverLLVMModuleRef, len: CPointer<UIntNative>): CString
-    func LLVMGetModuleFlag(module: DriverLLVMModuleRef, key: CString, keyLen: UIntNative): CPointer<Unit>
     func memcpy(dest: CPointer<UInt8>, src: CString, count: UIntNative): CPointer<UInt8>
     func strlen(str: CString): UIntNative
 }
 
-func ReadBitcodeInputInfo(bcPath: String): (Bool, String, DiagKindRefactor, String, Bool) {
-    let (openSuccess, openMessage, sourceName, hasWasmRootContract) = ReadBitcodeModuleInfo(bcPath)
+func ReadBitcodeInputInfo(bcPath: String): (Bool, String, DiagKindRefactor, String) {
+    let (openSuccess, openMessage, sourceName) = ReadBitcodeModuleInfo(bcPath)
     if (!openSuccess) {
-        return (false, "", DiagKindRefactor.bc_file_open_failed, openMessage, false)
+        return (false, "", DiagKindRefactor.bc_file_open_failed, openMessage)
     }
     if (let None <- sourceName) {
-        return (false, "", DiagKindRefactor.bc_parse_failed, "", false)
+        return (false, "", DiagKindRefactor.bc_parse_failed, "")
     }
     if (let Some(name) <- ParseBitcodePackageName(sourceName.getOrThrow())) {
-        return (true, name, DiagKindRefactor.bc_file_open_failed, "", hasWasmRootContract)
+        return (true, name, DiagKindRefactor.bc_file_open_failed, "")
     }
-    return (false, "", DiagKindRefactor.bc_invalid_package_name, "", false)
+    return (false, "", DiagKindRefactor.bc_invalid_package_name, "")
 }
 
-private func ReadBitcodeModuleInfo(bcPath: String): (Bool, String, Option<String>, Bool) {
+private func ReadBitcodeModuleInfo(bcPath: String): (Bool, String, Option<String>) {
     var sourceName: Option<String> = None
-    var hasWasmRootContract = false
-    try (pathCString = unsafe { LibC.mallocCString(bcPath) }.asResource(),
-        rootKey = unsafe { LibC.mallocCString(WASM_ROOT_CONTRACT_KEY) }.asResource()) {
+    try (pathCString = unsafe { LibC.mallocCString(bcPath) }.asResource()) {
         try (memBufPtr = LibC.malloc<DriverLLVMMemoryBufferRef>().asResource(),
             outMessage = LibC.malloc<CString>().asResource()) {
             unsafe {
@@ -66,7 +62,7 @@ private func ReadBitcodeModuleInfo(bcPath: String): (Bool, String, Option<String
                     message = CStringToString(rawMessage, unsafe { strlen(rawMessage) }) ?? ""
                     unsafe { LLVMDisposeMessage(rawMessage) }
                 }
-                return (false, message, None, false)
+                return (false, message, None)
             }
             let successMessage = unsafe { outMessage.value.read() }
             if (!successMessage.isNull()) {
@@ -83,11 +79,6 @@ private func ReadBitcodeModuleInfo(bcPath: String): (Bool, String, Option<String
                         let nameLen = unsafe { lenPtr.value.read() }
                         sourceName = CStringToString(rawName, nameLen)
                     }
-                    // Leave version and type validation to opt. Even an invalid
-                    // marker must request the guard and fail with the old opt.
-                    hasWasmRootContract = !unsafe {
-                        LLVMGetModuleFlag(module, rootKey.value, UIntNative(WASM_ROOT_CONTRACT_KEY.size))
-                    }.isNull()
                     unsafe { LLVMDisposeModule(module) }
                 }
             }
@@ -97,9 +88,9 @@ private func ReadBitcodeModuleInfo(bcPath: String): (Bool, String, Option<String
             }
         }
     } catch (e: Exception) {
-        return (true, "", None, false)
+        return (true, "", None)
     }
-    return (true, "", sourceName, hasWasmRootContract)
+    return (true, "", sourceName)
 }
 
 private func CStringToString(raw: CString, len: UIntNative): Option<String> {

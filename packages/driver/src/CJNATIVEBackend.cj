@@ -2,7 +2,6 @@ package cjcj::driver
 
 import std.collection.*
 import std.process.executeWithOutput
-import cjcj::option.WASM_ROOT_CONTRACT_VERSION
 import cjcj::utils.CJC_ASSERT_WITH_MSG
 
 public class CJNATIVEBackend <: Backend {
@@ -306,10 +305,6 @@ public class CJNATIVEBackend <: Backend {
             tool.AppendArg(bitCodeFile.filePath)
             PreprocessOfNewPassManager(tool)
             OPTSetOptions({ option: String => tool.AppendArg(option) }, driverOptions)
-            if (driverOptions.target.IsWasm() && (!bitCodeFile.isForeignInput ||
-                driverOptions.wasmRootContractInputs.contains(bitCodeFile.filePath))) {
-                tool.AppendArg("--cj-wasm-root-version=${WASM_ROOT_CONTRACT_VERSION}")
-            }
             if (driverOptions.exportWasmReturnBases) {
                 let report = TempFileManager.Instance().CreateUniqueTempFileInfo(TempFileKind.T_OBJ,
                     stem: "export-return-bases").filePath

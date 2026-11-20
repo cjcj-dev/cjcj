@@ -61,7 +61,7 @@ public class Driver {
 
     public func ExtractBCPackageNames(): Bool {
         for (bcPath in driverOptions.bcInputFiles) {
-            let (ok, packageName, error, message, hasWasmRootContract) = ReadBitcodeInputInfo(bcPath)
+            let (ok, packageName, error, message) = ReadBitcodeInputInfo(bcPath)
             if (!ok) {
                 if (error == DiagKindRefactor.bc_file_open_failed) {
                     diag.DiagnoseRefactor(
@@ -81,9 +81,6 @@ public class Driver {
                 return false
             }
             driverOptions.bcPackageNames.add(packageName)
-            if (hasWasmRootContract) {
-                driverOptions.wasmRootContractInputs.add(bcPath)
-            }
         }
         return true
     }
