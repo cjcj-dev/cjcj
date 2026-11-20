@@ -34,6 +34,29 @@ func capturedValue(n: Int64): Int64 {
     return captureParameter(c)
 }
 
+var innerBytes: Int64 = -1
+
+func raiseWithCell(n: Int64): Unit {
+    let inner = Cell(n) @local!
+    if (inner.read() == n) {
+        innerBytes = getAllocatedLocalObjectSize()
+        throw Exception("inner region")
+    }
+}
+
+func catchWithCell(n: Int64): Bool {
+    let outer = Cell(n) @local!
+    let held = getAllocatedLocalObjectSize()
+    try {
+        raiseWithCell(n + 1)
+    } catch (e: Exception) {
+        let remaining = getAllocatedLocalObjectSize()
+        println("unwind held=${held} inner=${innerBytes} remaining=${remaining}")
+        return e.message == "inner region" && innerBytes > held && remaining == held && outer.read() == n
+    }
+    return false
+}
+
 main(): Int64 {
     let before = getAllocatedLocalObjectSize()
     let answer = exercise(73)
@@ -43,5 +66,6 @@ main(): Int64 {
     if (activeBytes <= before) { return 22 }
     if (after != before) { return 23 }
     if (capturedValue(37) != 37 || getAllocatedLocalObjectSize() != after) { return 24 }
+    if (!catchWithCell(51) || getAllocatedLocalObjectSize() != after) { return 25 }
     return 0
 }

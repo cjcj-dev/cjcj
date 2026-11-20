@@ -76,6 +76,11 @@ for (const name of ['local','ordinary','escape']) {
   const run = execute(name+'-run',exe,[]);
   const result = new RegExp('^'+name+' before=(\\d+) active=(\\d+) after=(\\d+) payload=(\\d+)\\s*$','m').exec(run.stdout??'');
   if (!result) { failures.push(name+' missing public observation'); continue; }
+  if (name==='local' && run.status===0) {
+    const uw=/^unwind held=(\d+) inner=(\d+) remaining=(\d+)$/m.exec(run.stdout??'');
+    if (!uw || BigInt(uw[1])<=BigInt(result[1]) || BigInt(uw[2])<=BigInt(uw[1]) || uw[1]!==uw[3])
+      failures.push('exception unwinding must release the callee region and preserve the caller region');
+  }
   if (name==='ordinary' && !/^std\.ast parsed integer=73$/m.test(run.stdout??'')) failures.push('installed std.ast native parser');
   const [before,active,after,payload] = result.slice(1).map(BigInt);
   if (run.status !== 0 || before !== after || payload !== 73n || (name==='local' ? active<=before : active!==before))
