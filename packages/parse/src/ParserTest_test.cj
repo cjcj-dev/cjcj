@@ -55,6 +55,31 @@ private func expectStrings(actual: ArrayList<String>, expected: Array<String>): 
 }
 
 @Test
+class ParameterListRecoveryTest {
+    private func checkParameterList(source: String, errors: Int64): Unit {
+        let (node, diag) = parseDecl(source)
+        let funcBody = (node as FuncDecl).getOrThrow().funcBody.getOrThrow()
+        let params = funcBody.paramLists[0]
+        @Expect(countErrors(diag), errors)
+        @Expect(params.rightParenPos.IsZero(), false)
+        @Expect(funcBody.body.isSome(), true)
+        @Assert(params.params.size == 3)
+        @Expect(params.params[1].TestAttr(Attribute.IS_BROKEN), errors != 0)
+        @Expect(params.params[2].identifier.Val(), "y")
+    }
+
+    @TestCase
+    func preservesLaterParameterAndBody(): Unit {
+        checkParameterList("func f(x: Int64, Int64, y: Int64): Int64 { y }", 1)
+    }
+
+    @TestCase
+    func preservesValidParametersAndBody(): Unit {
+        checkParameterList("func f(x: Int64, z: Int64, y: Int64): Int64 { y }", 0)
+    }
+}
+
+@Test
 class ParseTypePortTest {
     @TestCase
     func parseTypePosition(): Unit {

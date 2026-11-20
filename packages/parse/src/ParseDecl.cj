@@ -1669,6 +1669,14 @@ extend ParserImpl {
                         list.variadicArgIndex = UInt64(list.params.size)
                     }
                     list.params.add(param)
+                    if (param.TestAttr(Attribute.IS_BROKEN)) {
+                        // Preserve the next parameter or the function body when
+                        // a broken parameter leaves unconsumed tokens.
+                        while (!SeeingAny([TokenKind.COMMA, TokenKind.RPAREN, TokenKind.LCURL, TokenKind.END])) {
+                            SkipPairedBrackets()
+                            Next()
+                        }
+                    }
                 },
                 TokenKind.RPAREN)
             if (!Skip(TokenKind.RPAREN)) {
