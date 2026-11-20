@@ -9,12 +9,13 @@
 //        --runtime-archive <file> --sysroot-tarball <file> [--cjpm <file>]
 //        --stdlib-source <stdlib dir> --boundscheck-source <dir> --clang <file> --llvm-ar <file>
 // To install prebuilt std, replace the four source options with --std-archive <file>... --std-module <file>....
+// The base must be a real directory, and the new destination must be outside it.
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {buildWasmStdCore, wasmStdInputs} from './wasm-std-core.mjs';
-import {checkWasmSdk, installWasiSysroot, readWasiPin, sha256File} from './wasi-toolchain.mjs';
+import {SYSROOT_DIR, checkWasmSdk, installWasiSysroot, readWasiPin, sha256File} from './wasi-toolchain.mjs';
 
 export const NATIVE_LLVM_BIN = '.native-tools/third_party/llvm/bin';
 export const LLVM_ENTRY_BIN = 'third_party/llvm/bin';
@@ -60,6 +61,42 @@ function requireFile(file, what) {
   if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error(`${what} is missing: ${file}`);
 }
 
+function checkCopyPaths(baseSdk, dest, cjpm) {
+  const stat = file => fs.lstatSync(file, {throwIfNoEntry: false});
+  const base = baseSdk && stat(baseSdk);
+  if (!base) throw new Error(`base SDK is missing: ${baseSdk}`);
+  if (!base.isDirectory()) throw new Error(`base SDK must be a directory, not a symbolic link or other file: ${baseSdk}`);
+  if (!dest || stat(dest)) throw new Error(`dest must be a new path: ${dest}`);
+
+  // Resolve the existing ancestor before mkdir or staging, including aliases into the base.
+  let ancestor = path.dirname(dest);
+  while (!stat(ancestor)) ancestor = path.dirname(ancestor);
+  const relative = path.relative(fs.realpathSync.native(baseSdk), fs.realpathSync.native(ancestor));
+  if (!relative || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative))) {
+    throw new Error(`dest must be outside the base SDK: ${dest}`);
+  }
+
+  // cp -a preserves symlinks. Check only paths the overlay will write through; other SDK links
+  // (such as bin/cjc) remain part of the copied layout.
+  const writeDirs = [NATIVE_LLVM_BIN, LLVM_ENTRY_BIN, 'libexec/compiler', 'runtime/lib/' + WASM_TARGET_DIR,
+    path.dirname(SYSROOT_DIR), STD_LIB_DIR, STD_MODULE_DIR, ...(cjpm !== undefined ? ['.target-tools/tools/bin'] : [])];
+  for (const dir of writeDirs) {
+    let entry = baseSdk;
+    for (const name of dir.split('/')) {
+      entry = path.join(entry, name);
+      const info = stat(entry);
+      if (!info) break;
+      if (!info.isDirectory()) throw new Error(`base SDK write path must be a directory, not a symbolic link: ${entry}`);
+    }
+  }
+  // The other file writes unlink their destination first. These two write in place.
+  for (const file of [`${LLVM_ENTRY_BIN}/wasm-ld.entry`, OVERLAY_PROVENANCE]) {
+    const entry = path.join(baseSdk, file);
+    const info = stat(entry);
+    if (info && !info.isFile()) throw new Error(`base SDK write path must be a regular file, not a symbolic link: ${entry}`);
+  }
+}
+
 // wasm-ld gets its own SDK entry: the llc entry with only the target line changed.
 export function wasmLdEntry(llcEntryText) {
   const from = `${NATIVE_LLVM_BIN}/llc`;
@@ -74,8 +111,9 @@ export function wasmLdEntry(llcEntryText) {
 export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, stdArchives = [], stdModules = [],
   sysrootTarball, cjpm, stdlibSource, boundscheckSource, clang, llvmAr, pin = readWasiPin()}) {
   // Validate every input before touching dest (no partial SDK on error).
-  if (!baseSdk || !fs.existsSync(baseSdk)) throw new Error(`base SDK is missing: ${baseSdk}`);
-  if (!dest || fs.existsSync(dest)) throw new Error(`dest must be a new path: ${dest}`);
+  if (baseSdk) baseSdk = path.resolve(baseSdk);
+  const target = dest && path.resolve(dest);
+  checkCopyPaths(baseSdk, target, cjpm);
   for (const tool of [...REPLACED_LLVM_TOOLS, 'lld']) requireFile(path.join(llvmBin ?? '', tool), `llvm input ${tool}`);
   for (const tool of REPLACED_LLVM_TOOLS) requireFile(path.join(baseSdk, NATIVE_LLVM_BIN, tool), `base SDK ${NATIVE_LLVM_BIN}/${tool}`);
   requireFile(path.join(baseSdk, LLVM_ENTRY_BIN, 'llc'), `base SDK ${LLVM_ENTRY_BIN}/llc launcher`);
@@ -105,16 +143,16 @@ export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, std
     requireFile(path.join(baseSdk, '.target-tools/tools/bin/cjpm'), 'base SDK .target-tools/tools/bin/cjpm');
   }
   const entry = wasmLdEntry(fs.readFileSync(path.join(baseSdk, LLVM_ENTRY_BIN, 'llc.entry'), 'utf8'));
-  const config = {baseSdk, dest, llvmBin, cjc, runtimeArchive, stdArchives, stdModules, sysrootTarball, cjpm, pin, entry, stdBuild};
-  fs.mkdirSync(path.dirname(dest), {recursive: true});
-  if (prebuilt) return populateSdk(config);
+  const config = {baseSdk, dest: target, llvmBin, cjc, runtimeArchive, stdArchives, stdModules, sysrootTarball, cjpm, pin, entry, stdBuild};
+  fs.mkdirSync(path.dirname(target), {recursive: true});
+  if (prebuilt) return {...populateSdk(config), dest};
 
   // Build against the same compiler, toolchain and sysroot that the installed SDK will use.
   // Keep the private SDK and intermediates together until both std outputs pass the layout check.
-  const stage = fs.mkdtempSync(path.join(path.resolve(path.dirname(dest)), '.wasm-sdk-'));
+  const stage = fs.mkdtempSync(path.join(path.dirname(target), '.wasm-sdk-'));
   try {
     const result = populateSdk({...config, dest: path.join(stage, 'sdk'), stdWork: path.join(stage, 'std')});
-    if (result.check.ok) fs.renameSync(result.dest, dest);
+    if (result.check.ok) fs.renameSync(result.dest, target);
     return {...result, dest};
   } finally {
     fs.rmSync(stage, {recursive: true, force: true});
@@ -214,7 +252,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(`usage: wasm-sdk-overlay.mjs --base-sdk <dir> --dest <new dir> --llvm-bin <dir> --cjc <file>
   --runtime-archive <file> --sysroot-tarball <file> [--cjpm <file>]
   [--stdlib-source <stdlib dir> --boundscheck-source <dir> --clang <file> --llvm-ar <file>
-   | --std-archive <file>... --std-module <file>...]`);
+   | --std-archive <file>... --std-module <file>...]
+  --base-sdk must be a real directory; --dest must be outside it.`);
     process.exit(0);
   }
   try {

@@ -90,6 +90,67 @@ test('a missing input fails before any output exists', () => {
   assert.throws(() => overlayWasmSdk(args), /dest must be a new path/);
 });
 
+test('both CLI modes reject unsafe SDK copy paths before touching the base or destination', t => {
+  const {dir, base, args} = fixture();
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const cli = fileURLToPath(new URL('./wasm-sdk-overlay.mjs', import.meta.url));
+  const alias = path.join(dir, 'base-alias');
+  fs.symlinkSync(base, alias, 'dir');
+  const dangling = path.join(dir, 'dangling-dest');
+  fs.symlinkSync(path.join(dir, 'absent'), dangling, 'dir');
+  const compiler = path.join(base, 'libexec/compiler/cjcj-stage1');
+  const oldArchive = path.join(base, 'lib/wasi_wasm32_cjnative/libcangjie-std-core.a');
+  write(oldArchive, 'inherited archive');
+  const oldModule = path.join(base, 'modules/wasi_wasm32_cjnative/std/std.core.cjo');
+  write(oldModule, 'inherited module');
+  const copied = path.join(dir, 'cp-called');
+  const cp = path.join(dir, 'test-bin/cp');
+  write(cp, `#!${process.execPath}
+require('node:fs').writeFileSync(${JSON.stringify(copied)}, 'unexpected copy');
+process.exit(1);
+`, 0o755);
+
+  const modes = [
+    ['source', ['--stdlib-source', dir, '--boundscheck-source', dir, '--clang', args.cjc, '--llvm-ar', args.cjc]],
+    ['prebuilt', ['--std-archive', args.stdArchives[0], '--std-module', args.stdModules[0]]],
+  ];
+  function rejects(input, dest, message) {
+    for (const [mode, flags] of modes) {
+      const result = spawnSync(process.execPath, [cli, '--base-sdk', input, '--dest', dest, '--llvm-bin', args.llvmBin,
+        '--cjc', args.cjc, '--runtime-archive', args.runtimeArchive, '--sysroot-tarball', args.sysrootTarball, ...flags],
+      {encoding: 'utf8', env: {...process.env, PATH: path.dirname(cp) + path.delimiter + process.env.PATH}});
+      assert.ifError(result.error);
+      assert.equal(result.status, 2, `${mode}: ${result.stderr}`);
+      assert.match(result.stderr, message, mode);
+      assert.equal(result.stdout, '', mode);
+      assert.equal(fs.existsSync(copied), false, mode);
+      assert.equal(fs.readFileSync(compiler, 'utf8'), 'native cjc', mode);
+      assert.equal(fs.readFileSync(oldArchive, 'utf8'), 'inherited archive', mode);
+      assert.equal(fs.readFileSync(oldModule, 'utf8'), 'inherited module', mode);
+    }
+  }
+
+  rejects(alias, args.dest, /base SDK must be a directory, not a symbolic link/);
+  rejects(alias + path.sep, args.dest, /base SDK must be a directory, not a symbolic link/);
+  assert.equal(fs.readlinkSync(alias), base);
+  rejects(base, path.join(alias, 'must-not-create/sdk'), /dest must be outside the base SDK/);
+  assert.equal(fs.existsSync(path.join(base, 'must-not-create')), false);
+  rejects(base, dangling, /dest must be a new path/);
+  assert.equal(fs.readlinkSync(dangling), path.join(dir, 'absent'));
+
+  const runtime = path.join(base, 'runtime');
+  fs.symlinkSync(path.dirname(oldArchive), runtime, 'dir');
+  rejects(base, args.dest, /base SDK write path must be a directory, not a symbolic link: .*runtime/);
+  assert.equal(fs.readlinkSync(runtime), path.dirname(oldArchive));
+  fs.unlinkSync(runtime);
+
+  const inheritedEntry = path.join(base, LLVM_ENTRY_BIN, 'wasm-ld.entry');
+  fs.symlinkSync(oldModule, inheritedEntry);
+  rejects(base, args.dest, /base SDK write path must be a regular file, not a symbolic link: .*wasm-ld\.entry/);
+  assert.equal(fs.readlinkSync(inheritedEntry), oldModule);
+  assert.equal(fs.existsSync(path.dirname(args.dest)), false);
+});
+
 test('a sysroot tarball that does not match the pin fails before any output exists', () => {
   const {args} = fixture();
   const pin = parseWasiPin(Object.entries({...args.pin, WASI_SYSROOT_SHA256: 'b'.repeat(64)}).map(([k, v]) => `${k}=${v}`).join('\n'));
