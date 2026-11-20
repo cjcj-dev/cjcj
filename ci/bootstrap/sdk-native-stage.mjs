@@ -15,7 +15,7 @@ import {assertFinalStdInput} from './sdk-final-std.mjs';
 import {writeStdProvenance} from '../../build/lib/provenance.mjs';
 import {stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
 import {resolveProductBinary} from '../srcbuild/lib/product-binary.mjs';
-import {acceptInstalledStd, flag, stdBuildType} from './sdk-std-resume.mjs';
+import {acceptInstalledStd, checkStdAstOutput, flag, stdBuildType} from './sdk-std-resume.mjs';
 import {installCompilerChirInterface} from './compiler-chir-interface.mjs';
 import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
@@ -169,12 +169,7 @@ export async function nativeStage(options, {signal} = {}) {
     }
     for(const rel of stdInstallFiles(platform))
       if(!(await fs.stat(path.join(output,rel))).isFile())throw new Error('STD_INSTALL_SHAPE '+rel);
-    if(astInclude){
-      const archive='libcangjie-std-astFFI.a';
-      if(await fileDigest(path.join(build,archive))!==await fileDigest(path.join(output,'lib',native.tuple,archive)))
-        throw Error('STD_AST_FFI_INSTALL_MISMATCH');
-      await fs.access(path.join(output,'modules',native.tuple,'std/std.ast.cjo'));
-    }
+    if(astInclude && !options['resume-installed'])await checkStdAstOutput({source,output,platform});
     if(options['compiler-runtime']==='target')await assertFinalStdInput({sdk,std:output,runtime,
       host:JSON.parse(await fs.readFile(path.join(sdk,'STAGE-INPUTS.json'),'utf8')).selection.bootstrapHost.install,platform,work:output+'.consumers',signal});
     // Use the revision checked against the consumed source before target startup.

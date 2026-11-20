@@ -16,7 +16,13 @@ test('std uses the selected native AST archive and headers through build and res
   assert.equal(flag(argv,'--std-ast-library'),path.join(input.ast.install,lib));
  }
  const argv=graph.stages.find(s=>s.id==='stage3-std').commands[0].argv,cwd=root;
- const source=flag(argv,'--source'),output=flag(argv,'--output'),link=output+'.runtime-input';
+ const source=path.join(root,'R'),output=path.join(root,'std'),link=output+'.runtime-input';
+ argv[argv.indexOf('--source')+1]=source;argv[argv.indexOf('--output')+1]=output;
+ const put=async(file,data)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,data);};
+ const ffi=path.join(output,'lib/linux_x86_64_cjnative/libcangjie-std-astFFI.a');
+ await put(path.join(source,'stdlib/build/build/libcangjie-std-astFFI.a'),'fixture FFI');
+ await put(ffi,'fixture FFI');
+ await put(path.join(output,'modules/linux_x86_64_cjnative/std/std.ast.cjo'),'fixture module');
  const expected={argv,cwd},terminal={event:'target-result',...expected,rc:0,wall:1};
  const previous={commands:[terminal]},file=path.join(root,'events');
  const build=['python3','-I','build.py','build','-t','relwithdebinfo','--jobs','2',
@@ -33,6 +39,8 @@ test('std uses the selected native AST archive and headers through build and res
  assert.deepEqual((await accept(build)).build.argv,build);
  await assert.rejects(()=>accept(build.map(a=>a.startsWith('--include=')?'--include=/mixed/wire':a)),/STD_RESUME_RECORD build/);
  await assert.rejects(()=>accept(build.filter(a=>!a.startsWith('--include='))),/STD_RESUME_RECORD build/);
+ await put(ffi,'older FFI');
+ await assert.rejects(()=>accept(build),/STD_AST_FFI_INSTALL_MISMATCH/);
  const ordinary=inputs('linux_x86_64');ordinary.compiler.install=ordinary.ast.install;
  assert.equal(flag(createBootstrapTargets(ordinary).stages.find(s=>s.id==='stage3-std').commands[0].argv,'--std-ast-include'),undefined);
 });

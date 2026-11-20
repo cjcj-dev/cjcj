@@ -1,6 +1,7 @@
 // Validate existing flow and command records; these are provenance, not authority.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {sdkPlatform} from './sdk-platform.mjs';
 export function flag(argv, name) {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : argv.find(v => v.startsWith(name + '='))?.slice(name.length + 1);
@@ -14,6 +15,15 @@ export function stdBuildType(value = 'relwithdebinfo') {
   if (!['debug','release','relwithdebinfo'].includes(value)) throw new Error('STD_BUILD_TYPE '+value);
   return value;
 }
+export async function checkStdAstOutput({source, output, platform}) {
+  const tuple=sdkPlatform(platform).tuple, archive='libcangjie-std-astFFI.a';
+  const built=await fs.readFile(path.join(source,'stdlib/build/build',archive));
+  const installed=await fs.readFile(path.join(output,'lib',tuple,archive));
+  if(!built.length || !built.equals(installed))throw Error('STD_AST_FFI_INSTALL_MISMATCH');
+  const module=await fs.stat(path.join(output,'modules',tuple,'std/std.ast.cjo'));
+  if(!module.isFile() || !module.size)throw Error('STD_AST_MODULE');
+}
+
 export async function acceptInstalledStd({file, source, output, commit, sdk, runtime, link, platform,
   compilerRuntime, heap, previous, expected, buildType, localModeApi, astInclude, astLibrary}) {
   if (!file) throw new Error('STD_RESUME_RECORD missing');
@@ -72,5 +82,6 @@ export async function acceptInstalledStd({file, source, output, commit, sdk, run
   if (actions.length !== 4 || after.slice(end + 1).some(row => row.cwd === stdlib
       && Array.isArray(row.argv) && row.argv.includes('build.py')))
     throw new Error('STD_RESUME_RECORD sequence');
+  if(astInclude)await checkStdAstOutput({source,output,platform});
   return {build, install, identity, terminal};
 }
