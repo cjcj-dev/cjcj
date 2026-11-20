@@ -39,6 +39,38 @@ test('Windows ZIP ignores MSYS PATH on write and read',()=>{
   for(const op of ['create','extract'])assert.equal(zipCommand(op,'D:\\work dir\\sdk.zip','cangjie','win32',env)[0],
     'C:\\Windows\\System32\\tar.exe');
 });
+test('relocated Windows ZIP checks the installed host and target instead of the producer workspace',{skip:process.platform!=='linux'},async()=>{
+  const root=await fs.mkdtemp(path.join(parent,'relative Windows ZIP ')),sdk=path.join(root,'cangjie');
+  const platform='windows_x86_64',tuple=platform+'_cjnative';
+  const put=async(file,bytes,mode)=>{
+    await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,bytes,{mode});
+  };
+  const body=path.join(sdk,'bin/cjcj-stage1.exe');
+  // Executable boundary witness only; no Windows binaries run on this host.
+  await put(body,'#!/bin/sh\necho FINITE_NATIVE_HELLO_BOUNDARY >&2\nexit 47\n',0o755);
+  for(const name of ['cjc.exe','cjc-frontend.exe'])await fs.symlink(path.basename(body),path.join(sdk,'bin',name));
+  await put(path.join(sdk,'STAGE-INPUTS.json'),JSON.stringify({phase:'stage3',platform,
+    compilerFile:'bin/cjcj-stage1.exe',compilerSha256:await fileDigest(body),
+    selection:{bootstrapHost:{install:path.join(sdk,'.host')},compilerExecution:{role:'target'}}}));
+  const runtime='runtime/lib/'+tuple+'/libcangjie-runtime.dll';
+  await put(path.join(sdk,runtime),'  Name: Common\n  Name: Coloured\n');
+  await put(path.join(sdk,'.host',runtime),'  Name: Common\n');
+  await put(path.join(sdk,'lib',tuple,'libcangjie-std-core.a'),' U Coloured\n U CJ_MCC_ReadRefField\n');
+  // Record the actual subprocess operands; the files hold finite symbol lists.
+  const toolLog=path.join(root,'symbol-argv.log');
+  const helper='#!/bin/sh\nprintf "%s\\n" "$2" >> "$SYMBOL_ARGV"\ncat -- "$2"\n';
+  for(const exe of ['nm','llvm-readobj'])await put(path.join(root,'inspect',exe),helper,0o755);
+  const entry=fileURLToPath(new URL('../bootstrap/sdk-verify-install.mjs',import.meta.url)),records=[];
+  await assert.rejects(archiveInstall({install:sdk,archive:path.join(root,'sdk.zip'),format:'zip',records,
+    test:{commands:[{argv:[process.execPath,entry,'--sdk','.','--work','../validation','--platform',platform,
+      '--final-std','--compiler-only'],env:{PATH:path.join(root,'inspect')+path.delimiter+process.env.PATH,SYMBOL_ARGV:toolLog}}]}}),
+    error=>error.rc===47);
+  const relocated=records.at(-1).cwd;
+  assert.notEqual(relocated,sdk);
+  assert.deepEqual((await fs.readFile(toolLog,'utf8')).trim().split('\n').sort(),[
+    path.join(relocated,'.host',runtime),path.join(relocated,runtime),
+    path.join(relocated,'lib',tuple,'libcangjie-std-core.a')].sort());
+});
 test('Windows target preserves the host Path and removes the previous SDK on drive-letter paths',()=>{
   const env=cleanSdkEnvironment('D:/new SDK','windows_x86_64',{CANGJIE_HOME:'C:/old SDK',Path:'c:\\Old SDK\\bin;C:\\Windows\\System32;D:\\tools'});
   assert.equal(env.Path,undefined);

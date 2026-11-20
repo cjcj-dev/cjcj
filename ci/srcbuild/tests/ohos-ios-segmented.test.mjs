@@ -67,18 +67,27 @@ for (const key of releaseKeys) {
     assert.deepEqual(job.needs, ['plan', 'source-stage3']);
     assert.equal(job.strategy.matrix, `\${{ fromJson(needs.plan.outputs.${family}_matrix) }}`);
     assert.equal(inner.jobs.plan.outputs[`${family}_matrix`], `\${{ steps.select.outputs.${family}_matrix }}`);
-    const restore = job.steps.findIndex(step => step.run?.includes('job-handoff.mjs restore stage3'));
+    const restoreEntry = family === 'ios' ? 'ios-stage2-handoff.mjs restore' : 'job-handoff.mjs restore stage3';
+    const restore = job.steps.findIndex(step => step.run?.includes(restoreEntry));
     const build = job.steps.findIndex(step => step.run?.includes(`build-${family}-final-std.mjs`));
-    assert.ok(restore >= 0 && build > restore, 'cross consumer must follow verified stage3 restore');
+    assert.ok(restore >= 0 && build > restore, 'cross consumer must follow verified SDK restore');
     const download = job.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
     const upload = job.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
+    if (family === 'ios') {
+      const producer = inner.jobs['source-stage3'].steps.find(s => s.with?.name === download.with.name);
+      assert.equal(producer.if, "matrix.target == 'darwin-arm64' && inputs.build_ios");
+      assert.equal(producer.with['if-no-files-found'], 'error');
+      assert.ok(job.steps.some(s => s.uses?.startsWith('actions/checkout@') && s.with['persist-credentials'] === false));
+      assert.ok(job.steps.every(s => !s.run?.includes('job-handoff.mjs')));
+    }
     assert.equal(job.steps[build].env.CROSS_STD_TUPLE, '${{ matrix.tuple }}');
     for (const entry of entries.filter(e => declared.includes(e.tuple))) {
       const row = rows.find(row => row.tuple === entry.tuple);
       const published = row && substitute(upload.with.name, row);
       console.log(`CROSS_ARTIFACT_ASSERT tuple=${entry.tuple} producer=${published} consumer=${entry.artifact}`);
       assert.equal(published, entry.artifact, 'published artifact must be the package consumer artifact');
-      assert.equal(substitute(download.with.name, row), `source-handoff-${source.target}-stage3`);
+      assert.equal(substitute(download.with.name, row), family === 'ios'
+        ? `source-ios-stage2-${source.target}` : `source-handoff-${source.target}-stage3`);
       assert.equal(substitute(upload.with.path, row), `\${{ env.CANGJIE_WORKSPACE }}/software/${entry.artifact}`);
       assert.equal(upload.with['if-no-files-found'], 'error');
     }
@@ -103,8 +112,19 @@ test('Android and Windows independent controls retain their producer and consume
 
 // Binary-format fixtures qualify the shared manifest/installer only. They are
 // deliberately not described as built iOS runtime or final std artifacts.
-for (const [tuple, cpu] of [['ios_aarch64_cjnative', 0x0100000c],
-  ['ios_simulator_aarch64_cjnative', 0x0100000c], ['ios_simulator_x86_64_cjnative', 0x01000007]]) {
+// mach_header_64 (MH_DYLIB), then LC_ID_DYLIB @rpath/<name> and LC_BUILD_VERSION
+// naming the deployment platform (PLATFORM_IOS 2, PLATFORM_IOSSIMULATOR 7).
+function machoDylibFixture(cpu, platform, name) {
+  const install = Buffer.from(`@rpath/${name}\0`);
+  const id = Buffer.alloc(Math.ceil((24 + install.length) / 8) * 8);
+  id.writeUInt32LE(0xd, 0); id.writeUInt32LE(id.length, 4); id.writeUInt32LE(24, 8); install.copy(id, 24);
+  const build = Buffer.alloc(24); build.writeUInt32LE(0x32, 0); build.writeUInt32LE(24, 4); build.writeUInt32LE(platform, 8);
+  const header = Buffer.alloc(32); header.writeUInt32LE(0xfeedfacf, 0); header.writeUInt32LE(cpu, 4); header.writeUInt32LE(6, 12);
+  header.writeUInt32LE(2, 16); header.writeUInt32LE(id.length + build.length, 20);
+  return Buffer.concat([header, id, build]);
+}
+for (const [tuple, cpu, platform] of [['ios_aarch64_cjnative', 0x0100000c, 2],
+  ['ios_simulator_aarch64_cjnative', 0x0100000c, 7], ['ios_simulator_x86_64_cjnative', 0x01000007, 7]]) {
   test(`${tuple}: installer preserves declared binary bytes and rejects changed transport`, async t => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ios-artifact-'));
     t.after(() => fs.rm(dir, {recursive: true, force: true}));
@@ -114,8 +134,7 @@ for (const [tuple, cpu] of [['ios_aarch64_cjnative', 0x0100000c],
     const input = path.join(source, 'runtime-install'), stage = path.join(source, 'installed-sdk');
     const files = new Map([[`lib/${tuple}/cjstart.o`, Buffer.from('fixture-start-object')]]);
     for (const name of ['libcangjie-runtime.dylib', 'libboundscheck.dylib']) {
-      const bytes = Buffer.alloc(64); bytes.writeUInt32LE(0xfeedfacf, 0); bytes.writeUInt32LE(cpu, 4); bytes.writeUInt32LE(6, 12);
-      bytes.write(name, 32); files.set(`runtime/lib/${tuple}/${name}`, bytes);
+      files.set(`runtime/lib/${tuple}/${name}`, machoDylibFixture(cpu, platform, name));
     }
     for (const [file, bytes] of files) {
       await fs.mkdir(path.dirname(path.join(input, file)), {recursive: true});
@@ -128,30 +147,6 @@ for (const [tuple, cpu] of [['ios_aarch64_cjnative', 0x0100000c],
     const builtBounds = path.join(source, 'runtime/CMakebuild/runtime-staging/lib', `${runtimeArch}_Release`, 'libboundscheck.dylib');
     await fs.mkdir(path.dirname(builtBounds), {recursive: true});
     await fs.copyFile(path.join(input, `runtime/lib/${tuple}/libboundscheck.dylib`), builtBounds);
-    for (const entry of ['packages', 'runtime_shim']) await fs.mkdir(path.join(workspace, entry), {recursive: true});
-    await fs.writeFile(path.join(workspace, 'cjpm.toml'), 'controlled source handoff');
-    const handoff = path.join(dir, 'source-handoff');
-    const env = {...process.env, GITHUB_WORKSPACE: workspace, RUNNER_TEMP: dir,
-      GITHUB_SHA: '1'.repeat(40), GITHUB_RUN_ID: '478', CJCJ_SRCBUILD_TARGET: 'darwin-arm64',
-      GITHUB_ENV: path.join(dir, 'env'), GITHUB_PATH: path.join(dir, 'path')};
-    const jobs = (await workflow('srcbuild-target.yml')).jobs;
-    const pack = jobs['source-stage3'].steps.find(step => step.run?.includes('job-handoff.mjs pack stage3')).run;
-    const restore = jobs['source-ios'].steps.find(step => step.run?.includes('job-handoff.mjs restore stage3')).run;
-    const execute = command => spawnSync('bash', ['-c', command], {cwd: root, env, encoding: 'utf8'});
-    const packed = execute(pack);
-    assert.equal(packed.status, 0, packed.stdout + packed.stderr);
-    const upload = jobs['source-stage3'].steps.find(step => step.uses?.startsWith('actions/upload-artifact@') && step.with?.name?.startsWith('source-handoff-'));
-    const download = jobs['source-ios'].steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
-    const location = value => value.replace('${{ runner.temp }}', dir);
-    assert.equal(download.with.name, upload.with.name, 'same stage3 artifact crosses the job boundary');
-    // Actions upload/download copies the packed directory to the consumer's
-    // declared download path; the producer and consumer paths need not match.
-    await fs.cp(location(upload.with.path), location(download.with.path), {recursive: true});
-    await fs.rm(workspace, {recursive: true});
-    await fs.mkdir(workspace);
-    const restored = execute(restore);
-    assert.equal(restored.status, 0, restored.stdout + restored.stderr);
-    console.log(`CROSS_HANDOFF_ASSERT tuple=${tuple} ${restored.stdout.trim()}`);
     const target = tuple.replace('_cjnative', '').replaceAll('_', '-').replace('x86-64', 'x86_64');
     const verify = () => invoke('ci/release/verify-ios-runtime.mjs', [], {
       CANGJIE_WORKSPACE: runtimeWorkspace, IOS_TARGET: target, CJCJ_NATIVE_RUNTIME_REF: args.runtimeRef,
@@ -166,12 +161,5 @@ for (const [tuple, cpu] of [['ios_aarch64_cjnative', 0x0100000c],
     const changed = verify();
     assert.equal(changed.status, 1);
     assert.match(changed.stderr, /inventory\/hash mismatch/);
-    await fs.appendFile(path.join(handoff, 'payload.tar'), 'changed-handoff-transport');
-    await fs.rm(env.GITHUB_ENV, {force: true});
-    const corrupt = execute(restore);
-    console.log(`CROSS_HANDOFF_REJECT_ASSERT tuple=${tuple} rc=${corrupt.status}`);
-    assert.equal(corrupt.status, 1);
-    assert.match(corrupt.stderr, /handoff payload SHA256 mismatch/);
-    await assert.rejects(fs.stat(env.GITHUB_ENV), {code: 'ENOENT'});
   });
 }

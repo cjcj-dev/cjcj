@@ -93,7 +93,7 @@ on:
         type: boolean
         default: false
       build_ios:
-        description: Build iOS runtime and final std from the native stage3 handoff
+        description: Build iOS runtime and final std using the source-built Darwin stage2 SDK
         required: false
         type: boolean
         default: false
@@ -273,8 +273,7 @@ jobs:
         uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.1'
-      - &native-windows-tools
-        uses: ./.github/actions/native-windows-tools
+      - uses: ./.github/actions/native-windows-tools
         if: runner.os == 'Windows'
 
       - &receive-selected-native-inputs-before-choosing-the-host
@@ -1109,6 +1108,20 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Seal the installed Darwin stage2 SDK for iOS
+        if: matrix.target == 'darwin-arm64' && inputs.build_ios
+        run: node ci/srcbuild/ios-stage2-handoff.mjs pack "$RUNNER_TEMP/ios-stage2-output"
+
+      - name: Upload the installed Darwin stage2 SDK for iOS
+        if: matrix.target == 'darwin-arm64' && inputs.build_ios
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-ios-stage2-${{ matrix.target }}
+          path: ${{ runner.temp }}/ios-stage2-output
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Seal source phase handoff
         run: node ci/srcbuild/job-handoff.mjs pack stage3 "$RUNNER_TEMP/source-handoff-output"
 
@@ -1135,8 +1148,12 @@ jobs:
     # the Windows final-std job, so the package job consumes that artifact
     # instead of retaining H leftovers. Splitting the std producer out of this
     # job is why it is a predecessor again rather than an optional copy.
-    needs: [plan, source-stage3, source-windows]
-    if: always() && needs.plan.result == 'success' && needs.source-stage3.result == 'success' && (needs.source-windows.result == 'success' || needs.source-windows.result == 'skipped')
+    needs: [plan, source-stage3, source-windows, source-ios]
+    if: >-
+      always() && needs.plan.result == 'success' && needs.source-stage3.result == 'success' &&
+      (needs.source-windows.result == 'success' || needs.source-windows.result == 'skipped') &&
+      (needs.source-ios.result == 'success' ||
+       (needs.source-ios.result == 'skipped' && !(inputs.build_ios && contains(needs.plan.outputs.llvm_platforms, 'darwin_aarch64'))))
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -1409,6 +1426,19 @@ jobs:
         if: matrix.target == 'linux-x64'
         run: node ci/srcbuild/steps/install-windows-ffi.mjs
 
+      - name: Download this run's iOS final std and runtime products
+        if: matrix.target == 'darwin-arm64' && inputs.build_ios
+        uses: actions/download-artifact@v8
+        with:
+          pattern: final-std-ios-*
+          path: ${{ runner.temp }}/ios-products
+
+      - name: Install iOS targets into the stage3 SDK
+        if: matrix.target == 'darwin-arm64' && inputs.build_ios
+        env:
+          IOS_ARTIFACT_DIR: ${{ runner.temp }}/ios-products
+        run: node ci/srcbuild/steps/install-ios-final-std.mjs
+
       - &verify-installed-sdk
         name: Verify installed SDK
         env:
@@ -1480,15 +1510,22 @@ jobs:
         name: Verify self-hosted SDK
         run: npx --yes zx@8 ci/srcbuild/steps/verify.mjs "$CANGJIE_WORKSPACE/software/cangjie"
 
-      - &upload-self-hosted-sdk-and-gate-logs
-        name: Upload self-hosted SDK and gate logs
-        if: always()
+      # Keep the archive and sidecar at the artifact root read by compose.
+      - name: Upload complete source-built SDK
         uses: actions/upload-artifact@v7
         with:
           name: cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}
           path: |
-            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ steps.version.outputs.value }}-cjcj.*
-            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ steps.version.outputs.value }}-cjcj.*.sha256
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ steps.version.outputs.value }}-cjcj.tar.gz
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ steps.version.outputs.value }}-cjcj.tar.gz.sha256
+          if-no-files-found: error
+
+      - name: Retain source SDK gate logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: srcbuild-gate-${{ matrix.target }}-${{ github.run_attempt }}
+          path: |
             ${{ runner.temp }}/cjcj-srcbuild-verify/*.log
             .srcbuild/shim-build.log
           if-no-files-found: warn
@@ -1721,17 +1758,18 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.1'
-      - uses: ./.github/actions/native-windows-tools
-        if: runner.os == 'Windows'
+      - *load-source-pins
+      - *load-and-validate-runtime-pin
+      - *resolve-actual-source-selection
 
-      - name: Download preceding source phase
+      - name: Download the installed Darwin stage2 SDK for iOS
         uses: actions/download-artifact@v8
         with:
-          name: source-handoff-${{ matrix.target }}-stage3
-          path: ${{ runner.temp }}/source-handoff
+          name: source-ios-stage2-${{ matrix.target }}
+          path: ${{ runner.temp }}/ios-stage2-input
 
-      - name: Verify preceding source phase
-        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+      - name: Restore the installed Darwin stage2 SDK for iOS
+        run: node ci/srcbuild/ios-stage2-handoff.mjs restore "$RUNNER_TEMP/ios-stage2-input"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -1747,15 +1785,6 @@ jobs:
       - name: Restore source SDK version output
         id: version
         run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Add Linux swap for stage2 chir heap
-        if: runner.os == 'Linux'
-        run: |
-          sudo fallocate -l 12G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
-          free -h
 
       - name: Install iOS SDK and probe
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
@@ -1970,7 +1999,8 @@ jobs:
           CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
         run: npx --yes zx@8 ci/srcbuild/steps/build-windows-final-std.mjs
 
-      # Nine fixed-source target outputs use the Windows SDK dependency closure.
+      # Keep these Linux cross-built outputs distinct from the native Windows
+      # tool artifacts; the two source targets run in the same release run.
       - name: Cross-build Windows SDK tools from source
         if: matrix.target == 'linux-x64'
         env:
@@ -1990,7 +2020,7 @@ jobs:
         if: matrix.target == 'linux-x64'
         uses: actions/upload-artifact@v7
         with:
-          name: source-cjlint-windows-x64
+          name: source-cross-cjlint-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjlint
           if-no-files-found: error
           retention-days: 7
@@ -2008,7 +2038,7 @@ jobs:
         if: matrix.target == 'linux-x64'
         uses: actions/upload-artifact@v7
         with:
-          name: source-cjprof-windows-x64
+          name: source-cross-cjprof-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjprof
           if-no-files-found: error
           retention-days: 7
@@ -2026,7 +2056,7 @@ jobs:
         if: matrix.target == 'linux-x64'
         uses: actions/upload-artifact@v7
         with:
-          name: source-cjcompat-windows-x64
+          name: source-cross-cjcompat-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjcompat
           if-no-files-found: error
           retention-days: 7
@@ -2044,7 +2074,7 @@ jobs:
         if: matrix.target == 'linux-x64'
         uses: actions/upload-artifact@v7
         with:
-          name: source-cjhead-windows-x64
+          name: source-cross-cjhead-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjhead
           if-no-files-found: error
           retention-days: 7
@@ -2062,7 +2092,7 @@ jobs:
         if: matrix.target == 'linux-x64'
         uses: actions/upload-artifact@v7
         with:
-          name: source-cjfmt-windows-x64
+          name: source-cross-cjfmt-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjfmt
           if-no-files-found: error
           retention-days: 7
@@ -2080,7 +2110,7 @@ jobs:
         if: matrix.target == 'linux-x64'
         uses: actions/upload-artifact@v7
         with:
-          name: source-LSPServer-windows-x64
+          name: source-cross-LSPServer-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/LSPServer
           if-no-files-found: error
           retention-days: 7
@@ -2098,7 +2128,7 @@ jobs:
         if: matrix.target == 'linux-x64'
         uses: actions/upload-artifact@v7
         with:
-          name: source-cjcov-windows-x64
+          name: source-cross-cjcov-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjcov
           if-no-files-found: error
           retention-days: 7
@@ -2116,7 +2146,7 @@ jobs:
         if: matrix.target == 'linux-x64'
         uses: actions/upload-artifact@v7
         with:
-          name: source-cjtrace-recover-windows-x64
+          name: source-cross-cjtrace-recover-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjtrace-recover
           if-no-files-found: error
           retention-days: 7
@@ -2134,7 +2164,7 @@ jobs:
         if: matrix.target == 'linux-x64'
         uses: actions/upload-artifact@v7
         with:
-          name: source-hle-windows-x64
+          name: source-cross-hle-windows-x64
           path: ${{ github.workspace }}/.release-hle-windows
           if-no-files-found: error
           retention-days: 7

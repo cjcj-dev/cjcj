@@ -17,8 +17,9 @@ export async function buildIosRuntime({source, target, sysroot, toolBin, version
   await $({cwd: runtime, env})`python3 build.py install --prefix ${root}`;
   // CMakeLists.txt installs boundscheck only for macOS. As in the Android
   // producer, carry the dependency from this same cross build, never host SDK.
-  await fs.copyFile(path.join(runtime, 'CMakebuild', 'runtime-staging', 'lib', `${target.runtimeArch}_Release`, 'libboundscheck.dylib'),
-    path.join(root, 'runtime', 'lib', target.tuple, 'libboundscheck.dylib'));
+  const stagedBounds = path.join(runtime, 'CMakebuild', 'runtime-staging', 'lib', `${target.runtimeArch}_Release`, 'libboundscheck.dylib');
+  const installedBounds = path.join(root, 'runtime', 'lib', target.tuple, 'libboundscheck.dylib');
+  await fs.copyFile(stagedBounds, installedBounds);
   await writeCrossRuntimeManifest({root, tuple: target.tuple, runtimeRef});
   return root;
 }

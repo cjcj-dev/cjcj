@@ -5,7 +5,7 @@ import test from 'node:test';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {load as loadYaml} from '../../vendor/js-yaml/js-yaml.mjs';
-import {allReleasePlatforms, getReleasePlatform, getTarget, releasePlatformReadiness, CROSS_STD_BUILDS} from '../../../build/lib/targets.mjs';
+import {allReleasePlatforms, getReleasePlatform, getTarget, releasePlatformReadiness, sourceBuildCells, CROSS_STD_BUILDS} from '../../../build/lib/targets.mjs';
 
 const root = path.resolve(import.meta.dirname, '..', '..', '..');
 const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
@@ -58,6 +58,31 @@ function phaseOf(job) {
   return 0;
 }
 
+function evalSourceCondition(condition, inputs, needs) {
+  return Function('inputs', 'needs', 'always', 'contains', 'return (' +
+    condition.replace(/needs\.([\w-]+)/g, 'needs["$1"]') + ')')(
+    inputs, needs, () => true, (value, part) => value.includes(part));
+}
+
+function sourceOutcomes(workflow, cell, inputs) {
+  const seen = new Map([['plan', {result:'success',outputs:{llvm_platforms:cell.llvm_platform}}]]);
+  function visit(id, stack = []) {
+    assert.ok(workflow.jobs[id], 'unknown source dependency ' + id);
+    assert.ok(!stack.includes(id), 'source dependency cycle: ' + [...stack,id].join(' -> '));
+    if (seen.has(id)) return seen.get(id);
+    const job = workflow.jobs[id];
+    const needs = Object.fromEntries([job.needs ?? []].flat().map(parent => [parent, visit(parent,[...stack,id])]));
+    const success = Object.values(needs).every(item => item.result === 'success');
+    const allowed = (success || /\balways\(\)/.test(job.if || '')) &&
+      (!job.if || evalSourceCondition(job.if, inputs, needs));
+    const row = {result: allowed ? 'success' : 'skipped'};
+    seen.set(id,row);
+    return row;
+  }
+  for (const id of Object.keys(workflow.jobs)) visit(id);
+  return seen;
+}
+
 async function artifactUploads(name) {
   const workflow = loadYaml(await readWorkflow(name));
   const found = [];
@@ -72,11 +97,45 @@ async function artifactUploads(name) {
         for (const row of CROSS_STD_BUILDS.filter(row => row.family === family)) {
           found.push([artifact.replace(/\$\{\{ matrix\.artifact \}\}/g, row.artifact), `${name}/${id}`]);
         }
+      } else if (name === 'srcbuild-target.yml' && job.strategy?.matrix === '${{ fromJson(needs.plan.outputs.matrix) }}') {
+        // The target workflow is invoked for a single cell. Expand addressable
+        // names only for jobs that can actually coexist in the release run.
+        const inputs = {build_ios:true,build_ohos:true,build_android:true,native_runtime_artifact:'fixture',native_build_inputs_artifact:'fixture'};
+        for (const cell of sourceBuildCells({nativeInputs:true})) {
+          if (sourceOutcomes(workflow,cell,inputs).get(id).result !== 'success') continue;
+          const targetGuard = step.if?.match(/^(?:always\(\) && )?matrix\.target == '([\w-]+)'(?: && [^|]+)?$/);
+          if (targetGuard && cell.target !== targetGuard[1]) continue;
+          const resolved = artifact.replace(/\$\{\{ matrix\.(\w+) \}\}/g, (_,field) => {
+            assert.ok(cell[field], `${id} missing ${field} for ${cell.target}`);
+            return cell[field];
+          });
+          found.push([resolved, `${name}/${id}/${cell.target}`]);
+        }
       } else found.push([artifact, `${name}/${id}`]);
     }
   }
   return found;
 }
+
+test('Windows and optional iOS source paths reach only their own packaging jobs', async () => {
+  const workflow = loadYaml(await readWorkflow('srcbuild-target.yml'));
+  const cells = sourceBuildCells({nativeInputs:true});
+  const results = ['success','skipped','failure','cancelled'];
+  for (const cell of cells) for (const build_ios of [false,true]) {
+    const inputs = {build_ios,native_runtime_artifact:'fixture',native_build_inputs_artifact:'fixture'};
+    const windows = cell.target === 'windows-x64', ios = cell.target === 'darwin-arm64' && build_ios;
+    const outcome = sourceOutcomes(workflow,cell,inputs);
+    for (const [job,expected] of [['native-windows-sdk',windows],['source-stage3',!windows],
+      ['srcbuild',!windows],['source-ios',ios],['source-windows',cell.target === 'linux-x64']])
+      assert.equal(outcome.get(job).result,expected ? 'success' : 'skipped',cell.target+' '+job);
+    for (const [winResult,iosResult] of results.flatMap(w => results.map(i => [w,i]))) {
+      const needs = {plan:{result:'success',outputs:{llvm_platforms:cell.llvm_platform}},
+        'source-stage3':{result:windows?'skipped':'success'},'source-windows':{result:winResult},'source-ios':{result:iosResult}};
+      assert.equal(evalSourceCondition(workflow.jobs.srcbuild.if,inputs,needs),
+        !windows && ['success','skipped'].includes(winResult) && (iosResult==='success' || iosResult==='skipped'&&!ios));
+    }
+  }
+});
 
 test('policy contract 1: the five package phases run in the policy order, one after another', async () => {
   const release = jobs(await readWorkflow('release.yml'));

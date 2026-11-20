@@ -12,16 +12,17 @@ import {verifyInstalledLanguage} from './sdk-installed-language.mjs';
 import {verifyCompiler} from './compiler_identity.mjs';
 import {compilerExecutionRoot} from './sdk-targets.mjs';
 export async function verifyInstall({sdk,work,platform,finalStd=false,cjpm=true,precompiledStdx=false,lspMacro=false}) {
+ sdk=path.resolve(sdk);work=path.resolve(work);
  await verifyCompiler(sdk);
  if(finalStd) {
   const metadata=await readJson(path.join(sdk,'STAGE-INPUTS.json'));
   if(!['stage2-target-sdk','stage3','source-build'].includes(metadata.phase))throw new Error('FINAL_STD_INSTALL_PHASE');
   const execution=compilerExecutionRoot(sdk,metadata.selection);
   if(platform.startsWith('linux_'))await verifyInstalledLanguage({sdk,work,platform,host:execution});
-  // The uncoloured comparison is a bootstrap input, independent of the
-  // compiler's execution role and of the installed target runtime.
+  // Compare the host runtime copied into this installation. The producer's
+  // bootstrap path is provenance and may be unavailable after relocation.
   await withProcessCancellation(signal=>assertFinalStdInput({sdk,std:sdk,runtime:sdk,
-   host:metadata.selection.bootstrapHost.install,platform,work:path.join(work,'string'),signal}));
+   host:path.join(sdk,'.host'),platform,work:path.join(work,'string'),signal}));
  }
  await helloInstall({sdk,work:path.join(work,'ordinary'),platform,cjpm});
  if(precompiledStdx)await precompiledStdxMacros({sdk,work:path.join(work,'precompiled-stdx'),platform});

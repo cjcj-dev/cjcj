@@ -24,11 +24,9 @@ if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('
 if (workspace === path.parse(workspace).root) throw new Error('workspace must not be filesystem root');
 const probe = probeRequirement('xcode-ios');
 if (!probe.present) throw new Error(probe.detail);
-const repository = path.join(workspace, 'cangjie_runtime');
-const actualRef = (await $({stdio: 'pipe'})`git -C ${repository} rev-parse HEAD`).stdout.trim();
 const sdk = path.join(path.resolve(required('CJCJ_BOOTSTRAP_WORK')), 'sdk-stage2');
 const originalCompiler = await installedStageOutput(sdk, 'stage2');
-if (actualRef !== expectedRef || actualRef !== originalCompiler.lineage.runtimeCommit) throw new Error(`runtime source mismatch: ${actualRef} != ${expectedRef}`);
+if (!/^[a-f0-9]{40}$/.test(expectedRef) || expectedRef !== originalCompiler.lineage.runtimeCommit) throw new Error('runtime source mismatch with stage2 compiler');
 const compiler = originalCompiler.product;
 const compilerKind = (await $({stdio: 'pipe'})`file -b ${compiler}`).stdout.trim();
 if (!compilerKind.includes('Mach-O') || !compilerKind.includes('arm64')) throw new Error(`wrong host compiler: ${compilerKind}`);
@@ -41,10 +39,14 @@ const jobs = await selectBuildJobs(process.env.STD_BUILD_JOBS);
 const sha256 = async file => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 {
   const started = Date.now();
-  const source = path.join(workspace, 'ios-source', target.target);
-  await fs.rm(source, {recursive: true, force: true});
-  await fs.mkdir(source, {recursive: true});
-  await $`set -o pipefail; git -C ${repository} archive ${expectedRef} | tar -x -C ${source}`;
+  // Each source-ios matrix cell builds runtime and std from one clean, pinned
+  // checkout. Only the installed stage2 SDK is consumed from the handoff.
+  const source = await fs.mkdtemp(path.join(workspace, target.target + '-'));
+  await $`git init --quiet ${source}`;
+  await $`git -C ${source} fetch --quiet --depth=1 ${required('RUNTIME_SRC_URL')} ${expectedRef}`;
+  await $`git -C ${source} checkout --quiet --detach FETCH_HEAD`;
+  const actualRef = (await $({stdio: 'pipe'})`git -C ${source} rev-parse HEAD`).stdout.trim();
+  if (actualRef !== expectedRef) throw new Error(`runtime source mismatch: ${actualRef} != ${expectedRef}`);
   const sysroot = (await $({stdio: 'pipe'})`xcrun --sdk ${target.sdk} --show-sdk-path`).stdout.trim();
   const clang = (await $({stdio: 'pipe'})`xcrun --sdk ${target.sdk} --find clang`).stdout.trim();
   const toolBin = path.dirname(clang);
@@ -62,7 +64,7 @@ const sha256 = async file => crypto.createHash('sha256').update(await fs.readFil
   await $({cwd: stdlib, env})`python3 build.py build -t release -j ${jobs} --target ${target.target} --target-lib=${path.join(runtimeOutput, 'lib', target.tuple)} --target-lib=${path.join(runtimeOutput, 'runtime', 'lib', target.tuple)} --target-sysroot ${sysroot} --target-toolchain ${toolBin}`;
   await $({cwd: stdlib, env})`python3 build.py install --prefix ${install}`;
   await assertCompiler();
-  await writeStdProvenance({sourceDir: path.join(repository, 'stdlib'), installPrefix: install, compiler,
+  await writeStdProvenance({sourceDir: stdlib, sourceRoot: source, sourceRevision: actualRef, installPrefix: install, compiler, buildSdk: sdk,
     note: `stage2 Darwin host cjc cross-built ${target.tuple}; runtime ${actualRef}; SDK ${sysroot}`});
   // runtime/CMakeLists.txt installs tuple directories, not a flat lib/ tree.
   // Keep runtime provenance separate from final std as in the Android producer.

@@ -23,8 +23,10 @@ test('existing SDK graph carries explicit Ndb51/R79b native Windows sources to C
   const runtimeCommit = '79b34798d0f4696f9fe5a3708981539466ecd35b';
   const astCommit = 'f07c55738c12c154160c313c630a42a73a51025d';
   const runtime = row(runtimeCommit, 'R');
+  const hostVersion = '1.3.0-alpha.20260925001050';
   const inputs = {platform: 'windows_x86_64', work: '/fixture/work', install: '/fixture/install',
-    llvmCommit, runtimeCommit, astCommit, host: {version: '1.3.0-alpha.20260925001050', install: '/fixture/H'},
+    llvmCommit, runtimeCommit, astCommit, host: {version: hostVersion, install: '/fixture/H'},
+    nativePair: {llvm: llvmCommit, runtime: runtimeCommit, hostVersion},
     llvm: row(llvmCommit, 'N'), runtime, stdlib: {...runtime}, ast: row(astCommit, 'AST'),
     h1: row(FIXED_INPUTS.h1, 'H1'), compiler: row('b'.repeat(40), 'C'), tools: {privateRoot: '/fixture/tools', launcher: 'sccache'}};
   const graph = createBootstrapTargets(inputs);

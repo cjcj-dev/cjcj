@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - '.github/workflows/ios-runtime.yml'
+      - 'ci/release/cross-runtime.mjs'
+      - 'ci/release/verify-ios-runtime.mjs'
+      - 'ci/srcbuild/steps/ios-runtime-control.mjs'
       - 'ci/srcbuild/lib/ios-runtime.mjs'
       - 'ci/srcbuild/steps/build-ios-*.mjs'
   workflow_dispatch:
