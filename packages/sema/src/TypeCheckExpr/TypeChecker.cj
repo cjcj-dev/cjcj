@@ -7718,13 +7718,33 @@ extend TypeChecker {
         return 0
     }
 
+    private func ExpectedCacheMode(node: Node): Option<ASTMode> {
+        if (let Some(arg) <- (node as FuncArg)) { return arg.expr.flatMap({ e => e.expectedLocalMode }) }
+        if (let Some(e) <- (node as Expr)) { return e.expectedLocalMode }
+        return None
+    }
+
+    private func CacheResultMode(ctx: ASTContext, node: Node): Option<ASTMode> {
+        let value = if (let Some(arg) <- (node as FuncArg)) { arg.expr } else { node as Expr }
+        if (let Some(e) <- value) {
+            let receiver = GetCurFuncBody(ctx, e.scopeName).flatMap({ b => b.funcDecl })
+                .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+            return CallSiteMode(e, receiver, HashSet<Decl>())
+        }
+        return None
+    }
+
     private func GetCacheKeyForSyn(ctx: ASTContext, node: Node): CacheKey {
         let target = ctx.targetTypeMap.get(node)
-        return CacheKey(target, IsNodeDesugared(node), GetDiagCacheKey())
+        var key = CacheKey(target, IsNodeDesugared(node), GetDiagCacheKey())
+        key.expectedMode = ExpectedCacheMode(node)
+        return key
     }
 
     private func GetCacheKeyForChk(ctx: ASTContext, node: Node, target: Ty): CacheKey {
-        return CacheKey(Some(target), IsNodeDesugared(node), GetDiagCacheKey())
+        var key = CacheKey(Some(target), IsNodeDesugared(node), GetDiagCacheKey())
+        key.expectedMode = ExpectedCacheMode(node)
+        return key
     }
 
     private func GetTypeCheckCache(ctx: ASTContext, node: Node): TypeCheckCache {
@@ -7746,6 +7766,8 @@ extend TypeChecker {
         } else {
             node.SetTy(Ty.GetInitialTy())
         }
+        if (let Some(m) <- cache.resultMode) { node.resolvedMode = m }
+        if (let Some(arg) <- (node as FuncArg)) { arg.checkedMode = cache.resultMode }
         RestoreTargets(node, cache.targets)
         if (recoverDiag) {
             if (let Some(diagValue) <- impl.diag) {
@@ -7763,7 +7785,8 @@ extend TypeChecker {
         if (let Some(diagValue2) <- impl.diag) {
             dc.BackUp(diagValue2)
         }
-        let entry = CacheEntry(Ty.IsTyCorrect(ret) && dc.NoError(), Some(ret), dc, CollectTargets(expr))
+        var entry = CacheEntry(Ty.IsTyCorrect(ret) && dc.NoError(), Some(ret), dc, CollectTargets(expr))
+        entry.resultMode = CacheResultMode(ctx, expr)
         GetTypeCheckCache(ctx, expr).synCache[key] = entry
         return ret
     }
@@ -7778,7 +7801,9 @@ extend TypeChecker {
         if (let Some(diagValue2) <- impl.diag) {
             dc.BackUp(diagValue2)
         }
-        let entry = CacheEntry(Ty.IsTyCorrect(ret) && dc.NoError(), Some(ret), dc, CollectTargets(arg))
+        var entry = CacheEntry(Ty.IsTyCorrect(ret) && dc.NoError(), Some(ret), dc, CollectTargets(arg))
+        entry.resultMode = CacheResultMode(ctx, arg)
+        arg.checkedMode = entry.resultMode
         GetTypeCheckCache(ctx, arg).synCache[key] = entry
         return ret
     }
@@ -7792,7 +7817,8 @@ extend TypeChecker {
         if (let Some(diagValue2) <- impl.diag) {
             dc.BackUp(diagValue2)
         }
-        let entry = CacheEntry(ret, expr.GetTy(), dc, CollectTargets(expr))
+        var entry = CacheEntry(ret, expr.GetTy(), dc, CollectTargets(expr))
+        entry.resultMode = CacheResultMode(ctx, expr)
         GetTypeCheckCache(ctx, expr).chkCache[key] = entry
         return ret
     }
@@ -7807,7 +7833,9 @@ extend TypeChecker {
         if (let Some(diagValue2) <- impl.diag) {
             dc.BackUp(diagValue2)
         }
-        let entry = CacheEntry(ret, arg.GetTy(), dc, CollectTargets(arg))
+        var entry = CacheEntry(ret, arg.GetTy(), dc, CollectTargets(arg))
+        entry.resultMode = CacheResultMode(ctx, arg)
+        arg.checkedMode = entry.resultMode
         GetTypeCheckCache(ctx, arg).chkCache[key] = entry
         return ret
     }
@@ -7955,6 +7983,7 @@ extend TypeChecker {
             return false
         }
         arg.SetTy(expr.GetTy() ?? TypeManager.GetInvalidTy())
+        arg.checkedMode = CacheResultMode(ctx, arg)
         return true
     }
 

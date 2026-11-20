@@ -1045,6 +1045,7 @@ public class LitConstExpr <: Expr {
 }
 
 public class FuncArg <: Node {
+    public var checkedMode: Option<ASTMode> = None
     public var name: SrcIdentifier = SrcIdentifier()
     public var colonPos: Position = INVALID_POSITION
     public var expr: Option<Expr> = None
@@ -1067,6 +1068,7 @@ public class FuncArg <: Node {
         if (let Some(value) <- expr) {
             value.Clear()
         }
+        checkedMode = None
         DisableAttr(Attribute.HAS_INITIAL)
     }
 

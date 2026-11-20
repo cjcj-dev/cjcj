@@ -35,6 +35,7 @@ private class MatchingStat {
 private class FunctionMatchingUnit {
     public var id: Int64 = -1
     public var fd: FuncDecl
+    public let argumentModes = ArrayList<Option<ASTMode>>()
     public var tysInArgOrder: ArrayList<Ty>
     public var typeMapping: SubstPack
     public var diags: Array<BasicDiagnostic> = Array<BasicDiagnostic>()
@@ -1385,13 +1386,15 @@ private func PermitsModalCall(typeManager: TypeManager, unit: FunctionMatchingUn
         if (let Some(value) <- call.args[i].expr) {
             // Candidate argument checking may have rolled back the speculative expression type.
             // Use the already matched, substituted parameter for Copyable conversions in that case.
-            if ((value.GetTy().map({ ty => typeManager.IsModalCopyType(ty) }) ?? false) ||
+            if ((value.GetTy().map({ ty => Ty.IsTyCorrect(ty) && typeManager.IsModalCopyType(ty) }) ?? false) ||
                 (i < unit.tysInArgOrder.size &&
                 typeManager.IsModalCopyType(typeManager.ApplySubstPack(unit.tysInArgOrder[i], unit.typeMapping)))) {
                 continue
             }
             let slot = LocalParameterMode(fd, ModeArgumentIndex(fd, call, i))
-            if ((let Some(m) <- CallSiteMode(value, receiver, HashSet<Decl>())) && !m.IsSubMode(slot)) { return false }
+            let actual = if (i < unit.argumentModes.size && unit.argumentModes[i].isSome()) { unit.argumentModes[i] }
+                else { CallSiteMode(value, receiver, HashSet<Decl>()) }
+            if ((let Some(m) <- actual) && !m.IsSubMode(slot)) { return false }
         }
     }
     return true
@@ -3374,6 +3377,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
             return None
         }
     }
+    for (arg in ce.args) { unit.argumentModes.add(arg.checkedMode) }
     unit.argNameValid = candidate.stat.argNameValid
     unit.matchedArgs = candidate.stat.matchedArgs
     if (NeedSynOnUsed(fd)) {
@@ -4455,6 +4459,11 @@ internal func MatchFunctionForCall(ctx: Option<ASTContext>, candidates: ArrayLis
     }
     let fdScopeLevelMap = HashMap<Node, Int64>()
     let orderedCandidates = GetOrderedCandidates(ctx, ce, candidates, fdScopeLevelMap)
+    var compareModes = false
+    for (i in 1..candidates.size) {
+        if (!SameModalInputs(candidates[0], candidates[i])) { compareModes = true; break }
+    }
+    let enclosingMode = ReceiverAtCall(ce, ctx)
     let illegals = ArrayList<FunctionMatchingUnit>()
     var preScopeLevel: Int64 = 0
     if (!orderedCandidates.isEmpty()) {
@@ -4481,6 +4490,8 @@ internal func MatchFunctionForCall(ctx: Option<ASTContext>, candidates: ArrayLis
             try (ds = DiagSuppressor(diag)) {
                 checked = CheckCandidate(typeManager, diag, ctx, candidate, target, argChecker: argChecker,
                     inferenceFailure: None, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer)
+                if (compareModes && !fd.TestAttr(Attribute.ENUM_CONSTRUCTOR) && (let Some(unit) <- checked) &&
+                    !PermitsModalCall(typeManager, unit, ce, enclosingMode)) { checked = None }
                 suppressedDiags = ds.GetSuppressedDiag()
             }
             let duplicated = checked.isSome() && !legals.isEmpty() &&
