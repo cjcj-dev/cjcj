@@ -47,8 +47,10 @@ async function installation(root, required) {
 // compare the installed archive with the result of R's deterministic append:
 // a matching build.py argv alone cannot identify what the object included.
 async function matchesFinalStdAst(build, install, input, ast) {
-  const includes=build.argv.filter(arg=>arg==='-I' || arg==='--include' || arg.startsWith('--include=') || /^-I./.test(arg));
-  if(includes.length!==1 || flag(build.argv,'--include')!==ast.include ||
+  const args=build.argv.slice(build.argv.indexOf('build.py')+2);
+  const includes=args.filter(arg=>arg==='-I' || arg==='--include' || arg.startsWith('--include=') || /^-I./.test(arg));
+  const include=flag(args,'--include')??flag(args,'-I')??includes[0]?.match(/^-I(.+)$/)?.[1];
+  if(includes.length!==1 || include!==ast.include ||
       build.argv.includes('--local_mode_api')!==(input.stdLocalModeApi===true))return false;
   const dir=path.join(build.cwd,'build/build'), src=path.dirname(build.cwd);
   const cache=await fs.readFile(path.join(dir,'CMakeCache.txt'),'utf8');
