@@ -128,6 +128,8 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
   }
   const nativeRecord='share/cjcj/build-inputs/native-build.json';
   const nativeFacts=await optional(path.join(sdk,nativeRecord));
+  if(target?.llvm?.install && stage.configuration?.layout!=='native-output' && !nativeFacts?.llvmLibrary)
+    throw Error('INSTALLED_LLVM_ORIGINAL_REQUIRED');
   const astRecord='share/cjcj/build-inputs/native-ast.json',astFacts=await optional(path.join(sdk,astRecord))??nativeFacts;
   if(astFacts){
     const selected=stage?.sources?.ast;
@@ -178,7 +180,12 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
       const original=await readJson(path.join(sdk,'share/cjcj/build-inputs/native-runtime.json'));
       if(original.runtime_sha!==runtime.source.commit||original.platform!==platform
         ||original.paired_llvm_sha!==(stage.sources?.backend??stage.sources?.llvm)?.commit||!original.files)throw Error('INSTALLED_RUNTIME_NATIVE_SOURCE');
+      if(original.configuration && (original.configuration.pairedLlvmCommit!==original.paired_llvm_sha
+        || original.configuration.hostVersion!==runtime.build?.configuration?.hostVersion
+        || (target.runtime.configuration && original.configuration.hostVersion!==target.runtime.configuration.hostVersion)))
+        throw Error('INSTALLED_RUNTIME_NATIVE_CONFIGURATION');
       const pair=new Set(products.map(row=>row.path));
+      if(target.runtime.install && products.some(row=>original.files[row.path]!==row.sha256))throw Error('INSTALLED_RUNTIME_NATIVE_BYTES pair');
       for(const [rel,expected] of Object.entries(original.files)) {
         if(!/^(lib|runtime\/lib)\//.test(rel)||pair.has(rel))continue;
         if(!/^[a-f0-9]{64}$/.test(expected))throw Error('INSTALLED_RUNTIME_NATIVE_BYTES '+rel);

@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 // R stdlib/build.py owns its CMake graph; cjpm owns the compiler workspace.
 import fs from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
 import path from 'node:path';
 import {selectBuildResources} from '../build-resources.mjs';
 import {fileURLToPath} from 'node:url';
@@ -91,7 +92,7 @@ export async function nativeStage(options, {signal} = {}) {
     if(!options['resume-installed']) {
       // A failed rebuild must not expose the previous std as a new install.
       const original=path.join(output,'PROVENANCE.txt');
-      await fs.rename(original,output+'.previous-provenance-'+(await import('node:crypto')).randomUUID())
+      await fs.rename(original,output+'.previous-provenance-'+randomUUID())
         .catch(error=>{if(error.code!=='ENOENT')throw error;});
     }
     await verifyStdBuildInputs(sdk,platform);

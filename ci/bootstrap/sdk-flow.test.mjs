@@ -376,6 +376,9 @@ fs.writeFileSync(out+'.c','#include <stdio.h>\\nint main(void){puts("hello from 
     return ['tools/bin/'+name,'tools/bin/'+name+'.entry','.target-tools/tools/'+(privateDir?privateDir+'/':'')+'bin/'+name];
   }),
   'tools/config/cangjie-format.toml','tools/config/cangjie-repo.toml','tools/dtsparser/analysis.js','tools/bin/node'])await put(output+'/'+rel,'finite native artifact');
+ const runtimeRoot=path.join(workspace,'cangjie_runtime','runtime');
+ const {directSource,directBuild}=await import('../fixtures/runtime-direct-inputs.mjs');
+ directSource(runtimeRoot);directBuild(runtimeRoot);
  // Give the finite producer its own Git-stamped products. Package reads
  // these installed bytes as well as the real command log from runBuildPy.
  for(const rel of ['runtime/lib/'+tuple+'/libcangjie-runtime.so','lib/'+tuple+'/libcangjie-runtime.a'])
