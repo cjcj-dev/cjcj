@@ -8,19 +8,23 @@ import {fileURLToPath} from 'node:url';
 const [compiler, output] = process.argv.slice(2);
 const root = path.resolve(output);
 fs.mkdirSync(root); // Require fresh outputs: a stale CJO must never pass.
-const enabled = ['--experimental', '--enable-local-mode', '--disable-codegen'];
+const enabled = ['--experimental', '--enable-local-mode', '--output-type=cjo'];
 const signatures = fileURLToPath(new URL('./signatures.cj', import.meta.url));
+const failures = [];
 function compile(name, source, args, diag) {
   const cwd = path.join(root, name);
   fs.mkdirSync(cwd);
   const archive = path.join(cwd, name + '.a');
-  const argv = [...args, '--output-type=staticlib', '--diagnostic-format=json', source, '-o', archive];
+  const cjo = args.includes('--output-type=cjo');
+  const argv = [...args, ...(cjo ? [] : ['--output-type=staticlib']), '--diagnostic-format=json', source, '-o', cjo ? cwd : archive];
   const r = spawnSync(compiler, argv, {cwd, encoding:'utf8'});
   fs.writeFileSync(path.join(cwd, 'result.json'), JSON.stringify({compiler, argv, rc:r.status,
     signal:r.signal, stdout:r.stdout, stderr:r.stderr}, null, 2));
   if (r.error) throw r.error;
-  assert.equal(r.status, diag ? 1 : 0, name + ': ' + r.stderr);
-  if (diag) assert.match(r.stderr + r.stdout, diag, name);
+  const ok = r.status === (diag ? 1 : 0) && (!diag || diag.test(r.stderr + r.stdout));
+  console.log(name, 'compiler rc', r.status, 'expected', diag?.source ?? 'success', ok ? 'PASS' : 'FAIL');
+  if (!ok) failures.push(name);
+  if (name === 'producer') assert(ok, 'failed to produce interface: ' + r.stderr);
   return cwd;
 }
 compile('defaultSource', signatures, [], /"DiagKind":\s*"parse_local_mode_disabled"/);
@@ -34,6 +38,7 @@ function consumer(name, body, options, diag) {
   compile(name, file, [...options, '--import-path', producer], diag);
 }
 const disabled = /"DiagKind":\s*"sema_local_api_disabled"/;
+consumer('unusedImport', '42', []);
 consumer('ordinary', 'let f = plain\nplainNested(f)', []);
 consumer('bareFull', 'let f = full\nf(20, 22)', [], disabled);
 consumer('bareHalf', 'let f = half\nf(20, 22)', [], disabled);
@@ -41,4 +46,8 @@ consumer('nestedDisabled', 'let f = nested\n0', [], disabled);
 consumer('enabledNested', 'let f = full\nnested(f)', enabled);
 consumer('enabledHalf', 'let f = half\nnested(f)', enabled);
 consumer('wrongMode', 'nested(plain)', enabled, /mismatched|incompatible|no.match|cannot.match/i);
+consumer('wrongSlot', 'let f: (Int64 @local!, Int64) -> Int64 = full\nf(20, 22)', enabled,
+  /mismatched|incompatible|no.match|cannot.match/i);
+consumer('nonCopyRejected', 'let x: String @local! = "s"\n0', enabled, /"DiagKind":\s*"parse_unexpected_modal_type"/);
+assert.deepEqual(failures, []);
 console.log('CJO cross-package signature controls passed');

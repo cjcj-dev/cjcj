@@ -123,6 +123,7 @@ public class Driver {
         if (!ExecuteFrontendPhase(this)) {
             return false
         }
+        if (driverOptions.outputMode == OutputMode.CJO) { return true }
         if (driverOptions.frontendOutputFiles.isEmpty() && driverOptions.inputObjs.isEmpty()) {
             return true
         }

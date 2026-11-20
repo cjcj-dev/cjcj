@@ -362,6 +362,10 @@ private func parseOutputType(opts: GlobalOptions, value: String): ActionResult {
         opts.outputMode = OutputMode.SHARED_LIB
         opts.enableHotReload = false
     }
+    else if (value == "cjo") {
+        opts.outputMode = OutputMode.CJO
+        opts.enableHotReload = false
+    }
     else if (value == "chir") {
         opts.outputMode = OutputMode.CHIR
         opts.enableHotReload = false

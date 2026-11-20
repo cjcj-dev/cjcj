@@ -424,6 +424,7 @@ public open class ToolChain {
                 case OutputMode.STATIC_LIB => TempFileKind.O_STATICLIB
                 case OutputMode.SHARED_LIB => TempFileKind.O_DYLIB
                 case OutputMode.CHIR => TempFileKind.O_CHIR
+                case OutputMode.CJO => TempFileKind.O_CJO
                 case OutputMode.OBJ => TempFileKind.O_OBJ
             }
         }

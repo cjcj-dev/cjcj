@@ -249,8 +249,8 @@ private func ExecuteCompile(instance: DefaultCompilerInstance): Bool {
         return HandleEmptyInputFileSituation(instance)
     }
 
-    if (globalOptions.enableLocalMode) {
-        if (!globalOptions.disableCodeGen || opts.dumpAction != DumpAction.NO_ACTION ||
+    if (globalOptions.outputMode == OutputMode.CJO) {
+        if (opts.dumpAction != DumpAction.NO_ACTION ||
             !globalOptions.inputObjs.isEmpty()) { return false }
         return instance.CompileCjoInterface()
     }

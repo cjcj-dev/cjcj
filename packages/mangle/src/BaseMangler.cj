@@ -5,6 +5,14 @@ import std.env.getVariable
 import cjcj::ast.*
 import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK, TaskQueue, TaskResult}
 
+private func MangleTypeMode(mode: ASTMode): String {
+    return match (mode) {
+        case ASTMode.NOT => ""
+        case ASTMode.FULL => "QLE"
+        case ASTMode.HALF => "QlE"
+    }
+}
+
 private func GetParentDecl(decl: FuncDecl): Option<Decl> {
     if (let Some(body) <- decl.funcBody) {
         if (let Some(parent) <- body.parentClassLike) {
@@ -640,10 +648,11 @@ public open class BaseMangler {
         var retTy = MangleSemaType(funcTy.retTy, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
         if (retTy.isEmpty()) { retTy = MANGLE_VOID_TY_SUFFIX }
         var params = ""
-        for (param in funcTy.paramTys) {
-            params += MangleSemaType(param, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
+        for (i in 0..funcTy.paramTys.size) {
+            params += MangleSemaType(funcTy.paramTys[i], genericsTypeStack, declare: declare,
+                isCollectGTy: isCollectGTy) + MangleTypeMode(funcTy.ParamMode(i))
         }
-        mangled += retTy + params + MANGLE_SUFFIX
+        mangled += retTy + MangleTypeMode(funcTy.retMode) + params + MANGLE_SUFFIX
         return mangled
     }
 
@@ -654,10 +663,16 @@ public open class BaseMangler {
                 return MANGLE_VOID_TY_SUFFIX
             }
             var mangled = ""
-            for (param in body.paramLists[0].params) {
+            let sig = funcDecl.GetTy().flatMap({ ty => ty as FuncTy })
+            let params = body.paramLists[0].params
+            for (i in 0..params.size) {
+                let param = params[i]
                 if (let Some(ty) <- param.GetTy()) {
                     if (ty.kind != TypeKind.TYPE_INITIAL) {
                         mangled += MangleSemaType(ty, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
+                        if ((let Some(ft) <- sig) && ft.paramTys.size == params.size) {
+                            mangled += MangleTypeMode(ft.ParamMode(i))
+                        }
                     }
                 } else {
                     throw IllegalArgumentException("Function parameter has no semantic type: " + param.identifier.Val())

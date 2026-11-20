@@ -1303,12 +1303,15 @@ public open class GlobalOptions <: Option {
     }
 
     protected open func PerformPostActions(): Bool {
-        if (enableLocalMode && (!disableCodeGen || outputMode != OutputMode.STATIC_LIB ||
-            backend != BackendType.CJNATIVE || target.os != OSType.LINUX || target.arch != ArchType.X86_64 ||
-            target.env != EnvironmentType.GNU || enIncrementalCompilation || !inputObjs.isEmpty() ||
-            compileMacroPackage || compileCjd || IsEmitCHIREnable() || !commonPartCjos.isEmpty())) {
-            Errorln("local mode is unavailable in this compiler build for native output; " +
-                "only Linux x86_64 CJO signatures with --disable-codegen --output-type=staticlib are supported")
+        if (enableLocalMode && outputMode != OutputMode.CJO) {
+            Errorln("local mode is unavailable in this compiler build for native output; use --output-type=cjo")
+            return false
+        }
+        if (outputMode == OutputMode.CJO && (backend != BackendType.CJNATIVE || target.os != OSType.LINUX ||
+            target.arch != ArchType.X86_64 || target.env != EnvironmentType.GNU || enIncrementalCompilation ||
+            !inputObjs.isEmpty() || compileMacroPackage || compileCjd || IsEmitCHIREnable() ||
+            !commonPartCjos.isEmpty() || !commonPartChirs.isEmpty() || (!output.isEmpty() && !IsDir(output)))) {
+            Errorln("CJO interface output requires a Linux x86_64 source package and a directory output")
             return false
         }
         chirLLVM = backend == BackendType.CJNATIVE
@@ -1654,6 +1657,7 @@ public open class GlobalOptions <: Option {
             case OutputMode.STATIC_LIB => "C"
             case OutputMode.SHARED_LIB => "S"
             case OutputMode.CHIR => "CH"
+            case OutputMode.CJO => "CJO"
             case OutputMode.OBJ => CompileTargetToSerializedString()
         }
     }

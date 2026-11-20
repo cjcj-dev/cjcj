@@ -90,6 +90,7 @@ private func optionValues(name: String): Array<OptionValue> {
             value("exe", "emit executable (default)", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
             value("staticlib", "emit static library", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
             value("dylib", "emit dynamic library", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
+            value("cjo", "emit a package interface without native code", [Backend.CJNATIVE], [Group.VISIBLE]),
             value("chir", "emit partially compiled package", [Backend.CJNATIVE], [Group.VISIBLE]),
             value("obj", "emit obj", [Backend.CJNATIVE], [Group.VISIBLE])
         ]

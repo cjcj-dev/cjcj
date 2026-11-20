@@ -78,7 +78,7 @@ public enum OSType { | WINDOWS | LINUX | DARWIN | IOS | UNKNOWN }
 public enum Vendor { | PC | APPLE | UNKNOWN }
 public enum EnvironmentType { | OHOS | GNU | ANDROID | SIMULATOR | NOT_AVAILABLE }
 public enum OptimizationLevel { | O0 | O1 | O2 | O3 | Os | Oz }
-public enum OutputMode { | EXECUTABLE | STATIC_LIB | SHARED_LIB | CHIR | OBJ }
+public enum OutputMode { | EXECUTABLE | STATIC_LIB | SHARED_LIB | CHIR | OBJ | CJO }
 public enum CompileTarget { | EXECUTABLE | STATIC_LIB | SHARED_LIB | DEFAULT }
 public enum LTOMode { | FULL_LTO | THIN_LTO | NO_LTO }
 public enum SanitizerCoverageType { | SCK_UNKNOW | SCK_NONE | SCK_FUNCTION | SCK_BB }
@@ -446,6 +446,7 @@ public func OutputModeIndex(value: OutputMode): Int64 {
         case OutputMode.SHARED_LIB => 2
         case OutputMode.CHIR => 3
         case OutputMode.OBJ => 4
+        case OutputMode.CJO => 5
     }
 }
 extend OutputMode <: Equatable<OutputMode> {

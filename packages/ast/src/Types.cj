@@ -1060,14 +1060,24 @@ public class FuncTyConfig {
     public var retMode: ASTMode = ASTMode.NOT
 
     public func ReadModes(ft: FuncType): Unit {
-        paramModes = Array<ASTMode>(ft.paramTypes.size, { i => TypeMode(ft.paramTypes[i]) })
+        for (param in ft.paramTypes) {
+            if (TypeMode(param) != ASTMode.NOT) {
+                paramModes = Array<ASTMode>(ft.paramTypes.size, { i => TypeMode(ft.paramTypes[i]) })
+                break
+            }
+        }
         retMode = TypeMode(ft.retType)
     }
 
     public func ReadModes(fb: FuncBody): Unit {
         if (!fb.paramLists.isEmpty()) {
             let params = fb.paramLists[0].params
-            paramModes = Array<ASTMode>(params.size, { i => TypeMode(params[i].typeNode) })
+            for (param in params) {
+                if (TypeMode(param.typeNode) != ASTMode.NOT) {
+                    paramModes = Array<ASTMode>(params.size, { i => TypeMode(params[i].typeNode) })
+                    break
+                }
+            }
         }
         retMode = TypeMode(fb.retType)
     }
