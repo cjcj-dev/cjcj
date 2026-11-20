@@ -289,7 +289,7 @@ public func GetTypeQualifiedName(t: Type, forNameFieldOfTi!: Bool = false): Stri
         if (t.GetTypeKind() == TypeKind.TYPE_VOID) {
             return MANGLE_UNIT_STR
         }
-        return t.ToString()
+        return TypeKindName(t.GetTypeKind())
     }
     if (let Some(rawArrayTy) <- (t as RawArrayType)) {
         return MANGLE_RAWARR_STR + MANGLE_LT_PREFIX + GetTypeQualifiedName(rawArrayTy.GetElementType(),

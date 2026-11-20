@@ -842,6 +842,15 @@ extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderReplaceArrays(
     auto *builder = unwrap(Builder);
     auto *composite = unwrap<DICompositeType>(Composite);
     auto *elements = Elements == nullptr ? nullptr : unwrap<MDTuple>(Elements);
+    for (auto *member : composite->getElements()) {
+        if (elements && llvm::is_contained(elements->operands(), member))
+            continue;
+        llvm::errs() << "incomplete debug type member replacement for " << composite->getName()
+                     << " (" << composite->getIdentifier() << "), missing: ";
+        member->print(llvm::errs());
+        llvm::errs() << "\n";
+        llvm::report_fatal_error("debug type completion lost an existing member");
+    }
     builder->replaceArrays(composite, DINodeArray(elements));
     return wrap(composite);
 }

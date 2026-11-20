@@ -65,6 +65,7 @@ private let DW_OP_deref: UInt64 = 0x06u64
 private let DW_TAG_const_type: UInt32 = 0x26u32
 private let DW_TAG_typedef: UInt32 = 0x16u32
 private let DW_TAG_subprogram: UInt32 = 0x2eu32
+private let DW_TAG_structure_type: UInt32 = 0x13u32
 private let DW_TAG_class_type: UInt32 = 0x02u32
 private let FlagZero: UInt32 = 0u32
 private let FlagArtificial: UInt32 = 64u32
@@ -767,8 +768,8 @@ public class DIBuilder {
         let diType = createBasicType(tyName, size, encoding)
         let typeDefType = createTypedef(diType, tyName, defaultFile, 0u32, compileUnit)
         if (boxTy.isSome()) {
-            var fwdDecl = createStructType(namespaceScope, tyName, defaultFile, 0u32, size + 64u64, 0u32,
-                FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), ty.ToString())
+            var fwdDecl = createForwardStruct(namespaceScope, tyName, defaultFile, 0u32,
+            size + 64u64, 0u32, FlagZero, ty.ToString())
             let memberType = createMemberType(fwdDecl, "base", defaultFile, 0u32, size, 0u32, 64u64,
                 FlagZero, typeDefType)
             fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(ArrayList<LLVMMetadataRef>([memberType])))
@@ -826,9 +827,9 @@ public class DIBuilder {
     private func CreateGenericType(genericTy: GenericType): LLVMMetadataRef {
         let name = GenerateTypeName(genericTy)
         let genericSize = 64u64
-        var genericType = createStructType(compileUnit, name, defaultFile, 0u32, genericSize, 0u32,
-            FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(),
-            genericTy.GetIdentifier())
+        var genericType = createForwardStruct(compileUnit, name, defaultFile, 0u32,
+            genericSize, 0u32, FlagZero, genericTy.GetIdentifier())
+        typeCache[genericTy.objectId] = genericType
         let ti = CreateTypeInfoMember(genericType, defaultFile)
         let elements = ArrayList<LLVMMetadataRef>([ti])
         for (upperBound in genericTy.GetUpperBounds()) {
@@ -845,8 +846,8 @@ public class DIBuilder {
         let diFile = defaultFile
         let refSizeInBits = GetSizeInBits(CreateRefType())
         // Generates the CString struct.
-        var fwdDecl = createStructType(compileUnit, name, diFile, 0u32, refSizeInBits, 0u32, FlagZero,
-            LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), uniqueName)
+        var fwdDecl = createForwardStruct(compileUnit, name, diFile, 0u32,
+            refSizeInBits, 0u32, FlagZero, uniqueName)
         // Generates a member 'chars' of the 'Int8 *' type in CString struct.
         let elemSizeInBits = GetTypeSize(unsafe { LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw) })
         let basicType = createBasicType("char", elemSizeInBits, DW_ATE_unsigned_char)
@@ -866,8 +867,8 @@ public class DIBuilder {
         if (!ptrTy.GetTypeArgs().isEmpty() && !ptrTy.GetTypeArgs()[0].IsCPointer()) {
             basicType = GetOrCreateType(ptrTy.GetTypeArgs()[0])
         }
-        var fwdDecl = createStructType(compileUnit, name, diFile, 0u32, sizeInBits, 0u32, FlagZero,
-            LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), uniqueName)
+        var fwdDecl = createForwardStruct(compileUnit, name, diFile, 0u32,
+            sizeInBits, 0u32, FlagZero, uniqueName)
         let elemType = CreatePointerType(basicType, sizeInBits: sizeInBits)
         let eleType = createMemberType(fwdDecl, "ptr", diFile, 0u32, sizeInBits, 8u32, 0u64,
             FlagZero, elemType) // 8 is default align size.
@@ -892,8 +893,8 @@ public class DIBuilder {
         let totalSize = 64u64 + arrayLayoutSize + GetSizeInBits(elemType)
         // Array type is a temporary type which do no have fixed definition file nor line.
         // type struct: {klass*, i32 arrayLength, [0 x T]}, where 'klass*' is invisible for user.
-        var fwdDecl = createStructType(scope, arrayTypeName, diFile, 0u32, totalSize, 0u32, FlagZero,
-            LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), identifier)
+        var fwdDecl = createForwardStruct(scope, arrayTypeName, diFile, 0u32,
+            totalSize, 0u32, FlagZero, identifier)
         if (arrayLayout.isNull()) {
             elements.add(CreateTypeInfoMember(fwdDecl, diFile))
             fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(elements))
@@ -951,8 +952,8 @@ public class DIBuilder {
         let identifier = tupleTy.ToString()
         let elements = ArrayList<LLVMMetadataRef>() // SmallVector Size: 16.
         if (CGType.GetOrCreate(cgMod, tupleTy).GetSize().isNone()) {
-            var fwdDecl = createStructType(scope, tupleTypeName, diFile, 0u32, 64u64, 0u32, FlagZero,
-                LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), identifier)
+            var fwdDecl = createForwardStruct(scope, tupleTypeName, diFile, 0u32,
+            64u64, 0u32, FlagZero, identifier)
             let memberType = CreateTypeInfoMember(fwdDecl, diFile)
             elements.add(memberType)
             fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(elements))
@@ -961,9 +962,8 @@ public class DIBuilder {
         // Tuple type is a temporary type which do no have fixed definition file & line.
         let boxOffset = if (boxTy.isSome()) { 64u64 } else { 0u64 }
         let totalSize = GetTypeSize(llvmType) + boxOffset
-        var fwdDecl = createStructType(scope, tupleTypeName, diFile, 0u32, totalSize, 0u32, FlagZero,
-            LLVMNullMetadata(), elements, 0u32, LLVMNullMetadata(),
-            "$" + boxOffset.toString() + "_" + identifier)
+        var fwdDecl = createForwardStruct(scope, tupleTypeName, diFile, 0u32,
+            totalSize, 0u32, FlagZero, "$" + boxOffset.toString() + "_" + identifier)
         if (let Some(box) <- boxTy) {
             typeCache[box.objectId] = fwdDecl
         }
@@ -1305,8 +1305,8 @@ public class DIBuilder {
         let name = GenerateCustomTypeName(structTy, needPkgPrefix: false)
         if (cgStructType.GetSize().isNone()) {
             let size = 64u64 + UInt64(structDef.GetAllInstanceVars().size) * 64u64
-            var fwdDecl = createStructType(defPackage, name, diFile, position.GetBeginPos().line, size, 0u32,
-                FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), identifier)
+            var fwdDecl = createForwardStruct(defPackage, name, diFile, position.GetBeginPos().line,
+            size, 0u32, FlagZero, identifier)
             typeCache[structTy.objectId] = fwdDecl
             let elements = ArrayList<LLVMMetadataRef>()
             CreateInheritedInterface(elements, fwdDecl, structTy)
@@ -1321,9 +1321,8 @@ public class DIBuilder {
         let structSize = UInt64(cgStructType.GetSize().getOrThrow()) * 8u64
         let structAlign = UInt32(cgStructType.GetAlign().getOrThrow())
         let boxOffset = if (boxTy.isSome()) { 64u64 } else { 0u64 }
-        var fwdDecl = createStructType(defPackage, name, diFile, position.GetBeginPos().line,
-            structSize + boxOffset, structAlign, FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(),
-            0u32, LLVMNullMetadata(), "$" + boxOffset.toString() + "_" + identifier)
+        var fwdDecl = createForwardStruct(defPackage, name, diFile, position.GetBeginPos().line,
+            structSize + boxOffset, structAlign, FlagZero, "$" + boxOffset.toString() + "_" + identifier)
         if (let Some(box) <- boxTy) {
             typeCache[box.objectId] = fwdDecl
         } else {
@@ -1461,8 +1460,8 @@ public class DIBuilder {
             if (cgType.IsOptionLike()) {
                 size += 32u64
             }
-            var fwdDecl = createStructType(defPackage, name, diFile, position.GetBeginPos().line, size, 0u32,
-                FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), identifier)
+            var fwdDecl = createForwardStruct(defPackage, name, diFile, position.GetBeginPos().line,
+            size, 0u32, FlagZero, identifier)
             typeCache[enumTy.objectId] = fwdDecl
             CreateInheritedInterface(enumMembers, fwdDecl, enumTy)
             if (cgType.IsOptionLike()) {
@@ -1540,9 +1539,8 @@ public class DIBuilder {
         let position = enumDef.GetDebugLocation()
         let diFile = GetOrCreateFile(position)
         let typeName = GenerateCustomTypeName(enumTy, needPkgPrefix: false)
-        let fwdDecl = createStructType(defPackage, "E0$" + typeName, diFile, position.GetBeginPos().line,
-            32u64, 0u32, FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32,
-            LLVMNullMetadata(), "$" + enumTy.ToString())
+        let fwdDecl = createForwardStruct(defPackage, "E0$" + typeName, diFile, position.GetBeginPos().line,
+            32u64, 0u32, FlagZero, "$" + enumTy.ToString())
         let constructorType = GetOrCreateEnumCtorType(enumTy)
         enumMembers.add(createMemberType(fwdDecl, "constructor", diFile, 0u32, 32u64, 0u32, 0u64,
             FlagZero, constructorType))
@@ -1558,9 +1556,8 @@ public class DIBuilder {
         let diFile = GetOrCreateFile(position)
         let typeName = GenerateCustomTypeName(enumTy, needPkgPrefix: false)
         let cgType = (CGType.GetOrCreate(cgMod, enumTy) as CGEnumType).getOrThrow()
-        let fwdDecl = createStructType(defPackage, "E3$" + typeName, diFile, position.GetBeginPos().line,
-            UInt64(cgType.GetsizeOfConstructorUnion()) + 32u64, 0u32, FlagZero, LLVMNullMetadata(),
-            ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), "$" + enumTy.ToString())
+        let fwdDecl = createForwardStruct(defPackage, "E3$" + typeName, diFile, position.GetBeginPos().line,
+            UInt64(cgType.GetsizeOfConstructorUnion()) + 32u64, 0u32, FlagZero, "$" + enumTy.ToString())
         typeCache[enumTy.objectId] = fwdDecl
         let constructorType = GetOrCreateEnumCtorType(enumTy)
         var fieldIdx: Int64 = 0
@@ -1570,8 +1567,8 @@ public class DIBuilder {
             let ctorName = GenerateCustomTypeName(enumTy, needPkgPrefix: false) + "_ctor_" + fieldIdx.toString()
             let paramTypes = ctor.funcType.getOrThrow().GetParamTypes()
             if (paramTypes.isEmpty()) {
-                var subEnumType = createStructType(defPackage, ctorName, diFile, 0u32, size, 0u32, FlagZero,
-                    LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), "")
+                var subEnumType = createForwardStruct(defPackage, ctorName, diFile, 0u32,
+            size, 0u32, FlagZero, "")
                 enumLayer.add(createMemberType(subEnumType, "constructor", diFile, 0u32, size, 0u32,
                     0u64, FlagZero, constructorType))
                 subEnumType = replaceArrays(subEnumType, getOrCreateArray(enumLayer))
@@ -1605,8 +1602,8 @@ public class DIBuilder {
                     argIndex++
                 }
             }
-            var subEnumType = createStructType(defPackage, ctorName, diFile, 0u32, totalSize, 0u32,
-                FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), "")
+            var subEnumType = createForwardStruct(defPackage, ctorName, diFile, 0u32,
+            totalSize, 0u32, FlagZero, "")
             enumLayer.add(createMemberType(subEnumType, "constructor", diFile, 0u32, size, 0u32,
                 0u64, FlagZero, constructorType))
             var offsetIndex: Int64 = 1
@@ -1663,10 +1660,8 @@ public class DIBuilder {
             let name = if (enumTy.IsOption()) { GenerateCustomTypeName(enumTy, needPkgPrefix: false) } else {
                 "E2$" + GenerateCustomTypeName(enumTy, needPkgPrefix: false)
             }
-            let fwdDecl = createStructType(defPackage, name, diFile, position.GetBeginPos().line,
-                size + boxOffset, unsafe { LLVMDITypeGetAlignInBits(argType) }, FlagZero, LLVMNullMetadata(),
-                ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(),
-                "$" + boxOffset.toString() + "_" + enumTy.ToString())
+            let fwdDecl = createForwardStruct(defPackage, name, diFile, position.GetBeginPos().line,
+            size + boxOffset, unsafe { LLVMDITypeGetAlignInBits(argType) }, FlagZero, "$" + boxOffset.toString() + "_" + enumTy.ToString())
             if (let Some(box) <- boxTy) {
                 typeCache[box.objectId] = fwdDecl
             }
@@ -1693,8 +1688,8 @@ public class DIBuilder {
         let diFile = GetOrCreateFile(position)
         let defPackage = createNameSpace(compileUnit, enumDef.GetPackageName(), false)
         let name = "E2$" + GenerateCustomTypeName(enumTy, needPkgPrefix: false)
-        let fwdDecl = createStructType(defPackage, name, diFile, position.GetBeginPos().line, 128u64, 0u32,
-            FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), enumTy.ToString())
+        let fwdDecl = createForwardStruct(defPackage, name, diFile, position.GetBeginPos().line,
+            128u64, 0u32, FlagZero, enumTy.ToString())
         enumMembers.add(createMemberType(fwdDecl, "constructor_R", diFile, 0u32, 8u64, 0u32, 64u64,
             FlagZero, GetOrCreateEnumCtorType(enumTy)))
         enumMembers.add(createMemberType(fwdDecl, "val", diFile, 0u32, 64u64, 0u32, 64u64,
@@ -1717,9 +1712,8 @@ public class DIBuilder {
                 "E2$" + GenerateCustomTypeName(enumTy, needPkgPrefix: false)
             }
             let boxOffset = if (boxTy.isSome()) { 64u64 } else { 0u64 }
-            let fwdDecl = createStructType(defPackage, name, diFile, position.GetBeginPos().line,
-                64u64 + 64u64 + boxOffset, 0u32, FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(),
-                0u32, LLVMNullMetadata(), "$" + boxOffset.toString() + "_" + enumTy.ToString())
+            let fwdDecl = createForwardStruct(defPackage, name, diFile, position.GetBeginPos().line,
+            64u64 + 64u64 + boxOffset, 0u32, FlagZero, "$" + boxOffset.toString() + "_" + enumTy.ToString())
             if (let Some(box) <- boxTy) {
                 typeCache[box.objectId] = fwdDecl
             } else {
@@ -1753,10 +1747,8 @@ public class DIBuilder {
             "E2$" + GenerateCustomTypeName(enumTy, needPkgPrefix: false)
         }
         let boxOffset = if (boxTy.isSome()) { 64u64 } else { 0u64 }
-        let fwdDecl = createStructType(defPackage, name, diFile, position.GetBeginPos().line,
-            totalSize + boxOffset, unsafe { LLVMDITypeGetAlignInBits(argType) }, FlagZero, LLVMNullMetadata(),
-            ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(),
-            "$" + boxOffset.toString() + "_" + enumTy.ToString())
+        let fwdDecl = createForwardStruct(defPackage, name, diFile, position.GetBeginPos().line,
+            totalSize + boxOffset, unsafe { LLVMDITypeGetAlignInBits(argType) }, FlagZero, "$" + boxOffset.toString() + "_" + enumTy.ToString())
         let align = cgMod.GetABITypeAlignment(cgType)
         let ctorCodeGenType = unsafe { LLVMStructGetTypeAtIndex(cgType, 0u32) }
         enumMembers.add(createMemberType(fwdDecl, "constructor", diFile, 0u32,
@@ -1795,9 +1787,8 @@ public class DIBuilder {
             ctorIndex++
         }
         maxSize += 64u64
-        let fwdDecl = createStructType(defPackage, "E1$" + name, diFile, position.GetBeginPos().line,
-            maxSize, 0u32, FlagVirtual, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32,
-            LLVMNullMetadata(), "$" + enumTy.ToString())
+        let fwdDecl = createForwardStruct(defPackage, "E1$" + name, diFile, position.GetBeginPos().line,
+            maxSize, 0u32, FlagVirtual, "$" + enumTy.ToString())
         if (let Some(box) <- boxTy) {
             typeCache[box.objectId] = fwdDecl
         } else {
@@ -1824,8 +1815,8 @@ public class DIBuilder {
         let diFile = GetOrCreateFile(position)
         let name = GenerateCustomTypeName(enumTy, needPkgPrefix: false)
         let ctorName = name + "_ctor_" + ctorIndex.toString()
-        var enumClassType = createStructType(subEnumType, ctorName, diFile, 0u32, totalSize, 0u32,
-            FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), "")
+        var enumClassType = createForwardStruct(subEnumType, ctorName, diFile, 0u32,
+            totalSize, 0u32, FlagZero, "")
         enumClassElements.add(createMemberType(enumClassType, "constructor", diFile, 0u32, 32u64, 0u32,
             64u64, FlagZero, GetOrCreateEnumCtorType(enumTy)))
         let align = cgMod.GetABITypeAlignment(enumCtorLayoutType)
@@ -1884,6 +1875,15 @@ public class DIBuilder {
             }
         }
         return result
+    }
+
+    // Recursive member emission needs a stable node before its member array is complete.
+    // A uniqued empty structure can be shared by two in-flight definitions with the
+    // same name and layout; completing one must not replace the other's members.
+    private func createForwardStruct(scope: LLVMMetadataRef, name: String, file: LLVMMetadataRef,
+        lineNo: UInt32, sizeInBits: UInt64, alignInBits: UInt32, flags: UInt32, identifier: String): LLVMMetadataRef {
+        return replaceWithDistinct(createReplaceableCompositeType(DW_TAG_structure_type, name, scope,
+            file, lineNo, 0u32, sizeInBits, alignInBits, flags, identifier))
     }
 
     private func createStructType(scope: LLVMMetadataRef, name: String, file: LLVMMetadataRef,
