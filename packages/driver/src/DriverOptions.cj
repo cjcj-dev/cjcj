@@ -28,6 +28,7 @@ public class DriverOptions <: GlobalOptions {
     public var incrementalCompileNoChange: Bool = false
     let wasmRootContractInputs = HashSet<String>()
     var wasmReturnBases = false
+    var disableWasmReturnBases = false
     var exportWasmReturnBases = false
     let wasmReturnBaseExports = ArrayList<String>()
     var wasmReturnBaseImport: String = ""

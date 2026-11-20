@@ -1,6 +1,7 @@
 package cjcj::driver
 
 import std.collection.*
+import std.process.executeWithOutput
 import cjcj::option.WASM_ROOT_CONTRACT_VERSION
 import cjcj::utils.CJC_ASSERT_WITH_MSG
 
@@ -14,7 +15,7 @@ public class CJNATIVEBackend <: Backend {
 
     protected override func GenerateToolChain(): Bool {
         if (driverOptions.target.os == OSType.WASI) {
-            TC = Wasm_CJNATIVE(driver, driverOptions, backendCmds)
+            TC = Wasm_CJNATIVE(driver, driverOptions, backendCmds, SupportsWasmReturnBases)
             return true
         }
         if (driverOptions.target.os == OSType.LINUX) {
@@ -95,6 +96,21 @@ public class CJNATIVEBackend <: Backend {
         let tool = Tool(toolPath, ToolType.BACKEND, driverOptions.environment.allVariables)
         tool.SetLdLibraryPath(FileUtil.JoinPath(FileUtil.GetDirPath(toolPath), "../lib"))
         return tool
+    }
+
+    private func SupportsWasmReturnBases(option: String): Bool {
+        // Independent compiler/LLVM installations need not carry the same
+        // opt features. Probe the exact opt and environment used for lowering.
+        let opt = GenerateCJNativeBaseTool(optPath)
+        try {
+            let (rc, stdout, _) = executeWithOutput(optPath, ["--help-hidden"],
+                environment: opt.GetProcessEnvironment())
+            return rc == 0 && String.fromUtf8(stdout).split("\n").any({ line =>
+                line.trimAscii().startsWith(option + "=")
+            })
+        } catch (e: Exception) {
+            return false
+        }
     }
 
     private func GetFrontendOutputs(): ArrayList<TempFileInfo> {

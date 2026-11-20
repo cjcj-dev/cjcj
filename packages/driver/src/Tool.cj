@@ -240,6 +240,8 @@ public class Tool {
     public let toolType: ToolType
     public let name: String
     public let environmentVars: HashMap<String, String>
+    var mayRetryWithoutWasmReturnBases = false
+    var wasmReturnBaseLinkMismatch = false
     private let args: ArrayList<String> = ArrayList<String>()
     private let argKinds: ArrayList<ArgKind> = ArrayList<ArgKind>()
     private let deferredArgMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
@@ -573,7 +575,11 @@ public class Tool {
         if (name == "PublishWasmReturnBaseLink") {
             let full = GetFullArgs()
             if (!VerifyWasmReturnBaseLink(full[1], full[2], full[3], full[4])) {
-                eprintln("error: final wasm link did not select the proven return-base definitions")
+                if (mayRetryWithoutWasmReturnBases) {
+                    wasmReturnBaseLinkMismatch = true
+                } else {
+                    eprintln("error: final wasm link could not confirm the proven return-base definitions")
+                }
                 return false
             }
             return CopyFile(full[5], full[6])
@@ -602,13 +608,24 @@ public class Tool {
 
     @When[os != "Windows"]
     public func BuildEnvironmentVector(): Array<String> {
+        let variables = GetProcessEnvironment()
         let environment = ArrayList<String>()
+        for ((key, value) in variables) { environment.add(key + "=" + value) }
+        return environment.toArray()
+    }
+
+    @When[os == "Windows"]
+    func GetProcessEnvironment(): HashMap<String, String> { environmentVars }
+
+    @When[os != "Windows"]
+    func GetProcessEnvironment(): HashMap<String, String> {
+        let environment = HashMap<String, String>()
         if (!ldLibraryPath.isEmpty()) {
             let inherited = environmentVars.get(DYNAMIC_LIBRARY_PATH_ENV) ?? ""
             let value = if (inherited.isEmpty()) { ldLibraryPath } else { ldLibraryPath + ":" + inherited }
-            environment.add(DYNAMIC_LIBRARY_PATH_ENV + "=" + value)
+            environment[DYNAMIC_LIBRARY_PATH_ENV] = value
         } else if (let Some(value) <- environmentVars.get(DYNAMIC_LIBRARY_PATH_ENV)) {
-            environment.add(DYNAMIC_LIBRARY_PATH_ENV + "=" + value)
+            environment[DYNAMIC_LIBRARY_PATH_ENV] = value
         }
         for ((key, value) in environmentVars) {
             if (IsBlockedEnvironmentVariable(key)) {
@@ -617,9 +634,9 @@ public class Tool {
             if (key == DYNAMIC_LIBRARY_PATH_ENV) {
                 continue
             }
-            environment.add(key + "=" + value)
+            environment[key] = value
         }
-        return environment.toArray()
+        return environment
     }
 
 }

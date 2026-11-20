@@ -12,9 +12,12 @@ import std.fs.*
 // dynamic library output.
 public class Wasm_CJNATIVE <: Gnu {
     private var selectedArchive: Option<(String, String, String)> = None
+    private let supportsReturnBases: (String) -> Bool
 
-    public init(driver: Driver, driverOptions: DriverOptions, backendCmds: ArrayList<ToolBatch>) {
+    public init(driver: Driver, driverOptions: DriverOptions, backendCmds: ArrayList<ToolBatch>,
+        supportsReturnBases: (String) -> Bool) {
         super(driver, driverOptions, backendCmds)
+        this.supportsReturnBases = supportsReturnBases
     }
 
     private func WasiSysrootLibPath(): String {
@@ -51,28 +54,44 @@ public class Wasm_CJNATIVE <: Gnu {
             eprintln("error: the wasm32-wasi target needs the pinned WASI sysroot in " + WasiSysrootLibPath())
             return false
         }
-        PrepareWasmReturnBases()
-        return true
+        return PrepareWasmReturnBases()
     }
 
-    private func PrepareWasmReturnBases(): Unit {
+    private func PrepareWasmReturnBases(): Bool {
+        if (driverOptions.disableWasmReturnBases) { return true }
+        let producing = driverOptions.outputMode == OutputMode.STATIC_LIB && driverOptions.inputLibraryOrder.isEmpty()
+        let linking = driverOptions.outputMode == OutputMode.EXECUTABLE
+        let hasLinkOptions = !driverOptions.inputLinkOptionOrder.isEmpty() ||
+            !driverOptions.inputLinkOptionsOrder.isEmpty()
+        if (hasLinkOptions && (producing || linking)) {
+            if (driverOptions.wasmReturnBases) {
+                eprintln("error: --wasm-return-bases cannot verify the selected member with --link-option or --link-options")
+                return false
+            }
+            return true
+        }
         // The cached-object path can skip opt, and no library selection is part
-        // of its key. Keep both sides of this opt-in out of that cache.
-        if (!driverOptions.wasmReturnBases || driverOptions.enIncrementalCompilation ||
+        // of its key. Keep both sides of the proof out of that cache.
+        if (driverOptions.enIncrementalCompilation ||
             driverOptions.incrementalCompileNoChange || !driverOptions.inputObjs.isEmpty() ||
-            !driverOptions.bcInputFiles.isEmpty() || !driverOptions.inputLinkOptionOrder.isEmpty() ||
-            !driverOptions.inputLinkOptionsOrder.isEmpty() || !driverOptions.optArg.isEmpty() ||
+            !driverOptions.bcInputFiles.isEmpty() || !driverOptions.optArg.isEmpty() ||
             !driverOptions.optPassOptions.isEmpty() || driverOptions.enableCoverage || driverOptions.EnableAsan() ||
             driverOptions.EnableTsan() || driverOptions.EnableHwAsan() || !driverOptions.llcArg.isEmpty() ||
             driverOptions.IsObfuscationEnabled() || objcopyPath.isEmpty()) {
-            return
+            return ReturnBasesUnavailable("requires a fresh compilation with the standard opt and llc pipeline")
         }
-        if (driverOptions.outputMode == OutputMode.STATIC_LIB && driverOptions.inputLibraryOrder.isEmpty()) {
-            driverOptions.exportWasmReturnBases = true
+        if (producing) {
+            driverOptions.exportWasmReturnBases = supportsReturnBases("--cj-wasm-export-return-bases")
+            if (!driverOptions.exportWasmReturnBases) {
+                return ReturnBasesUnavailable("the installed opt cannot export records")
+            }
+            return true
         }
-        if (driverOptions.outputMode != OutputMode.EXECUTABLE || driverOptions.inputLibraryOrder.size != 1) { return }
+        if (!linking || driverOptions.inputLibraryOrder.size != 1) {
+            return ReturnBasesUnavailable("requires a static library producer or an executable with one -l dependency")
+        }
         let library = driverOptions.inputLibraryOrder[0].value
-        if (!IsWasmReturnBaseName(library)) { return }
+        if (!IsWasmReturnBaseName(library)) { return ReturnBasesUnavailable("unsupported library name") }
         let dirs = ArrayList<String>()
         for (dir in driverOptions.librarySearchPaths) { dirs.add(dir) }
         dirs.add(CangjieLibPath())
@@ -83,10 +102,15 @@ public class Wasm_CJNATIVE <: Gnu {
             if (!FileUtil.FileExist(archive)) { continue }
             // lld/wasm/Driver.cpp addLibrary stops at the first match, and
             // addFile consults neighboring .imports. Do not bypass either.
-            if (FileUtil.FileExist(base + ".imports")) { return }
+            if (FileUtil.FileExist(base + ".imports")) {
+                return ReturnBasesUnavailable("the selected archive has a neighboring .imports file")
+            }
             try {
                 let bytes = File.readFrom(archive)
                 if (let Some(member) <- ReadWasmReturnBaseMember(bytes)) {
+                    if (!supportsReturnBases("--cj-wasm-import-return-bases")) {
+                        return ReturnBasesUnavailable("the installed opt cannot import records")
+                    }
                     let tm = TempFileManager.Instance()
                     let snapshot = tm.CreateUniqueTempFileInfo(TempFileKind.O_STATICLIB, stem: "selected-input").filePath
                     let records = tm.CreateUniqueTempFileInfo(TempFileKind.T_OBJ, stem: "import-return-bases").filePath
@@ -94,13 +118,22 @@ public class Wasm_CJNATIVE <: Gnu {
                         File.writeTo(snapshot, bytes)
                         selectedArchive = Some(("-l" + library, snapshot, member.name))
                         driverOptions.wasmReturnBaseImport = records
+                        return true
                     }
                 }
             } catch (e: Exception) {
                 // No proof was passed to opt; use the regular link for unknown input.
             }
-            return
+            return ReturnBasesUnavailable("the first matching archive, " + archive + ", supplied no usable records")
         }
+        return ReturnBasesUnavailable("no matching archive for -l" + library)
+    }
+
+    private func ReturnBasesUnavailable(reason: String): Bool {
+        if (driverOptions.wasmReturnBases) {
+            eprintln("warning: --wasm-return-bases not applied: " + reason)
+        }
+        return true
     }
 
     protected override func GenerateArchiveTool(objFiles: ArrayList<TempFileInfo>): Bool {
@@ -149,6 +182,7 @@ public class Wasm_CJNATIVE <: Gnu {
             tool.AppendArg("--Map=" + map)
             let verify = Tool("PublishWasmReturnBaseLink", ToolType.INTERNAL_IMPLEMENTED,
                 driverOptions.environment.allVariables)
+            verify.mayRetryWithoutWasmReturnBases = !driverOptions.wasmReturnBases
             verify.AppendArgs([map, snapshot, member, driverOptions.wasmReturnBaseImport, linkOutput, output])
             tool.successors.add(verify)
         }
