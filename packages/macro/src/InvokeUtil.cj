@@ -634,10 +634,22 @@ private func HasCurrentMacroRuntimeBinding(path: String): Bool { return true }
 
 // Cangjie images register runtime metadata. Pair the runtime loader's path
 // handle with FindCJSymbol/UnloadCJLibrary, rather than bypassing it with dlclose.
-public func OpenMacroLibrary(path: String): RuntimeHandle {
+public func OpenMacroLibrary(selectedPath: String): RuntimeHandle {
+    // A selected Linux file may still be a bare name (the default cwd hit).
+    // Use its absolute path for both the binding check and the runtime loader,
+    // which would otherwise search for the bare name again.
+    @When[os == "Linux"]
+    let resolvedPath = FileUtil.GetAbsPath(selectedPath)
+    @When[os != "Linux"]
+    let resolvedPath = Some(selectedPath)
+    if (resolvedPath.isNone()) {
+        Errorln("could not get realpath of library: " + selectedPath)
+        return RuntimeHandle(selectedPath)
+    }
+    let path = resolvedPath.getOrThrow()
     if (!HasCurrentMacroRuntimeBinding(path)) {
-        Errorln("macro runtime binding is missing or belongs to another SDK; rebuild or relink macro with the current SDK: " + path)
-        return RuntimeHandle(path)
+        Errorln("macro runtime binding is missing or belongs to another SDK; rebuild or relink macro with the current SDK: " + selectedPath)
+        return RuntimeHandle(selectedPath)
     }
     // The runtime owns one entry per image. Repeated calls into the same macro
     // package reuse that entry rather than acquiring unmatched native references.
