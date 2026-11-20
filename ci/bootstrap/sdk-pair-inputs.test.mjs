@@ -77,8 +77,9 @@ test('selected AST explicit reuse needs the object dependencies and the selected
  const obj='libs/std/ast/native/CMakeFiles/cangjie-std-astFFI-objs.dir/ast_api.cpp.o';
  const put=async(file,text)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,text);};
  const run=(cmd,args)=>{const r=spawnSync(cmd,args,{cwd:dir,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout;};
- for(const name of ['cangjie/AST/Node.h','cangjie/CHIR/IR/AttributeInfo.h'])await put(path.join(include,name),'#pragma once\n');
- await put(path.join(dir,'ast_api.cpp'),'#include <cangjie/AST/Node.h>\n#include <cangjie/CHIR/IR/AttributeInfo.h>\nint bridge(){return 1;}\n');
+ await put(path.join(include,'cangjie/AST/Node.h'),'struct Node { int id; };\n');
+ await put(path.join(include,'cangjie/CHIR/IR/AttributeInfo.h'),'struct AttributeInfo { unsigned long bits; };\n');
+ await put(path.join(dir,'ast_api.cpp'),'#include <cangjie/AST/Node.h>\n#include <cangjie/CHIR/IR/AttributeInfo.h>\nint bridge(){return sizeof(Node)+sizeof(AttributeInfo);}\n');
  await put(path.join(dir,'support.cpp'),'int support(){return 2;}\n');
  await put(path.join(dir,'build.ninja'),[
    'rule cc','  command = c++ -I'+include+' -MMD -MF $out.d -c $in -o $out','  depfile = $out.d','  deps = gcc',
