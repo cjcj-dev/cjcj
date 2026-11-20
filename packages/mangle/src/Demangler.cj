@@ -200,6 +200,7 @@ class DemangleInfo {
     var args: String = ""
     var genericConstraints: String = ""
     var genericTypes: String = ""
+    var modeSuffix: String = ""
     var functionParameterTypes: String = ""
     var demangled: String = ""
     var isPrivateDeclaration: Bool = false
@@ -251,6 +252,7 @@ class DemangleInfo {
                 fullDemangledName += GetGenericTypes()
                 fullDemangledName += GetArgTypesName(argsNum)
                 fullDemangledName += GetGenericConstraints()
+                fullDemangledName += modeSuffix
         }
         return fullDemangledName
     }
@@ -307,7 +309,15 @@ class DemangleInfo {
     }
 
     private func GetFunctionName(): String {
-        return GetArgTypesName() + " -> " + GetReturnType()
+        let name = GetArgTypesName() + " -> " + GetReturnType()
+        // Differentiate the callable's own mode from its return type's mode.
+        return if (modeSuffix.isEmpty()) { name } else { "(" + name + ")" + modeSuffix }
+    }
+
+    func TakeModeSuffix(): String {
+        let suffix = modeSuffix
+        modeSuffix = ""
+        return suffix
     }
 
     func GetIdentifier(): String {
@@ -613,7 +623,8 @@ class Demangler {
             if (!IsQualifiedType()) {
                 return Reject("invalid mangling name")
             }
-            return DemangleNextUnit("invalid mangling name")
+            let di = DemangleTypedUnit()
+            return if (isValid) { di } else { Reject() }
         }
         if (mangledName.isEmpty()) {
             return Reject("invalid mangling name")
@@ -846,7 +857,7 @@ class Demangler {
             if (IsMaybeDefaultFuncParamFunction()) {
                 break
             }
-            let curDi = DemangleNextUnit("invalid argument type")
+            let curDi = DemangleTypedUnit()
             if (!isValid) {
                 return ""
             }
@@ -984,7 +995,7 @@ class Demangler {
 
     private func DemangleCFuncType(): DemangleInfo {
         SkipString(MANGLE_C_FUNCTY_PREFIX)
-        let di = DemangleInfo(DemangleNextUnit().GetFullName(scopeResolution), DemanglerTypeKind.FUNCTION)
+        let di = DemangleInfo(DemangleTypedUnit().GetFullName(scopeResolution), DemanglerTypeKind.FUNCTION)
         di.args = DemangleArgTypes(ARGS_DELIMITER)
         SkipChar(b'E')
         return di
@@ -992,7 +1003,7 @@ class Demangler {
 
     private func DemangleFunction(): DemangleInfo {
         SkipString(MANGLE_FUNCTY_PREFIX)
-        let di = DemangleInfo(DemangleNextUnit().GetFullName(scopeResolution), DemanglerTypeKind.FUNCTION)
+        let di = DemangleInfo(DemangleTypedUnit().GetFullName(scopeResolution), DemanglerTypeKind.FUNCTION)
         di.args = DemangleArgTypes(ARGS_DELIMITER)
         SkipChar(b'E')
         return di
@@ -1016,7 +1027,10 @@ class Demangler {
             di.genericConstraints += "[]"
             dim--
         }
-        di.args = DemangleNextUnit().GetFullName(scopeResolution)
+        let elem = DemangleTypedUnit()
+        // The container body has no terminator; the following mode belongs to it.
+        di.modeSuffix = elem.TakeModeSuffix()
+        di.args = elem.GetFullName(scopeResolution)
         return di
     }
 
@@ -1024,15 +1038,21 @@ class Demangler {
         let di = DemangleInfo(MANGLE_VARRAY_STR, DemanglerTypeKind.TUPLE)
         SkipChar(b'V')
         let num = DemangleManglingNumber()
-        di.genericTypes = DemangleGenericTypes().GetFullName(scopeResolution, num)
+        let elem = DemangleGenericTypes(relocateMode: true)
+        di.modeSuffix = elem.TakeModeSuffix()
+        di.genericTypes = elem.GetFullName(scopeResolution, num)
         return di
     }
 
     private func DemangleCPointer(): DemangleInfo {
         let di = DemangleInfo(MANGLE_PTR_STR, DemanglerTypeKind.CPOINTER)
         SkipChar(b'P')
-        let generic = DemangleType().GetFullName(scopeResolution)
-        di.genericTypes = genericTypefilter(generic)
+        if (!IsQualifiedType()) { return Reject("invalid pointee type") }
+        let elem = DemangleTypedUnit()
+        di.modeSuffix = elem.TakeModeSuffix()
+        let generic = DemangleInfo("", DemanglerTypeKind.GENERIC_TYPES)
+        generic.args = elem.GetFullName(scopeResolution)
+        di.genericTypes = genericTypefilter(generic.GetFullName(scopeResolution))
         return di
     }
 
@@ -1135,29 +1155,17 @@ class Demangler {
         return DemangleInfo(name, DemanglerTypeKind.GENERIC_TYPES, isValid)
     }
 
-    private func DemangleType(): DemangleInfo {
-        let di = DemangleInfo("", DemanglerTypeKind.GENERIC_TYPES)
-        if (IsQualifiedType()) {
-            let curDi = DemangleNextUnit()
-            if (isValid) {
-                di.args = curDi.GetFullName(scopeResolution)
-                return di
-            }
-        }
-        isValid = false
-        return di
-    }
-
-    private func DemangleGenericTypes(): DemangleInfo {
+    private func DemangleGenericTypes(relocateMode!: Bool = false): DemangleInfo {
         let di = DemangleInfo("", DemanglerTypeKind.GENERIC_TYPES)
         var firstIteration = true
         var argTypesFullName = ""
         while (IsNotEndOfMangledName() && !IsCurrentCharDigit(mangledName[currentIndex]) &&
             !IsFunction(mangledName[currentIndex]) && !IsOperatorName()) {
-            let curDi = DemangleNextUnit()
+            let curDi = DemangleTypedUnit()
             if (!isValid) {
                 break
             }
+            if (relocateMode) { di.modeSuffix += curDi.TakeModeSuffix() }
             if (!firstIteration) {
                 argTypesFullName += ARGS_DELIMITER_TYPE
             }
@@ -1172,11 +1180,15 @@ class Demangler {
         let di = DemangleInfo("", DemanglerTypeKind.FUNCTION_PARAMETER_TYPES)
         var firstIteration = true
         var argTypesFullName = ""
+        if (PeekChar() == Some(b'W')) {
+            argTypesFullName = "this" + DemangleMode()
+            firstIteration = false
+        }
         if (IsNotEndOfMangledName() && mangledName[currentIndex] == b'v') {
             currentIndex += MANGLE_CHAR_LEN
         } else {
             while (IsNotEndOfMangledName() && !IsCurrentCharDigit(mangledName[currentIndex])) {
-                let curDi = DemangleNextUnit()
+                let curDi = DemangleTypedUnit()
                 if (!isValid) {
                     break
                 }
@@ -1188,6 +1200,29 @@ class Demangler {
             }
         }
         di.args = argTypesFullName
+        return di
+    }
+
+    // The mode follows a complete type body (Q) or immediately follows H for
+    // a function declaration's receiver (W). Only the local axis is emitted.
+    private func DemangleMode(): String {
+        currentIndex++
+        if (currentIndex + 1 < mangledName.size && mangledName[currentIndex + 1] == b'E') {
+            let degree = mangledName[currentIndex]
+            if (degree == b'L' || degree == b'l') {
+                currentIndex += 2
+                return if (degree == b'L') { " @ local!" } else { " @ local?" }
+            }
+        }
+        let _ = Reject("invalid or unterminated modal encoding")
+        return ""
+    }
+
+    private func DemangleTypedUnit(): DemangleInfo {
+        let di = DemangleNextUnit("invalid type")
+        if (isValid && PeekChar() == Some(b'Q')) {
+            di.modeSuffix += DemangleMode()
+        }
         return di
     }
 

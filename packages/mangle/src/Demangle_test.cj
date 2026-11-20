@@ -51,4 +51,57 @@ public class DemangleTest {
         control.args = "a,b"
         @Expect(control.GetFullName("::"), ", C <: a &b")
     }
+
+    @TestCase
+    public func ModalFunctionAndReturnHaveDistinctNames(): Unit {
+        for ((symbol, expected) in [
+            ("F0ilE", "(Int64) -> Int32"),
+            ("F0ilEQlE", "((Int64) -> Int32) @ local?"),
+            ("F0iQlElE", "(Int64) -> Int32 @ local?"),
+            ("F0ilQLEE", "(Int64 @ local!) -> Int32")
+        ]) {
+            let result = DemangleType(symbol)
+            @Expect(result.IsValid(), true)
+            @Expect(result.GetFullName(), expected)
+        }
+    }
+
+    @TestCase
+    public func ContainerModeDoesNotChangeTheElementType(): Unit {
+        for ((symbol, expected) in [
+            ("V3_F0ilE", "VArray<(Int64) -> Int32,$4>"),
+            ("V3_F0ilEQlE", "VArray<(Int64) -> Int32,$4> @ local?"),
+            ("PF0ilEQlE", "CPointer<(Int64) -> Int32> @ local?"),
+            ("A0_F0lQlEiEQLE", "RawArray<(Int32) -> Int64 @ local?>[] @ local!"),
+            ("A0_A1_lQLE", "RawArray<RawArray<Int64>[][]>[] @ local!"),
+            ("T1_lEQlE", "Tuple<Int64> @ local?")
+        ]) {
+            let result = DemangleType(symbol)
+            @Expect(result.IsValid(), true)
+            @Expect(result.GetFullName(), expected)
+        }
+    }
+
+    @TestCase
+    public func ReceiverAndParameterModesAppearInPlace(): Unit {
+        for ((symbol, expected) in [
+            ("_CN7default3Box2pApgHv", "Box.pA::get()"),
+            ("_CN7default3Box2pApgHWLEv", "Box.pA::get(this @ local!)"),
+            ("_CN7default3Box2pApsHWlElQlE", "Box.pA::set(this @ local?, Int64 @ local?)"),
+            ("_CN7default14withLocalParamHlQlElQLE", "withLocalParam(Int64 @ local?, Int64 @ local!)")
+        ]) {
+            let result = Demangle(symbol, ".")
+            @Expect(result.IsValid(), true)
+            @Expect(result.GetPkgName(), "default")
+            @Expect(result.GetFullName(), expected)
+        }
+    }
+
+    @TestCase
+    public func InvalidModePayloadDoesNotDemangleAsPlainType(): Unit {
+        for (symbol in ["F0ilEQxE", "F0ilEQl", "F0ilEQE", "F0iQllElE"]) {
+            @Expect(DemangleType(symbol).IsValid(), false)
+        }
+        @Expect(Demangle("_CN7default3Box2pApgHWuEv").IsValid(), false)
+    }
 }
