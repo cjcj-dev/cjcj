@@ -108,6 +108,22 @@ public func GetFuncTypeWithoutThisPtrFromAutoEnvBaseType(autoEnvBaseType: ClassT
     return (paramTypes, typeArgs[typeArgs.size - 1])
 }
 
+// Generic AutoEnv arguments carry the data types. Their call-site modes are
+// declared on the virtual method slots (after the implicit receiver).
+func GetClosureCallType(base: ClassType, builder: CHIRBuilder): FuncType {
+    let (params, ret) = GetFuncTypeWithoutThisPtrFromAutoEnvBaseType(base)
+    if (base.GetGenericArgs().isEmpty()) {
+        return builder.context.GetFuncTy(params, ret, modal: base.GetModalInfo())
+    }
+    let (_, method) = GetFuncTypeFromAutoEnvBaseDef(base.GetClassDef())
+    CJC_ASSERT(method.GetNumOfParams() == params.size + 1)
+    for (i in 0..params.size) {
+        params[i] = builder.WithModal(params[i], method.GetParamType(i + 1).StripAllRefs().GetModalInfo())
+    }
+    let result = builder.WithModal(ret, method.GetReturnType().StripAllRefs().GetModalInfo())
+    return builder.context.GetFuncTy(params, result, modal: base.GetModalInfo())
+}
+
 public func GetBuiltinTypeWithVTable(ty: BuiltinType, builder: CHIRBuilder): BuiltinType {
     if (ty.IsCPointer()) {
         return builder.context.GetCPointerTy(builder.context.GetUnitTy())

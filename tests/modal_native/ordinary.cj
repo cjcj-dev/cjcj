@@ -17,6 +17,14 @@ func exercise(n: Int64): Int64 {
     return c.read()
 }
 
+func recursiveDefault(seed: Int64): Int64 {
+    func sum(n!: Int64 = 3): Int64 {
+        if (n == 0) { return seed }
+        return n + sum(n: n - 1)
+    }
+    return sum()
+}
+
 main(): Int64 {
     let before = getAllocatedLocalObjectSize()
     let answer = exercise(73)
@@ -25,6 +33,7 @@ main(): Int64 {
     if (answer != 73) { return 21 }
     if (activeBytes != before) { return 22 }
     if (after != before) { return 23 }
+    if (recursiveDefault(7) != 13 || getAllocatedLocalObjectSize() != before) { return 25 }
     // Exercise the SDK's installed std.ast and its native parser after observing the ordinary allocation.
     let expr = parseExpr(Tokens().append(Token(TokenKind.INTEGER_LITERAL, "73")))
     if (let Some(lit) <- (expr as LitConstExpr)) {

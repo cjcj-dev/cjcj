@@ -1782,8 +1782,7 @@ public class ClosureConversion {
     private func GetFuncTypeWithoutThisPtrFromAutoEnvType(autoEnvType: ClassType): FuncType {
         CJC_ASSERT(autoEnvType.IsAutoEnv())
         if (autoEnvType.IsAutoEnvBase()) {
-            let (paramTypes, retType) = GetFuncTypeWithoutThisPtrFromAutoEnvBaseType(autoEnvType)
-            return builder.context.GetFuncTy(paramTypes, retType, modal: autoEnvType.GetModalInfo())
+            return GetClosureCallType(autoEnvType, builder)
         }
         let parent = autoEnvType.GetSuperClassTy(builder: builder).getOrThrow()
         return GetFuncTypeWithoutThisPtrFromAutoEnvType(ClosureClassView(parent, autoEnvType))
@@ -2206,7 +2205,7 @@ public class ClosureConversion {
         for (idx in index) {
             let op = expr.GetOperand(idx)
             let opClassTy = (op.GetType().getOrThrow().StripAllRefs() as ClassType).getOrThrow()
-            let parent = opClassTy.GetClassDef().GetSuperClassTy().getOrThrow()
+            let parent = opClassTy.GetSuperClassTy(builder: builder).getOrThrow()
             let expectedType = builder.context.GetRefTy(ClosureClassView(parent, opClassTy))
             let typecast = builder.CreateClassStaticCast(expectedType, op, parentBlock)
             typecast.MoveBefore(expr)
@@ -2371,7 +2370,8 @@ public class ClosureConversion {
         if (let Some(found) <- instAutoEnvWrapperDefs.get(wrapperName)) {
             return found
         }
-        let wrapperClassDef = CreateAutoEnvWrapper(wrapperName, instAutoEnvBaseType)
+        // The cache is keyed by the definition; the first use must not color its superclass.
+        let wrapperClassDef = CreateAutoEnvWrapper(wrapperName, RequireClassType(instAutoEnvBaseDef))
         CreateMemberVarInAutoEnvWrapper(wrapperClassDef)
         let genericFunc = CreateGenericMethodInAutoEnvWrapper(wrapperClassDef)
         CreateInstMethodInAutoEnvWrapper(wrapperClassDef, genericFunc)
@@ -2718,10 +2718,20 @@ public class ClosureConversion {
         let paramType = param.GetType().getOrThrow().StripAllRefs()
         let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper((paramType as ClassType).getOrThrow())
         let parentBlock = fn.GetBody().getOrThrow().GetEntryBlock().getOrThrow()
-        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let autoEnvWrapperType = ClosureClassView(RequireClassType(autoEnvWrapperDef), paramType)
         let allocate = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
             parentBlock)
-        parentBlock.InsertExprIntoHead(allocate)
+        // A parameter has one wrapper shared by all its users. Keep it in the entry
+        // prologue, inside this function's region if SetMemRegion opened one.
+        var opening: Option<Expression> = None
+        if (autoEnvWrapperType.IsLocalRegion()) {
+            for (expr in parentBlock.GetExpressions()) {
+                if (expr.GetExprKind() == ExprKind.END_REGION) { break }
+                if (expr.GetExprKind() == ExprKind.START_REGION) { opening = expr; break }
+            }
+        }
+        if (let Some(start) <- opening) { allocate.MoveAfter(start) }
+        else { parentBlock.InsertExprIntoHead(allocate) }
         let path = ArrayList<UInt64>()
         path.add(0u64)
         let storeMemberVar = builder.CreateStoreElementRef(param, RequireResult(allocate), path, parentBlock)
