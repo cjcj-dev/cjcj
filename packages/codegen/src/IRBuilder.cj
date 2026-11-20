@@ -6480,7 +6480,7 @@ public class IRBuilder2 <: Resource {
 
     public func CreateTypeInfo(chirTy: Type, typeInfoProviders: HashMap<Int64, (IRBuilder2) -> LLVMValueRef>,
         canChangeBB!: Bool = true): LLVMValueRef {
-        let baseTy = chirTy.StripAllRefs()
+        let baseTy = chirTy.StripAllRefs().GetDataType(GetCGContext().GetCHIRBuilder())
         if (baseTy.IsThis()) {
             let currentFunction = cgFunction ?? throw IllegalStateException("ThisType requires current CGFunction")
             let cgFuncType = currentFunction.GetCGFunctionType() ??

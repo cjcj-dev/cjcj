@@ -67,6 +67,11 @@ public open class Type <: Hashable & Equatable<Type> {
         this.modal = modal
     }
 
+    // Runtime TypeInfo describes the data, including the data carried by a box.
+    public func GetDataType(builder: CHIRBuilder): Type {
+        return builder.WithModal(this, ModalInfo())
+    }
+
     public func IsModal(): Bool {
         return modal.local != CHIRMode.NONE
     }

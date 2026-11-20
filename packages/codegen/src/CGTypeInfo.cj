@@ -2,7 +2,6 @@ package cjcj::codegen
 
 import std.collection.*
 import cjcj::basic.Linkage
-import cjcj::chir.ModalInfo
 import cjcj::chir.TypeKindName
 import cjcj::chir.Attribute
 import cjcj::chir.BooleanType
@@ -888,7 +887,7 @@ public func CreateTypeInfoForTemplateCallback(cgMod: CGModule, irBuilder: IRBuil
     plainRuntimeTypeInfoArrayGEP!: Bool = false): LLVMValueRef {
     let baseTy = chirTy.StripAllRefs()
     if (let Some(genericTy) <- (baseTy as GenericType)) {
-        let dataTy = (cgMod.GetCGContext().GetCHIRBuilder().WithModal(genericTy, ModalInfo()) as GenericType).getOrThrow()
+        let dataTy = (genericTy.GetDataType(cgMod.GetCGContext().GetCHIRBuilder()) as GenericType).getOrThrow()
         if (let Some(genericIdx) <- FindGenericParamIndex(dataTy, genericParams)) {
             return GetRuntimeTypeInfoFromArray(irBuilder, runtimeTypeInfoArray, genericIdx, genericTy,
                 plainRuntimeTypeInfoArrayGEP: plainRuntimeTypeInfoArrayGEP)
