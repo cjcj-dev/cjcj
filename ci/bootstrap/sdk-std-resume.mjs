@@ -15,6 +15,10 @@ export function stdBuildType(value = 'relwithdebinfo') {
   if (!['debug','release','relwithdebinfo'].includes(value)) throw new Error('STD_BUILD_TYPE '+value);
   return value;
 }
+export function selectedStdAst({ast,compiler}) {
+  if (!ast?.install || (!ast.astInstallation && ast.install===compiler?.install)) return undefined;
+  return {include:path.join(ast.install,'include'),library:path.join(ast.install,ast.astInstallation?.library??'libcangjie-ast-support.a')};
+}
 export async function checkStdAstOutput({source, output, platform}) {
   const tuple=sdkPlatform(platform).tuple, archive='libcangjie-std-astFFI.a';
   const built=await fs.readFile(path.join(source,'stdlib/build/build',archive));

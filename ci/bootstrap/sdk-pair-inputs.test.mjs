@@ -68,3 +68,36 @@ test('explicit final std reuse must retain the actual producer build type',async
   else await assert.rejects(installedFinalStd({install,commands},input),/FINAL_STD_REUSE_BUILD_TYPE/);
  }
 });
+
+test('selected AST explicit reuse needs the object dependencies and the selected archive',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'final-pair-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const src=path.join(root,'R/stdlib'),dir=path.join(src,'build/build'),install=path.join(root,'std');
+ const ast=path.join(root,'ast'),include=path.join(ast,'include'),library=path.join(ast,'libcangjie-ast-support.a');
+ const tuple='linux_x86_64_cjnative',archive='libcangjie-std-astFFI.a';
+ const obj='libs/std/ast/native/CMakeFiles/cangjie-std-astFFI-objs.dir/ast_api.cpp.o';
+ const put=async(file,text)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,text);};
+ const run=(cmd,args)=>{const r=spawnSync(cmd,args,{cwd:dir,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout;};
+ for(const name of ['cangjie/AST/Node.h','cangjie/CHIR/IR/AttributeInfo.h'])await put(path.join(include,name),'#pragma once\n');
+ await put(path.join(dir,'ast_api.cpp'),'#include <cangjie/AST/Node.h>\n#include <cangjie/CHIR/IR/AttributeInfo.h>\nint bridge(){return 1;}\n');
+ await put(path.join(dir,'support.cpp'),'int support(){return 2;}\n');
+ await put(path.join(dir,'build.ninja'),[
+   'rule cc','  command = c++ -I'+include+' -MMD -MF $out.d -c $in -o $out','  depfile = $out.d','  deps = gcc',
+   'build '+obj+': cc ast_api.cpp','build support.o: cc support.cpp',''].join('\n'));
+ run('ninja',[]);run('ar',['rcsD',library,'support.o']);
+ const ninja=spawnSync('which',['ninja'],{encoding:'utf8'}).stdout.trim();
+ await put(path.join(dir,'CMakeCache.txt'),'CMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_MAKE_PROGRAM:FILEPATH='+ninja+'\nCANGJIE_INCLUDE:STRING='+include+'\n');
+ await fs.copyFile(library,path.join(dir,archive));run('ar',['qD',archive,obj]);
+ const libdir=path.join(install,'lib',tuple);
+ await put(path.join(libdir,'libcangjie-std-core.a'),'fixture');await fs.copyFile(path.join(dir,archive),path.join(libdir,archive));
+ for(const pkg of ['std.core','std.ast'])await put(path.join(install,'modules',tuple,'std',pkg+'.cjo'),'fixture');
+ const commands=path.join(root,'cmds.json'), commit='1'.repeat(40),compiler='2'.repeat(40);
+ const args=['python3','-I','build.py','build','-t','release','--include='+include];
+ await put(commands,JSON.stringify([{cwd:src,argv:args,rc:0},{cwd:src,argv:['python3','-I','build.py','install','--prefix',install],rc:0}]));
+ await put(path.join(install,'PROVENANCE.txt'),'STD_SOURCE_COMMIT = '+commit+'\nBUILT_BY_CJC = '+compiler+'\nCOLOURED = true\n');
+ const input={ast:{install:ast},compiler:{install:root},stdlib:{commit},stage2:{compilerCommit:compiler},platform:'linux_x86_64',stdBuildType:'release'};
+ const supplied={install,commands};assert.deepEqual(await installedFinalStd(supplied,input),supplied);
+ // Keep the input path, object and log unchanged but substitute a different support archive.
+ await fs.copyFile(library,library+'.original');run('ar',['qD',library,'support.o']);
+ assert.equal(await installedFinalStd(supplied,input),undefined);await fs.copyFile(library+'.original',library);
+ await fs.unlink(path.join(dir,'.ninja_deps'));assert.equal(await installedFinalStd(supplied,input),undefined);
+});

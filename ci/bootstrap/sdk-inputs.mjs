@@ -7,6 +7,7 @@ import {visibleOptionsOnly,requireOptionVisibility} from './compiler-option-visi
 // The descriptor contains locations, not producer receipts or SDK authorities.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify, isDeepStrictEqual} from 'node:util';
@@ -22,7 +23,7 @@ import {runtimeSourceRepository} from '../../build/lib/runtime-source-inputs.mjs
 import {readInstalledNativeAst} from './installed-native-ast.mjs';
 import {installPath as mingwInstallPath} from '../../build/toolchain/mingw.mjs';
 import {installationSelection,resolveSources} from './native-source-selection.mjs';
-import {stdBuildType,flag} from './sdk-std-resume.mjs';
+import {stdBuildType,flag,selectedStdAst,checkStdAstOutput} from './sdk-std-resume.mjs';
 import {stdDependencyInputs} from './stdlib-build.mjs';
 const execute = promisify(execFile);
 
@@ -40,6 +41,41 @@ async function installation(root, required) {
   for (const rel of required) if (!(await fs.stat(path.join(root, rel))).isFile())
     throw new Error('NATIVE_INSTALL_FILE ' + rel);
   return root;
+}
+// R's native AST archive is the selected support archive plus ast_api.cpp.o.
+// Ninja folds the compiler depfile into .ninja_deps. Inspect that object, and
+// compare the installed archive with the result of R's deterministic append:
+// a matching build.py argv alone cannot identify what the object included.
+async function matchesFinalStdAst(build, install, input, ast) {
+  const includes=build.argv.filter(arg=>arg==='-I' || arg==='--include' || arg.startsWith('--include=') || /^-I./.test(arg));
+  if(includes.length!==1 || flag(build.argv,'--include')!==ast.include ||
+      build.argv.includes('--local_mode_api')!==(input.stdLocalModeApi===true))return false;
+  const dir=path.join(build.cwd,'build/build'), src=path.dirname(build.cwd);
+  const cache=await fs.readFile(path.join(dir,'CMakeCache.txt'),'utf8');
+  const cached=key=>cache.split(/\r?\n/).find(l=>l.startsWith(key+':'))?.split('=').slice(1).join('=');
+  if(cached('CMAKE_GENERATOR')!=='Ninja' || cached('CANGJIE_INCLUDE')!==ast.include)return false;
+  const ninja=cached('CMAKE_MAKE_PROGRAM');
+  if(!ninja)return false;
+  const target='libs/std/ast/native/CMakeFiles/cangjie-std-astFFI-objs.dir/ast_api.cpp';
+  const obj=target+(sdkPlatform(input.platform).os==='win32'?'.obj':'.o');
+  const {stdout}=await execute(ninja,['-t','deps',obj],{cwd:dir});
+  const deps=stdout.trimEnd().split(/\r?\n/);
+  if(!deps.shift()?.endsWith('(VALID)'))return false;
+  const files=deps.map(line=>path.resolve(dir,line.trim()));
+  const astHeaders=files.filter(f=>f.split(path.sep).includes('cangjie') && f.includes(path.sep+'include'+path.sep+'cangjie'+path.sep));
+  if(!files.includes(path.join(ast.include,'cangjie/CHIR/IR/AttributeInfo.h')) ||
+      !files.includes(path.join(ast.include,'cangjie/AST/Node.h')) ||
+      astHeaders.some(f=>!f.startsWith(ast.include+path.sep)))return false;
+  await checkStdAstOutput({source:src,output:install,platform:input.platform});
+  const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'std-ast-compare-'));
+  try {
+    const copy=path.join(tmp,'ffi.a');
+    await fs.copyFile(ast.library,copy);
+    const ar=sdkPlatform(input.platform).os==='linux'?'ar':cached('CMAKE_AR');
+    if(!ar)return false;
+    await execute(ar,['qD',copy,path.join(dir,obj)]);
+    return await fileDigest(copy)===await fileDigest(path.join(dir,'libcangjie-std-astFFI.a'));
+  } finally {await fs.rm(tmp,{recursive:true,force:true});}
 }
 // Reuse a completed native std producer through its existing command log and
 // provenance. Keep final std distinct from the compiler's bootstrap libraries.
@@ -64,6 +100,20 @@ export async function installedFinalStd(supplied, input) {
   const native = sdkPlatform(input.platform);
   await installation(install, ['modules/'+native.tuple+'/std/std.core.cjo',
     'lib/'+native.tuple+'/libcangjie-std-core.a']);
+  const ast=selectedStdAst(input);
+  if(ast){
+    const attempts=rows.filter(row=>row.argv?.includes('build.py') &&
+      (row.argv.includes('build')||row.argv.includes('install')));
+    if(attempts.length!==2 || attempts[0]!==rows[built] || attempts[1]!==rows[installed])return undefined;
+    try {
+      if(!await matchesFinalStdAst(rows[built],install,input,ast))return undefined;
+    } catch(error){
+      // An imported installation need not retain its build directory or tools.
+      if(!['ENOENT','ENOTDIR'].includes(error.code) && typeof error.code!=='number' &&
+          !['STD_AST_FFI_INSTALL_MISMATCH','STD_AST_MODULE'].includes(error.message))throw error;
+      return undefined;
+    }
+  }
   return {install, commands};
 }
 // Validate the actual selected source objects, including an explicit inputs file.
@@ -281,7 +331,11 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     targetComponents:{compiler:component(rows.compiler),std:component(stdlib??rows.runtime),runtime:component(rows.runtime),
       llvm:component(rows.llvm),ast:component(rows.ast)}};
   if(installations.stage2)inputs.stage2=await stage2Input(installations.stage2,inputs);
-  if(descriptor.reuseFinalStd)inputs.reuseFinalStd=await installedFinalStd(descriptor.reuseFinalStd,inputs);
+  if(descriptor.reuseFinalStd){
+    const reused=await installedFinalStd(descriptor.reuseFinalStd,inputs);
+    if(reused)inputs.reuseFinalStd=reused;
+    else console.log('Selected AST build inputs not established for final std; building stage3-std');
+  }
   await validateSourceInputs(inputs);
   const file = path.join(work, 'sdk-inputs.json');
   await atomicJson(file, inputs);

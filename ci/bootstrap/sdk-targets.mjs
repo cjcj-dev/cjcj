@@ -7,7 +7,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
-import {stdBuildType} from './sdk-std-resume.mjs';
+import {stdBuildType,selectedStdAst} from './sdk-std-resume.mjs';
 export const BOOTSTRAP_PHASES=Object.freeze(['stage0','stage0-run','std-bootstrap','stage1-initial','stage1-std','stage2','stage3-std','stage3']);
 import {readSourcePins} from '../native-llvm-inputs.mjs';
 import {retainedToolPath,toolExecutionLibraries} from '../../build/srcbuild/tool-layout.mjs';
@@ -239,14 +239,14 @@ export function createBootstrapTargets(input) {
   if(!/^\d+\.\d+\.\d+-alpha\.\d+$/.test(hostVersion||'')||host.version!==hostVersion)throw new Error('TARGET_HOST_VERSION');
   const out=id=>'${output.'+id+'}';
   const repo=id=>'${repo.'+id+'}';
+  const stdAst=selectedStdAst(input);
   const stageArg=(kind,source,sdk,output,phase,compilerRuntime)=>({argv:[process.execPath,stageEntry,'--kind',kind,'--source',source,
     '--sdk',sdk,'--runtime',runtime.install,'--output',output,'--platform',platform,
     '--commit',kind==='h1'?h1.commit:kind==='std'?stdlib.commit:compiler.commit,
     ...(kind==='h1'||kind==='compiler'?['--visible-options-only',String(visibleOptionsOnly(input.visibleOptionsOnly))]:[]),
     ...(kind==='compiler' && compiler.shimInstall ? ['--shim-install',compiler.shimInstall] : []),
     ...(kind==='h1' && h1.shimInstall ? ['--shim-install',h1.shimInstall] : []),
-    ...(kind==='std' && (ast.astInstallation || ast.install!==compiler.install) ? ['--std-ast-include',path.join(ast.install,'include'),
-      '--std-ast-library',path.join(ast.install,ast.astInstallation?.library??'libcangjie-ast-support.a')] : []),
+    ...(kind==='std' && stdAst ? ['--std-ast-include',stdAst.include,'--std-ast-library',stdAst.library] : []),
     ...(kind==='std' && input.stdBuildType !== undefined ? ['--build-type',input.stdBuildType] : []),
     ...(kind==='std' && input.stdLocalModeApi===true ? ['--local-mode-api'] : []),
     ...(kind==='std' && input.stdDependencies ? ['--std-dependencies',JSON.stringify(input.stdDependencies)] : []),
