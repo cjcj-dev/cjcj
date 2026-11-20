@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {makeRepos,REPO_NAMES} from '../../build/lib/config.mjs';
-export const windowsToolsCommit='fb66583a50e30ff20cd04c7d0c71dcf6acad5beb';
+export const windowsToolsCommit='8ca1e2f8d82fad88c6a1894110b6d356a1a9bdbe';
 export function windowsToolsSource(env) {
   const repo=env.WINDOWS_TOOLS_REPOSITORY;
   if(!/^[\w.-]+\/[\w.-]+$/.test(repo||'')||repo.split('/').some(s=>s==='.'||s==='..'))throw Error('WINDOWS_TOOLS_READ_REPOSITORY_REQUIRED');

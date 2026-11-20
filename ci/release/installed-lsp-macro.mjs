@@ -45,17 +45,22 @@ export async function consumeInstalledLspMacro({sdk,platform,work,env=process.en
   await run('compile',[cjc,'--compile-macro',def]);
   for(const name of ['sdkprobe.cjo','lib-macro_sdkprobe'+native.shared])await fs.access(path.join(cwd,name));
   const file=path.join(cwd,'consumer.cj'),uri=pathToFileURL(file).href;
+  // Keep the opened URI for diagnostics; later requests name the same on-disk
+  // file through another valid URI, including drive and filename case on Windows.
+  const alias=native.os==='win32'
+    ? uri.replace(/^file:\/\/\/([A-Za-z]):/,(_,d)=>'file:///'+(d===d.toUpperCase()?d.toLowerCase():d.toUpperCase())+':').replace(/consumer\.cj$/,'CONSUMER.cj')
+    : uri;
   const source=value=>'package sdkclient\nimport sdkprobe.*\nfunc inspect(): Unit {\n    let inferred = '+value+'\n    println(inferred)\n}\n';
   const plain=source('17'),expanded=source('@FromBody(17)');
   await fs.writeFile(file,plain);
   const database=path.join(cwd,'compile_commands.json');
   await atomicJson(database,[{directory:cwd,file,arguments:[cjc,'--output-type=staticlib','--import-path',cwd,file]}]);
-  const hover=id=>({id,method:'textDocument/hover',params:{textDocument:{uri},position:{line:3,character:9}}});
+  const hover=id=>({id,method:'textDocument/hover',params:{textDocument:{uri:alias},position:{line:3,character:9}}});
   const requests=[
     {id:1,method:'initialize',params:{initializationOptions:{compilationDatabase:database}}},
     {method:'initialized',params:{}},
     {method:'textDocument/didOpen',params:{textDocument:{uri,languageId:'cangjie',version:1,text:plain}}},hover(2),
-    {method:'textDocument/didChange',params:{textDocument:{uri,version:2},contentChanges:[{text:expanded}]}},hover(3),
+    {method:'textDocument/didChange',params:{textDocument:{uri:alias,version:2},contentChanges:[{text:expanded}]}},hover(3),
     {id:4,method:'shutdown',params:{}},{method:'exit',params:{}}];
   const input=Buffer.concat(requests.map(frame));await fs.writeFile(path.join(cwd,'requests.lsp'),input);
   const rows=messages(await run('server',[lsp,'--sdk',sdk],input));
