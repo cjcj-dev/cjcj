@@ -17,7 +17,10 @@ const env = cleanSdkEnvironment(sdk,'linux_x86_64',{...process.env,PATH:'/usr/bi
 fs.mkdirSync(output);
 const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const producer = fs.existsSync(path.join(sdk,'STAGE-INPUTS.json')) ? await compilerProducer(sdk) : compiler;
-const inputs = new Set([compiler,producer,path.join(runtime,'libcangjie-runtime.so'),path.join(runtime,'libboundscheck.so'),
+const schema=path.join(sdk,'schema/StdxChirFormat.fbs');
+const generated=path.join(sdk,'include/flatbuffers/StdxChirFormat_generated.h');
+const flatc=path.join(sdk,'third_party/flatbuffers/bin/flatc');
+const inputs = new Set([compiler,producer,schema,generated,flatc,path.join(sdk,'include/cangjie/CHIR/IR/AttributeInfo.h'),path.join(runtime,'libcangjie-runtime.so'),path.join(runtime,'libboundscheck.so'),
   path.join(llvm,'libLLVM-15.so'),path.join(sdk,'modules',tuple,'std/std.runtime.cjo'),
   path.join(sdk,'modules',tuple,'std/std.core.cjo'),path.join(sdk,'lib',tuple,'libcangjie-std-core.a')]);
 const identity = Object.fromEntries([...inputs].map(p => {
@@ -33,6 +36,15 @@ function execute(name, exe, args) {
   return r;
 }
 const failures = [];
+const regenerated=path.join(output,'schema');
+fs.mkdirSync(regenerated);
+const gen=execute('stdx-schema',flatc,['--no-warnings','-c','-o',regenerated,schema]);
+if (gen.status !== 0 || !fs.existsSync(path.join(regenerated,path.basename(generated))) ||
+    digest(path.join(regenerated,path.basename(generated))) !== digest(generated)) failures.push('installed stdx schema/header pair');
+const abi = execute('stdx-headers','c++',['-std=c++17','-fsyntax-only','-I'+path.join(sdk,'include'),
+  '-I'+path.join(sdk,'third_party/flatbuffers/include'),fileURLToPath(new URL('./sdk_chir.cpp',import.meta.url))]);
+if (abi.status !== 0) failures.push('installed stdx C++ interface');
+
 for (const name of ['local','ordinary','escape']) {
   const source = fileURLToPath(new URL('./'+name+'.cj',import.meta.url));
   const exe = path.join(output,name);
