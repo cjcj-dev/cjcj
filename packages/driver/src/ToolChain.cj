@@ -385,7 +385,8 @@ public open class ToolChain {
         }
     }
 
-    protected func SortInputlibraryFileAndAppend(tool: Tool, objFiles: ArrayList<TempFileInfo>): Unit {
+    protected func SortInputlibraryFileAndAppend(tool: Tool, objFiles: ArrayList<TempFileInfo>,
+        replaceLibrary!: Option<(String, String)> = None): Unit {
         let inputOrderTuples = ArrayList<(String, UInt64)>()
         AppendObjectsFromCompiled(tool, objFiles, inputOrderTuples)
         AppendObjectsFromInput(inputOrderTuples)
@@ -396,6 +397,12 @@ public open class ToolChain {
             CompareInputOrderTuples(left, right)
         }, stable: true)
         for (tuple in inputOrderTuples) {
+            if (let Some((arg, pinned)) <- replaceLibrary) {
+                if (tuple[0] == arg) {
+                    tool.AppendArg(pinned)
+                    continue
+                }
+            }
             tool.AppendArg(tuple[0])
         }
     }

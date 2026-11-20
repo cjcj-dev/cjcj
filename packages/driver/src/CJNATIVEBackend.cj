@@ -55,6 +55,10 @@ public class CJNATIVEBackend <: Backend {
     }
 
     protected override func PrepareDependencyPath(): Bool {
+        if (driverOptions.wasmReturnBases && !driverOptions.target.IsWasm()) {
+            eprintln("error: --wasm-return-bases requires wasm32-wasi")
+            return false
+        }
         let cjnativeBinSearchPaths = ArrayList<String>()
         if (driverOptions.environment.cangjieHome.hasValue) {
             cjnativeBinSearchPaths.add(FileUtil.JoinPath(driverOptions.environment.cangjieHome.value,
@@ -158,6 +162,8 @@ public class CJNATIVEBackend <: Backend {
         ChainCompileAfterPreprocess(driverOptions.saveTemps)
         let batch = ArrayList<Tool>()
         for (objFile in objFiles) {
+            // Imported proofs belong to this link, never to a reusable object.
+            if (!driverOptions.wasmReturnBaseImport.isEmpty()) { break }
             let srcFile = objFile.filePath
             let destFile = driverOptions.GetHashedObjFileName(FileUtil.GetFileNameWithoutExtension(srcFile)) + ".o"
             if (driverOptions.aggressiveParallelCompile.hasValue &&
@@ -287,6 +293,15 @@ public class CJNATIVEBackend <: Backend {
             if (driverOptions.target.IsWasm() && (!bitCodeFile.isForeignInput ||
                 driverOptions.wasmRootContractInputs.contains(bitCodeFile.filePath))) {
                 tool.AppendArg("--cj-wasm-root-version=${WASM_ROOT_CONTRACT_VERSION}")
+            }
+            if (driverOptions.exportWasmReturnBases) {
+                let report = TempFileManager.Instance().CreateUniqueTempFileInfo(TempFileKind.T_OBJ,
+                    stem: "export-return-bases").filePath
+                driverOptions.wasmReturnBaseExports.add(report)
+                tool.AppendArg("--cj-wasm-export-return-bases=" + report)
+            }
+            if (!driverOptions.wasmReturnBaseImport.isEmpty()) {
+                tool.AppendArg("--cj-wasm-import-return-bases=" + driverOptions.wasmReturnBaseImport)
             }
             OPTSetVerifyOptions({ option: String => tool.AppendArg(option) }, driverOptions)
             OPTSetTripleOptions({ option: String => tool.AppendArg(option) }, driverOptions)

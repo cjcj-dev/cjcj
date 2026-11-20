@@ -564,6 +564,20 @@ public class Tool {
     }
 
     private func InternalImplementedCommandExec(): Bool {
+        if (name == "MergeWasmReturnBases") {
+            let full = GetFullArgs()
+            if (MergeWasmReturnBases(full[1], full[2..])) { return true }
+            eprintln("error: missing or incompatible wasm return-base records from opt")
+            return false
+        }
+        if (name == "PublishWasmReturnBaseLink") {
+            let full = GetFullArgs()
+            if (!VerifyWasmReturnBaseLink(full[1], full[2], full[3], full[4])) {
+                eprintln("error: final wasm link did not select the proven return-base definitions")
+                return false
+            }
+            return CopyFile(full[5], full[6])
+        }
         if (toolType == ToolType.INTERNAL_IMPLEMENTED && name == "RemoveFile") {
             let full = GetFullArgs()
             return !FileUtil.FileExist(full[1]) || FileUtil.Remove(full[1])

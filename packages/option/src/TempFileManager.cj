@@ -123,15 +123,15 @@ public class TempFileManager {
 
     // Backend intermediates must not share the flat codegen/package output namespace.
     // A newly created directory also makes separate allocations unique under --save-temps.
-    public func CreateUniqueTempFileInfo(kind: TempFileKind): TempFileInfo {
+    public func CreateUniqueTempFileInfo(kind: TempFileKind, stem!: String = "partial"): TempFileInfo {
         let directory = FSDirectory.createTemp(tempDir).toString()
-        let path = FileUtil.JoinPath(directory, "partial") + TempFileKindSuffix(kind, opts)
+        let path = FileUtil.JoinPath(directory, stem) + TempFileKindSuffix(kind, opts)
         if (!opts.saveTemps) {
             // Reverse-order cleanup removes the file before its directory, including on signals.
             deletedFiles.add(unsafe { LibC.mallocCString(directory) })
             deletedFiles.add(unsafe { LibC.mallocCString(path) })
         }
-        return TempFileInfo(fileName: "partial", filePath: path)
+        return TempFileInfo(fileName: stem, filePath: path)
     }
 
     public func DeleteTempFiles(): Unit {

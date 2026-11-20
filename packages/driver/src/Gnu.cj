@@ -231,7 +231,7 @@ public open class Gnu <: ToolChain {
 
         processedObjFiles.add(TempFileInfo(fileName: FileUtil.GetFileNameWithoutExtension(outputFile),
             filePath: outputFile, rawPath: outputFile, isFrontendOutput: true))
-        if (driverOptions.aggressiveParallelCompile.hasValue &&
+        if (driverOptions.wasmReturnBaseImport.isEmpty() && driverOptions.aggressiveParallelCompile.hasValue &&
             driverOptions.aggressiveParallelCompile.value > 1u64) {
             let destFile = driverOptions.GetHashedObjFileNameForPackage(pkgName, pkgName) + ".o"
             let cacheCopyTool = Tool("CacheCopy", ToolType.INTERNAL_IMPLEMENTED, driverOptions.environment.allVariables)
