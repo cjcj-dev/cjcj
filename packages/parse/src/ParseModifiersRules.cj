@@ -270,7 +270,8 @@ private func ExtendBodyFuncRule(modifier: TokenKind): Option<Array<TokenKind>> {
 
 private func ClassStructBodyVarRule(modifier: TokenKind): Option<Array<TokenKind>> {
     if (modifier == TokenKind.CONST) { return NoConflicts() }
-    if (modifier == TokenKind.STATIC) { return NoConflicts() }
+    if (modifier == TokenKind.STATIC) { return [TokenKind.DEMODE] }
+    if (modifier == TokenKind.DEMODE) { return [TokenKind.STATIC] }
     if (modifier == TokenKind.PUBLIC) { return AccessPublic() }
     if (modifier == TokenKind.PRIVATE) { return AccessPrivate() }
     if (modifier == TokenKind.INTERNAL) { return AccessInternal() }
@@ -381,6 +382,9 @@ private func EmptyScopeRule(defKind: DefKind, scopeKind: ScopeKind): Bool {
 }
 
 private func FindRule(defKind: DefKind, scopeKind: ScopeKind, modifier: TokenKind): Option<Array<TokenKind>> {
+    if (modifier == TokenKind.EXCLAVE && (defKind == DefKind.FUNC || defKind == DefKind.CONSTRUCTOR)) {
+        return NoConflicts()
+    }
     if (defKind == DefKind.FUNC) {
         if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { return TopLevelFuncRule(modifier) }
         if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY)) { return ClassBodyFuncRule(modifier) }

@@ -1380,6 +1380,10 @@ public class PartialInstantiation {
             case ASTKind.TOKEN_PART => InstantiateTokenPart((source as TokenPart).getOrThrow(), visitor)
             case ASTKind.QUOTE_EXPR => InstantiateQuoteExpr((source as QuoteExpr).getOrThrow(), visitor)
             case ASTKind.TRY_EXPR => InstantiateTryExpr((source as TryExpr).getOrThrow(), visitor)
+            case ASTKind.EXCLAVE_EXPR =>
+                let ex = ExclaveExpr()
+                if (let Some(body) <- (source as ExclaveExpr).getOrThrow().body) { ex.body = InstantiateBlock(body, visitor) }
+                ex
             case ASTKind.THROW_EXPR => InstantiateThrowExpr((source as ThrowExpr).getOrThrow(), visitor)
             case ASTKind.RETURN_EXPR => InstantiateReturnExpr((source as ReturnExpr).getOrThrow(), visitor)
             case ASTKind.WHILE_EXPR => InstantiateWhileExpr((source as WhileExpr).getOrThrow(), visitor)

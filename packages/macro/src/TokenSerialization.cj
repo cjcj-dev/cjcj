@@ -128,7 +128,7 @@ private let ALL_TOKEN_KINDS: Array<TokenKind> = [
     TokenKind.MULTILINE_STRING, TokenKind.MULTILINE_RAW_STRING, TokenKind.BOOL_LITERAL, TokenKind.UNIT_LITERAL,
     TokenKind.DOLLAR_IDENTIFIER, TokenKind.ANNOTATION, TokenKind.AT_EXCL, TokenKind.COMMON, TokenKind.SPECIFIC,
     TokenKind.PERFORM, TokenKind.RESUME, TokenKind.THROWING, TokenKind.HANDLE, TokenKind.ILLEGAL,
-    TokenKind.DOUBLE_COLON, TokenKind.FEATURES
+    TokenKind.DOUBLE_COLON, TokenKind.FEATURES, TokenKind.EXCLAVE, TokenKind.DEMODE
 ]
 
 private func tokenKindFromIndex(index: UInt16): TokenKind {

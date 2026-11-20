@@ -75,3 +75,8 @@ public func GetReceiverMode(fd: FuncDecl): ASTMode {
         (let Some(modal) <- body.paramLists[0].receiverModal)) { return modal.local }
     return ASTMode.NOT
 }
+
+public func HasLocalModifier(decl: Decl, kind: TokenKind): Bool {
+    for (modifier in decl.modifiers) { if (modifier.modifier == kind) { return true } }
+    return false
+}

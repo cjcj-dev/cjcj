@@ -169,6 +169,8 @@ public enum TokenKind {
     | ILLEGAL
     | DOUBLE_COLON
     | FEATURES
+    | EXCLAVE
+    | DEMODE
 }
 
 public func TokenKindIndex(kind: TokenKind): Int64 {
@@ -338,6 +340,8 @@ public func TokenKindIndex(kind: TokenKind): Int64 {
         case TokenKind.ILLEGAL => 162
         case TokenKind.DOUBLE_COLON => 163
         case TokenKind.FEATURES => 164
+        case TokenKind.EXCLAVE => 165
+        case TokenKind.DEMODE => 166
     }
 }
 
@@ -375,7 +379,7 @@ public let TOKEN_KIND_VALUES: Array<String> = [
     "package_identifier", "integer_literal", "rune_byte_literal", "float_literal", "comment", "newline", "end",
     "sentinel", "char_literal", "string_literal", "jstring_literal", "multiline_string", "multiline_raw_string",
     "bool_literal", "unit_literal", "dollar_identifier", "annotation", "at_exclamation", "common", "specific",
-    "perform", "resume", "throwing", "handle", "illegal", "double_colon", "features"
+    "perform", "resume", "throwing", "handle", "illegal", "double_colon", "features", "exclave", "demode"
 ]
 
 public let TOKENS: Array<String> = [
@@ -390,7 +394,7 @@ public let TOKENS: Array<String> = [
     "match", "where", "extend", "with", "prop", "static", "public", "private", "internal", "protected",
     "override", "redef", "abstract", "sealed", "open", "foreign", "inout", "mut", "unsafe", "operator",
     "spawn", "synchronized", "<:", "main", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-    "", "", "", "@!", "common", "specific", "perform", "resume", "throwing", "handle", "", "::", "features"
+    "", "", "", "@!", "common", "specific", "perform", "resume", "throwing", "handle", "", "::", "features", "exclave", "demode"
 ]
 
 public let TOKEN_TO_OPERATOR_PRECEDENCE: Array<UInt8> = [
@@ -407,7 +411,7 @@ public let TOKEN_TO_OPERATOR_PRECEDENCE: Array<UInt8> = [
     0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
     0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
     0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
-    0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8
+    0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8
 ]
 
 public func Len(tokenKind: TokenKind): Int64 {

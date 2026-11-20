@@ -5,7 +5,8 @@ import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.SourceManager as BasicSourceManager
-import cjcj::ast.GetReceiverMode
+import cjcj::ast.{GetReceiverMode, HasLocalModifier}
+import cjcj::ast.TokenKind as SourceTokenKind
 import cjcj::option.GlobalOptions
 import cjcj::option.OSType
 import cjcj::option.OutputMode
@@ -881,6 +882,7 @@ private func BuildAttr(attrs: AstAttributePack): AttributeInfo {
 
 func BuildVarDeclAttr(decl: AstVarDecl): AttributeInfo {
     let attrInfo = BuildAttr(decl.GetAttrs())
+    if (HasLocalModifier(decl, SourceTokenKind.DEMODE)) { attrInfo.Enable(Attribute.DEMODE) }
     if (!decl.isVar) {
         attrInfo.Enable(Attribute.READONLY)
     }
@@ -4457,6 +4459,7 @@ public class FaithfulAST2CHIR {
 
     private func SetFuncAttributeAndLinkageType(funcDecl: AstFuncDecl, fn: Function): Unit {
         fn.AppendAttributeInfo(BuildAttr(funcDecl.GetAttrs()))
+        if (HasLocalModifier(funcDecl, SourceTokenKind.EXCLAVE)) { fn.EnableAttr(Attribute.EXCLAVE) }
         if (funcDecl.HasAnno(AstAnnotationKind.NO_HEAP_ALLOC)) { fn.EnableAttr(Attribute.NO_HEAP_ALLOC) }
         if (funcDecl.HasAnno(AstAnnotationKind.NO_WRITE_BARRIER)) { fn.EnableAttr(Attribute.NO_WRITE_BARRIER) }
         if (funcDecl.HasAnno(AstAnnotationKind.NO_WRITE_BARRIER_REC)) {

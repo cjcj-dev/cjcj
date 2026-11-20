@@ -177,7 +177,8 @@ public func As(kind: ASTKind, node: Option<Node>): Option<Node> {
                 if (let Some(casted) <- DynamicCast<DoWhileExpr>(value)) { casted } else { None }
             case ASTKind.TYPE_CONV_EXPR =>
                 if (let Some(casted) <- DynamicCast<TypeConvExpr>(value)) { casted } else { None }
-            case ASTKind.EXCLAVE_EXPR => DynamicCast<ExclaveExpr>(value)
+            case ASTKind.EXCLAVE_EXPR =>
+                if (let Some(casted) <- DynamicCast<ExclaveExpr>(value)) { casted } else { None }
             case ASTKind.THROW_EXPR =>
                 if (let Some(casted) <- DynamicCast<ThrowExpr>(value)) { casted } else { None }
             case ASTKind.PERFORM_EXPR =>

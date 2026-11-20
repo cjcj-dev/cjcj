@@ -1132,6 +1132,10 @@ private class ASTHasherImpl {
             case ASTKind.SUBSCRIPT_EXPR => HashSubscriptExpr((node as SubscriptExpr).getOrThrow(), whatTypeToHash: whatTypeToHash)
             case ASTKind.SYNCHRONIZED_EXPR => HashSynchronizedExpr((node as SynchronizedExpr).getOrThrow(), whatTypeToHash: whatTypeToHash)
             case ASTKind.THIS_TYPE => HashThisType((node as ThisType).getOrThrow(), whatTypeToHash: whatTypeToHash)
+            case ASTKind.EXCLAVE_EXPR =>
+                let ex = (node as ExclaveExpr).getOrThrow()
+                HashExpr(ex, whatTypeToHash: whatTypeToHash)
+                SuperHash(ex.body, whatTypeToHash: whatTypeToHash)
             case ASTKind.THROW_EXPR => HashThrowExpr((node as ThrowExpr).getOrThrow(), whatTypeToHash: whatTypeToHash)
             case ASTKind.TRAIL_CLOSURE_EXPR => HashTrailingClosureExpr((node as TrailingClosureExpr).getOrThrow(), whatTypeToHash: whatTypeToHash)
             case ASTKind.TRY_EXPR => HashTryExpr((node as TryExpr).getOrThrow(), whatTypeToHash: whatTypeToHash)
@@ -1526,7 +1530,7 @@ public class ASTHasher {
         let a = ASTHasherImpl()
         a.HashSpecificModifiers(decl, [
             TokenKind.OPEN, TokenKind.ABSTRACT, TokenKind.SEALED, TokenKind.MUT, TokenKind.STATIC, TokenKind.CONST,
-            TokenKind.FOREIGN
+            TokenKind.FOREIGN, TokenKind.DEMODE, TokenKind.EXCLAVE
         ])
         a.SrcUseHashAnnotations(decl.annotations)
         if (decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.FUNC_PARAM) {
@@ -1559,7 +1563,7 @@ public class ASTHasher {
             hasher.HashMemberSignature(memberAPI)
             hasher.HashSpecificModifiers(memberAPI, [
                 TokenKind.PUBLIC, TokenKind.PROTECTED, TokenKind.PRIVATE, TokenKind.INTERNAL, TokenKind.MUT,
-                TokenKind.STATIC
+                TokenKind.STATIC, TokenKind.DEMODE, TokenKind.EXCLAVE
             ])
         }
         return hasher.value
@@ -1634,7 +1638,7 @@ public class ASTHasher {
                 a.HashMemberSignature(visibleAPI)
                 a.HashSpecificModifiers(visibleAPI, [
                     TokenKind.PUBLIC, TokenKind.PROTECTED, TokenKind.INTERNAL, TokenKind.PRIVATE, TokenKind.MUT,
-                    TokenKind.STATIC
+                    TokenKind.STATIC, TokenKind.DEMODE, TokenKind.EXCLAVE
                 ])
             }
         }
