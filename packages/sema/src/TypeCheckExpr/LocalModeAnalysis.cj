@@ -195,34 +195,44 @@ class LocalModeAnalysis {
         return false
     }
 
-    private func External(value: Expr): Bool {
-        // Entering an exclave ends this frame's region. Permitted operands now live in
-        // the caller's region. Return validation handles values leaving that region.
-        if (ExclaveOwner().isSome()) { return false }
-        for (branch in ResultBranches(value)) { if (External(branch)) { return true } }
-        if (let Some(index) <- (value as SubscriptExpr)) {
-            if (index.isTupleAccess || (index.baseExpr.map({ e => e.TyKind() == TypeKind.TYPE_VARRAY }) ?? false)) {
-                return index.baseExpr.map({ b => External(b) }) ?? false
-            }
+    // Keep both possibilities across control flow. A projection on a conditional
+    // receiver can read either region; one external arm cannot justify an escape.
+    private func RegionOrigins(value: Expr): UInt8 {
+        if (value.GetTy().map({ t => t.IsNothing() }) ?? false) { return 0u8 }
+        if (ExclaveOwner().isSome()) { return 1u8 }
+        let branches = ResultBranches(value)
+        if (!branches.isEmpty()) {
+            var bits = 0u8
+            for (branch in branches) { bits = bits | RegionOrigins(branch) }
+            return bits
         }
-        if (let Some(paren) <- (value as ParenExpr)) {
-            return if (let Some(inner) <- paren.expr) { External(inner) } else { false }
+        // Calls return into the caller's current region. Property accesses become
+        // getter calls, including those which still carry a PropDecl as target.
+        if (value is CallExpr || (value.GetTarget().map({ d => d is PropDecl ||
+            d.TestAttr(Attribute.ENUM_CONSTRUCTOR) }) ?? false)) { return 1u8 }
+        if (let Some(lowered) <- value.desugarExpr) { return RegionOrigins(lowered) }
+        if (let Some(index) <- (value as SubscriptExpr)) {
+            return index.baseExpr.map({ b => RegionOrigins(b) }) ?? 1u8
         }
         if (let Some(ma) <- (value as MemberAccess)) {
-            return ma.baseExpr.map({ base => External(base) }) ?? false
+            if (ma.GetTarget().map({ d => IsGlobalOrStaticVar(d) }) ?? false) { return 2u8 }
+            return ma.baseExpr.map({ b => RegionOrigins(b) }) ?? 1u8
         }
         if (let Some(ref) <- (value as RefExpr)) {
-            if (ref.isThis || ref.isSuper) { return true }
-            if ((let Some(d) <- ref.GetTarget()) && (d.IsMemberDecl() || d.TestAttr(Attribute.GLOBAL) ||
-                d.TestAttr(Attribute.STATIC))) { return true }
+            if (ref.isThis || ref.isSuper) { return 2u8 }
+            if (let Some(target) <- ref.GetTarget()) {
+                if (let Some(param) <- (target as FuncParam)) {
+                    if (!scopes.isEmpty() && (let Some(owner) <- owners.get(param)) &&
+                        refEq(owner, scopes[scopes.size - 1])) { return 2u8 }
+                } else if (target is VarDecl && (IsGlobalOrStaticVar(target) || target.IsMemberDecl())) {
+                    return 2u8
+                }
+            }
         }
-        if ((let Some(ref) <- (value as RefExpr)) && (let Some(target) <- ref.GetTarget()) &&
-            (let Some(param) <- (target as FuncParam))) {
-            if (scopes.isEmpty()) { return false }
-            if (let Some(owner) <- owners.get(param)) { return refEq(owner, scopes[scopes.size - 1]) }
-        }
-        return false
+        return 1u8
     }
+
+    private func External(value: Expr): Bool { return (RegionOrigins(value) & 2u8) != 0u8 }
 
     private func CheckReturn(value: Expr, expected: ASTMode): Unit {
         let parts = ResultBranches(value)
@@ -234,7 +244,7 @@ class LocalModeAnalysis {
         }
         Check(value, expected)
         if (expected != ASTMode.NOT && value.resolvedMode != ASTMode.NOT &&
-            !CopyNode(value) && ExclaveOwner().isNone() && !External(value)) {
+            !CopyNode(value) && ExclaveOwner().isNone() && (RegionOrigins(value) & 1u8) != 0u8) {
             DiagMismatchedTypesWithFoundTy(diag, value, "an external local return value", "an internal local value")
         }
     }
@@ -256,8 +266,12 @@ class LocalModeAnalysis {
             } else { left is RefExpr }
             if (!allowed || !own) { DiagMismatchedTypesWithFoundTy(diag, right, "a field in the destination region", "local? field") }
         }
-        if (left.resolvedMode == ASTMode.FULL && External(left) != External(right)) {
-            DiagMismatchedTypesWithFoundTy(diag, right, "the region of the destination", "a different region")
+        if (left.resolvedMode == ASTMode.FULL) {
+            let dst = RegionOrigins(left)
+            let src = RegionOrigins(right)
+            if (src != 0u8 && dst != 0u8 && (src != dst || src == 3u8)) {
+                DiagMismatchedTypesWithFoundTy(diag, right, "the region of the destination", "a possible different region")
+            }
         }
         if ((let Some(target) <- left.GetTarget()) && (let Some(owner) <- owners.get(target)) &&
             !scopes.isEmpty() && !refEq(owner, scopes[scopes.size - 1])) {
