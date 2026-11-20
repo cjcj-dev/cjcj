@@ -648,7 +648,9 @@ public func TypeCheckDeclSetEnumElementTyForFunc(
         }
     }
     let retTy = funcDecl.outerDecl.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
-    let ctorTy = tm.GetFunctionTy(paramTys.toArray(), retTy)
+    let cfg = FuncTyConfig()
+    cfg.ReadModes(body)
+    let ctorTy = tm.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
     body.SetTy(ctorTy)
     funcDecl.SetTy(ctorTy)
     let retType = RefType()

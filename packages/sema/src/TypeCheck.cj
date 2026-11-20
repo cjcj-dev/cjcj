@@ -1040,7 +1040,9 @@ public func PreSetDeclType(typeManager: TypeManager, ctx: ASTContext,
             } else {
                 TypeManager.GetInvalidTy()
             }
-            funcDecl.SetTy(typeManager.GetFunctionTy(paramTys.toArray(), retTy))
+            let cfg = FuncTyConfig()
+            cfg.ReadModes(funcBody)
+            funcDecl.SetTy(typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg))
             continue
         }
         if (let Some(retType) <- funcBody.retType) {

@@ -3,7 +3,7 @@ package cjcj::sema.TypeCheckExpr
 import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cjcj::sema.{DiagMismatchedTypesWithFoundTy, GenerateTypeMapping, TypeManager}
+import cjcj::sema.{BindPatternMode, ResultBranches, JoinResultModes, DiagMismatchedTypesWithFoundTy, GenerateTypeMapping, TypeManager}
 
 // Resolve modes after overload and lambda selection, before AST rewrites lose lexical owners.
 class LocalModeAnalysis {
@@ -11,6 +11,7 @@ class LocalModeAnalysis {
     private let scopes = ArrayList<FuncBody>()
     private let owners = HashMap<Decl, FuncBody>()
     private let declaredIn = HashMap<Decl, Node>()
+    private let patternOrigins = HashMap<Decl, UInt8>()
     private let parents = ArrayList<Node>()
 
     private let typeManager: TypeManager
@@ -193,6 +194,7 @@ class LocalModeAnalysis {
         if (let Some(ref) <- (value as RefExpr)) {
             if (ref.isThis || ref.isSuper) { return 2u8 }
             if (let Some(target) <- ref.GetTarget()) {
+                if (let Some(bits) <- patternOrigins.get(target)) { return bits }
                 if (let Some(param) <- (target as FuncParam)) {
                     if (!scopes.isEmpty() && (let Some(owner) <- owners.get(param)) &&
                         refEq(owner, scopes[scopes.size - 1])) { return 2u8 }
@@ -202,6 +204,17 @@ class LocalModeAnalysis {
             }
         }
         return 1u8
+    }
+
+    private func BindProjection(pattern: Pattern, value: Expr): Unit {
+        BindPatternMode(pattern, value.resolvedMode)
+        let origin = RegionOrigins(value)
+        Walker(pattern, visitPre: { n: Node =>
+            if (let Some(varPat) <- (n as VarPattern)) {
+                if (let Some(v) <- varPat.varDecl) { patternOrigins[v] = origin }
+            }
+            if (n is Pattern) { VisitAction.WALK_CHILDREN } else { VisitAction.SKIP_CHILDREN }
+        }).Walk()
     }
 
     private func External(value: Expr): Bool { return (RegionOrigins(value) & 2u8) != 0u8 }
@@ -279,6 +292,10 @@ class LocalModeAnalysis {
             }
         }
         let decl = ref.GetTarget() ?? return;
+        if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            ref.resolvedMode = ref.expectedLocalMode ?? ASTMode.NOT
+            return
+        }
         ref.resolvedMode = decl.resolvedMode
         if (decl is FuncDecl && IsInstanceMember(decl) && !IsCallTarget(ref) && !scopes.isEmpty() &&
             (let Some(owner) <- scopes[scopes.size - 1].funcDecl) && GetReceiverMode(owner) != ASTMode.NOT) {
@@ -339,6 +356,20 @@ class LocalModeAnalysis {
                 return
             }
             createdMode = postfix.local
+        }
+        if (enumCtor) {
+            let values = ArrayList<Expr>()
+            for (arg in call.args) { if (let Some(v) <- arg.expr) { values.add(v) } }
+            createdMode = call.modal.map({ m => m.local }) ?? (call.expectedLocalMode ??
+                JoinResultModes(typeManager, values, { v => Some(v.resolvedMode) }))
+            call.resolvedMode = createdMode
+            for (value in values) {
+                Check(value, createdMode)
+                if (createdMode == ASTMode.FULL && !CopyNode(value) && External(value)) {
+                    DiagMismatchedTypesWithFoundTy(diag, value, "an internal local argument", "an external local value")
+                }
+            }
+            return
         }
         if (!ctor && !enumCtor && (let Some(fd) <- decl) && IsInstanceMember(fd)) {
             let mode = GetReceiverMode(fd)
@@ -465,6 +496,16 @@ class LocalModeAnalysis {
             }
         } else if (let Some(call) <- (node as CallExpr)) {
             ResolveCall(call)
+        } else if (let Some(literal) <- (node as LitConstExpr)) {
+            literal.resolvedMode = literal.expectedLocalMode ?? ASTMode.NOT
+        } else if (let Some(arr) <- (node as ArrayLit)) {
+            arr.resolvedMode = arr.expectedLocalMode ?? JoinResultModes(typeManager, arr.children, { v => Some(v.resolvedMode) })
+            for (value in arr.children) {
+                Check(value, arr.resolvedMode)
+                if (arr.resolvedMode == ASTMode.FULL && !CopyNode(value) && External(value)) {
+                    DiagMismatchedTypesWithFoundTy(diag, value, "a value in the array's region", "an external local element")
+                }
+            }
         } else if (let Some(tuple) <- (node as TupleLit)) {
             tuple.resolvedMode = JoinResultModes(typeManager, tuple.children, { e => Some(e.resolvedMode) })
             if (tuple.resolvedMode == ASTMode.FULL) {
@@ -503,7 +544,7 @@ class LocalModeAnalysis {
                     !decl.IsMemberDecl() && !decl.TestAttr(Attribute.GLOBAL)) {
                     decl.resolvedMode = decl.typeNode.map({ t => t.resolvedMode }) ?? initExpr.resolvedMode
                     if ((let Some(vpd) <- (decl as VarWithPatternDecl)) && (let Some(pat) <- vpd.irrefutablePattern)) {
-                        BindTuplePatternMode(pat, decl.resolvedMode)
+                        BindPatternMode(pat, decl.resolvedMode)
                     }
                     Check(initExpr, decl.resolvedMode)
                     if (decl.resolvedMode == ASTMode.FULL && !CopyNode(decl) && External(initExpr)) {
@@ -528,7 +569,15 @@ class LocalModeAnalysis {
         // construction or a store into a global/field. Never infer a region from spelling.
         if (node.resolvedMode == ASTMode.NOT || !(node is Expr) || parents.size < 2) { return }
         let parent = parents[parents.size - 2]
-        if (IsBranchChild(parent, node) || parent is TupleLit) { return }
+        if (IsBranchChild(parent, node) || parent is TupleLit || parent is ArrayLit) { return }
+        if ((let Some(me) <- (parent as MatchExpr)) && (me.selector.map({ e => refEq(e, node) }) ?? false)) {
+            for (arm in me.matchCases) { for (pat in arm.patterns) { BindProjection(pat, (node as Expr).getOrThrow()) } }
+            return
+        }
+        if ((let Some(lp) <- (parent as LetPatternDestructor)) && (lp.initializer.map({ e => refEq(e, node) }) ?? false)) {
+            for (pat in lp.patterns) { BindProjection(pat, (node as Expr).getOrThrow()) }
+            return
+        }
         if (let Some(index) <- (parent as SubscriptExpr)) {
             if (index.baseExpr.map({ b => refEq(b, node) }) ?? false) { return }
             if (index.desugarExpr.map({ e => refEq(e, node) }) ?? false) { return }

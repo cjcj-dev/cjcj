@@ -1080,10 +1080,14 @@ public class FuncTyConfig {
             }
         }
         retMode = TypeMode(fb.retType)
+        if ((let Some(fd) <- fb.funcDecl) && (let Some(pd) <- fd.propDecl)) {
+            if (fd.isGetter) { retMode = PropertyMode(pd) }
+            if (fd.isSetter) { paramModes = [PropertyMode(pd)] }
+        }
     }
 
     private func TypeMode(t: Option<Type>): ASTMode {
-        if (let Some(node) <- t) { return node.resolvedMode }
+        if (let Some(node) <- t) { return node.modal.map({ m => m.local }) ?? node.resolvedMode }
         return ASTMode.NOT
     }
 

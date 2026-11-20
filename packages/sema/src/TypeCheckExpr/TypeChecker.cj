@@ -3557,9 +3557,8 @@ extend TypeChecker {
     // Pass the contextual mode only along value-producing edges. A condition, earlier statement
     // or nested function body never inherits the result slot of its enclosing expression.
     private func SetExpectedResultMode(expr: Expr, mode: ASTMode): Unit {
-        if (let Some(call) <- (expr as CallExpr)) {
-            call.expectedLocalMode = Some(mode)
-        } else if (let Some(b) <- (expr as Block)) {
+        expr.expectedLocalMode = Some(mode)
+        if (let Some(b) <- (expr as Block)) {
             if ((let Some(last) <- b.GetLastExprOrDecl()) && (let Some(value) <- (last as Expr))) {
                 SetExpectedResultMode(value, mode)
             }
@@ -3884,7 +3883,7 @@ extend TypeChecker {
         }
         CheckFuncParamList(ctx, fb.paramLists[0])
         let paramTys = GetFuncBodyParamTys(fb)
-        let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), ctorTy)
+        let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), ctorTy, cfg: FunctionTyConfigForFuncBody(fb))
         fb.SetTy(funcTy)
         funcDecl.SetTy(funcTy)
         fb.retType.getOrThrow().SetTy(ctorTy)
@@ -4304,7 +4303,7 @@ extend TypeChecker {
                     let mode = if (let Some(t) <- vpd.typeNode) { t.modal.map({ m => m.local }) ?? t.resolvedMode }
                         else { BindingResultMode(impl.typeManager, initValue, receiver) ?? ASTMode.NOT }
                     vpd.resolvedMode = mode
-                    BindTuplePatternMode(pattern, mode)
+                    BindPatternMode(pattern, mode)
                 }
                 BindPatternBindings(ctx, pattern)
             }
@@ -6130,6 +6129,9 @@ extend TypeChecker {
                 exprChecker: Some({ target: Ty, expr: Expr =>
                     Check(ctx, target, expr)
                 }), refInferer: Some({ refExpr: RefExpr => InferRefExpr(ctx, refExpr) })) && subpatternsGood
+            let receiver = GetCurFuncBody(ctx, initializer.scopeName).flatMap({ b => b.funcDecl })
+                .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+            BindPatternMode(pattern, BindingResultMode(impl.typeManager, initializer, receiver) ?? ASTMode.NOT)
         }
         if (Ty.IsTyCorrect(selectorTy) && subpatternsGood) {
             letPattern.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
@@ -7422,12 +7424,12 @@ extend TypeChecker {
             let thisTy = impl.typeManager.ApplySubstPack(
                 impl.typeManager.GetClassThisTy(classDecl, classDecl.GetTy().getOrThrow().typeArgs.toArray()),
                 typeMapping)
-            baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), thisTy))
+            baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), thisTy, cfg: funcTy.CopyConfig()))
             return Some(thisTy)
         } else if (let Some(memberAccess) <- (baseExpr as MemberAccess)) {
             if (let Some(memberBase) <- memberAccess.baseExpr) {
                 if (let Some(genericTy) <- (memberBase.GetTy().getOrThrow() as GenericsTy)) {
-                    baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), genericTy))
+                    baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), genericTy, cfg: funcTy.CopyConfig()))
                     return Some(genericTy)
                 }
             }
@@ -8358,6 +8360,13 @@ extend TypeChecker {
         if (leftTy.IsInvalid()) {
             ae.SetTy(TypeManager.GetInvalidTy())
             return TypeManager.GetInvalidTy()
+        }
+        if (!ae.isCompound) {
+            let receiver = GetCurFuncBody(ctx, ae.scopeName).flatMap({ b => b.funcDecl })
+                .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+            if (let Some(mode) <- CallSiteMode(leftExpr, receiver, HashSet<Decl>())) {
+                SetExpectedResultMode(rightExpr, mode)
+            }
         }
         let concreteLeftTy = Ty.GetPrimitiveUpperBound(TcReplaceIdeal(impl.typeManager, leftExpr))
         if (!IsAssignable(leftExpr, ae.isCompound, diagsForOverload.toArray(), impl.diag.getOrThrow())) {

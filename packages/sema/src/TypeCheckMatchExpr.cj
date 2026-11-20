@@ -173,6 +173,10 @@ public func ChkMatchCasePatterns(typeManager: TypeManager, ctx: ASTContext, targ
         if (!ChkPattern(typeManager, ctx, target, pattern, isPatternInMatch: true, exprChecker: exprChecker,
             desugarCallExpr: desugarCallExpr, refInferer: refInferer, diag: diag)) {
             ok = false
+        } else if (let Some(selector) <- pattern.ctxExpr) {
+            let receiver = GetCurFuncBody(ctx, selector.scopeName).flatMap({ b => b.funcDecl })
+                .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+            BindPatternMode(pattern, BindingResultMode(typeManager, selector, receiver) ?? ASTMode.NOT)
         }
     }
     return ok
