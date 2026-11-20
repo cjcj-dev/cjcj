@@ -1703,7 +1703,7 @@ public class FaithfulAST2CHIR {
     private func CreateAnnotationTargetVar(decl: AstClassDecl, expr: AstExpr, index: Int64): GlobalVar {
         let varMangledName = decl.mangledName + ANNOTATION_VAR_POSTFIX + index.toString()
         let loc = TranslateLocationWithoutScope(builder.context, expr.begin, expr.end)
-        let annotationTargetType = chirType.TranslateType(RequireAstTy(expr))
+        let annotationTargetType = chirType.TranslateType(expr)
         let varType = builder.context.GetRefTy(annotationTargetType)
         let srcCodeIdentifier = decl.identifier.Val() + ANNOTATION_VAR_POSTFIX + index.toString()
         let globalVar = builder.CreateGlobalVar(varType, varMangledName,
@@ -3949,7 +3949,7 @@ public class FaithfulAST2CHIR {
             throw IllegalStateException("faithful AST2CHIR literal global initializer expected LitConstExpr")
         let globalVar = RequireGlobalVar(globalCache.Get(varDecl))
         let literal = TranslateLiteralValue(litExpr)
-        let createdConstant3766 = builder.CreateConstant(chirType.TranslateType(RequireAstTy(varDecl)), literal, block)
+        let createdConstant3766 = builder.CreateConstant(chirType.TranslateType(varDecl), literal, block)
         block.AppendExpression(createdConstant3766)
         let value = RequireResult(createdConstant3766)
         let createdStore3767 = builder.CreateStore(value, globalVar, block)
@@ -4116,8 +4116,8 @@ public class FaithfulAST2CHIR {
         let initExpr = RequireExpr(varDecl.initializer, "global variable initializer")
         if (IsSimpleLiteralValue(initExpr)) {
             if (let Some(litExpr) <- (Translator.GetDesugaredExpr(initExpr) as AstLitConstExpr)) {
-                let declTy = chirType.TranslateType(RequireAstTy(varDecl))
-                let initTy = chirType.TranslateType(RequireAstTy(initExpr))
+                let declTy = chirType.TranslateType(varDecl)
+                let initTy = chirType.TranslateType(initExpr)
                 return !declTy.IsEqual(initTy)
             }
         }
@@ -4442,7 +4442,7 @@ public class FaithfulAST2CHIR {
             throw IllegalStateException("faithful generic function has no body")
         if (let Some(generic) <- funcBody.generic) {
             for (typeParam in generic.typeParameters) {
-                let _ = chirType.TranslateType(RequireAstTy(typeParam))
+                let _ = chirType.TranslateType(typeParam)
             }
             for (typeParam in generic.typeParameters) {
                 chirType.FillGenericArgType((RequireAstTy(typeParam) as AstGenericsTy).getOrThrow())
@@ -4513,7 +4513,7 @@ public class FaithfulAST2CHIR {
             }
             return
         }
-        let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
+        let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(funcDecl)))
         var mangledName = EffectiveFunctionIdentifier(funcDecl)
         if (funcDecl.TestAttr(AstAttribute.NO_MANGLE) && funcTy.IsCFunc()) {
             mangledName += CFFI_FUNC_SUFFIX
@@ -4544,7 +4544,7 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreatePseudoImportedFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
-        let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
+        let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(funcDecl)))
         let fn = builder.CreateFunction(funcTy, funcDecl.mangledName, srcCodeIdentifier: funcDecl.identifier.Val(),
             rawMangledName: funcDecl.rawMangleName, packageName: funcDecl.fullPackageName)
         AttachFunctionGenericParams(funcDecl, fn)
@@ -4557,8 +4557,11 @@ public class FaithfulAST2CHIR {
         let body = funcDecl.funcBody ??
             throw IllegalStateException("faithful pseudo imported function has no body")
         CJC_ASSERT(body.paramLists.size == 1)
-        for (param in body.paramLists[0].params) {
-            let paramTy = chirType.TranslateType(RequireAstTy(param))
+        let params = body.paramLists[0].params
+        let offset = if (HasImplicitThisParam(funcDecl)) { 1 } else { 0 }
+        for (i in 0..params.size) {
+            let param = params[i]
+            let paramTy = funcTy.GetParamType(i + offset)
             let paramLoc = TranslateLocationWithoutScope(builder.context, param.begin, param.end)
             let chirParam = builder.CreateParameter(paramTy, paramLoc, fn)
             chirParam.SetSrcCodeIdentifier(param.identifier.GetRawText())
@@ -4644,7 +4647,7 @@ public class FaithfulAST2CHIR {
         if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
             TranslateFunctionGenericUpperBounds(funcDecl)
         }
-        let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
+        let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(funcDecl)))
         let fn = builder.CreateFunction(funcTy, EffectiveMangledName(funcDecl),
             srcCodeIdentifier: funcDecl.identifier.Val(), rawMangledName: EffectiveRawMangledName(funcDecl),
             packageName: EffectivePackageName(funcDecl))
@@ -4659,8 +4662,11 @@ public class FaithfulAST2CHIR {
         let body = funcDecl.funcBody ??
             throw IllegalStateException("faithful imported function has no body")
         CJC_ASSERT(!body.paramLists.isEmpty())
-        for (param in body.paramLists[0].params) {
-            let paramTy = chirType.TranslateType(RequireAstTy(param))
+        let params = body.paramLists[0].params
+        let offset = if (HasImplicitThisParam(funcDecl)) { 1 } else { 0 }
+        for (i in 0..params.size) {
+            let param = params[i]
+            let paramTy = funcTy.GetParamType(i + offset)
             let paramLoc = TranslateLocationWithoutScope(builder.context, param.begin, param.end)
             let chirParam = builder.CreateParameter(paramTy, paramLoc, fn)
             chirParam.SetSrcCodeIdentifier(param.identifier.GetRawText())
@@ -4669,7 +4675,7 @@ public class FaithfulAST2CHIR {
     }
 
     private func ConvertImportedFunctionType(fn: Function, funcDecl: AstFuncDecl): Unit {
-        let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
+        let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(funcDecl)))
         if (fn.GetFuncType().getOrThrow() == funcTy) {
             return
         }
@@ -4722,7 +4728,7 @@ public class FaithfulAST2CHIR {
         let generic = funcBody.generic ??
             throw IllegalStateException("faithful generic function has no generic parameters")
         for (genericTy in generic.typeParameters) {
-            genericParamTys.add((chirType.TranslateType(RequireAstTy(genericTy)) as GenericType).getOrThrow())
+            genericParamTys.add((chirType.TranslateType(genericTy) as GenericType).getOrThrow())
         }
         return genericParamTys
     }
@@ -4734,7 +4740,7 @@ public class FaithfulAST2CHIR {
         }
         let generic = decl.GetGeneric().getOrThrow()
         for (genericTy in generic.typeParameters) {
-            genericParamTys.add((chirType.TranslateType(RequireAstTy(genericTy)) as GenericType).getOrThrow())
+            genericParamTys.add((chirType.TranslateType(genericTy) as GenericType).getOrThrow())
         }
         return genericParamTys
     }
@@ -4744,7 +4750,7 @@ public class FaithfulAST2CHIR {
             globalCache.Set(varDecl, globalVar)
             return
         }
-        let varTy = chirType.TranslateType(RequireAstTy(varDecl))
+        let varTy = chirType.TranslateType(varDecl)
         let globalVar = builder.CreateGlobalVar(builder.context.GetRefTy(varTy), EffectiveMangledName(varDecl),
             srcCodeIdentifier: varDecl.identifier.Val(), rawMangledName: EffectiveRawMangledName(varDecl),
             packageName: EffectivePackageName(varDecl))
@@ -4817,7 +4823,7 @@ public class FaithfulAST2CHIR {
             return globalVar
         }
         let loc = TranslateLocationWithoutScope(builder.context, decl.begin, decl.end)
-        let varTy = chirType.TranslateType(RequireAstTy(decl))
+        let varTy = chirType.TranslateType(decl)
         let globalVar = builder.CreateGlobalVar(builder.context.GetRefTy(varTy), EffectiveMangledName(decl),
             srcCodeIdentifier: decl.identifier.Val(), rawMangledName: EffectiveRawMangledName(decl),
             packageName: EffectivePackageName(decl))
@@ -4891,7 +4897,7 @@ public class FaithfulAST2CHIR {
         let explicitParamCount = GetExplicitParamCount(funcDecl)
         let astTypeAlreadyHasThis = baseParams.size > explicitParamCount
         let params = ArrayList<Type>()
-        params.add(AddRefIfFuncIsMutOrClass(chirType.TranslateType(RequireAstTy(outerDecl)), funcDecl))
+        params.add(AddRefIfFuncIsMutOrClass(chirType.TranslateType(outerDecl), funcDecl))
         var paramIndex: Int64 = if (astTypeAlreadyHasThis) { 1 } else { 0 }
         while (paramIndex < baseParams.size) {
             params.add(baseParams[paramIndex])
@@ -5138,7 +5144,7 @@ public class FaithfulAST2CHIR {
         }
         var out = ""
         for (param in params) {
-            out += FaithfulMangleType(chirType.TranslateType(RequireAstTy(param)), genericsTypeStack)
+            out += FaithfulMangleType(chirType.TranslateType(param), genericsTypeStack)
         }
         return out
     }

@@ -62,6 +62,7 @@ func CopyNodeField(source: Node, target: Node): Unit {
     target.begin = source.begin
     target.end = source.end
     target.SetTy(source.GetTy().getOrThrow())
+    target.resolvedMode = source.resolvedMode
     target.curMacroCall = source.curMacroCall
     target.isInMacroCall = source.isInMacroCall
     target.comments = cloneCommentGroups(source.comments)

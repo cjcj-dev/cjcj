@@ -1251,6 +1251,10 @@ extend TypeChecker {
             }
         }
         PostTypeCheck(activeContexts)
+        if ((let Some(instance) <- impl.ci) && instance.globalOptions.IsLocalModeAnalysis() &&
+            (let Some(diag) <- impl.diag) && diag.GetErrorCount() == 0u64) {
+            for (pkg in pkgs) { LocalModeAnalysis(diag).Resolve(pkg) }
+        }
     }
 
     public func PerformDesugarAfterSema(pkgs: ArrayList<Package>): Unit {
@@ -5710,10 +5714,11 @@ extend TypeChecker {
         return le.GetTy().getOrThrow()
     }
 
-    private func ChkLamParamTys(ctx: ASTContext, le: LambdaExpr, targetParamTys: ArrayList<Ty>,
+    private func ChkLamParamTys(ctx: ASTContext, le: LambdaExpr, formal: FuncTy,
         outParamTys: ArrayList<Ty>): Bool {
         CJC_ASSERT(le.funcBody.isSome() && !le.funcBody.getOrThrow().paramLists.isEmpty())
         let paramList = le.funcBody.getOrThrow().paramLists[0]
+        let targetParamTys = formal.paramTys
         if (paramList.params.size != targetParamTys.size) {
             if (let Some(diagValue) <- impl.diag) {
                 let builder = DiagnoseRefactor(
@@ -5734,6 +5739,21 @@ extend TypeChecker {
                 implicitBoxed: false, allowOptionBox: false)) {
                 le.SetTy(TypeManager.GetInvalidTy())
                 return false
+            }
+            if ((let Some(instance) <- impl.ci) && instance.globalOptions.IsLocalModeAnalysis() &&
+                (let Some(typeNode) <- param.typeNode)) {
+                param.resolvedMode = typeNode.resolvedMode
+                if (targetParamTy.kind != TypeKind.TYPE_INT64 && !formal.ParamMode(idx).IsSubMode(param.resolvedMode)) {
+                    if (let Some(diag) <- impl.diag) {
+                        let ty = targetParamTy.String()
+                        DiagMismatchedTypesWithFoundTy(diag, param, ty + formal.ParamMode(idx).Suffix(),
+                            ty + param.resolvedMode.Suffix())
+                    }
+                    return false
+                }
+            } else {
+                // A contextual lambda parameter is pending until this formal is selected.
+                param.resolvedMode = formal.ParamMode(idx)
             }
             outParamTys.add(param.GetTy().getOrThrow())
         }
@@ -5779,11 +5799,12 @@ extend TypeChecker {
         if (let Some(targetFuncTy) <- (targetTy as FuncTy)) {
             try (ds = DiagSuppressor(impl.diag)) {
                 let paramTys = ArrayList<Ty>()
-                let paramsMatched = ChkLamParamTys(ctx, le, targetFuncTy.paramTys, paramTys)
+                let paramsMatched = ChkLamParamTys(ctx, le, targetFuncTy, paramTys)
                 let retType = RefType()
                 retType.begin = le.begin
                 retType.end = le.end
                 retType.SetTy(targetFuncTy.retTy)
+                retType.resolvedMode = targetFuncTy.retMode
                 retType.EnableAttr(Attribute.COMPILER_ADD)
                 le.funcBody.getOrThrow().retType = Some(retType)
                 ClearLambdaBodyForReCheck(le)
@@ -5797,6 +5818,8 @@ extend TypeChecker {
                         }
                     }
                     let cfg = targetFuncTy.CopyConfig()
+                    let params = funcBody.paramLists[0].params
+                    cfg.paramModes = Array<ASTMode>(params.size, { i => params[i].resolvedMode })
                     let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), bodyRetTy, cfg: cfg)
                     funcBody.SetTy(funcTy)
                     le.SetTy(funcTy)

@@ -1580,7 +1580,7 @@ extend ParserImpl {
                     enableThis = true
                 }
                 if (SeeingAny(GetTypeFirst()) || SeeingContextualKeyword()) {
-                    body.retType = ParseType()
+                    body.retType = ParseType(compileOptions.IsLocalModeAnalysis())
                 } else {
                     body.EnableAttr(Attribute.IS_BROKEN)
                     DiagExpectedIdentifierFuncBody(body)

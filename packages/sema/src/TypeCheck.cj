@@ -509,6 +509,7 @@ public func GetTyFromASTType(typeManager: TypeManager, ctx: ASTContext, node: Op
 
 public func GetTyFromASTType(typeManager: TypeManager, ctx: ASTContext, node: Type,
     importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    if (let Some(modal) <- node.modal) { node.resolvedMode = modal.local }
     if (!Ty.IsInitialTy(node.GetTy())) {
         if (let Some(ty) <- node.GetTy()) {
             return ty

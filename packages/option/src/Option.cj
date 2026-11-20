@@ -329,6 +329,12 @@ public open class GlobalOptions <: Option {
     public var compileTestsOnly: Bool = false
     public var exportForTest: Bool = false
     public var enableLocalMode: Bool = false
+
+    // In-memory frontend analysis. The public option validator accepts local mode only for CJO.
+    public func IsLocalModeAnalysis(): Bool {
+        return enableLocalMode && disableCodeGen && outputMode == OutputMode.STATIC_LIB &&
+            !enIncrementalCompilation && !IsEmitCHIREnable() && !saveTemps
+    }
     public var enableEH: Bool = false
     public var mock: MockMode = MockMode.DEFAULT
     public var diagFormat: DiagFormat = DiagFormat.DEFAULT

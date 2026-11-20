@@ -72,6 +72,8 @@ public open class Node <: Hashable & Equatable<Node> {
     public let objectId: Int64
     public let astKind: ASTKind
     private var attributes: AttributePack = AttributePack()
+    // Concrete Sema mode of this occurrence; shared Ty objects remain unqualified.
+    public var resolvedMode: ASTMode = ASTMode.NOT
     private var ty: Option<Ty> = Ty.GetInitialTy()
 
     public init() {
@@ -166,6 +168,7 @@ public open class Node <: Hashable & Equatable<Node> {
         DisableAttr(Attribute.INITIALIZATION_CHECKED)
         DisableAttr(Attribute.IS_CHECK_VISITED)
         ty = Ty.GetInitialTy()
+        resolvedMode = ASTMode.NOT
     }
 
     public func IsStructOrClassDecl(): Bool {

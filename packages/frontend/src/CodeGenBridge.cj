@@ -328,7 +328,7 @@ private class ToCHIR {
     // CHIR.cpp:1318-1356: translation owns its phase recorder.
     private func TranslateToCHIR(): Bool {
         try (recorder = ProfileRecorder("CHIR", "AST to CHIR Translation")) {
-            let chirType = CHIRType(builder, CHIRTypeCache())
+            let chirType = CHIRType(builder, CHIRTypeCache(), localSlots: instance.invocation.globalOptions.IsLocalModeAnalysis())
             let ast2chir = FaithfulAST2CHIR(builder, chirType, instance.GetSourceManager(),
                 gim: instance.gim,
                 importedPkgs: instance.importManager.getOrThrow().GetAllImportedPackages(),

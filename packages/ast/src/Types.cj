@@ -1083,7 +1083,7 @@ public class FuncTyConfig {
     }
 
     private func TypeMode(t: Option<Type>): ASTMode {
-        if ((let Some(node) <- t) && (let Some(m) <- node.modal)) { return m.local }
+        if (let Some(node) <- t) { return node.resolvedMode }
         return ASTMode.NOT
     }
 

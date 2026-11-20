@@ -41,6 +41,9 @@ extend ParserImpl {
     private func CheckSlotMode(ty: Type, parameterSlot: Bool): Unit {
         if (!compileOptions.enableLocalMode) { return }
         if (let Some(modal) <- ty.modal) {
+            if (parameterSlot && compileOptions.IsLocalModeAnalysis() && (ty as RefType).isSome()) {
+                return // Sema checks the resolved nominal type, including aliases and generic arguments.
+            }
             // The public CJO subset supports only direct Int64 parameter slots.
             if (parameterSlot && ((ty as PrimitiveType).map({ t => t.str == "Int64" }) ?? false)) { return }
             DiagnoseUnexpectedLocalMode(modal)
@@ -386,7 +389,7 @@ extend ParserImpl {
             CheckSlotMode(typeNode, true)
             funcTy.paramTypes.add(typeNode)
         }
-        funcTy.retType = ParseType()
+        funcTy.retType = ParseType(compileOptions.IsLocalModeAnalysis())
         if (let Some(ret) <- funcTy.retType) {
             funcTy.end = ret.end
         }
