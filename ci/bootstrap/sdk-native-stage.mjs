@@ -167,7 +167,11 @@ export async function nativeStage(options, {signal} = {}) {
     const packageManifest=path.join(source,'packages/cjc/cjpm.toml'),packageBefore=await fs.readFile(packageManifest);
     const hostRuntimeFile=path.join(host,'runtime/lib',native.tuple,'libcangjie-runtime'+native.shared);
     const hostRuntimeSupportsConfigV1=(await nativeSymbolRows(hostRuntimeFile,{platform,runtime:true,defined:true})).includes('CJ_MRT_CjRuntimeInitWithConfigV1');
-    const startupConfiguration={hostRuntimeFile,hostRuntimeSupportsConfigV1};
+    const llvmLibraryFile=path.join(sdk,'third_party/llvm',native.llvmDirectory,native.llvmLibrary);
+    await fs.access(llvmLibraryFile,fs.constants.R_OK);
+    const startupConfiguration={hostRuntimeFile,hostRuntimeSupportsConfigV1,llvmLibraryFile};
+    const linkFile=path.join(source,'runtime_shim','h1-'+native.llvmLibrary);
+    let linkCreated=false;
     let packageCompiled=packageBefore;
     const lock=path.join(source,'cjpm.lock'),lockBefore=await fs.readFile(lock).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
     const h1env={...cleanSdkEnvironment(host,platform,process.env,host),cjHeapSize:resources.heap,
@@ -185,12 +189,17 @@ export async function nativeStage(options, {signal} = {}) {
         replacements++;return prefix+JSON.stringify(compileOption);
       });
       if(replacements!==1)throw Error('H1_WORKSPACE_COMPILE_OPTION');
-      if(!hostRuntimeSupportsConfigV1) {
-        // Legacy official hosts still need the compiler-only heap policy.
-        const hostOnly=new Set(['--wrap=CJ_MRT_CjRuntimeInitWithConfigV1']);
-        packageCompiled=Buffer.from(packageBefore.toString().replace(/^(\s*link-option\s*=\s*)"([^"\n]*)"/gm,
-          (_,prefix,value)=>prefix+JSON.stringify(value.split(/\s+/).filter(token=>!hostOnly.has(token)).join(' '))));
-      }
+      // cjpm and its compiler run on H. The executable built here links the
+      // same N library that stage0-run installs beside the native shim.
+      try {await fs.symlink(llvmLibraryFile,linkFile);linkCreated=true;}
+      catch(error){if(error.code!=='EEXIST'||await fs.readlink(linkFile)!==llvmLibraryFile)throw error;}
+      const hostLLVM='${CANGJIE_HOME}/third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary;
+      let llvmInputs=0;
+      packageCompiled=Buffer.from(packageBefore.toString().replace(/^(\s*link-option\s*=\s*)"([^"\n]*)"/gm,
+        (_,prefix,value)=>prefix+JSON.stringify(value.split(/\s+/)
+          .filter(token=>hostRuntimeSupportsConfigV1||token!=='--wrap=CJ_MRT_CjRuntimeInitWithConfigV1')
+          .map(token=>{if(token!==hostLLVM)return token;llvmInputs++;return path.relative(source,linkFile);}).join(' '))));
+      if(llvmInputs!==1)throw Error('H1_PACKAGE_LLVM_LINK_INPUT');
       await fs.writeFile(packageManifest,packageCompiled);
       await fs.writeFile(manifest,text);
       await fs.copyFile(path.join(inputs,'llvm-shim.o'),path.join(source,'runtime_shim/cjselfhost_llvmshim.o'));
@@ -213,6 +222,7 @@ export async function nativeStage(options, {signal} = {}) {
     } finally {
       await fs.writeFile(manifest,before);
       await fs.writeFile(packageManifest,packageBefore);
+      if(linkCreated)await fs.unlink(linkFile);
       const {sha256}=await import('./sdk-io.mjs');
       await atomicJson(path.join(work,'startup-configuration.json'),{...startupConfiguration,sourceChanges:{
         'packages/cjc/cjpm.toml':{beforeSha256:sha256(packageBefore),buildSha256:sha256(packageCompiled)}}});

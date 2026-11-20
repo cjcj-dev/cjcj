@@ -238,7 +238,8 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       // legacy hosts. Reuse its real three commands, never a private-script receipt.
       if(facts.producer!=='sdk-native-stage:h1'||!path.isAbsolute(facts.sourceRoot||'')
         ||!facts.sourceChanges?.['packages/cjc/cjpm.toml']
-        ||!isDeepStrictEqual(facts.startupConfiguration,{hostRuntimeFile,hostRuntimeSupportsConfigV1})
+        ||!isDeepStrictEqual(facts.startupConfiguration,{hostRuntimeFile,hostRuntimeSupportsConfigV1,
+          llvmLibraryFile:path.join(rows.llvm.install,'third_party/llvm',native.llvmDirectory,native.llvmLibrary)})
         ||!isDeepStrictEqual(facts.nativeShim,await readInstalledNativeShim({install:rows.llvm.install}))
         ||!Array.isArray(commands)||commands.length!==3
         ||commands.some(row=>row.rc!==0||row.signal||row.cwd!==facts.sourceRoot)
