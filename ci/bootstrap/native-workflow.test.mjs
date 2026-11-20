@@ -165,7 +165,7 @@ test('Windows source plan, upload and package receive the same native std for pi
   const win=invoke('windows-x64'),linux=invoke('linux-x64');
   assert.equal(win.status,0,win.stderr);assert.equal(linux.status,0,linux.stderr);
   const pin=JSON.parse(win.stdout).TOOLS_REF,other=JSON.parse(linux.stdout).TOOLS_REF;
-  assert.equal(pin,'8ca1e2f8d82fad88c6a1894110b6d356a1a9bdbe');assert.equal(other,'52adc7a2b67f8f1e711b6a50fbd0c83d85558a58');
+  assert.equal(pin,'7e95e02ed895212b9343bced2cf7af282497eabc');assert.equal(other,'52adc7a2b67f8f1e711b6a50fbd0c83d85558a58');
   const [cell]=JSON.parse(sourcePlan.output.matrix).include;
   assert.equal(cell.runner,'windows-2025');
   const artifact=cell[upload.with.name.match(/^\$\{\{ matrix\.(\w+) \}\}$/)[1]];
