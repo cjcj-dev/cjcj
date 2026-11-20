@@ -672,7 +672,8 @@ extend ParserImpl {
                 } else if (let Some(ctor) <- (decl as PrimaryCtorDecl)) {
                     ctor.overflowStrategy = anno.overflowStrategy
                 } else {
-                    (decl as MainDecl).getOrThrow().overflowStrategy = anno.overflowStrategy
+                    let entry = (decl as MainDecl).getOrThrow()
+                    entry.overflowStrategy = anno.overflowStrategy
                 }
             } else if (anno.kind == AnnotationKind.FASTNATIVE) {
                 if (let Some(fd) <- (decl as FuncDecl)) {
@@ -680,11 +681,15 @@ extend ParserImpl {
                 } else if (let Some(ctor) <- (decl as PrimaryCtorDecl)) {
                     ctor.isFastNative = true
                 } else {
-                    (decl as MainDecl).getOrThrow().isFastNative = true
+                    let entry = (decl as MainDecl).getOrThrow()
+                    entry.isFastNative = true
                 }
             }
             @When[backend == "cjnative"]
-            if (anno.kind == AnnotationKind.FROZEN && (let Some(fd) <- (decl as FuncDecl))) {
+            let isFrozenAnno = anno.kind == AnnotationKind.FROZEN
+            @When[backend != "cjnative"]
+            let isFrozenAnno = false
+            if (isFrozenAnno && (let Some(fd) <- (decl as FuncDecl))) {
                 fd.isFrozen = true
             }
         }
