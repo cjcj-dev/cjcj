@@ -75,6 +75,9 @@ public class Wasm_CJNATIVE <: Gnu {
         tool.AppendArg(FileUtil.JoinPath(WasiSysrootLibPath(), "crt1-command.o"))
         tool.AppendArg("-z")
         tool.AppendArg("stack-size=1048576")
+        // Stack below the data segments: an exhausted linear-memory stack wraps past address 0
+        // and traps instead of silently overwriting static data and static GC roots.
+        tool.AppendArg("--stack-first")
         // wasm-ld 15 has no -l:<file>, --start-group or -rpath-link; archives are
         // passed by path and resolved order-independently.
         for (path in driverOptions.librarySearchPaths) {
