@@ -8274,6 +8274,33 @@ public class Translator {
         } else {
             target.fullPackageName
         }
+        // These std.core declarations are CHIR array operations, not runtime intrinsic IDs.
+        if (packageName == "std.core") {
+            if (identifier == "rawArrayAllocate" || identifier == "rawArrayAllocate2" ||
+                identifier == "rawArrayAllocate3") {
+                CJC_ASSERT(expr.args.size == 1)
+                let element = (resultTy.StripAllRefs() as RawArrayType).getOrThrow().GetElementType()
+                let size = TranslateExprArg(RequireFuncArgExpr(expr.args[0], "raw array allocation size"))
+                return RequireResult(TryCreate(CurrentBlock(), TranslateLocation(expr), resultTy, element, size))
+            }
+            if (identifier == "rawArrayInitByValue") {
+                let loc = TranslateLocation(expr)
+                let types = RequireFuncType(chirTy.TranslateType(base)).GetParamTypes()
+                CJC_ASSERT(expr.args.size == 3 && types.size == 3)
+                let values = ArrayList<Value>()
+                for (i in 0..3) {
+                    let arg = TranslateExprArg(RequireFuncArgExpr(expr.args[i], "raw array initialization argument"))
+                    values.add(TypeCastOrBoxIfNeeded(arg, types[i], loc))
+                }
+                let unit = builder.context.GetUnitTy()
+                let initArray = builder.CreateRawArrayInitByValue(unit, values[0], values[1], values[2], CurrentBlock())
+                CurrentBlock().AppendExpression(initArray)
+                initArray.SetDebugLocation(loc)
+                let result = builder.CreateConstant(unit, UnitLiteral(), CurrentBlock())
+                CurrentBlock().AppendExpression(result)
+                return RequireResult(result)
+            }
+        }
         let intrinsicKind = LookupPackageIntrinsicKind(packageName, identifier) ?? IntrinsicKind.NOT_INTRINSIC
 
         // Translate arguments (mirrors TranslateFuncArgs(expr, nullptr, nullptr)): generate the
