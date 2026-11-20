@@ -1399,7 +1399,7 @@ public class ClosureConversion {
             params.add(ReplaceThisTypeToConcreteType(paramTy, thisType, builder))
         }
         return builder.context.GetFuncTy(params, ReplaceThisTypeToConcreteType(funcTy.GetReturnType(), thisType, builder),
-            hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+            hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc(), modal: funcTy.modal)
     }
 
     private func ConvertTypeArgsWithThisType(args: ArrayList<Type>, thisType: Type): ArrayList<Type> {

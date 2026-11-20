@@ -8,7 +8,7 @@ class TypeBuilder {
 
     public init(builder: FlatBufferBuilder) {
         this.builder = builder
-        builder.StartTable(2)
+        builder.StartTable(3)
     }
 
     public func add_kind(kind: UInt8): Unit {
@@ -19,21 +19,34 @@ class TypeBuilder {
         builder.AddOffset(1, argTys)
     }
 
+    public func add_modal(modal: FlatBufferOffset): Unit {
+        builder.AddOffset(2, modal)
+    }
+
     public func Finish(): FlatBufferOffset {
         return builder.EndTable()
     }
 }
 
-func CreateType(builder: FlatBufferBuilder, kind: UInt8, argTys: FlatBufferOffset): FlatBufferOffset {
+func CreateType(builder: FlatBufferBuilder, kind: UInt8, argTys: FlatBufferOffset,
+    modal: FlatBufferOffset): FlatBufferOffset {
     let tableBuilder = TypeBuilder(builder)
+    tableBuilder.add_modal(modal)
     tableBuilder.add_argTys(argTys)
     tableBuilder.add_kind(kind)
     return tableBuilder.Finish()
 }
 
-func CreateTypeDirect(builder: FlatBufferBuilder, kind: UInt8, argTys: Option<ArrayList<UInt32>>): FlatBufferOffset {
+func CreateTypeDirect(builder: FlatBufferBuilder, kind: UInt8, argTys: Option<ArrayList<UInt32>>,
+    modal: ModalInfo): FlatBufferOffset {
     let argTysOffset = if (let Some(value) <- argTys) { builder.CreateVectorU32(value) } else { 0u32 }
-    return CreateType(builder, kind, argTysOffset)
+    var modalOffset: FlatBufferOffset = 0u32
+    if (modal.local != CHIRMode.NONE) {
+        builder.StartTable(1)
+        builder.AddI16(0, Int16(modal.HashIndex()))
+        modalOffset = builder.EndTable()
+    }
+    return CreateType(builder, kind, argTysOffset, modalOffset)
 }
 
 class RawArrayTypeBuilder {

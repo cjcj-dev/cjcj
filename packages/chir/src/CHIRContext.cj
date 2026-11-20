@@ -390,11 +390,11 @@ public class CHIRContext {
         return (ty as BoxType).getOrThrow()
     }
 
-    public func GetThisTy(): ThisType {
-        let hashValue = HashValue(HashArgTypes(ArrayList<Type>()), TypeKind.TYPE_THIS)
+    public func GetThisTy(modal!: ModalInfo = ModalInfo()): ThisType {
+        let hashValue = HashModal(HashValue(HashArgTypes(ArrayList<Type>()), TypeKind.TYPE_THIS), modal)
         let ty = GetType(hashValue, { allocatedTy: Type =>
-            return allocatedTy.IsThis()
-        }, { => ThisType() })
+            return allocatedTy.IsThis() && allocatedTy.modal == modal
+        }, { => ThisType(modal: modal) })
         return (ty as ThisType).getOrThrow()
     }
 
@@ -402,15 +402,15 @@ public class CHIRContext {
         return GetGenericTy(name, name)
     }
 
-    public func GetGenericTy(name: String, srcCodeIdentifier: String): GenericType {
+    public func GetGenericTy(name: String, srcCodeIdentifier: String, modal!: ModalInfo = ModalInfo()): GenericType {
         var hashValue: Int64 = 0
-        hashValue = HashValue(hashValue, name)
+        hashValue = HashModal(HashValue(hashValue, name), modal)
         let ty = GetType(hashValue, { allocatedTy: Type =>
             if (let Some(genericTy) <- (allocatedTy as GenericType)) {
-                return genericTy.GetIdentifier() == name
+                return genericTy.GetIdentifier() == name && genericTy.modal == modal
             }
             return false
-        }, { => GenericType(name, srcCodeIdentifier) })
+        }, { => GenericType(name, srcCodeIdentifier, modal: modal) })
         return (ty as GenericType).getOrThrow()
     }
 
@@ -508,11 +508,16 @@ public class CHIRContext {
     // Official CHIRContext::WithModal / WithModalImpl (CHIRContext.cpp @63bf237b): re-interns `ty` with
     // `modal` on its outermost data type; Ref and Box wrappers are looked through and preserved.
     public func WithModal(ty: Type, modal: ModalInfo): Type {
+        if (!ty.IsRef() && !ty.IsBox() && ty.modal == modal) { return ty }
+        return WithModalImpl(ty, modal, HashMap<Int64, GenericType>())
+    }
+
+    private func WithModalImpl(ty: Type, modal: ModalInfo, memo: HashMap<Int64, GenericType>): Type {
         if (let Some(refTy) <- (ty as RefType)) {
-            return GetRefTy(WithModal(refTy.GetBaseType(), modal))
+            return GetRefTy(WithModalImpl(refTy.GetBaseType(), modal, memo))
         }
         if (let Some(boxTy) <- (ty as BoxType)) {
-            return GetBoxTy(WithModal(boxTy.GetBaseType(), modal))
+            return GetBoxTy(WithModalImpl(boxTy.GetBaseType(), modal, memo))
         }
         if (modal == ty.modal) {
             return ty
@@ -545,8 +550,16 @@ public class CHIRContext {
                 GetVArrayTy(varrayTy.GetElementType(), varrayTy.GetSize(), modal: modal)
             case TypeKind.TYPE_CPOINTER =>
                 GetCPointerTy((ty as CPointerType).getOrThrow().GetElementType(), modal: modal)
-            // Official re-interns generics with modal upper bounds; cjcj interns generics by name only,
-            // so a modal generic has no CHIR identity yet and must not be silently aliased.
+            case TypeKind.TYPE_THIS => GetThisTy(modal: modal)
+            case TypeKind.TYPE_GENERIC =>
+                let src = (ty as GenericType).getOrThrow()
+                if (let Some(visited) <- memo.get(src.objectId)) { return visited }
+                let dst = GetGenericTy(src.GetIdentifier(), src.GetSrcCodeIdentifier(), modal: modal)
+                memo[src.objectId] = dst
+                let bounds = ArrayList<Type>()
+                for (bound in src.GetUpperBounds()) { bounds.add(WithModalImpl(bound, modal, memo)) }
+                dst.SetUpperBounds(bounds)
+                dst
             case _ => throw IllegalStateException("CHIRContext.WithModal: no modal CHIR identity for ${ty.ToString()}")
         }
     }

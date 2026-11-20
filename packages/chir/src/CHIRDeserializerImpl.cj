@@ -1422,6 +1422,15 @@ class CHIRDeserializerImpl {
     }
 
     private func Deserialize(obj: PackageFormat_Type): Type {
+        let ty = DeserializeBaseType(obj)
+        let modal = obj.GetModal()
+        if ((ty.IsRef() || ty.IsBox()) && modal.local != CHIRMode.NONE) {
+            throw IllegalArgumentException("Serialized CHIR reference wrapper carries a data mode")
+        }
+        return if (ty.IsRef() || ty.IsBox()) { ty } else { builder.context.WithModal(ty, modal) }
+    }
+
+    private func DeserializeBaseType(obj: PackageFormat_Type): Type {
         let kind = obj.GetKind()
         if (kind == CHIRFB_CHIR_TYPE_KIND_INT8) { return builder.context.GetInt8Ty() }
         if (kind == CHIRFB_CHIR_TYPE_KIND_INT16) { return builder.context.GetInt16Ty() }
@@ -1459,13 +1468,13 @@ class CHIRDeserializerImpl {
     private func Deserialize(obj: PackageFormat_RawArrayType): RawArrayType {
         let argTys = obj.GetBase().getOrThrow().GetArgTys().getOrThrow()
         let elemTy = GetType<Type>(argTys.Get(0u32, 0u32)).getOrThrow()
-        return builder.context.GetRawArrayTy(elemTy, dims: UInt64(obj.GetDims()))
+        return builder.context.GetRawArrayTy(elemTy, dims: UInt64(obj.GetDims()), modal: obj.GetBase().getOrThrow().GetModal())
     }
 
     private func Deserialize(obj: PackageFormat_VArrayType): VArrayType {
         let argTys = obj.GetBase().getOrThrow().GetArgTys().getOrThrow()
         let elemTy = GetType<Type>(argTys.Get(0u32, 0u32)).getOrThrow()
-        return builder.context.GetVArrayTy(elemTy, UInt64(obj.GetSize()))
+        return builder.context.GetVArrayTy(elemTy, UInt64(obj.GetSize()), modal: obj.GetBase().getOrThrow().GetModal())
     }
 
     private func Deserialize(obj: PackageFormat_FuncType): FuncType {
@@ -1480,7 +1489,7 @@ class CHIRDeserializerImpl {
             index++
         }
         return builder.context.GetFuncTy(paramTys, retTy, hasVarLenParam: obj.GetHasVarArg(),
-            isCFunc: obj.GetIsCFuncType())
+            isCFunc: obj.GetIsCFuncType(), modal: obj.GetBase().getOrThrow().GetModal())
     }
 
     private func Deserialize(obj: PackageFormat_CustomType): CustomType {
@@ -1488,22 +1497,22 @@ class CHIRDeserializerImpl {
         let def = GetCustomTypeDef<CustomTypeDef>(obj.GetCustomTypeDef()).getOrThrow()
         let typeArgs = GetType<Type>(obj.GetBase().getOrThrow().GetArgTys())
         if (kind == CHIRFB_CHIR_TYPE_KIND_CLASS) {
-            return builder.context.GetClassTy((def as ClassDef).getOrThrow(), typeArgs)
+            return builder.context.GetClassTy((def as ClassDef).getOrThrow(), typeArgs, modal: obj.GetBase().getOrThrow().GetModal())
         }
         if (kind == CHIRFB_CHIR_TYPE_KIND_ENUM) {
-            return builder.context.GetEnumTy((def as EnumDef).getOrThrow(), typeArgs)
+            return builder.context.GetEnumTy((def as EnumDef).getOrThrow(), typeArgs, modal: obj.GetBase().getOrThrow().GetModal())
         }
         if (kind == CHIRFB_CHIR_TYPE_KIND_STRUCT) {
-            return builder.context.GetStructTy((def as StructDef).getOrThrow(), typeArgs)
+            return builder.context.GetStructTy((def as StructDef).getOrThrow(), typeArgs, modal: obj.GetBase().getOrThrow().GetModal())
         }
         CJC_ABORT()
-        return builder.context.GetStructTy((def as StructDef).getOrThrow(), typeArgs)
+        return builder.context.GetStructTy((def as StructDef).getOrThrow(), typeArgs, modal: obj.GetBase().getOrThrow().GetModal())
     }
 
     private func Deserialize(obj: PackageFormat_GenericType): GenericType {
         let identifier = obj.GetIdentifier().getOrThrow().str()
         let srcCodeIdentifier = obj.GetSrcCodeIdentifier().getOrThrow().str()
-        let genericType = builder.context.GetGenericTy(identifier, srcCodeIdentifier)
+        let genericType = builder.context.GetGenericTy(identifier, srcCodeIdentifier, modal: obj.GetBase().getOrThrow().GetModal())
         genericTypeConfig.add((genericType, obj))
         return genericType
     }

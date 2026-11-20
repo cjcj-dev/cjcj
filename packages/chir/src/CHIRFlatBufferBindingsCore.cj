@@ -2,10 +2,32 @@ package cjcj::chir
 
 import cjcj::flatbuffers.{FlatBufferString, Offset, Table, Vector, VerifierTemplate}
 
-// PackageFormat_generated.h:2746-2765. Type read accessors and Verify.
+class PackageFormat_ModalInfo <: Table {
+    init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
+
+    func GetLocal(): Int16 { return GetField(CHIRFB_MODAL_INFO_VT_LOCAL, 0i16) }
+
+    func Verify(verifier: VerifierTemplate): Bool {
+        return VerifyTableStart(verifier) && VerifyField<Int16>(verifier, CHIRFB_MODAL_INFO_VT_LOCAL, 2) &&
+            GetLocal() >= 0i16 && GetLocal() <= 2i16 && verifier.EndTable()
+    }
+}
+
 class PackageFormat_Type <: Table {
     init(data: Array<UInt8>, pos: Int64) {
         super(data, pos)
+    }
+
+    func GetModal(): ModalInfo {
+        if (let Some(pos) <- GetPointer(CHIRFB_TYPE_VT_MODAL)) {
+            return match (PackageFormat_ModalInfo(data, pos).GetLocal()) {
+                case 0i16 => ModalInfo()
+                case 1i16 => ModalInfo(CHIRMode.MAYBE)
+                case 2i16 => ModalInfo(CHIRMode.MUST)
+                case _ => throw IllegalArgumentException("Invalid serialized CHIR local mode")
+            }
+        }
+        return ModalInfo()
     }
 
     func GetKind(): UInt8 {
@@ -21,7 +43,10 @@ class PackageFormat_Type <: Table {
             VerifyField<UInt8>(verifier, CHIRFB_TYPE_VT_KIND, 1) &&
             VerifyOffset(verifier, CHIRFB_TYPE_VT_ARGTYS) &&
             verifier.VerifyVector(GetPointer(CHIRFB_TYPE_VT_ARGTYS), 4) &&
-            verifier.EndTable()
+            VerifyOffset(verifier, CHIRFB_TYPE_VT_MODAL) &&
+            verifier.VerifyTable(GetPointer(CHIRFB_TYPE_VT_MODAL), { pos: Int64, active: VerifierTemplate =>
+                PackageFormat_ModalInfo(data, pos).Verify(active)
+            }) && verifier.EndTable()
     }
 }
 

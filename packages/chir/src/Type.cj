@@ -1083,14 +1083,15 @@ public class BoxType <: Type {
 public class GenericType <: Type & Equatable<GenericType> {
     public let name: String
     private var srcCodeIdentifier: String
-    private let upperBounds: ArrayList<Type> = ArrayList<Type>()
+    private let boundsMutex = Mutex()
+    private var upperBounds: ArrayList<Type> = ArrayList<Type>()
 
     public init(name: String) {
         this(name, name)
     }
 
-    public init(name: String, srcCodeIdentifier: String) {
-        super(TypeKind.TYPE_GENERIC)
+    public init(name: String, srcCodeIdentifier: String, modal!: ModalInfo = ModalInfo()) {
+        super(TypeKind.TYPE_GENERIC, modal: modal)
         this.name = name
         this.srcCodeIdentifier = srcCodeIdentifier
     }
@@ -1116,18 +1117,18 @@ public class GenericType <: Type & Equatable<GenericType> {
     }
 
     public func GetUpperBounds(): ArrayList<Type> {
-        return upperBounds.clone()
+        synchronized(boundsMutex) { return upperBounds.clone() }
     }
 
     public func SetUpperBounds(bounds: ArrayList<Type>): Unit {
-        upperBounds.clear()
+        let updated = ArrayList<Type>()
         for (bound in bounds) {
             if (bound.StripAllRefs().IsValueType()) {
                 throw IllegalArgumentException("Generic type upper bound should not be a value type")
             }
-            upperBounds.add(bound)
+            updated.add(bound)
         }
-        sort(upperBounds, by: { left: Type, right: Type =>
+        sort(updated, by: { left: Type, right: Type =>
             if (left.ToString() < right.ToString()) {
                 Ordering.LT
             } else if (left.ToString() > right.ToString()) {
@@ -1136,10 +1137,11 @@ public class GenericType <: Type & Equatable<GenericType> {
                 Ordering.EQ
             }
         }, stable: true)
+        synchronized(boundsMutex) { upperBounds = updated }
     }
 
     public func GetInstMap(instMap: HashMap<Int64, (GenericType, Type)>, builder: CHIRBuilder): Unit {
-        for (upperBound in upperBounds) {
+        for (upperBound in GetUpperBounds()) {
             let upperBoundCustomType = (upperBound.StripAllRefs() as CustomType).getOrThrow()
             upperBoundCustomType.GetInstMap(instMap, builder)
         }
@@ -1151,7 +1153,7 @@ public class GenericType <: Type & Equatable<GenericType> {
 
     public func GetInstMemberTypeByPathCheckingReadOnly(path: ArrayList<UInt64>, builder: CHIRBuilder): (Type, Bool) {
         var concretType: Option<Type> = None
-        for (upperBound in upperBounds) {
+        for (upperBound in GetUpperBounds()) {
             let upperBoundCustomType = (upperBound.StripAllRefs() as CustomType).getOrThrow()
             if (upperBoundCustomType.GetCustomTypeDef().IsClassLike()) {
                 if (concretType.isNone()) {
@@ -1170,7 +1172,7 @@ public class GenericType <: Type & Equatable<GenericType> {
     public override func GetExpectedFunc(funcName: String, funcType: FuncType, isStatic: Bool,
         funcInstTypeArgs: ArrayList<Type>, builder: CHIRBuilder,
         checkAbstractMethod: Bool): Option<Function> {
-        for (upperBound in upperBounds) {
+        for (upperBound in GetUpperBounds()) {
             if (let Some(expectedFunc) <- upperBound.StripAllRefs().GetExpectedFunc(funcName, funcType, isStatic,
                 funcInstTypeArgs, builder, checkAbstractMethod)) {
                 return expectedFunc
@@ -1180,7 +1182,7 @@ public class GenericType <: Type & Equatable<GenericType> {
     }
 
     public override func ToString(): String {
-        return "Generic-" + name
+        return FormatWithModal("Generic-" + name)
     }
 
     public override func ToSrcCodeString(): String {
@@ -1190,24 +1192,24 @@ public class GenericType <: Type & Equatable<GenericType> {
     public override func Hash(): Int64 {
         var hashVal: Int64 = 0
         hashVal = HashValue(hashVal, name)
-        return hashVal
+        return HashModal(hashVal, modal)
     }
 
     public override func IsEqual(other: Type): Bool {
         if (let Some(genericTy) <- (other as GenericType)) {
-            return name == genericTy.name
+            return name == genericTy.name && modal == genericTy.modal
         }
         return false
     }
 }
 
 public class ThisType <: Type {
-    public init() {
-        super(TypeKind.TYPE_THIS)
+    public init(modal!: ModalInfo = ModalInfo()) {
+        super(TypeKind.TYPE_THIS, modal: modal)
     }
 
     public override func ToString(): String {
-        return "This"
+        return FormatWithModal("This")
     }
 
     public override func ToSrcCodeString(): String {
@@ -1782,13 +1784,13 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type
     }
     if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
         return RawArrayType(ReplaceRawGenericArgType(rawArrayTy.GetElementType(), replaceTable),
-            dims: rawArrayTy.GetDims())
+            dims: rawArrayTy.GetDims(), modal: ty.GetModalInfo())
     }
     if (let Some(varrayTy) <- (ty as VArrayType)) {
-        return VArrayType(ReplaceRawGenericArgType(varrayTy.GetElementType(), replaceTable), varrayTy.size)
+        return VArrayType(ReplaceRawGenericArgType(varrayTy.GetElementType(), replaceTable), varrayTy.size, modal: ty.GetModalInfo())
     }
     if (let Some(pointerTy) <- (ty as CPointerType)) {
-        return CPointerType(ReplaceRawGenericArgType(pointerTy.GetElementType(), replaceTable))
+        return CPointerType(ReplaceRawGenericArgType(pointerTy.GetElementType(), replaceTable), modal: ty.GetModalInfo())
     }
     if (let Some(boxTy) <- (ty as BoxType)) {
         return BoxType(ReplaceRawGenericArgType(boxTy.GetBaseType(), replaceTable))
@@ -1798,7 +1800,7 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type
         for (arg in tupleTy.GetTypeArgs()) {
             args.add(ReplaceRawGenericArgType(arg, replaceTable))
         }
-        return TupleType(args)
+        return TupleType(args, modal: ty.GetModalInfo())
     }
     if (let Some(funcTy) <- (ty as FuncType)) {
         let params = ArrayList<Type>()
@@ -1806,28 +1808,28 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type
             params.add(ReplaceRawGenericArgType(param, replaceTable))
         }
         let retTy = ReplaceRawGenericArgType(funcTy.GetReturnType(), replaceTable)
-        return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+        return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc(), modal: ty.GetModalInfo())
     }
     if (let Some(structTy) <- (ty as StructType)) {
         let args = ArrayList<Type>()
         for (arg in structTy.GetGenericArgs()) {
             args.add(ReplaceRawGenericArgType(arg, replaceTable))
         }
-        return StructType(structTy.GetStructDef(), args)
+        return StructType(structTy.GetStructDef(), args, modal: ty.GetModalInfo())
     }
     if (let Some(classTy) <- (ty as ClassType)) {
         let args = ArrayList<Type>()
         for (arg in classTy.GetGenericArgs()) {
             args.add(ReplaceRawGenericArgType(arg, replaceTable))
         }
-        return ClassType(classTy.GetClassDef(), args)
+        return ClassType(classTy.GetClassDef(), args, modal: ty.GetModalInfo())
     }
     if (let Some(enumTy) <- (ty as EnumType)) {
         let args = ArrayList<Type>()
         for (arg in enumTy.GetGenericArgs()) {
             args.add(ReplaceRawGenericArgType(arg, replaceTable))
         }
-        return EnumType(enumTy.GetEnumDef(), args)
+        return EnumType(enumTy.GetEnumDef(), args, modal: ty.GetModalInfo())
     }
     return ty
 }
@@ -1838,13 +1840,13 @@ public func CreateNewTypeWithArgs(oldType: Type, newArgs: ArrayList<Type>, build
     }
     if (let Some(tupleTy) <- (oldType as TupleType)) {
         let _ = tupleTy
-        return builder.context.GetTupleTy(newArgs)
+        return builder.context.GetTupleTy(newArgs, modal: oldType.GetModalInfo())
     }
     if (let Some(structTy) <- (oldType as StructType)) {
-        return builder.context.GetStructTy(structTy.GetStructDef(), newArgs)
+        return builder.context.GetStructTy(structTy.GetStructDef(), newArgs, modal: oldType.GetModalInfo())
     }
     if (let Some(enumTy) <- (oldType as EnumType)) {
-        return builder.context.GetEnumTy(enumTy.GetEnumDef(), newArgs)
+        return builder.context.GetEnumTy(enumTy.GetEnumDef(), newArgs, modal: oldType.GetModalInfo())
     }
     if (let Some(funcTy) <- (oldType as FuncType)) {
         let paramTys = ArrayList<Type>()
@@ -1854,10 +1856,10 @@ public func CreateNewTypeWithArgs(oldType: Type, newArgs: ArrayList<Type>, build
             idx++
         }
         return builder.context.GetFuncTy(paramTys, newArgs[newArgs.size - 1], hasVarLenParam: funcTy.HasVarArg(),
-            isCFunc: oldType.IsCFunc())
+            isCFunc: oldType.IsCFunc(), modal: oldType.GetModalInfo())
     }
     if (let Some(classTy) <- (oldType as ClassType)) {
-        return builder.context.GetClassTy(classTy.GetClassDef(), newArgs)
+        return builder.context.GetClassTy(classTy.GetClassDef(), newArgs, modal: oldType.GetModalInfo())
     }
     if (let Some(refTy) <- (oldType as RefType)) {
         let _ = refTy
@@ -1867,15 +1869,15 @@ public func CreateNewTypeWithArgs(oldType: Type, newArgs: ArrayList<Type>, build
     if (let Some(pointerTy) <- (oldType as CPointerType)) {
         let _ = pointerTy
         CJC_ASSERT(newArgs.size == 1)
-        return builder.context.GetCPointerTy(newArgs[0])
+        return builder.context.GetCPointerTy(newArgs[0], modal: oldType.GetModalInfo())
     }
     if (let Some(rawArrayTy) <- (oldType as RawArrayType)) {
         CJC_ASSERT(newArgs.size == 1)
-        return builder.context.GetRawArrayTy(newArgs[0], dims: rawArrayTy.GetDims())
+        return builder.context.GetRawArrayTy(newArgs[0], dims: rawArrayTy.GetDims(), modal: oldType.GetModalInfo())
     }
     if (let Some(varrayTy) <- (oldType as VArrayType)) {
         CJC_ASSERT(newArgs.size == 1)
-        return builder.context.GetVArrayTy(newArgs[0], varrayTy.size)
+        return builder.context.GetVArrayTy(newArgs[0], varrayTy.size, modal: oldType.GetModalInfo())
     }
     if (let Some(boxTy) <- (oldType as BoxType)) {
         let _ = boxTy
@@ -1890,8 +1892,9 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Type, Type>
         return ty
     }
     if (let Some(genericTy) <- (ty as GenericType)) {
-        if (let Some(instTy) <- replaceTable.get(genericTy)) {
-            return instTy
+        let dataTy = builder.context.GetGenericTy(genericTy.name, genericTy.GetSrcCodeIdentifier())
+        if (let Some(instTy) <- replaceTable.get(dataTy)) {
+            return builder.context.WithModal(instTy, genericTy.modal)
         }
         return ty
     }
@@ -1907,8 +1910,9 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type
         return ty
     }
     if (let Some(genericTy) <- (ty as GenericType)) {
-        if (let Some(instTy) <- replaceTable.get(genericTy.objectId)) {
-            return instTy
+        let dataTy = builder.context.GetGenericTy(genericTy.name, genericTy.GetSrcCodeIdentifier())
+        if (let Some(instTy) <- replaceTable.get(dataTy.objectId)) {
+            return builder.context.WithModal(instTy, genericTy.modal)
         }
         return ty
     }
@@ -1924,8 +1928,9 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<GenericType
         return ty
     }
     if (let Some(genericTy) <- (ty as GenericType)) {
-        if (let Some(instTy) <- replaceTable.get(genericTy)) {
-            return instTy
+        let dataTy = builder.context.GetGenericTy(genericTy.name, genericTy.GetSrcCodeIdentifier())
+        if (let Some(instTy) <- replaceTable.get(dataTy)) {
+            return builder.context.WithModal(instTy, genericTy.modal)
         }
         return ty
     }
@@ -1942,8 +1947,9 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, (Gen
         return ty
     }
     if (let Some(genericTy) <- (ty as GenericType)) {
-        if (let Some(instTy) <- replaceTable.get(genericTy.objectId)) {
-            return instTy[1]
+        let dataTy = builder.context.GetGenericTy(genericTy.name, genericTy.GetSrcCodeIdentifier())
+        if (let Some(instTy) <- replaceTable.get(dataTy.objectId)) {
+            return builder.context.WithModal(instTy[1], genericTy.modal)
         }
         return ty
     }
@@ -1974,37 +1980,37 @@ private func ReplaceRawGenericArgType(ty: Type, genericParams: ArrayList<Generic
     }
     if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
         return RawArrayType(ReplaceRawGenericArgType(rawArrayTy.GetElementType(), genericParams, genericArgs),
-            dims: rawArrayTy.GetDims())
+            dims: rawArrayTy.GetDims(), modal: ty.modal)
     }
     if (let Some(varrayTy) <- (ty as VArrayType)) {
         return VArrayType(ReplaceRawGenericArgType(varrayTy.GetElementType(), genericParams, genericArgs),
-            varrayTy.size)
+            varrayTy.size, modal: ty.modal)
     }
     if (let Some(pointerTy) <- (ty as CPointerType)) {
-        return CPointerType(ReplaceRawGenericArgType(pointerTy.GetElementType(), genericParams, genericArgs))
+        return CPointerType(ReplaceRawGenericArgType(pointerTy.GetElementType(), genericParams, genericArgs), modal: ty.modal)
     }
     if (let Some(boxTy) <- (ty as BoxType)) {
         return BoxType(ReplaceRawGenericArgType(boxTy.GetBaseType(), genericParams, genericArgs))
     }
     if (let Some(tupleTy) <- (ty as TupleType)) {
-        return TupleType(ReplaceRawGenericArgTypes(tupleTy.GetTypeArgs(), genericParams, genericArgs))
+        return TupleType(ReplaceRawGenericArgTypes(tupleTy.GetTypeArgs(), genericParams, genericArgs), modal: ty.modal)
     }
     if (let Some(funcTy) <- (ty as FuncType)) {
         let params = ReplaceRawGenericArgTypes(funcTy.GetParamTypes(), genericParams, genericArgs)
         let retTy = ReplaceRawGenericArgType(funcTy.GetReturnType(), genericParams, genericArgs)
-        return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+        return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc(), modal: ty.modal)
     }
     if (let Some(structTy) <- (ty as StructType)) {
         return StructType(structTy.GetStructDef(),
-            ReplaceRawGenericArgTypes(structTy.GetGenericArgs(), genericParams, genericArgs))
+            ReplaceRawGenericArgTypes(structTy.GetGenericArgs(), genericParams, genericArgs), modal: ty.modal)
     }
     if (let Some(classTy) <- (ty as ClassType)) {
         return ClassType(classTy.GetClassDef(),
-            ReplaceRawGenericArgTypes(classTy.GetGenericArgs(), genericParams, genericArgs))
+            ReplaceRawGenericArgTypes(classTy.GetGenericArgs(), genericParams, genericArgs), modal: ty.modal)
     }
     if (let Some(enumTy) <- (ty as EnumType)) {
         return EnumType(enumTy.GetEnumDef(),
-            ReplaceRawGenericArgTypes(enumTy.GetGenericArgs(), genericParams, genericArgs))
+            ReplaceRawGenericArgTypes(enumTy.GetGenericArgs(), genericParams, genericArgs), modal: ty.modal)
     }
     return ty
 }

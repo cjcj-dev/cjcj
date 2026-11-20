@@ -152,7 +152,7 @@ public func ManglePrimitive(kind: TypeKind): String {
 func MangleArraySliceType(t: Type, genericsTypeStack: ArrayList<String>, useGenericName: Bool): String {
     let typeArgs = t.GetTypeArgs()
     return MANGLE_ARRAY_SLICE_PREFIX + MangleType(typeArgs[0], genericsTypeStack, useGenericName: useGenericName) +
-        MANGLE_SUFFIX
+        MANGLE_SUFFIX + MangleCHIRTypeMode(t)
 }
 
 private func IdentifierForMangledCHIRType(def: CustomTypeDef): String {
@@ -194,6 +194,18 @@ public func MangleType(t: Type): String {
 }
 
 public func MangleType(t: Type, genericsTypeStack: ArrayList<String>, useGenericName!: Bool = false): String {
+    return MangleTypeBody(t, genericsTypeStack, useGenericName) + MangleCHIRTypeMode(t)
+}
+
+private func MangleCHIRTypeMode(t: Type): String {
+    return match (t.GetModalInfo().Local()) {
+        case CHIRMode.NONE => ""
+        case CHIRMode.MAYBE => "QlE"
+        case CHIRMode.MUST => "QLE"
+    }
+}
+
+private func MangleTypeBody(t: Type, genericsTypeStack: ArrayList<String>, useGenericName: Bool): String {
     let primitive = ManglePrimitive(t.GetTypeKind())
     if (!primitive.isEmpty()) {
         return primitive

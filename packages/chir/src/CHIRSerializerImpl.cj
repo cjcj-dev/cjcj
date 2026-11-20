@@ -746,7 +746,7 @@ class CHIRSerializerImpl {
     private func Serialize(obj: Type): FlatBufferOffset {
         let kind = UInt8(TypeKindIndex(obj.GetTypeKind()))
         let argTys = GetId(obj.GetTypeArgs())
-        return CreateTypeDirect(builder, kind, if (argTys.isEmpty()) { None } else { Some(argTys) })
+        return CreateTypeDirect(builder, kind, if (argTys.isEmpty()) { None } else { Some(argTys) }, obj.modal)
     }
 
     private func Serialize(obj: RawArrayType): FlatBufferOffset {

@@ -699,6 +699,8 @@ const CHIRFB_PHASE_MAX: UInt8 = 3u8
 // PackageFormat_generated.h:2748-2751 (Type::FlatBuffersVTableOffset).
 const CHIRFB_TYPE_VT_KIND: UInt16 = 4u16
 const CHIRFB_TYPE_VT_ARGTYS: UInt16 = 6u16
+const CHIRFB_TYPE_VT_MODAL: UInt16 = 8u16
+const CHIRFB_MODAL_INFO_VT_LOCAL: UInt16 = 4u16
 
 // RawArrayType table field slot offsets. PackageFormat.fbs:107-110;
 // PackageFormat_generated.h:2811-2814 (RawArrayType::FlatBuffersVTableOffset).

@@ -365,13 +365,9 @@ public func GetInstMapFromCurDefAndExDefToCurType(curType: CustomType): HashMap<
 }
 
 public func ReplaceThisTypeToConcreteType(ty: Type, concreteType: Type, builder: CHIRBuilder): Type {
-    if (let Some(refTy) <- (ty as RefType)) {
-        if (refTy.GetBaseType().IsThis()) {
-            return concreteType
-        }
-    }
-    if (ty.IsThis()) {
-        return concreteType
+    let derefType = ty.StripAllRefs()
+    if (derefType.IsThis()) {
+        return builder.context.WithModal(concreteType, derefType.modal)
     }
     let newArgs = ArrayList<Type>()
     for (argTy in ty.GetTypeArgs()) {
