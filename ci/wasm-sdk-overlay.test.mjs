@@ -1,6 +1,8 @@
+#!/usr/bin/env zx
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,6 +72,7 @@ test('overlay produces a layout that passes the wasm SDK check and records prove
   assert.match(provenance.outputs['libexec/compiler/cjcj-stage1'], /^[0-9a-f]{64}$/);
   assert.equal(provenance.inputs.sysrootTarball.sha256, args.pin.WASI_SYSROOT_SHA256);
   assert.equal(provenance.releaseVerifiable, false);
+  assert.equal(provenance.inputs.std.mode, 'prebuilt');
   assert.deepEqual(provenance.supersededManifestEntries, {'RELEASE-MANIFEST.jsonl': ['libexec/compiler/cjcj-stage1']});
   assert.deepEqual(manifestDrift(base), {'TOOLS-INPUTS.json': ['tools/bin/node']}, 'pre-existing base drift is reported, not attributed');
 });
@@ -92,4 +95,75 @@ test('a sysroot tarball that does not match the pin fails before any output exis
   const pin = parseWasiPin(Object.entries({...args.pin, WASI_SYSROOT_SHA256: 'b'.repeat(64)}).map(([k, v]) => `${k}=${v}`).join('\n'));
   assert.throws(() => overlayWasmSdk({...args, pin}), /sha256 mismatch/);
   assert.equal(fs.existsSync(args.dest), false);
+});
+
+test('source mode installs the std pair produced by the staged SDK', t => {
+  const {dir, base, args} = fixture();
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const stdLib = 'lib/wasi_wasm32_cjnative/libcangjie-std-core.a';
+  const stdMod = 'modules/wasi_wasm32_cjnative/std/std.core.cjo';
+  write(path.join(base, stdLib), 'old archive');
+  write(path.join(base, stdMod), 'old module');
+  write(path.join(base, path.dirname(stdMod), 'std.stale.cjo'), 'stale module');
+
+  const executable = (file, body) => write(file, `#!${process.execPath}
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const args = process.argv.slice(2);
+${body}
+`, 0o755);
+  executable(path.join(base, 'bin/cjc'), `
+const sdk = process.env.CANGJIE_HOME;
+assert(args.includes('--no-prelude'));
+assert.equal(fs.readFileSync(path.join(sdk, 'libexec/compiler/cjcj-stage1'), 'utf8'), 'wasm cjc');
+assert.equal(fs.readFileSync(path.join(sdk, '${NATIVE_LLVM_BIN}/opt'), 'utf8'), 'wasm opt');
+assert.equal(fs.readFileSync(path.join(sdk, 'runtime/lib/wasi_wasm32_cjnative/libcangjie-runtime.a'), 'utf8'), 'rt');
+assert(fs.statSync(path.dirname(path.join(sdk, '${stdMod}'))).isDirectory());
+assert(!fs.existsSync(path.join(sdk, '${stdMod}')));
+assert(!fs.existsSync(path.join(sdk, '${stdLib}')));
+const out = args.find(arg => arg.startsWith('--output=')).slice('--output='.length);
+fs.writeFileSync(out, 'fresh core');
+fs.writeFileSync(out + '.cjo', 'fresh module');
+`);
+  const stdlibSource = path.join(dir, 'stdlib with spaces');
+  const native = path.join(stdlibSource, 'libs/std/core/native');
+  write(path.join(native, 'CMakeLists.txt'), '--redefine-sym \${SYM_PREFIX}Int64_ti=\${SYM_PREFIX}Int64.ti');
+  write(path.join(native, 'typetemplate.c'), 'template source');
+  write(path.join(native, 'ffi.c'), 'ffi source');
+  write(path.join(native, 'SIMD_support.c'), 'SIMD source');
+  const boundscheckSource = path.join(dir, 'bounds');
+  write(path.join(boundscheckSource, 'src/memcpy_s.c'), 'bounds source');
+  fs.mkdirSync(path.join(boundscheckSource, 'include'));
+  const clang = path.join(dir, 'clang');
+  executable(clang, `
+const src = args.at(-3);
+const out = args.at(-1);
+if (src.endsWith('typetemplate.c')) fs.writeFileSync(out, '@Int64_ti = global i32 0');
+else fs.copyFileSync(src, out);
+`);
+  const llvmAr = path.join(dir, 'llvm-ar');
+  executable(llvmAr, `
+const [op, archive, ...objects] = args;
+assert.equal(op, 'rs');
+for (const object of objects) fs.appendFileSync(archive, '|'+fs.readFileSync(object, 'utf8'));
+`);
+  const source = {stdlibSource, boundscheckSource, clang, llvmAr};
+  assert.throws(() => overlayWasmSdk({...args, ...source}), /either source std production or prebuilt/);
+  assert.throws(() => overlayWasmSdk({...args, stdModules: []}), /requires both/);
+  assert.equal(fs.existsSync(args.dest), false);
+
+  const result = overlayWasmSdk({...args, ...source, stdArchives: [], stdModules: []});
+  assert.equal(result.check.ok, true);
+  assert.equal(fs.readFileSync(path.join(args.dest, stdLib), 'utf8'),
+    'fresh core|bounds source|ffi source|SIMD source|@"Int64.ti" = global i32 0', 'SDK must install the archive produced in this run');
+  assert.equal(fs.readFileSync(path.join(args.dest, stdMod), 'utf8'), 'fresh module');
+  assert.equal(result.provenance.inputs.std.mode, 'source');
+  assert.equal(fs.existsSync(path.join(args.dest, path.dirname(stdMod), 'std.stale.cjo')), false);
+  assert.equal(fs.readFileSync(path.join(base, stdLib), 'utf8'), 'old archive');
+
+  const cli = fileURLToPath(new URL('./wasm-sdk-overlay.mjs', import.meta.url));
+  const rejected = spawnSync(process.execPath, [cli, '--std-archive', '--std-module', args.stdModules[0]], {encoding: 'utf8'});
+  assert.equal(rejected.status, 2);
+  assert.match(rejected.stderr, /missing value for --std-archive/);
 });

@@ -1,3 +1,4 @@
+#!/usr/bin/env zx
 // wasm32-wasi SDK overlay (staged subset M0): turn a native cjcj SDK into one that can also target
 // wasm32-wasi, from explicit inputs, with provenance and the ci/wasi-toolchain.mjs layout check.
 // Productizes the lane-1 hand assembly: wasm-enabled llc/opt/llvm-objcopy and lld-as-wasm-ld into
@@ -5,15 +6,21 @@
 // wasi_wasm32_cjnative runtime/std archives and modules, the pinned wasi-sysroot and (optionally) cjpm.
 //
 //   node ci/wasm-sdk-overlay.mjs --base-sdk <dir> --dest <new dir> --llvm-bin <dir> --cjc <file>
-//        --runtime-archive <file> --std-archive <file>... --std-module <file>... --sysroot-tarball <file> [--cjpm <file>]
+//        --runtime-archive <file> --sysroot-tarball <file> [--cjpm <file>]
+//        --stdlib-source <stdlib dir> --boundscheck-source <dir> --clang <file> --llvm-ar <file>
+// To install prebuilt std, replace the four source options with --std-archive <file>... --std-module <file>....
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {buildWasmStdCore, wasmStdInputs} from './wasm-std-core.mjs';
 import {checkWasmSdk, installWasiSysroot, readWasiPin, sha256File} from './wasi-toolchain.mjs';
 
 export const NATIVE_LLVM_BIN = '.native-tools/third_party/llvm/bin';
 export const LLVM_ENTRY_BIN = 'third_party/llvm/bin';
+const WASM_TARGET_DIR = 'wasi_wasm32_cjnative';
+const STD_LIB_DIR = `lib/${WASM_TARGET_DIR}`;
+const STD_MODULE_DIR = `modules/${WASM_TARGET_DIR}/std`;
 const REPLACED_LLVM_TOOLS = Object.freeze(['llc', 'opt', 'llvm-objcopy']);
 
 // SDK manifests (top-level *.json / *.jsonl) pin files by sha256 as {"path": p, "sha256": h} or {"<p>": {"sha256": h}}.
@@ -65,7 +72,7 @@ export function wasmLdEntry(llcEntryText) {
 }
 
 export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, stdArchives = [], stdModules = [],
-  sysrootTarball, cjpm, pin = readWasiPin()}) {
+  sysrootTarball, cjpm, stdlibSource, boundscheckSource, clang, llvmAr, pin = readWasiPin()}) {
   // Validate every input before touching dest (no partial SDK on error).
   if (!baseSdk || !fs.existsSync(baseSdk)) throw new Error(`base SDK is missing: ${baseSdk}`);
   if (!dest || fs.existsSync(dest)) throw new Error(`dest must be a new path: ${dest}`);
@@ -76,7 +83,16 @@ export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, std
   requireFile(path.join(baseSdk, 'libexec/compiler/cjcj-stage1'), 'base SDK libexec/compiler/cjcj-stage1');
   requireFile(cjc, 'compiler input');
   requireFile(runtimeArchive, 'wasm runtime archive');
-  if (stdArchives.length === 0 || stdModules.length === 0) throw new Error('at least one std archive and one std module are required');
+  const prebuilt = stdArchives.length > 0 || stdModules.length > 0;
+  const sourceOptions = {stdlibSource, boundscheckSource, clang, llvmAr};
+  if (prebuilt && Object.values(sourceOptions).some(value => value !== undefined)) {
+    throw new Error('use either source std production or prebuilt std inputs');
+  }
+  if (prebuilt && (!stdArchives.length || !stdModules.length)) {
+    throw new Error('prebuilt std requires both --std-archive and --std-module');
+  }
+  const stdBuild = prebuilt ? undefined : wasmStdInputs(sourceOptions);
+  if (stdBuild) requireFile(path.join(baseSdk, 'bin/cjc'), 'base SDK bin/cjc launcher');
   for (const file of stdArchives) requireFile(file, 'std archive');
   for (const file of stdModules) requireFile(file, 'std module');
   requireFile(sysrootTarball, 'wasi-sysroot tarball');
@@ -89,8 +105,45 @@ export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, std
     requireFile(path.join(baseSdk, '.target-tools/tools/bin/cjpm'), 'base SDK .target-tools/tools/bin/cjpm');
   }
   const entry = wasmLdEntry(fs.readFileSync(path.join(baseSdk, LLVM_ENTRY_BIN, 'llc.entry'), 'utf8'));
-
+  const config = {baseSdk, dest, llvmBin, cjc, runtimeArchive, stdArchives, stdModules, sysrootTarball, cjpm, pin, entry, stdBuild};
   fs.mkdirSync(path.dirname(dest), {recursive: true});
+  if (prebuilt) return populateSdk(config);
+
+  // Build against the same compiler, toolchain and sysroot that the installed SDK will use.
+  // Keep the private SDK and intermediates together until both std outputs pass the layout check.
+  const stage = fs.mkdtempSync(path.join(path.resolve(path.dirname(dest)), '.wasm-sdk-'));
+  try {
+    const result = populateSdk({...config, dest: path.join(stage, 'sdk'), stdWork: path.join(stage, 'std')});
+    if (result.check.ok) fs.renameSync(result.dest, dest);
+    return {...result, dest};
+  } finally {
+    fs.rmSync(stage, {recursive: true, force: true});
+  }
+}
+
+function clearInheritedWasmStd(sdk) {
+  const root = fs.realpathSync(sdk);
+  for (const rel of [STD_LIB_DIR, path.dirname(STD_MODULE_DIR)]) {
+    const dir = path.join(sdk, rel);
+    for (const candidate of [path.dirname(dir), dir]) {
+      if (fs.existsSync(candidate) && !fs.realpathSync(candidate).startsWith(root + path.sep)) {
+        throw new Error(`inherited Wasm std path escapes the SDK: ${candidate}`);
+      }
+    }
+    fs.mkdirSync(dir, {recursive: true});
+    if (rel === STD_LIB_DIR) {
+      for (const name of fs.readdirSync(dir).filter(name => /^libcangjie-std-.*\.a$/.test(name))) fs.rmSync(path.join(dir, name));
+    } else {
+      const modules = path.join(sdk, STD_MODULE_DIR);
+      fs.rmSync(modules, {recursive: true, force: true});
+      // cjc checks the target module directory even when building the prelude itself.
+      fs.mkdirSync(modules);
+    }
+  }
+}
+
+function populateSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, stdArchives, stdModules, sysrootTarball, cjpm,
+  pin, entry, stdBuild, stdWork}) {
   const copy = spawnSync('cp', ['-a', baseSdk, dest], {encoding: 'utf8'});
   if (copy.status !== 0) throw new Error(`cp -a ${baseSdk} ${dest} failed: ${copy.stderr}`);
   const put = (from, to) => { fs.mkdirSync(path.dirname(to), {recursive: true}); fs.rmSync(to, {force: true}); fs.copyFileSync(from, to); fs.chmodSync(to, fs.statSync(from).mode); };
@@ -102,14 +155,25 @@ export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, std
   fs.writeFileSync(path.join(dest, LLVM_ENTRY_BIN, 'wasm-ld.entry'), entry); record(`${LLVM_ENTRY_BIN}/wasm-ld.entry`);
   put(cjc, path.join(dest, 'libexec/compiler/cjcj-stage1')); record('libexec/compiler/cjcj-stage1');
   put(runtimeArchive, path.join(dest, 'runtime/lib/wasi_wasm32_cjnative/libcangjie-runtime.a')); record('runtime/lib/wasi_wasm32_cjnative/libcangjie-runtime.a');
-  for (const file of stdArchives) { const rel = `lib/wasi_wasm32_cjnative/${path.basename(file)}`; put(file, path.join(dest, rel)); record(rel); }
-  for (const file of stdModules) { const rel = `modules/wasi_wasm32_cjnative/std/${path.basename(file)}`; put(file, path.join(dest, rel)); record(rel); }
   if (cjpm !== undefined) { put(cjpm, path.join(dest, '.target-tools/tools/bin/cjpm')); record('.target-tools/tools/bin/cjpm'); }
   const sysroot = installWasiSysroot({sdk: dest, tarball: sysrootTarball, pin});
+  if (stdBuild) {
+    clearInheritedWasmStd(dest);
+    const {archive, module} = buildWasmStdCore(dest, stdWork, stdBuild);
+    stdArchives = [archive];
+    stdModules = [module];
+  }
+  for (const file of stdArchives) { const rel = `${STD_LIB_DIR}/${path.basename(file)}`; put(file, path.join(dest, rel)); record(rel); }
+  for (const file of stdModules) { const rel = `${STD_MODULE_DIR}/${path.basename(file)}`; put(file, path.join(dest, rel)); record(rel); }
   const inputs = {baseSdk: path.resolve(baseSdk), sysrootTarball: {path: path.resolve(sysrootTarball), sha256: sysroot.sha256}};
   for (const [name, file] of Object.entries({cjc, runtimeArchive, lld: path.join(llvmBin, 'lld'), ...(cjpm ? {cjpm} : {})})) {
     inputs[name] = {path: path.resolve(file), sha256: sha256File(file)};
   }
+  inputs.std = stdBuild
+    ? {mode: 'source', stdlibSource: stdBuild.stdlibSource, boundscheckSource: stdBuild.bounds,
+      clang: {path: stdBuild.clang, sha256: sha256File(stdBuild.clang)},
+      llvmAr: {path: stdBuild.llvmAr, sha256: sha256File(stdBuild.llvmAr)}}
+    : {mode: 'prebuilt', archives: stdArchives.map(file => path.resolve(file)), modules: stdModules.map(file => path.resolve(file))};
   // The base SDK's release manifests still describe the files replaced here; record exactly which entries the
   // overlay superseded (drift present in dest but not in base) so nothing treats this SDK as release-verifiable.
   const baseDrift = manifestDrift(baseSdk);
@@ -124,15 +188,35 @@ export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, std
   return {dest, provenance, check: checkWasmSdk(dest, {pin})};
 }
 
+const CLI_OPTIONS = new Map([
+  ['--base-sdk', 'baseSdk'], ['--dest', 'dest'], ['--llvm-bin', 'llvmBin'], ['--cjc', 'cjc'],
+  ['--runtime-archive', 'runtimeArchive'], ['--sysroot-tarball', 'sysrootTarball'], ['--cjpm', 'cjpm'],
+  ['--stdlib-source', 'stdlibSource'], ['--boundscheck-source', 'boundscheckSource'], ['--clang', 'clang'], ['--llvm-ar', 'llvmAr'],
+  ['--std-archive', 'stdArchives'], ['--std-module', 'stdModules'],
+]);
+
 function options(argv) {
-  const one = name => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
-  const all = name => argv.flatMap((value, i) => (value === name ? [argv[i + 1]] : []));
-  return {baseSdk: one('--base-sdk'), dest: one('--dest'), llvmBin: one('--llvm-bin'), cjc: one('--cjc'),
-    runtimeArchive: one('--runtime-archive'), stdArchives: all('--std-archive'), stdModules: all('--std-module'),
-    sysrootTarball: one('--sysroot-tarball'), cjpm: one('--cjpm')};
+  const parsed = {stdArchives: [], stdModules: []};
+  for (let i = 0; i < argv.length; i += 2) {
+    const [flag, value] = [argv[i], argv[i + 1]];
+    const key = CLI_OPTIONS.get(flag);
+    if (!key) throw new Error(`unknown option: ${flag}`);
+    if (!value || value.startsWith('--')) throw new Error(`missing value for ${flag}`);
+    if (Array.isArray(parsed[key])) parsed[key].push(value);
+    else if (parsed[key] !== undefined) throw new Error(`repeated option: ${flag}`);
+    else parsed[key] = value;
+  }
+  return parsed;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv.length === 3 && process.argv[2] === '--help') {
+    console.log(`usage: wasm-sdk-overlay.mjs --base-sdk <dir> --dest <new dir> --llvm-bin <dir> --cjc <file>
+  --runtime-archive <file> --sysroot-tarball <file> [--cjpm <file>]
+  [--stdlib-source <stdlib dir> --boundscheck-source <dir> --clang <file> --llvm-ar <file>
+   | --std-archive <file>... --std-module <file>...]`);
+    process.exit(0);
+  }
   try {
     const result = overlayWasmSdk(options(process.argv.slice(2)));
     console.log(JSON.stringify({dest: result.dest, check: result.check}));
