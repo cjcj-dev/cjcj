@@ -18,6 +18,7 @@ public func TranslateTerminatorExpression(compiler: CHIR2BCHIR, context: CHIR2BC
             ExprKind.TRY_MUL | ExprKind.TRY_DIV | ExprKind.TRY_MOD |
             ExprKind.TRY_EXP | ExprKind.TRY_LSHIFT | ExprKind.TRY_RSHIFT =>
             TranslateIntOpWithException(compiler, context, expr)
+        case ExprKind.EXCLAVE => compiler.TranslateBlockGroup(context, (expr as Exclave).getOrThrow().GetBody())
         case ExprKind.TRY_ALLOCATE => TranslateTryAllocateTerminator(compiler, context, expr)
         case _ => context.definition.PushOp(OpCode.ABORT)
     }

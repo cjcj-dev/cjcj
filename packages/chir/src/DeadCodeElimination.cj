@@ -646,6 +646,8 @@ public class DeadCodeElimination {
                     if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
                         UnreachableBlockEliminationForFunc(lambdaBody, isDebug: isDebug)
                     }
+                } else if (let Some(exclave) <- (expr as Exclave)) {
+                    UnreachableBlockEliminationForFunc(exclave.GetBody(), isDebug: isDebug)
                 }
             }
 
@@ -748,6 +750,7 @@ public class DeadCodeElimination {
             }
             if (isNothingIr) {
                 CreateNullReturnValue(builder, block, funcBody)
+                EndRegionAtNewExit(builder, block, funcBody, block)
                 let createdExit719 = builder.CreateExit(None, block)
                 block.AppendExpression(createdExit719)
             }
@@ -993,6 +996,29 @@ private func HandleFuncWithNothingParamter(builder: CHIRBuilder, funcBody: Block
     return false
 }
 
+// A synthesized return inherits the region depth of the path it truncates.
+private func EndRegionAtNewExit(builder: CHIRBuilder, dest: Block, body: BlockGroup, source: Block): Unit {
+    let entry = body.GetEntryBlock() ?? return
+    let pending = ArrayList<(Block, Int64)>()
+    let seen = HashSet<Int64>()
+    pending.add((entry, 0))
+    while (!pending.isEmpty()) {
+        let (block, incoming) = pending.remove(at: pending.size - 1)
+        if (seen.contains(block.nodeId) || !refEq(block.GetParentBlockGroup().getOrThrow(), body)) { continue }
+        seen.add(block.nodeId)
+        var depth = incoming
+        for (expr in block.GetExpressions()) {
+            if (expr.GetExprKind() == ExprKind.START_REGION) { depth++ }
+            if (expr.GetExprKind() == ExprKind.END_REGION && depth > 0) { depth-- }
+        }
+        if (refEq(block, source)) {
+            if (depth > 0) { dest.AppendExpression(builder.CreateRegionBoundary(ExprKind.END_REGION, dest)) }
+            return
+        }
+        for (succ in block.GetSuccessors()) { pending.add((succ, depth)) }
+    }
+}
+
 private func HandleNothingTerminator(builder: CHIRBuilder, expr: ExpressionWithException,
     funcBody: BlockGroup): Unit {
     CJC_ASSERT(expr.GetExprKind() == ExprKind.TRY_APPLY ||
@@ -1000,6 +1026,7 @@ private func HandleNothingTerminator(builder: CHIRBuilder, expr: ExpressionWithE
         expr.GetExprKind() == ExprKind.TRY_INVOKESTATIC)
     let newSuccessBlock = builder.CreateBlock(funcBody)
     CreateNullReturnValue(builder, newSuccessBlock, funcBody)
+    EndRegionAtNewExit(builder, newSuccessBlock, funcBody, expr.GetParentBlock().getOrThrow())
     let createdExit965 = builder.CreateExit(None, newSuccessBlock)
     newSuccessBlock.AppendExpression(createdExit965)
 

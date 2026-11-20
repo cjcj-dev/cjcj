@@ -24,9 +24,13 @@ func exercise(n: Int64): Int64 {
 
 func invokeCaptured(f: (() -> Int64) @local?): Int64 { return f() }
 
+func captureParameter(c: Cell @local?): Int64 {
+    return invokeCaptured({ => c.read() })
+}
+
 func capturedValue(n: Int64): Int64 {
     let c = Cell(n) @local!
-    return invokeCaptured({ => c.read() })
+    return captureParameter(c)
 }
 
 main(): Int64 {

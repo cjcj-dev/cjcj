@@ -823,6 +823,56 @@ public class CHIRChecker {
         for (block in blocks) {
             CheckBlock(block, topLevelFunc)
         }
+        CheckRegionPaths(blockGroup, topLevelFunc)
+    }
+
+    // Nested groups own independent frames. Incoming depth must agree on every
+    // join and back edge, and an exit cannot carry an open frame into its caller.
+    private func CheckRegionPaths(group: BlockGroup, fn: Function): Unit {
+        let forbidden = (group.GetOwnerFunc().map({ f => f.TestAttr(Attribute.EXCLAVE) }) ?? false) ||
+            (group.GetOwnerExpression().map({ e => e is Exclave }) ?? false)
+        if (forbidden) {
+            for (block in group.GetBlocks()) {
+                for (expr in block.GetExpressions()) {
+                    if (expr.GetExprKind() == ExprKind.START_REGION || expr.GetExprKind() == ExprKind.END_REGION) {
+                        ErrorInExpr(fn, expr, "an exclave body cannot open or close a region")
+                    }
+                }
+            }
+        }
+        let entry = group.GetEntryBlock() ?? return
+        let pending = ArrayList<(Block, Int64)>()
+        let seen = HashMap<Int64, Int64>()
+        pending.add((entry, 0))
+        while (!pending.isEmpty()) {
+            let (block, incoming) = pending.remove(at: pending.size - 1)
+            if (let Some(first) <- seen.get(block.nodeId)) {
+                if (first != incoming) {
+                    ErrorInFunc(fn, "inconsistent region depth at block " + block.GetIdentifier())
+                }
+                continue
+            }
+            seen[block.nodeId] = incoming
+            var depth = incoming
+            for (expr in block.GetExpressions()) {
+                if (expr.GetExprKind() == ExprKind.START_REGION) { depth++ }
+                else if (expr.GetExprKind() == ExprKind.END_REGION) {
+                    if (depth == 0) { ErrorInExpr(fn, expr, "EndRegion without StartRegion"); break }
+                    depth--
+                } else if (expr is Exit || expr is Exclave) {
+                    if (depth != 0) { ErrorInExpr(fn, expr, "missing EndRegion before leaving the frame") }
+                    break
+                } else if (expr.IsTerminator()) {
+                    for (succ in expr.GetSuccessors()) {
+                        if (refEq(succ.GetParentBlockGroup().getOrThrow(), group)) {
+                            pending.add((succ, depth))
+                        } else if (depth != 0) {
+                            ErrorInExpr(fn, expr, "control flow leaves block group with an open region")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func CheckBlock(block: Block, topLevelFunc: Function): Unit {

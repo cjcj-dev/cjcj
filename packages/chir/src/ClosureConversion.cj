@@ -890,9 +890,9 @@ public class ClosureConversion {
             if (let Some(srcTy) <- srcFunc.GetType()) {
                 if (let Some(funcTy) <- (srcTy as FuncType)) {
                     for (paramTy in funcTy.GetParamTypes()) {
-                        superArgs.add(SubstituteGenericTypes(paramTy, genericMap))
+                        superArgs.add(SubstituteGenericTypes(builder.WithModal(paramTy, ModalInfo()), genericMap))
                     }
-                    superArgs.add(SubstituteGenericTypes(funcTy.GetReturnType(), genericMap))
+                    superArgs.add(SubstituteGenericTypes(builder.WithModal(funcTy.GetReturnType(), ModalInfo()), genericMap))
                 }
             }
         }
@@ -1583,12 +1583,16 @@ public class ClosureConversion {
         let refType = builder.context.GetRefTy(instantiateClassTy)
         let allocate = builder.CreateAllocate(refType, instantiateClassTy, parent)
         let obj = RequireResult(allocate)
-        // Keep recursive closures visible from the entry, but allocate only after its region opens.
-        let entry = parent.GetParentBlockGroup().getOrThrow().GetEntryBlock().getOrThrow()
+        // Allocate early enough for recursion without hoisting out of an inlined exclave.
+        // Boundaries in a predecessor already dominate this block; keep any preceding
+        // boundary in this block on the same side of the allocation as the original use.
         var boundary: Option<Expression> = None
         if (instantiateClassTy.IsLocalRegion()) {
-            for (expr in entry.GetExpressions()) {
-                if (expr.GetExprKind() == ExprKind.START_REGION) { boundary = expr; break }
+            for (expr in parent.GetExpressions()) {
+                if (refEq(expr, user)) { break }
+                if (expr.GetExprKind() == ExprKind.START_REGION || expr.GetExprKind() == ExprKind.END_REGION) {
+                    boundary = expr
+                }
             }
         }
         if (let Some(start) <- boundary) { allocate.MoveAfter(start) }
@@ -2773,57 +2777,19 @@ public class ClosureConversion {
     }
 
     private func SubstituteGenericTypes(ty: Type, genericMap: HashMap<String, Type>): Type {
+        if (genericMap.isEmpty()) { return ty }
         if (let Some(genericTy) <- (ty as GenericType)) {
-            return genericMap.get(GenericTypeKey(genericTy)) ?? ty
-        }
-        if (let Some(refTy) <- (ty as RefType)) {
-            return builder.context.GetRefTy(SubstituteGenericTypes(refTy.GetBaseType(), genericMap))
-        }
-        if (let Some(funcTy) <- (ty as FuncType)) {
-            let params = ArrayList<Type>()
-            for (paramTy in funcTy.GetParamTypes()) {
-                params.add(SubstituteGenericTypes(paramTy, genericMap))
+            if (let Some(mapped) <- genericMap.get(GenericTypeKey(genericTy))) {
+                return builder.WithModal(mapped, genericTy.GetModalInfo())
             }
-            return builder.context.GetFuncTy(params, SubstituteGenericTypes(funcTy.GetReturnType(), genericMap),
-                hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+            return ty
         }
-        if (let Some(tupleTy) <- (ty as TupleType)) {
-            return builder.context.GetTupleTy(SubstituteGenericTypeArgs(tupleTy.GetTypeArgs(), genericMap))
-        }
-        if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
-            return builder.context.GetRawArrayTy(SubstituteGenericTypes(rawArrayTy.GetElementType(), genericMap),
-                dims: rawArrayTy.GetDims())
-        }
-        if (let Some(varrayTy) <- (ty as VArrayType)) {
-            return builder.context.GetVArrayTy(SubstituteGenericTypes(varrayTy.GetElementType(), genericMap),
-                varrayTy.size)
-        }
-        if (let Some(pointerTy) <- (ty as CPointerType)) {
-            return builder.context.GetCPointerTy(SubstituteGenericTypes(pointerTy.GetElementType(), genericMap))
-        }
-        if (let Some(boxTy) <- (ty as BoxType)) {
-            return builder.context.GetBoxTy(SubstituteGenericTypes(boxTy.GetBaseType(), genericMap))
-        }
-        if (let Some(structTy) <- (ty as StructType)) {
-            return builder.context.GetStructTy(structTy.GetStructDef(),
-                SubstituteGenericTypeArgs(structTy.GetGenericArgs(), genericMap))
-        }
-        if (let Some(classTy) <- (ty as ClassType)) {
-            return builder.context.GetClassTy(classTy.GetClassDef(),
-                SubstituteGenericTypeArgs(classTy.GetGenericArgs(), genericMap))
-        }
-        if (let Some(enumTy) <- (ty as EnumType)) {
-            return builder.context.GetEnumTy(enumTy.GetEnumDef(),
-                SubstituteGenericTypeArgs(enumTy.GetGenericArgs(), genericMap))
-        }
-        return ty
+        return CreateNewTypeWithArgs(ty, SubstituteGenericTypeArgs(ty.GetTypeArgs(), genericMap), builder)
     }
 
     private func SubstituteGenericTypeArgs(args: ArrayList<Type>, genericMap: HashMap<String, Type>): ArrayList<Type> {
         let out = ArrayList<Type>()
-        for (arg in args) {
-            out.add(SubstituteGenericTypes(arg, genericMap))
-        }
+        for (arg in args) { out.add(SubstituteGenericTypes(arg, genericMap)) }
         return out
     }
 

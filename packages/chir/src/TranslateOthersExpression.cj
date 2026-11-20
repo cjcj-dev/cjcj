@@ -47,6 +47,7 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
             context.definition.PushCell(expr.GetNumOfNonSuccessorOperands())
         case ExprKind.BOX => TranslateBox(context, expr)
         case ExprKind.UNBOX_TO_VALUE => context.definition.PushOp(OpCode.UNBOX)
+        case ExprKind.START_REGION | ExprKind.END_REGION => context.definition.PushOp(OpCode.UNIT)
         case ExprKind.UNBOX_TO_REF => context.definition.PushOp(OpCode.UNBOX_REF)
         case ExprKind.VARRAY_BUILDER | ExprKind.SPAWN | ExprKind.INVOKESTATIC | ExprKind.GET_RTTI |
             ExprKind.GET_RTTI_STATIC | ExprKind.CAST_TO_CONCRETE | ExprKind.CAST_TO_GENERIC =>
