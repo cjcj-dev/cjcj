@@ -1127,7 +1127,7 @@ public open class BaseMangler {
             for (setter in (decl as PropDecl).getOrThrow().setters) {
                 setter.exportId = Mangle(setter)
             }
-            return Mangle(decl)
+            return Mangle(decl) + MangleTypeMode(PropertyMode((decl as PropDecl).getOrThrow()))
         }
         decl.exportId = Mangle(decl)
         for (member in decl.GetMemberDeclPtrs()) {

@@ -143,8 +143,10 @@ private func CheckForConflictExportId(decls: ArrayList<Decl>): Unit {
         if (!decl.TestAttr(Attribute.GLOBAL) || decl.astKind == ASTKind.EXTEND_DECL) {
             continue
         }
-        if (exportIdDeclMap.contains(decl.exportId)) {
-            InternalError("Found same exportID when export the package.")
+        if (let Some(previous) <- exportIdDeclMap.get(decl.exportId)) {
+            InternalError("Found same exportID when export the package: " + decl.exportId +
+                " (" + previous.identifier.Val() + ":" + previous.begin.line.toString() + ", " +
+                decl.identifier.Val() + ":" + decl.begin.line.toString() + ")")
             return
         }
         exportIdDeclMap[decl.exportId] = decl
@@ -152,8 +154,10 @@ private func CheckForConflictExportId(decls: ArrayList<Decl>): Unit {
             if (member.doNotExport) {
                 continue
             }
-            if (exportIdDeclMap.contains(member.exportId)) {
-                InternalError("Found same exportID when export the package.")
+            if (let Some(previous) <- exportIdDeclMap.get(member.exportId)) {
+                InternalError("Found same exportID when export the package: " + member.exportId +
+                    " (" + previous.identifier.Val() + ":" + previous.begin.line.toString() + ", " +
+                    member.identifier.Val() + ":" + member.begin.line.toString() + ")")
                 return
             }
             exportIdDeclMap[member.exportId] = member
