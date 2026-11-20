@@ -1295,6 +1295,19 @@ public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Op
     if (let Some(paren) <- (expr as ParenExpr)) {
         if (let Some(inner) <- paren.expr) { return CallSiteMode(inner, receiver, seen) }
     }
+    if (let Some(block) <- (expr as Block)) {
+        if ((let Some(last) <- block.GetLastExprOrDecl()) && (let Some(value) <- (last as Expr))) {
+            return CallSiteMode(value, receiver, seen)
+        }
+    }
+    if (let Some(index) <- (expr as SubscriptExpr)) {
+        if (index.isTupleAccess || index.IsVArrayAccess()) {
+            if (let Some(base) <- index.baseExpr) { return CallSiteMode(base, receiver, seen) }
+        }
+        if (let Some(lowered) <- index.desugarExpr) { return CallSiteMode(lowered, receiver, seen) }
+        if ((let Some(target) <- index.GetTarget()) && (let Some(fd) <- (target as FuncDecl)) &&
+            (let Some(ty) <- fd.GetTy()) && (let Some(ft) <- (ty as FuncTy))) { return ft.retMode }
+    }
     if (let Some(call) <- (expr as CallExpr)) {
         if (let Some(m) <- call.modal) { return m.local }
         if (let Some(fd) <- call.resolvedFunction) {
@@ -1346,6 +1359,12 @@ private func ReceiverAtCall(call: CallExpr, ctx: Option<ASTContext>): ASTMode {
 private func PermitsModalCall(typeManager: TypeManager, unit: FunctionMatchingUnit, call: CallExpr, receiver: ASTMode): Bool {
     let fd = unit.fd
     let base = call.baseFunc ?? return true;
+    if (!fd.TestAttr(Attribute.CONSTRUCTOR) && !fd.TestAttr(Attribute.ENUM_CONSTRUCTOR) &&
+        (let Some(mode) <- call.expectedLocalMode) && (let Some(ty) <- fd.GetTy()) &&
+        (let Some(ft) <- (ty as FuncTy)) && !ft.retMode.IsSubMode(mode) &&
+        !typeManager.IsModalCopyType(typeManager.ApplySubstPack(ft.retTy, unit.typeMapping))) {
+        return false
+    }
     if (fd.TestAttr(Attribute.CONSTRUCTOR) && !fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
         if ((let Some(m) <- call.modal) && m.local != GetReceiverMode(fd)) { return false }
         if (call.modal.isNone() && (let Some(expected) <- call.expectedLocalMode) &&

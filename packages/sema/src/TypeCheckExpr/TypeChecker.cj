@@ -3578,6 +3578,13 @@ extend TypeChecker {
         }
     }
 
+    private func ExpectedReturnMode(body: FuncBody, retType: Type): ASTMode {
+        if ((let Some(fd) <- body.funcDecl) && fd.isGetter && (let Some(pd) <- fd.propDecl)) {
+            return PropertyMode(pd)
+        }
+        return retType.modal.map({ m => m.local }) ?? retType.resolvedMode
+    }
+
     private func CheckBodyRetType(ctx: ASTContext, fb: FuncBody): Bool {
         let retType = fb.retType.getOrThrow()
         let retTy = retType.GetTy().getOrThrow()
@@ -3619,7 +3626,7 @@ extend TypeChecker {
             if (retTy.IsUnit()) {
                 isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, body))
             } else {
-                SetExpectedResultMode(body, retType.modal.map({ m => m.local }) ?? retType.resolvedMode)
+                SetExpectedResultMode(body, ExpectedReturnMode(fb, retType))
                 isWellTyped = Check(ctx, retTy, body)
                 if (!isWellTyped && body.body.isEmpty()) {
                     if (let Some(diagValue2) <- impl.diag) {
@@ -6051,7 +6058,7 @@ extend TypeChecker {
                     retTy
                 }
                 let slot = fb.retType.getOrThrow()
-                SetExpectedResultMode(innerExpr, slot.modal.map({ m => m.local }) ?? slot.resolvedMode)
+                SetExpectedResultMode(innerExpr, ExpectedReturnMode(fb, slot))
                 isWellTyped = Check(ctx, targetTy, innerExpr) && isWellTyped
                 if (isWellTyped) {
                     typeCheckExprPutTargetType(ctx, innerExpr, innerExpr.GetTy() ?? targetTy)

@@ -556,7 +556,10 @@ class LocalModeAnalysis {
             }
         } else if (let Some(assign) <- (node as AssignExpr)) {
             if ((let Some(left) <- assign.leftValue) && (let Some(right) <- assign.rightExpr)) {
-                CheckStore(left, right)
+                // The walker visits the lowered setter and checks its receiver and value argument.
+                // Only a built-in subscript also has an element storage slot at the source node.
+                let loweredSetter = left is SubscriptExpr && (assign.desugarExpr.map({ e => e is CallExpr }) ?? false)
+                if (!loweredSetter) { CheckStore(left, right) }
             }
         } else if (let Some(ret) <- (node as ReturnExpr)) {
             if (!scopes.isEmpty() && (let Some(ft) <- Signature(scopes[scopes.size - 1])) &&
