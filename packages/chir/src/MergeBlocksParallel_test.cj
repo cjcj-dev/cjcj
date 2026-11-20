@@ -43,6 +43,27 @@ class MergeBlocksParallelTest {
     }
 
     @TestCase
+    func skipsAnUnreachableForInLatchWithoutCountingAMerge(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "unreachableLatch")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let entry = builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        entry.AppendExpression(builder.CreateExit(None, entry))
+        let latch = builder.CreateBlock(body)
+        latch.AppendExpression(builder.CreateExit(None, latch))
+        latch.SetGeneratedFromForIn(true)
+
+        @Assert(latch.GetPredecessors().isEmpty())
+        @Expect(MergeBlocks().RunOnFunction(fn, builder), 0)
+        @Expect(latch.GetGeneratedFromForIn(), false)
+        @Expect(body.GetBlocks().size, 2)
+        @Expect(entry.GetTerminator().getOrThrow().GetExprKind(), ExprKind.EXIT)
+    }
+
+    @TestCase
     func clonedLoopBlocksKeepGlobalUsersInTheirOwnFunctions(): Unit {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)

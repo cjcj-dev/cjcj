@@ -1,7 +1,6 @@
 package cjcj::chir
 
 import std.collection.*
-import cjcj::utils.CJC_ASSERT
 
 extend SkipKind {
     operator func &(right: SkipKind): SkipKind {
@@ -46,9 +45,13 @@ private func CopyBlock(builder: CHIRBuilder, block: Block, users: ArrayList<(Val
     return copiedBlock
 }
 
-private func MergeForInCondBlock(builder: CHIRBuilder, block: Block, users: ArrayList<(Value, Expression)>): Unit {
+private func MergeForInCondBlock(builder: CHIRBuilder, block: Block, users: ArrayList<(Value, Expression)>): Bool {
     let oldPreds = block.GetPredecessors()
-    CJC_ASSERT(!oldPreds.isEmpty())
+    if (oldPreds.isEmpty()) {
+        // A loop body that never falls through can leave an unreachable latch.
+        block.RemoveGeneratedFromForIn()
+        return false
+    }
     var idx: Int64 = 0
     while (idx < oldPreds.size - 1) {
         let copiedBlock = CopyBlock(builder, block, users)
@@ -57,6 +60,7 @@ private func MergeForInCondBlock(builder: CHIRBuilder, block: Block, users: Arra
         idx++
     }
     block.RemoveGeneratedFromForIn()
+    return true
 }
 
 public class MergeBlocks {
@@ -112,9 +116,10 @@ public class MergeBlocks {
             // owned by structured expressions rather than only direct lambdas.
             Visitor.Visit(body, { block: Block =>
                 if (block.GetGeneratedFromForIn()) {
-                    MergeForInCondBlock(builder, block, appendedGlobalUsers)
-                    merged[0]++
-                    changed[0] = true
+                    if (MergeForInCondBlock(builder, block, appendedGlobalUsers)) {
+                        merged[0]++
+                        changed[0] = true
+                    }
                 } else if (CanMergeIntoPredecessor(block, enableCompileDebug, enableCoverage)) {
                     if (MergeIntoPredecessor(block)) {
                         merged[0]++
