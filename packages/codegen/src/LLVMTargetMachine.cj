@@ -69,24 +69,7 @@ public func LLVMCodeGenFileTypeValue(fileType: LLVMCodeGenFileType): Int32 {
 }
 
 foreign {
-    func LLVMInitializeARMTargetInfo(): Unit
-    func LLVMInitializeARMTarget(): Unit
-    func LLVMInitializeARMTargetMC(): Unit
-    func LLVMInitializeARMAsmPrinter(): Unit
-    func LLVMInitializeARMAsmParser(): Unit
-    func LLVMInitializeARMDisassembler(): Unit
-    func LLVMInitializeAArch64TargetInfo(): Unit
-    func LLVMInitializeAArch64Target(): Unit
-    func LLVMInitializeAArch64TargetMC(): Unit
-    func LLVMInitializeAArch64AsmPrinter(): Unit
-    func LLVMInitializeAArch64AsmParser(): Unit
-    func LLVMInitializeAArch64Disassembler(): Unit
-    func LLVMInitializeX86TargetInfo(): Unit
-    func LLVMInitializeX86Target(): Unit
-    func LLVMInitializeX86TargetMC(): Unit
-    func LLVMInitializeX86AsmPrinter(): Unit
-    func LLVMInitializeX86AsmParser(): Unit
-    func LLVMInitializeX86Disassembler(): Unit
+    func LLVMSelfhostInitTargetComponent(name: CString, component: UInt32): Int32
 
     func LLVMGetFirstTarget(): LLVMTargetRef
     func LLVMGetNextTarget(target: LLVMTargetRef): LLVMTargetRef
@@ -151,52 +134,39 @@ private var llvmConfiguredTargetsInitialized: Bool = false
 private var llvmAsmParsersInitialized: Bool = false
 private var llvmDisassemblersInitialized: Bool = false
 
-public func LLVMInitializeTargetInfo(arch: LLVMTargetArch): Unit {
-    match (arch) {
-        case LLVMTargetArch.ARM => unsafe { LLVMInitializeARMTargetInfo() }
-        case LLVMTargetArch.AArch64 => unsafe { LLVMInitializeAArch64TargetInfo() }
-        case LLVMTargetArch.X86 => unsafe { LLVMInitializeX86TargetInfo() }
+private func InitTargetComponent(arch: LLVMTargetArch, component: UInt32): Bool {
+    let name = match (arch) {
+        case LLVMTargetArch.ARM => "ARM"
+        case LLVMTargetArch.AArch64 => "AArch64"
+        case LLVMTargetArch.X86 => "X86"
     }
+    try (cname = unsafe { LibC.mallocCString(name) }.asResource()) {
+        return unsafe { LLVMSelfhostInitTargetComponent(cname.value, component) } != 0
+    }
+}
+
+public func LLVMInitializeTargetInfo(arch: LLVMTargetArch): Unit {
+    if (!InitTargetComponent(arch, 0u32)) { throw IllegalArgumentException("LLVM target has no TargetInfo") }
 }
 
 public func LLVMInitializeTarget(arch: LLVMTargetArch): Unit {
-    match (arch) {
-        case LLVMTargetArch.ARM => unsafe { LLVMInitializeARMTarget() }
-        case LLVMTargetArch.AArch64 => unsafe { LLVMInitializeAArch64Target() }
-        case LLVMTargetArch.X86 => unsafe { LLVMInitializeX86Target() }
-    }
+    if (!InitTargetComponent(arch, 1u32)) { throw IllegalArgumentException("LLVM target has no Target") }
 }
 
 public func LLVMInitializeTargetMC(arch: LLVMTargetArch): Unit {
-    match (arch) {
-        case LLVMTargetArch.ARM => unsafe { LLVMInitializeARMTargetMC() }
-        case LLVMTargetArch.AArch64 => unsafe { LLVMInitializeAArch64TargetMC() }
-        case LLVMTargetArch.X86 => unsafe { LLVMInitializeX86TargetMC() }
-    }
+    if (!InitTargetComponent(arch, 2u32)) { throw IllegalArgumentException("LLVM target has no TargetMC") }
 }
 
 public func LLVMInitializeAsmPrinter(arch: LLVMTargetArch): Unit {
-    match (arch) {
-        case LLVMTargetArch.ARM => unsafe { LLVMInitializeARMAsmPrinter() }
-        case LLVMTargetArch.AArch64 => unsafe { LLVMInitializeAArch64AsmPrinter() }
-        case LLVMTargetArch.X86 => unsafe { LLVMInitializeX86AsmPrinter() }
-    }
+    if (!InitTargetComponent(arch, 3u32)) { throw IllegalArgumentException("LLVM target has no AsmPrinter") }
 }
 
 public func LLVMInitializeAsmParser(arch: LLVMTargetArch): Unit {
-    match (arch) {
-        case LLVMTargetArch.ARM => unsafe { LLVMInitializeARMAsmParser() }
-        case LLVMTargetArch.AArch64 => unsafe { LLVMInitializeAArch64AsmParser() }
-        case LLVMTargetArch.X86 => unsafe { LLVMInitializeX86AsmParser() }
-    }
+    if (!InitTargetComponent(arch, 4u32)) { throw IllegalArgumentException("LLVM target has no AsmParser") }
 }
 
 public func LLVMInitializeDisassembler(arch: LLVMTargetArch): Unit {
-    match (arch) {
-        case LLVMTargetArch.ARM => unsafe { LLVMInitializeARMDisassembler() }
-        case LLVMTargetArch.AArch64 => unsafe { LLVMInitializeAArch64Disassembler() }
-        case LLVMTargetArch.X86 => unsafe { LLVMInitializeX86Disassembler() }
-    }
+    if (!InitTargetComponent(arch, 5u32)) { throw IllegalArgumentException("LLVM target has no Disassembler") }
 }
 
 public func LLVMInitializeConfiguredTarget(arch: LLVMTargetArch, asmPrinter!: Bool = true,
@@ -216,33 +186,30 @@ public func LLVMInitializeConfiguredTarget(arch: LLVMTargetArch, asmPrinter!: Bo
 }
 
 public func LLVMInitializeConfiguredTargets(): Unit {
-    if (llvmConfiguredTargetsInitialized) {
-        return
+    if (llvmConfiguredTargetsInitialized) { return }
+    for (component in [0u32, 1u32, 2u32, 3u32]) {
+        unsafe { LLVMSelfhostInitTargetComponent(CString(CPointer<UInt8>()), component) }
     }
-    LLVMInitializeConfiguredTarget(LLVMTargetArch.ARM)
-    LLVMInitializeConfiguredTarget(LLVMTargetArch.AArch64)
-    LLVMInitializeConfiguredTarget(LLVMTargetArch.X86)
     llvmConfiguredTargetsInitialized = true
 }
 
 public func LLVMInitializeConfiguredAsmParsers(): Unit {
-    if (llvmAsmParsersInitialized) {
-        return
+    if (!llvmAsmParsersInitialized) {
+        unsafe { LLVMSelfhostInitTargetComponent(CString(CPointer<UInt8>()), 4u32) }
+        llvmAsmParsersInitialized = true
     }
-    LLVMInitializeAsmParser(LLVMTargetArch.ARM)
-    LLVMInitializeAsmParser(LLVMTargetArch.AArch64)
-    LLVMInitializeAsmParser(LLVMTargetArch.X86)
-    llvmAsmParsersInitialized = true
 }
 
 public func LLVMInitializeConfiguredDisassemblers(): Unit {
-    if (llvmDisassemblersInitialized) {
-        return
+    if (!llvmDisassemblersInitialized) {
+        unsafe { LLVMSelfhostInitTargetComponent(CString(CPointer<UInt8>()), 5u32) }
+        llvmDisassemblersInitialized = true
     }
-    LLVMInitializeDisassembler(LLVMTargetArch.ARM)
-    LLVMInitializeDisassembler(LLVMTargetArch.AArch64)
-    LLVMInitializeDisassembler(LLVMTargetArch.X86)
-    llvmDisassemblersInitialized = true
+}
+
+private func InitTargetForEmission(arch: LLVMTargetArch): Bool {
+    return InitTargetComponent(arch, 0u32) && InitTargetComponent(arch, 1u32) &&
+        InitTargetComponent(arch, 2u32) && InitTargetComponent(arch, 3u32)
 }
 
 public func LLVMInitializeNativeTargetForTriple(triple: String): Bool {
@@ -250,16 +217,13 @@ public func LLVMInitializeNativeTargetForTriple(triple: String): Bool {
     if (normalizedTriple.startsWith("x86_64") || normalizedTriple.startsWith("i386") ||
         normalizedTriple.startsWith("i486") || normalizedTriple.startsWith("i586") ||
         normalizedTriple.startsWith("i686")) {
-        LLVMInitializeConfiguredTarget(LLVMTargetArch.X86)
-        return true
+        return InitTargetForEmission(LLVMTargetArch.X86)
     }
     if (normalizedTriple.startsWith("aarch64") || normalizedTriple.startsWith("arm64")) {
-        LLVMInitializeConfiguredTarget(LLVMTargetArch.AArch64)
-        return true
+        return InitTargetForEmission(LLVMTargetArch.AArch64)
     }
     if (normalizedTriple.startsWith("arm") || normalizedTriple.startsWith("thumb")) {
-        LLVMInitializeConfiguredTarget(LLVMTargetArch.ARM)
-        return true
+        return InitTargetForEmission(LLVMTargetArch.ARM)
     }
     return false
 }

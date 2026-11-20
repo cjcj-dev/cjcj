@@ -49,6 +49,7 @@
 
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
+#include <llvm-c/Target.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -286,6 +287,41 @@ using LLVMSelfhostValueToValueMapRef = ValueToValueMapTy*;
 
 // Mirror TranslateLitConstant's `static_cast<float>(strtold(...))`
 // (src/CHIR/AST2CHIR/TranslateASTNode/TranslateLitConstExpr.cpp:25,80).
+// LLVM's generated lists enumerate the components present in the linked library.
+// A null name registers every configured target; a named request reports absence.
+extern "C" int LLVMSelfhostInitTargetComponent(const char *name, unsigned component)
+{
+    bool found = false;
+    switch (component) {
+    case 0:
+#define LLVM_TARGET(T) if (!name || std::strcmp(name, #T) == 0) { LLVMInitialize##T##TargetInfo(); found = true; }
+#include "llvm/Config/Targets.def"
+        break;
+    case 1:
+#define LLVM_TARGET(T) if (!name || std::strcmp(name, #T) == 0) { LLVMInitialize##T##Target(); found = true; }
+#include "llvm/Config/Targets.def"
+        break;
+    case 2:
+#define LLVM_TARGET(T) if (!name || std::strcmp(name, #T) == 0) { LLVMInitialize##T##TargetMC(); found = true; }
+#include "llvm/Config/Targets.def"
+        break;
+    case 3:
+#define LLVM_ASM_PRINTER(T) if (!name || std::strcmp(name, #T) == 0) { LLVMInitialize##T##AsmPrinter(); found = true; }
+#include "llvm/Config/AsmPrinters.def"
+        break;
+    case 4:
+#define LLVM_ASM_PARSER(T) if (!name || std::strcmp(name, #T) == 0) { LLVMInitialize##T##AsmParser(); found = true; }
+#include "llvm/Config/AsmParsers.def"
+        break;
+    case 5:
+#define LLVM_DISASSEMBLER(T) if (!name || std::strcmp(name, #T) == 0) { LLVMInitialize##T##Disassembler(); found = true; }
+#include "llvm/Config/Disassemblers.def"
+        break;
+    default: break;
+    }
+    return found;
+}
+
 extern "C" double CJSelfhostStrtoldToFloat32(const char *Value)
 {
     return static_cast<float>(strtold(Value, nullptr));
