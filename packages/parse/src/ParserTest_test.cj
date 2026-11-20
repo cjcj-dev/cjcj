@@ -150,6 +150,67 @@ class LocalModeSyntaxTest {
         @Expect(arg.TestAttr(Attribute.IS_BROKEN), true)
         @Expect(countErrors(diag), 2)
     }
+    @TestCase
+    func catchTypesRejectExplicitModes(): Unit {
+        for ((source, restricted) in [
+            ("try {} catch (_: E | F @local!) {}", 1),
+            ("try {} catch (e: E @~local | F) {}", 1),
+            ("try {} catch (e: E | F) {}", 0)
+        ]) {
+            let (expr, diag) = parseExpr(source)
+            @Expect(expr.astKind, ASTKind.TRY_EXPR)
+            @Expect(unexpectedModeErrors(diag), restricted)
+            @Expect(countErrors(diag), restricted * 2)
+        }
+    }
+
+    @TestCase
+    func isAndAsTargetsRejectExplicitModes(): Unit {
+        for ((source, restricted) in [("x is C @local?", 1), ("x as C @~local", 1),
+            ("x is C", 0), ("x as C", 0)]) {
+            let (_, diag) = parseExpr(source)
+            @Expect(unexpectedModeErrors(diag), restricted)
+            @Expect(countErrors(diag), restricted * 2)
+        }
+    }
+
+    @TestCase
+    func instanceFieldsRejectModesButStaticFieldsKeepTheMode(): Unit {
+        for ((source, restricted, disabled) in [
+            ("class C { let x: T @local! = v }", 1, 1),
+            ("struct C { let x: T @~local = v }", 1, 1),
+            ("class C { static let x: T @local! = v }", 0, 1),
+            ("class C { let x: T = v }", 0, 0)
+        ]) {
+            let (_, diag) = parseDecl(source)
+            @Expect(unexpectedModeErrors(diag), restricted)
+            @Expect(countErrors(diag), restricted + disabled)
+        }
+    }
+
+    @TestCase
+    func macroSignatureRejectsLocalTokens(): Unit {
+        for ((source, restricted, disabled) in [
+            ("public macro M(a: Tokens @local!): Tokens { a }", 1, 1),
+            ("public macro M(a: Tokens): Tokens @local? { a }", 1, 1),
+            ("public macro M(a: Tokens @~local): Tokens { a }", 0, 1),
+            ("public macro M(a: Tokens): Tokens { a }", 0, 0)
+        ]) {
+            let (_, diag) = parseDecl(source)
+            @Expect(unexpectedModeErrors(diag), restricted)
+            @Expect(countErrors(diag), restricted + disabled)
+        }
+    }
+
+    private func unexpectedModeErrors(diag: DiagnosticEngine): Int64 {
+        var count = 0
+        for (diagnostic in diag.GetCategoryDiagnostic(DiagCategory.PARSE)) {
+            if (diagnostic.rKind == DiagKindRefactor.parse_unexpected_modal_type) {
+                count++
+            }
+        }
+        return count
+    }
 }
 
 @Test

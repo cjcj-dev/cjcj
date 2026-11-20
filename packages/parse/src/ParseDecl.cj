@@ -1,6 +1,7 @@
 package cjcj::parse
 
 import cjcj::ast.ASTCloner
+import cjcj::ast.ASTMode
 import cjcj::ast.InsertPropGetterSignature
 import cjcj::ast.InsertPropSetterSignature
 import cjcj::ast.INVALID_IDENTIFIER
@@ -820,6 +821,13 @@ extend ParserImpl {
     }
 
     private func CheckMacroParamType(macroDecl: MacroDecl, typeNode: Type, isReturnTy: Bool): Unit {
+        if (let Some(modal) <- typeNode.modal) {
+            if (modal.local != ASTMode.NOT) {
+                DiagnoseUnexpectedLocalMode(modal)
+                macroDecl.EnableAttr(Attribute.HAS_BROKEN)
+                return
+            }
+        }
         if (IsTokensRefType(typeNode)) {
             return
         }
@@ -1980,6 +1988,14 @@ extend ParserImpl {
             ParseTypeAndExpr(decl)
             EnableModifierAttrs(decl, CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE))
             CheckVarDeclModifiers(modifiers, decl, scopeKind, key)
+            if ((ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) &&
+                !HasModifier(modifiers, TokenKind.STATIC)) {
+                if (let Some(ty) <- decl.typeNode) {
+                    if (let Some(modal) <- ty.modal) {
+                        DiagnoseUnexpectedLocalMode(modal)
+                    }
+                }
+            }
         }
         return decl
     }

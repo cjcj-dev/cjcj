@@ -85,6 +85,11 @@ extend ParserImpl {
         return Some(modal)
     }
 
+    internal func DiagnoseUnexpectedLocalMode(modal: ASTModalInfo): Unit {
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_modal_type,
+            MakeRange(modal.localPos, modal.end)).Emit()
+    }
+
     public func ParsePrefixType(): Type {
         if (Seeing(TokenKind.QUEST)) {
             let opt = OptionType()
