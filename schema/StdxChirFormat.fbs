@@ -11,35 +11,8 @@ file_identifier "CR01";
 // Using 'uint32' as type of 'Type/Value/Expression/CustomTypeDef' 's table index.
 // 0 is invalid index or means void, valid index start from 1, which is the offset of table plus 1.
 
-// Using 'uint64' as a bitset for attributes:
-// 0   STATIC,               Mark whether a member is a static one.
-// 1   PUBLIC,               Mark whether a member is a public one.
-// 2   PRIVATE,              Mark whether a member is a private one.
-// 3   PROTECTED,            Mark whether a member is a protected one.
-// 4   ABSTRACT,             Mark whether a function is an abstract one.
-// 5   VIRTUAL,              Mark whether a declaration is in fact open (even if the user does not use `open` keyword).
-// 6   OVERRIDE,             Mark whether a declaration in fact overrides the inherited one (even if the user does not use `override` keyword).
-// 7   REDEF,                Mark whether a declaration in fact overrides the inherited one (even if the user does not use `redef` keyword).
-// 8   SEALED,               Mark whether a declaration is a sealed one.
-// 9   FOREIGN,              Mark whether a declaration is a foreign one.
-// 10  MUT,                  Mark whether a declaration is a mutable one.
-// 11  FINAL,                Mark a Function override a parent class's func, and this func self does not have VIRTUAL Attribute.
-// 12  OPERATOR,             Mark whether a declaration is a operator one.
-// 13  JAVA,                 Mark whether a node is foreign call.
-// 14  READONLY,             'let x = xxx', 'x' enable READONLY attribute
-// 15  CONST,                correspond `const` keyword in Cangjie source code.
-// 16  IMPORTED,             Mark whether variable、func、enum、struct、class is imported from other package.
-// 17  GENERIC_INSTANTIATED, Mark whether a `GlobalVar/Function/Type` is instantiated.
-// 18  NO_DEBUG_INFO,        Mark a `Value` doesn't contain debug info, like line/column number.
-// 19  GENERIC,              Mark a declaration is generic
-// 20  INTERNAL,             GlobalVar/Function/Enum/Class/Struct/Interface is visible in current and sub package.
-// 21  COMPILER_ADD,         Mark a `Value` is added by compiler, like "copied default func from interface".
-// compiler attribute
-// 22  NO_REFLECT_INFO,      Mark a `Value` is't used by `reflect` feature.
-// 23  NO_INLINE,            Mark a Function can't be inlined.
-// 24  NON_RECOMPILE,        only used in `ImportedValue` in incremental compilation, indicate this ImportedValue is converted from a decl in current package that is not recompiled.
-// 25  UNREACHABLE,          Mark a Block is unreachable.
-// 26  NO_SIDE_EFFECT,       Mark a Function does't have side effect.
+// Attribute words use the low 64 bits of the compiler AttributeIndex.
+// The installed cangjie/CHIR/IR/AttributeInfo.h names their positions.
 
 enum CHIRTypeKind: uint8 {
   INVALID,
