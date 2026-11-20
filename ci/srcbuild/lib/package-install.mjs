@@ -30,6 +30,14 @@ export async function packageInstall({sdk,target,version,officialSdkRoot,archive
   await verifyInstall({sdk,work:work+'/installed',platform:target.spec.llvmPlatform,finalStd:true,precompiledStdx:true,packageRegex});
  }else await atomicJson(path.join(work,'cross-consumption.json'),consumption);
  const inputs=await installedInputs(sdk,target.spec.llvmPlatform);
+ if(sourcePair){
+  const components = new Map(inputs.components.map(row=>[row.component,row.source]));
+  for(const [name,want] of [['runtime',sourcePair.runtime],['std',sourcePair.runtime],
+    [components.has('llvm-backend')?'llvm-backend':'llvm-cjdb',sourcePair.llvm]]){
+   const actual=components.get(name);
+   if(actual?.status!=='resolved'||actual.commit!==want) throw Error('SDK_PACKAGE_INSTALLED_PAIR '+name);
+  }
+ }
  await writeInstalledReleaseManifest({stage:sdk,platform:target.spec.llvmPlatform,...inputs});
  await atomicJson(path.join(sdk,'BUILD-MANIFEST.json'),{version,target:target.spec.key,consumption,...inputs});
  const test=consumption.status==='EXECUTED'?{commands:[{argv:[process.execPath,fileURLToPath(new URL('../../bootstrap/sdk-verify-install.mjs',import.meta.url)),
