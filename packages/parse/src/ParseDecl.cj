@@ -664,7 +664,6 @@ extend ParserImpl {
         for (anno in annos) {
             funcDecl.annotations.add(anno)
             if (anno.kind == AnnotationKind.INTRINSIC) {
-                CheckIntrinsicFunc(funcDecl)
                 funcDecl.EnableAttr(Attribute.INTRINSIC)
             }
             if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
@@ -689,7 +688,6 @@ extend ParserImpl {
         for (anno in annos) {
             funcDecl.annotations.add(anno)
             if (anno.kind == AnnotationKind.INTRINSIC) {
-                CheckIntrinsicFunc(funcDecl)
                 funcDecl.EnableAttr(Attribute.INTRINSIC)
             }
             if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
@@ -700,18 +698,6 @@ extend ParserImpl {
                 funcDecl.isFastNative = true
             }
         }
-    }
-
-    private func CheckIntrinsicFunc(fd: Decl): Unit {
-        for (intrinsic in intrinsics) {
-            if (let Some(intrinsicDecl) <- (intrinsic as Decl)) {
-                if (fd.identifier == intrinsicDecl.identifier) {
-                    DiagDuplicatedIntrinsicFunc(fd, intrinsicDecl)
-                    return
-                }
-            }
-        }
-        intrinsics.add(fd)
     }
 
     public func ParseMacroDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MacroDecl {

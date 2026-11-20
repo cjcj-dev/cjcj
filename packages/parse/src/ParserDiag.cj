@@ -1302,13 +1302,6 @@ extend ParserImpl {
         builder.Emit()
     }
 
-    public func DiagDuplicatedIntrinsicFunc(decl: Decl, prev: Decl): Unit {
-        let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_duplicated_intrinsic_function, decl,
-            decl.identifier.Val())
-        builder.AddHint(MakeRange(prev.begin, prev.end))
-        builder.Emit()
-    }
-
     public func DiagDeclCannotInheritTheirSelf(decl: InheritableDecl, rt: RefType): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_decl_cannot_inherit_their_self, rt,
             rt.ref.identifier.Val())
