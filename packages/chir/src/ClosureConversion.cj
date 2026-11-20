@@ -517,12 +517,17 @@ public class ClosureConversion {
     private func LiftType(pkg: Package): Unit {
         let convertTypeToClosure: ConvertTypeFunc = { ty: Type => ConvertTypeToClosureType(ty) }
         func convertTypeToInstBase(ty: Type): Type {
+            // Official LiftType (ClosureConversion.cpp:1531-1543 @63bf237b): the AutoEnv def is keyed by the
+            // modal-free function type and the function type's modal is re-applied to the instantiated base.
             let funcType = StaticCast<FuncType>(ty)
-            let autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(funcType)
+            let dataFuncType = StaticCast<FuncType>(builder.WithModal(funcType, ModalInfo()))
+            let autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(dataFuncType)
             let nestedConverter = TypeConverterForCC(convertTypeToClosure, convertTypeToInstBase, builder)
             LiftCustomDefType(autoEnvBaseDef, nestedConverter)
-            let convertedFuncType = ConvertFuncArgsAndRetType(funcType)
-            return builder.context.GetRefTy(InstantiateAutoEnvBaseType(autoEnvBaseDef, convertedFuncType))
+            let convertedFuncType = ConvertFuncArgsAndRetType(dataFuncType)
+            let autoEnvTy = builder.WithModal(InstantiateAutoEnvBaseType(autoEnvBaseDef, convertedFuncType),
+                funcType.GetModalInfo())
+            return builder.context.GetRefTy(autoEnvTy)
         }
         let converter = TypeConverterForCC(convertTypeToClosure, convertTypeToInstBase, builder)
         let preVisit = { expr: Expression =>
@@ -634,22 +639,27 @@ public class ClosureConversion {
 
     private func ConvertCompositionalType(ty: Type): Type {
         if (let Some(tupleTy) <- (ty as TupleType)) {
-            return builder.context.GetTupleTy(ConvertTypeArgs(tupleTy.GetTypeArgs()))
+            return builder.context.GetTupleTy(ConvertTypeArgs(tupleTy.GetTypeArgs()), modal: ty.GetModalInfo())
         } else if (let Some(funcTy) <- (ty as FuncType)) {
             return ConvertFuncType(funcTy)
         } else if (let Some(enumTy) <- (ty as EnumType)) {
-            return builder.context.GetEnumTy(enumTy.GetEnumDef(), ConvertTypeArgs(enumTy.GetGenericArgs()))
+            return builder.context.GetEnumTy(enumTy.GetEnumDef(), ConvertTypeArgs(enumTy.GetGenericArgs()),
+                modal: ty.GetModalInfo())
         } else if (let Some(structTy) <- (ty as StructType)) {
-            return builder.context.GetStructTy(structTy.GetStructDef(), ConvertTypeArgs(structTy.GetGenericArgs()))
+            return builder.context.GetStructTy(structTy.GetStructDef(), ConvertTypeArgs(structTy.GetGenericArgs()),
+                modal: ty.GetModalInfo())
         } else if (let Some(classTy) <- (ty as ClassType)) {
-            return builder.context.GetClassTy(classTy.GetClassDef(), ConvertTypeArgs(classTy.GetGenericArgs()))
+            return builder.context.GetClassTy(classTy.GetClassDef(), ConvertTypeArgs(classTy.GetGenericArgs()),
+                modal: ty.GetModalInfo())
         } else if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
             return builder.context.GetRawArrayTy(ConvertTypeToClosureType(rawArrayTy.GetElementType()),
-                dims: rawArrayTy.GetDims())
+                dims: rawArrayTy.GetDims(), modal: ty.GetModalInfo())
         } else if (let Some(varrayTy) <- (ty as VArrayType)) {
-            return builder.context.GetVArrayTy(ConvertTypeToClosureType(varrayTy.GetElementType()), varrayTy.size)
+            return builder.context.GetVArrayTy(ConvertTypeToClosureType(varrayTy.GetElementType()), varrayTy.size,
+                modal: ty.GetModalInfo())
         } else if (let Some(pointerTy) <- (ty as CPointerType)) {
-            return builder.context.GetCPointerTy(ConvertTypeToClosureType(pointerTy.GetElementType()))
+            return builder.context.GetCPointerTy(ConvertTypeToClosureType(pointerTy.GetElementType()),
+                modal: ty.GetModalInfo())
         } else if (let Some(refTy) <- (ty as RefType)) {
             return builder.context.GetRefTy(ConvertTypeToClosureType(refTy.GetBaseType()))
         } else if (let Some(boxTy) <- (ty as BoxType)) {
@@ -698,9 +708,13 @@ public class ClosureConversion {
     }
 
     private func ConvertFuncType(funcTy: FuncType): Type {
-        let autoEnvBaseDef = GetOrCreateGenericAutoEnvBaseDef(funcTy.GetParamTypes().size)
-        let convertedFuncType = ConvertFuncArgsAndRetType(funcTy)
-        let autoEnvBaseTy = InstantiateAutoEnvBaseType(autoEnvBaseDef, convertedFuncType)
+        // Official ConvertFuncType (ClosureConversion.cpp:1379-1389 @63bf237b): the AutoEnv class must not
+        // depend on the function type's own modal; the modal is applied to the instantiated base instead.
+        let dataFuncType = StaticCast<FuncType>(builder.WithModal(funcTy, ModalInfo()))
+        let autoEnvBaseDef = GetOrCreateGenericAutoEnvBaseDef(dataFuncType.GetParamTypes().size)
+        let convertedFuncType = ConvertFuncArgsAndRetType(dataFuncType)
+        let autoEnvBaseTy = builder.WithModal(InstantiateAutoEnvBaseType(autoEnvBaseDef, convertedFuncType),
+            funcTy.GetModalInfo())
         return builder.context.GetRefTy(autoEnvBaseTy)
     }
 
