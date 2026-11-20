@@ -97,6 +97,7 @@ public class PackageFormat_FuncParamList <: Table {
             verifier.VerifyVector(GetPointer(MF_FUNC_PARAM_LIST_VT_PARAMS), 4) &&
             VerifyOffset(verifier, MF_FUNC_PARAM_LIST_VT_DESUGARS) &&
             verifier.VerifyVector(GetPointer(MF_FUNC_PARAM_LIST_VT_DESUGARS), 4) &&
+            VerifyField<UInt32>(verifier, 8, 4) &&
             verifier.EndTable()
     }
 }
@@ -123,6 +124,9 @@ public class PackageFormat_FuncBody <: Table {
             VerifyField<UInt32>(verifier, MF_FUNC_BODY_VT_BODY, 4) &&
             VerifyField<Bool>(verifier, MF_FUNC_BODY_VT_ALWAYS, 1) &&
             VerifyField<UInt8>(verifier, MF_FUNC_BODY_VT_CAPTUREKIND, 1) &&
+            VerifyOffset(verifier, 14) &&
+            verifier.VerifyTable(GetPointer(14),
+                { p: Int64, v: VerifierTemplate => PackageFormat_Mode(data, p).Verify(v) }) &&
             verifier.EndTable()
     }
 }
@@ -465,6 +469,7 @@ public class PackageFormat_VarInfo <: Table {
             VerifyField<UInt8>(verifier, MF_VAR_INFO_VT_VALUE_TYPE, 1) &&
             VerifyOffset(verifier, MF_VAR_INFO_VT_VALUE) &&
             VerifyConstValue(data, verifier, GetValue(), GetValueType()) &&
+            VerifyField<Bool>(verifier, 16, 1) &&
             verifier.EndTable()
     }
 }
@@ -521,6 +526,7 @@ public class PackageFormat_FuncInfo <: Table {
             VerifyField<Bool>(verifier, MF_FUNC_INFO_VT_ISCONST, 1) &&
             VerifyField<Bool>(verifier, MF_FUNC_INFO_VT_ISINLINE, 1) &&
             VerifyField<Bool>(verifier, MF_FUNC_INFO_VT_ISFASTNATIVE, 1) &&
+            VerifyField<Bool>(verifier, 18, 1) &&
             verifier.EndTable()
     }
 }
@@ -720,6 +726,9 @@ public class PackageFormat_Decl <: Table {
             verifier.VerifyVector(GetPointer(MF_DECL_VT_DEPENDENCIES), 4) &&
             verifier.VerifyVectorOfTables(GetPointer(MF_DECL_VT_DEPENDENCIES),
                 {p: Int64, v: VerifierTemplate => PackageFormat_FullId(data, p).Verify(v)}) &&
+            VerifyOffset(verifier, 42) &&
+            verifier.VerifyTable(GetPointer(42),
+                { p: Int64, v: VerifierTemplate => PackageFormat_Mode(data, p).Verify(v) }) &&
             verifier.EndTable()
     }
 }
@@ -1173,6 +1182,9 @@ public class PackageFormat_Expr <: Table {
             VerifyField<UInt8>(verifier, MF_EXPR_VT_INFO_TYPE, 1) &&
             VerifyOffset(verifier, MF_EXPR_VT_INFO) &&
             VerifyExprInfo(data, verifier, GetInfo(), GetInfoType()) &&
+            VerifyOffset(verifier, 22) &&
+            verifier.VerifyTable(GetPointer(22),
+                { p: Int64, v: VerifierTemplate => PackageFormat_Mode(data, p).Verify(v) }) &&
             verifier.EndTable()
     }
 }

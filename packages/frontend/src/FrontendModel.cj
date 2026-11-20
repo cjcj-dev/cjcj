@@ -2815,7 +2815,9 @@ public class CjoSignatureMaterializer {
             }
             let retTypeIndex = reader.U32Field(bodyTable, 6, 0u32)
             if (retTypeIndex != 0u32) {
-                body.retType = Some(UpdateFlatTypeNode(body.retType, TypeNodeForTy(LoadFlatTypeOrInvalid(retTypeIndex))))
+                let result = UpdateFlatTypeNode(body.retType, TypeNodeForTy(LoadFlatTypeOrInvalid(retTypeIndex)))
+                result.resolvedMode = FlatMode(reader, bodyTable, 14)
+                body.retType = Some(result)
             }
         }
         body.SetTy(funcDecl.GetTy() ?? FaithfulSemaTypeManager.GetInvalidTy())
@@ -3544,6 +3546,7 @@ public class CjoSignatureMaterializer {
         if (record.kind == 6u16) {
             return VarWithPatternDecl()
         }
+        if (record.kind == 14u16) { return ThisParam() }
         if (record.kind == 7u16) {
             return FuncParam()
         }
@@ -3574,6 +3577,12 @@ public class CjoSignatureMaterializer {
         throw IllegalArgumentException("unsupported FlatBuffer DeclKind ${record.kind}")
     }
 
+    private func FlatMode(reader: CjoFlatBuffer, table: Int64, slot: Int64): ASTMode {
+        let mode = reader.OffsetField(table, slot)
+        if (mode < 0) { return ASTMode.NOT }
+        return ASTMode.FromWire(reader.U8Field(mode, 4, 0u8))
+    }
+
     private func ApplyFlatDeclBasicInfo(reader: CjoFlatBuffer, record: CjoFlatDecl, decl: Decl): Unit {
         decl.begin = LoadFlatPosition(reader, reader.TableField(record.table, 14))
         decl.end = LoadFlatPosition(reader, reader.TableField(record.table, 16))
@@ -3587,6 +3596,7 @@ public class CjoSignatureMaterializer {
         decl.exportId = record.exportId
         decl.mangledName = record.mangledName
         decl.rawMangleName = record.mangledBeforeSema
+        decl.resolvedMode = FlatMode(reader, record.table, 42)
         decl.fullPackageName = if (record.fullPackageName.isEmpty()) { packageName } else { record.fullPackageName }
         decl.moduleName = RootPackageName(decl.fullPackageName)
         decl.toBeCompiled = false
@@ -4143,6 +4153,7 @@ public class CjoSignatureMaterializer {
                 LoadFlatVarWithPatternInfo(reader, record, varWithPattern)
             }
         }
+        if (record.kind == 14u16) { return Some(decl) }
         if (let Some(param) <- (decl as FuncParam)) {
             LoadFlatParamInfo(reader, record, param)
         }
@@ -4168,6 +4179,9 @@ public class CjoSignatureMaterializer {
         funcDecl.isConst = reader.U8Field(infoTable, 12, 0u8) != 0u8
         funcDecl.isInline = (reader.U8Field(infoTable, 14, 0u8) != 0u8) && canInline
         funcDecl.isFastNative = reader.U8Field(infoTable, 16, 0u8) != 0u8
+        if (reader.U8Field(infoTable, 18, 0u8) != 0u8) {
+            funcDecl.modifiers.add(Modifier(TokenKind.EXCLAVE, funcDecl.begin))
+        }
         // Mirror ASTLoader.cpp:810-811: derive isFrozen from the loaded @Frozen annotation
         // (annotations are loaded in ApplyFlatDeclBasicInfo, which runs before this).
         funcDecl.isFrozen = funcDecl.HasAnno(AstAnnotationKind.FROZEN)
@@ -4266,6 +4280,15 @@ public class CjoSignatureMaterializer {
 
     private func LoadFlatFuncParamList(reader: CjoFlatBuffer, listTable: Int64): FuncParamList {
         let list = FuncParamList()
+        let receiverIndex = reader.U32Field(listTable, 8, 0u32)
+        if (receiverIndex != 0u32) {
+            let record = GetFormatDeclByIndexImpl(receiverIndex).getOrThrow()
+            if (record.kind != 14u16) { throw IllegalStateException("invalid CJO receiver declaration") }
+            list.thisParam = EnsureFlatDecl(record).getOrThrow() as ThisParam
+            if (list.thisParam.getOrThrow().resolvedMode == ASTMode.NOT) {
+                throw IllegalStateException("missing CJO receiver mode")
+            }
+        }
         let params = reader.VectorField(listTable, 4)
         let desugars = reader.VectorField(listTable, 6)
         if (params < 0) {
@@ -4307,6 +4330,9 @@ public class CjoSignatureMaterializer {
         varDecl.isVar = reader.U8Field(infoTable, 4, 0u8) != 0u8
         varDecl.isConst = reader.U8Field(infoTable, 6, 0u8) != 0u8
         varDecl.isMemberParam = reader.U8Field(infoTable, 8, 0u8) != 0u8
+        if (reader.U8Field(infoTable, 16, 0u8) != 0u8) {
+            varDecl.modifiers.add(Modifier(TokenKind.DEMODE, varDecl.begin))
+        }
         // VarInfo field 3 (vtable slot 10) = initializer expr index. Mirrors ASTLoader.cpp:719-720.
         let initIndex = reader.U32Field(infoTable, 10, 0u32)
         if ((importSrcCode && !varDecl.TestAttr(Attribute.COMMON)) || deserializingCommon) {
@@ -4338,6 +4364,7 @@ public class CjoSignatureMaterializer {
                 if (let Some(ty) <- block.GetTy()) {
                     dummy.SetTy(ty)
                 }
+                dummy.resolvedMode = block.resolvedMode
                 dummy.desugarExpr = block
                 return dummy
             }
@@ -4405,6 +4432,19 @@ public class CjoSignatureMaterializer {
         }
         if (kind == FLAT_EXPR_KIND_TYPE_CONV) {
             return Some(LoadFlatTypeConvExpr(reader, exprTable, exprIndex))
+        }
+        if (kind == 39u16) {
+            let ex = ExclaveExpr()
+            allLoadedExprs.add(exprIndex, ex)
+            CreateAndLoadBasicInfo(reader, exprTable, ex)
+            let operands = reader.VectorField(exprTable, 12)
+            if (operands < 0 || reader.VectorLength(operands) != 1) {
+                throw IllegalStateException("invalid CJO exclave operands")
+            }
+            ex.body = LoadFlatExprRaw(reader, reader.VectorU32(operands, 0)).getOrThrow() as Block
+            if (ex.body.isNone()) { throw IllegalStateException("invalid CJO exclave body") }
+            ex.EnableAttr(Attribute.IMPORTED)
+            return Some(ex)
         }
         if (kind == FLAT_EXPR_KIND_THROW) {
             return Some(LoadFlatThrowExpr(reader, exprTable, exprIndex))
@@ -5247,6 +5287,7 @@ public class CjoSignatureMaterializer {
     }
 
     private func LoadFlatNodeBasicInfo(reader: CjoFlatBuffer, exprTable: Int64, node: Node): Unit {
+        node.resolvedMode = FlatMode(reader, exprTable, 22)
         node.begin = LoadFlatPosition(reader, reader.TableField(exprTable, 6))
         node.end = LoadFlatPosition(reader, reader.TableField(exprTable, 8))
     }

@@ -614,9 +614,8 @@ public class ASTCloner {
     }
 
     private static func CloneFuncParam(source: FuncParam, visitFunc: (Node, Node) -> Unit): VarDecl {
-        let _ = source
         let _ = visitFunc
-        let target = FuncParam()
+        let target: FuncParam = if (source is ThisParam) { ThisParam() } else { FuncParam() }
         target.EnableAttr(Attribute.COMPILER_ADD)
         return target
     }
@@ -1896,6 +1895,7 @@ public class ASTCloner {
             if (let Some(dst) <- (target as FuncParamList)) {
                 dst.leftParenPos = src.leftParenPos
                 dst.receiverModal = src.receiverModal
+                if (let Some(tp) <- src.thisParam) { dst.thisParam = CloneNode(tp, visitFunc) as ThisParam }
                 for (param in src.params) { if (let Some(cloned) <- (CloneNode(param, visitFunc) as FuncParam)) { dst.params.add(cloned) } }
                 dst.rightParenPos = src.rightParenPos
                 dst.variadicArgIndex = src.variadicArgIndex

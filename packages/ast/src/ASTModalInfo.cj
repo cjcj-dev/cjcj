@@ -71,8 +71,10 @@ public func GetReceiverMode(fd: FuncDecl): ASTMode {
         if (let Some(t) <- propertyDecl.typeNode) { return t.resolvedMode }
         return propertyDecl.resolvedMode
     }
-    if ((let Some(body) <- fd.funcBody) && !body.paramLists.isEmpty() &&
-        (let Some(modal) <- body.paramLists[0].receiverModal)) { return modal.local }
+    if ((let Some(body) <- fd.funcBody) && !body.paramLists.isEmpty()) {
+        if (let Some(modal) <- body.paramLists[0].receiverModal) { return modal.local }
+        if (let Some(tp) <- body.paramLists[0].thisParam) { return tp.resolvedMode }
+    }
     return ASTMode.NOT
 }
 
