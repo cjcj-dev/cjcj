@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {spawnSync} from 'node:child_process';
+import {copyHostStd} from '../srcbuild/stages/stdlib.mjs';
+import {getTarget} from '../lib/targets.mjs';
 import {fileURLToPath} from 'node:url';
 import {
   assertSdkPathParity,
@@ -321,6 +323,23 @@ test('Linux package maps only its private PCRE2 loader chain and rejects fallbac
   await assert.rejects(check(), /pcre2-flat-library/);
   fs.rmSync(local, {recursive:true});
   await assert.rejects(check(), /pcre2-loader-chain/);
+});
+
+test('incremental Linux std copy retires flat PCRE2 and preserves private links and other libraries', t => {
+  const {official:std, candidate:compiler} = fixture(t);
+  const target = getTarget('linux-x64');
+  const dir = 'runtime/lib/' + target.spec.runtimeTuple + '/';
+  const link = 'libpcre2-8.so', abi = link + '.0', version = abi + '.14.0';
+  for (const [root, prefix] of [[compiler, dir], [std, dir + 'pcre2/']]) {
+    put(root, prefix + version);
+    fs.symlinkSync(version, path.join(root, prefix, abi));
+    fs.symlinkSync(abi, path.join(root, prefix, link));
+  }
+  put(compiler, dir + 'libother.so');
+  copyHostStd(std, compiler, target);
+  assert.deepEqual(fs.readdirSync(path.join(compiler, dir)).sort(), ['libother.so', 'pcre2']);
+  assert.equal(fs.readlinkSync(path.join(compiler, dir, 'pcre2', link)), abi);
+  assert.equal(fs.readlinkSync(path.join(compiler, dir, 'pcre2', abi)), version);
 });
 
 // Exercise the actual public package path on retained installed products.
