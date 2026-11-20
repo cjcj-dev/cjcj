@@ -281,7 +281,7 @@ for(const separateBackend of [false,true])test('normal install pair and language
   }
   await write(R,statusRel,deferred);files[statusRel]=digest(deferred);
   await write(R,'include/schedule.h','finite installed runtime headers');
-  let original=JSON.stringify({runtime_sha:STD,paired_llvm_sha:STAGE2,platform,files});
+  const original=JSON.stringify({runtime_sha:STD,paired_llvm_sha:STAGE2,platform,files});
   await write(R,'NATIVE-INPUTS.json',original);
   for(const rel of ['modules','lib/'+TUPLE+'/libcangjie-std-core.a','PROVENANCE.txt'])await copy(fixture,S,rel);
   const cjo='modules/'+TUPLE+'/std/std.core.cjo';await write(S,cjo,'finite std CJO');
@@ -398,8 +398,7 @@ endforeach()
     await command(['cmake','--build',build,'--parallel','2'],{records});
     for(const tool of ['llc','opt'])await command(['cmake','--install',build,'--component',tool],{records});
     backend=component(install,{commit,build});target.backend=backend;
-    original=JSON.stringify({runtime_sha:STD,paired_llvm_sha:commit,platform,files});
-    await write(R,'NATIVE-INPUTS.json',original);
+    assert.notEqual(commit,STAGE2,'backend is independent of the N paired with runtime');
   }
   const descriptor={work:root+'/work',install:sdk,selection:{platform,hostPlatform:platform,bootstrapHost:{install:H,platform},
     compilerExecution:{role:'target',stage:'finite-final',platform,...target},targetComponents:target},test:{commands:[

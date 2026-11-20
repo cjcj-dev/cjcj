@@ -200,6 +200,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       verifications[name].librarySha256=facts.llvmLibrary.sha256;
     }
     rows[name] = {...rows[name], verification:verifications[name], buildResult:supplied.buildResult, configuration:supplied.configuration,
+      ...(name==='runtime' && descriptor.nativePair ? {component:true} : {}),
       ...(astInstallation?{astInstallation}:{}),
       ...(name==='llvm'&&facts.windowsToolchain?{windowsToolchain:facts.windowsToolchain}:{}),
       install:await installation(supplied.install, required),
@@ -303,13 +304,18 @@ export async function prepareSourceBuildInputs(config, env=process.env, startSta
   const hostInstall=config.officialSdkRoot??env.CJCJ_OFFICIAL_SDK_ROOT;
   if(!hostInstall)throw Error('SOURCE_BUILD_BOOTSTRAP_HOST_REQUIRED');
   const bootstrapHost={install:path.resolve(hostInstall),platform:host};
+  if(config.nativeRuntime) {
+    const observed=await execute(path.join(bootstrapHost.install,'bin','cjc'+sdkPlatform(host).exe),['--version']);
+    bootstrapHost.version=config.nativeRuntime.hostVersion;
+    if(hostToolchainFromCjcVersion(observed.stdout)!=='nightly-'+bootstrapHost.version)throw Error('INSTALL_COMPONENT_HOST');
+  }
   const component=name=>({...selected[name],install,platform});
   const compiler={...component('compiler'),product:path.join(install,'bin','cjc'+config.target.spec.exeSuffix),
     configuration:{producer:'build.py build/install',buildType:config.buildType}};
   const selection=installationSelection({platform,hostPlatform:host,bootstrapHost,
     compilerExecution:{role:'target',stage:'source-build',platform,
       compiler,...Object.fromEntries(['runtime','std','llvm'].map(name=>[name,component(name==='std'?'runtime':name)]))},
-    targetComponents:{compiler,runtime:component('runtime'),std:component('runtime'),
+    targetComponents:{compiler,runtime:{...component('runtime'),...(config.nativeRuntime?{component:true,buildResult:path.join(install,'NATIVE-INPUTS.json')}:{})},std:component('runtime'),
       // Native compiler/build.py consumes the selected LLVM checkout through its
       // existing third_party/llvm-project source input. AST is compiler source.
       llvm:{...component('llvm'),configuration:{producer:'compiler/build.py',component:'third_party/llvm'}},
@@ -363,7 +369,7 @@ export async function prepareInstallInputs(descriptor) {
     host.version=pair.hostVersion;
     runtime.sourceRepository=await runtimeSourceRepository(runtime.repository);
     Object.assign(runtime,await receiveNativeRuntime({root:runtime.install,sourceRepository:runtime.sourceRepository,
-      platform:supplied.platform,llvmCommit:members.backend?.commit??llvm.commit,runtimeCommit:runtime.commit,
+      platform:supplied.platform,llvmCommit:llvm.commit,runtimeCommit:runtime.commit,
       hostVersion:host.version,work}));
     runtime.gateStatus=path.join(runtime.sourceRoot,'runtime','CMakebuild','gc-unit.status');
     const commands=await readJson(std.install+'.commands.json');

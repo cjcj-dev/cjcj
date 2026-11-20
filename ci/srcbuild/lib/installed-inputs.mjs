@@ -3,6 +3,7 @@
 // or a CI-provided expected tuple. Existing producer fields stay intact.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {isDeepStrictEqual} from 'node:util';
 import {fileDigest,readJson,relative} from '../../bootstrap/sdk-flow.mjs';
 import {stdInstallationExcludes,runtimeLibraryLinks,nativeTargetLibraryExcludes} from '../../bootstrap/sdk-targets.mjs';
 import {gcUnitStatusRelative} from '../../../build/srcbuild/gc-unit-gate.mjs';
@@ -176,16 +177,24 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
     // Preserve and read R's original native install facts. The runtime pair
     // record intentionally does not stamp its C dependencies (bounds/aio/thread).
     // Reopening an absolute producer prefix would break archive relocation.
-    if(stage?.selection?.targetComponents?.runtime?.buildResult){
+    const adopted=production?.configuration?.nativeRuntime;
+    const received=target?.runtime?.component===true || Boolean(adopted);
+    if(received || target?.runtime?.buildResult){
       const original=await readJson(path.join(sdk,'share/cjcj/build-inputs/native-runtime.json'));
       if(original.runtime_sha!==runtime.source.commit||original.platform!==platform
-        ||original.paired_llvm_sha!==(stage.sources?.backend??stage.sources?.llvm)?.commit||!original.files)throw Error('INSTALLED_RUNTIME_NATIVE_SOURCE');
-      if(original.configuration && (original.configuration.pairedLlvmCommit!==original.paired_llvm_sha
-        || original.configuration.hostVersion!==runtime.build?.configuration?.hostVersion
-        || (target.runtime.configuration && original.configuration.hostVersion!==target.runtime.configuration.hostVersion)))
+        ||original.paired_llvm_sha!==stage.sources?.llvm?.commit||!original.files)throw Error('INSTALLED_RUNTIME_NATIVE_SOURCE');
+      const config=original.configuration;
+      if(received && (!stage.selection.bootstrapHost?.version || !original.build_type || !original.version
+        || !isDeepStrictEqual(config,{buildType:original.build_type,version:original.version,
+          hostVersion:stage.selection.bootstrapHost.version,pairedLlvmCommit:stage.sources.llvm.commit})
+        || (adopted && (adopted.runtimeCommit!==original.runtime_sha || adopted.llvmCommit!==original.paired_llvm_sha || adopted.hostVersion!==config.hostVersion))))
+        throw Error('INSTALLED_RUNTIME_NATIVE_CONFIGURATION');
+      if(config && (!isDeepStrictEqual(config,runtime.build?.configuration)
+        || config.pairedLlvmCommit!==original.paired_llvm_sha
+        || (target.runtime.configuration && !isDeepStrictEqual(config,target.runtime.configuration))))
         throw Error('INSTALLED_RUNTIME_NATIVE_CONFIGURATION');
       const pair=new Set(products.map(row=>row.path));
-      if(target.runtime.install && products.some(row=>original.files[row.path]!==row.sha256))throw Error('INSTALLED_RUNTIME_NATIVE_BYTES pair');
+      if((received || target.runtime.install) && products.some(row=>original.files[row.path]!==row.sha256))throw Error('INSTALLED_RUNTIME_NATIVE_BYTES pair');
       for(const [rel,expected] of Object.entries(original.files)) {
         if(!/^(lib|runtime\/lib)\//.test(rel)||pair.has(rel))continue;
         if(!/^[a-f0-9]{64}$/.test(expected))throw Error('INSTALLED_RUNTIME_NATIVE_BYTES '+rel);

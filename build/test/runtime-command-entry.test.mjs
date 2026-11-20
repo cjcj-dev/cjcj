@@ -74,6 +74,8 @@ function r3Fixture(label) {
  directSource(runtime);directBuild(runtime);
  const config=buildConfig({workspace,officialSdkRoot:host});installGcUnitInputs(config,runtime,sdk);
  const seed=root+'/native-input';fs.cpSync(sdk,seed,{recursive:true});write(seed+'/RUNTIME-INPUTS.json','{}');
+ write(seed+'/NATIVE-INPUTS.json','{}');
+ write(host+'/bin/cjc','#!'+process.execPath+'\nconsole.log("Cangjie Compiler: 1.0.0 (cjnative)");\n',0o755);
  // Only build.py is controlled. Actual runBuildPy environment/command facts,
  // overlay, split/cache checks, provenance and language gate remain active.
  const record=String.raw`import os,sys,pathlib,json,shutil
@@ -111,7 +113,7 @@ if sys.argv[1]=='install':
  write(workspace+'/.source-selection.json',JSON.stringify(choices));
  fs.mkdirSync(workspace+'/software',{recursive:true});fs.symlinkSync('../cangjie_compiler/output',workspace+'/software/cangjie');
  const loader=root+'/boundaries.mjs';
- write(loader,`export async function load(url,context,next){const r=await next(url,context);const boundary=url.endsWith('/ci/bootstrap/sdk-flow.mjs')?'installProducts':url.endsWith('/build/lib/package-lineage.mjs')?'assertPackagedLineage':url.endsWith('/ci/bootstrap/sdk-verify-install.mjs')?'verifyInstall':url.endsWith('/ci/bootstrap/native-runtime-input.mjs')?'receiveNativeRuntime':null;if(!boundary)return r;let s=String(r.source);const re=new RegExp('export (async )?function '+boundary+'\\\\(');if(!re.test(s))throw Error('R3_BOUNDARY_SHAPE '+boundary);s=s.replace(re,(_,a='')=>a+'function ORIGINAL_'+boundary+'(');s+='\\nexport async function '+boundary+'(input){console.log("R3_CONTROLLED_BOUNDARY '+boundary+'");if('+JSON.stringify(boundary)+'==="receiveNativeRuntime")return {install:input.root};}';return {...r,source:s};}\n`);
+ write(loader,`export async function load(url,context,next){const r=await next(url,context);const boundary=url.endsWith('/ci/bootstrap/sdk-flow.mjs')?'installProducts':url.endsWith('/build/lib/package-lineage.mjs')?'assertPackagedLineage':url.endsWith('/ci/bootstrap/sdk-verify-install.mjs')?'verifyInstall':url.endsWith('/ci/bootstrap/native-runtime-input.mjs')?'receiveNativeRuntime':null;if(!boundary)return r;let s=String(r.source);const re=new RegExp('export (async )?function '+boundary+'\\\\(');if(!re.test(s))throw Error('R3_BOUNDARY_SHAPE '+boundary);s=s.replace(re,(_,a='')=>a+'function ORIGINAL_'+boundary+'(');s+='\\nexport async function '+boundary+'(input){console.log("R3_CONTROLLED_BOUNDARY '+boundary+'");if('+JSON.stringify(boundary)+'==="receiveNativeRuntime")return {install:input.root,buildResult:input.root+"/NATIVE-INPUTS.json"};}';return {...r,source:s};}\n`);
  const base={...process.env,NODE_OPTIONS:'--experimental-loader='+loader,R3_SEED:seed,R3_TRACE:root+'/producer.jsonl',DIRECT_TRACE:root+'/language.jsonl',GC_UNIT_GATE_CONTRACT_SELFTEST:'1',GC_UNIT_GATE_SKIP:'0',MRT_TESTABLE_INTERNALS:'0'};
  for(const key of ['CJCJ_OFFICIAL_SDK_ROOT','CJCJ_SRCBUILD_CONSUMER_SDK','CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE','CANGJIE_BUILD_DRY_RUN','CJCJ_NATIVE_RUNTIME_INSTALL','CJCJ_NATIVE_RUNTIME_SOURCE','CJCJ_NATIVE_SOURCE_SELECTION','CJCJ_NATIVE_RUNTIME_REF','CJCJ_NATIVE_LLVM_REF'])delete base[key];
  function invoke(stage,{mode='missing',explicit=true,selected=host,native=false,extra={}}={}) {
