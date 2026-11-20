@@ -3,6 +3,9 @@ import {nativeSourceSelection} from './bootstrap/native-source-selection.mjs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
+import {nativeLlvmInputs} from './native-llvm-inputs.mjs';
+import {readHostToolchainPin} from './host-toolchain-pin.mjs';
+
 const PIN_FILE = new URL('./runtime_pin.env', import.meta.url);
 
 function parsePins(text) {
@@ -15,7 +18,13 @@ function parsePins(text) {
 
 export function nativePair(env = process.env, {requireHost=true} = {}) {
   const llvm = env.CJCJ_NATIVE_LLVM_REF, runtime = env.CJCJ_NATIVE_RUNTIME_REF;
-  if (!llvm && !runtime) return null;
+  if (!llvm && !runtime) {
+    if (!env.CJCJ_NATIVE_RUNTIME_ARTIFACT) return null;
+    // A named native runtime still has to match the selected pair at receipt.
+    const pins = nativeLlvmInputs(env);
+    return nativePair({...env, ...pins, CJCJ_NATIVE_HOST_VERSION:
+      env.CJCJ_NATIVE_HOST_VERSION || readHostToolchainPin().replace(/^nightly-/, '')}, {requireHost});
+  }
   if (![llvm, runtime].every(value => /^[0-9a-f]{40}$/.test(value || '')))
     throw new Error('NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED');
   const hostVersion = env.CJCJ_NATIVE_HOST_VERSION;

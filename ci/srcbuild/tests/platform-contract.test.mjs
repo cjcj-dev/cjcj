@@ -496,7 +496,7 @@ test('source-build workflow connects every native runner to its LLVM and std art
     'the source SDK job no longer depends on fixed-llvm');
   for (const edge of [
     'name: fixed-llvm-tools-${{ matrix.llvm_platform }}',
-    'name: final-std-${{ matrix.target }}',
+    'name: ${{ matrix.final_std_artifact }}',
     'path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-stage2',
   ]) assert.ok(workflow.includes(edge), edge);
 
@@ -554,7 +554,14 @@ test('arm soak produces every artifact its package job downloads, each exactly o
   assert.ok(gate, 'package consumer declares its final std gate');
   const resolved = effectiveInputs(consumer, callerInputs);
   const gateEnv = Object.fromEntries(Object.entries(gate.env).map(([name, value]) => [name, substitute(value, resolved)]));
-  assert.equal(gateEnv.EXPECTED_STD_ARTIFACT, `final-std-${platform}`);
+  assert.equal(gate.env.EXPECTED_STD_ARTIFACT,'${{ steps.package-inputs.outputs.std_artifact }}');
+  const keyWork=fsSync.mkdtempSync(path.join(os.tmpdir(),'std-consumer-'));
+  try {
+    const out=path.join(keyWork,'outputs');
+    execFileSync(process.execPath,['ci/release/package-key.mjs'],{cwd:root,env:{...process.env,RELEASE_PLATFORM:platform,GITHUB_ENV:path.join(keyWork,'env'),GITHUB_OUTPUT:out}});
+    gateEnv.EXPECTED_STD_ARTIFACT=fsSync.readFileSync(out,'utf8').trim().slice('std_artifact='.length);
+    assert.equal(gateEnv.EXPECTED_STD_ARTIFACT,`final-std-${platform}`);
+  } finally {fsSync.rmSync(keyWork,{recursive:true,force:true});}
   assert.equal(gateEnv.SELECTED_STD_ARTIFACT, demanded);
   for (const [selected, expected] of [[demanded, 0], [`${demanded}-BROKEN`, 1]]) {
     const checked = spawnSync('bash', ['-eu', '-o', 'pipefail', '-c', gate.run], {

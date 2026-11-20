@@ -7,6 +7,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {assertX64PeImage} from '../../build/lib/pe-symbols.mjs';
 import {parseArgs} from 'node:util';
 import {privateRoot} from '../bootstrap/sdk-flow.mjs';
 import {toolName,retainedToolPath} from '../../build/srcbuild/tool-layout.mjs';
@@ -30,11 +31,12 @@ for (const name of ['tool', 'platform', 'artifact', 'sdk']) {
 }
 if (!/^[A-Za-z0-9][A-Za-z0-9_.+-]*$/.test(values.tool)) throw new Error(`invalid tool name: ${values.tool}`);
 
-if(values.tool==='cjlint'&&values.platform!=='linux-x64')throw Error('CJLINT_PLATFORM_NOT_SUPPORTED');
+if(values.tool==='cjlint'&&!['linux-x64','windows-x64'].includes(values.platform))throw Error('CJLINT_PLATFORM_NOT_SUPPORTED');
 const windows = values.platform === 'windows-x64';
 const name = values.tool + (windows ? '.exe' : '');
 const artifactRoot = path.resolve(values.artifact);
 const sourceBinary = path.join(artifactRoot, name);
+if(windows)assertX64PeImage(sourceBinary,false);
 const sidecar = path.join(artifactRoot, 'SOURCE-PROVENANCE.json');
 const pin = await readToolsPin(path.resolve(import.meta.dirname, '..', 'source_pin.env'));
 const provenance = await verifyComponentProvenance({

@@ -117,6 +117,7 @@ jobs:
     needs: [matrix-plan, source-final-std]
     uses: ./.github/workflows/build-release-package.yml
     with:
+      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
       native_host_version: ${{ inputs.native_host_version }}

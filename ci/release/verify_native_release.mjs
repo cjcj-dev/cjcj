@@ -28,6 +28,13 @@ async function compareSubtree(reference, sdk, relative) {
 export async function verifyNativeRelease(options, env = process.env) {
   const {sdk, platform, version, sourceSha, runtimeRef, releaseKey = '', std, crossRoot, work} = options;
   const {target, release, toolApplicability} = await assertNativeReleaseInputs(options);
+  if (platform==='windows-x64') {
+    const {nativePair}=await import('../runtime-pin.mjs');
+    const pair=nativePair(env),stage=await readJson(path.join(sdk,'STAGE-INPUTS.json'));
+    if(!pair || stage.selection?.targetComponents?.llvm?.commit!==pair.llvm
+      || stage.selection?.bootstrapHost?.version!==pair.hostVersion || pair.runtime!==runtimeRef)
+      throw Error('WINDOWS_PACKAGE_SOURCE_PAIR');
+  }
   assertNoVerifierReportArtifacts([sdk]);
   assertSdkCompilerRuntimeAbi({sdk, target});
   await verifyInstalledReleaseManifest({stage:sdk,platform:target.spec.llvmPlatform,...await installedInputs(sdk,target.spec.llvmPlatform)});
@@ -57,13 +64,13 @@ export async function verifyNativeRelease(options, env = process.env) {
   const installedEnv = await colourEnvironment('run', {...env, CJCJ_NATIVE_RUNTIME_REF: runtimeRef});
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   await command([process.execPath, path.join(root, 'scripts/verify_packaged_cjdb.mjs'), sdk], {env: installedEnv});
-  await command(['npx', '--yes', 'zx@8', path.join(root, 'ci/smoke/run_smoke.mjs'),
+  await command([process.execPath, path.join(root, 'ci/smoke/run_smoke.mjs'),
     path.join(sdk, 'bin/cjc' + target.spec.exeSuffix), path.join(work, 'smoke')],
   {env: {...installedEnv, CJCJ_OFFICIAL_SDK_HOME: path.join(sdk, '.host')}});
   // The installed compiler passes an oversized final link to ld.lld through a
   // response file on Windows (!2161); this runs again from the relocated archive.
   if (target.spec.os === 'windows')
-    await command(['npx', '--yes', 'zx@8', path.join(root, 'tests/upstream_compiler_1120/linker-response.mjs'),
+    await command([process.execPath, path.join(root, 'tests/upstream_compiler_1120/linker-response.mjs'),
       path.join(sdk, 'bin/cjc' + target.spec.exeSuffix), path.join(work, 'linker-response')], {env: installedEnv});
   // Compiler smoke is not a lint/LSP macro consumer. Preserve this missing
   // business gate after the independent installed consumers, rather than

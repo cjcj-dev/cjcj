@@ -199,9 +199,17 @@ export function llvmToolMatrix(requested = 'all', {platformSet = '', publishTupl
   }))};
 }
 
+// A Windows source cell and a Linux cross-std cell publish different products.
+export function finalStdArtifact(target, producer) {
+  getTarget(target); getTarget(producer);
+  return target === 'windows-x64' && producer === target
+    ? 'final-std-native-windows-x64' : 'final-std-' + target;
+}
+
 export function sourceBuildCells({nativeInputs=false}={}) {
   return [...registry.values()].filter(target => target.sourceBuild || nativeInputs && target.nativeSourceBuild).map(({spec, sourceBuild, nativeSourceBuild}) => ({
     target: spec.key,
+    final_std_artifact: finalStdArtifact(spec.key, spec.key),
     runner: (nativeSourceBuild || sourceBuild).runner,
     llvm_platform: spec.llvmPlatform,
     static_libs: spec.needsStaticLibs,

@@ -55,7 +55,7 @@ async function inputFiles(command, cwd, env, inputs) {
   if (env.CANGJIE_HOME) {
     // Preserve all target subdirectories: a conservative declaration inventory,
     // without guessing target option semantics or claiming these files were loaded.
-    for (const name of ['modules', 'lib', 'runtime/lib', 'third_party/llvm/lib', 'tools/lib']) {
+    for (const name of ['modules', 'lib', 'runtime/lib', process.platform === 'win32' ? 'third_party/llvm/bin' : 'third_party/llvm/lib', 'tools/lib']) {
       const dir = path.join(env.CANGJIE_HOME, name);
       if (await fs.stat(dir).then(s => s.isDirectory(), () => false)) directories.push(dir);
       else throw new Error(`missing SDK input directory: ${dir}`);

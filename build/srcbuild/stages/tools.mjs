@@ -35,25 +35,27 @@ function toolArgv(config,name,args) {
 const runTool=(config,name,cwd,args,options)=>runBuildScript(config,toolSourceRoot(config,name),toolArgv(config,name,args).slice(2),{...options,script:'build.mjs'});
 
 function buildArgsFor(name, config, jobs) {
+  const spec=config.target.spec;
+  const nativeAnalysis=!spec.crossCompile && ['linux_x86_64','windows_x86_64'].includes(spec.llvmPlatform);
   if(['lsp','cjhead'].includes(name)) {
-    if(config.target.spec.llvmPlatform!=='linux_x86_64'||config.target.spec.crossCompile)throw new BuildError('tools.'+name,'Cangjie analysis tools currently support Linux x86-64');
+    if(!nativeAnalysis)throw new BuildError('tools.'+name,'Cangjie analysis tools require native Linux or Windows x86-64');
     for(const key of ['toolsCompilerLibs','toolsRuntimeConfig','toolsLlvmShim','toolsLlvmLibrary'])if(!config[key])throw new BuildError('tools.'+name,key+' is required');
     const sdk=consumerSdk(config),build=toolProducerDirectory(config,name);
     if(name==='lsp') {
       if(!config.toolsJsonBuild)throw new BuildError('tools.lsp','toolsJsonBuild is required');
-      return ['--phase','build','--sdk',sdk,'--cjpm',path.join(bootstrapHostSdk(config),'tools/bin/cjpm'),'--build',build,'--server','stdio','--jobs',String(jobs),
+      return ['--phase','build','--sdk',sdk,'--cjpm',path.join(bootstrapHostSdk(config),'tools/bin/cjpm'+spec.exeSuffix),'--build',build,'--server','stdio','--jobs',String(jobs),
         '--frontend-packages',config.toolsCompilerLibs,'--runtime-config',config.toolsRuntimeConfig,'--json-build',config.toolsJsonBuild,
         '--llvm-shim',config.toolsLlvmShim,'--llvm-library',config.toolsLlvmLibrary];
     }
     if(!config.toolsFrontendRef)throw new BuildError('tools.cjhead','toolsFrontendRef is required');
-    return ['build','--cjc',path.join(sdk,'bin/cjc'),'--frontend-dir',config.toolsCompilerLibs,
+    return ['build','--cjc',path.join(sdk,'bin/cjc'+spec.exeSuffix),'--frontend-dir',config.toolsCompilerLibs,
       '--shim',config.toolsLlvmShim,'--runtime-config',config.toolsRuntimeConfig,'--llvm-lib',config.toolsLlvmLibrary,
       '--frontend-commit',config.toolsFrontendRef,'--source-commit',config.repo('tools').tag,
-      '--runtime-dir',path.join(sdk,'runtime/lib/linux_x86_64_cjnative'),'--build-dir',build,'--jobs',String(jobs)];
+      '--runtime-dir',path.join(sdk,'runtime/lib',spec.runtimeTuple),'--build-dir',build,'--jobs',String(jobs)];
   }
   if(name==='hle')return ['build','-t',config.buildType==='relwithdebinfo'?'release':config.buildType,'--build-dir',hleBuildDirectory(config),...(config.target.spec.crossCompile?['--target','windows-x86_64']:[])];
   if(name==='cjlint') {
-    if(config.target.spec.os!=='linux'||config.target.spec.crossCompile||config.target.spec.llvmPlatform!=='linux_x86_64')throw new BuildError('tools.cjlint','selected Cangjie producer supports Linux x86-64');
+    if(!nativeAnalysis)throw new BuildError('tools.cjlint','selected Cangjie producer requires native Linux or Windows x86-64');
     for(const key of ['toolsAnalysisSdk','toolsFrontendSource','toolsFrontendRef','toolsCompilerLibs','toolsRuntimeConfig','toolsLlvmShim','toolsLlvmLibrary'])if(!config[key])throw new BuildError('tools.cjlint',key+' is required');
     return ['build','--sdk',consumerSdk(config),'--cjpm-sdk',bootstrapHostSdk(config),'--analysis-sdk',config.toolsAnalysisSdk,
       '--frontend-source',config.toolsFrontendSource,'--frontend-ref',config.toolsFrontendRef,
@@ -62,7 +64,7 @@ function buildArgsFor(name, config, jobs) {
       '--build-dir',cjlintBuildDirectory(config),'--jobs',String(jobs)];
   }
   if(name==='cjprof') {
-    if(config.target.spec.os!=='linux'||config.target.spec.crossCompile||config.target.spec.llvmPlatform!=='linux_x86_64')throw new BuildError('tools.cjprof','selected Cangjie producer supports Linux x86-64');
+    if(!nativeAnalysis)throw new BuildError('tools.cjprof','selected Cangjie producer requires native Linux or Windows x86-64');
     for(const key of ['toolsJniHome','toolsRuntimeHeader','toolsLombokJar'])if(!config[key])throw new BuildError('tools.cjprof',key+' is required');
     return ['build','--sdk',consumerSdk(config),'--jni-home',config.toolsJniHome,'--runtime-header',config.toolsRuntimeHeader,'--lombok-jar',config.toolsLombokJar,'--build-dir',cjprofBuildDirectory(config)];
   }

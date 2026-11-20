@@ -8,6 +8,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {fileDigest,readJson,relative} from '../bootstrap/sdk-flow.mjs';
 import {sdkPlatform,entryPlatformName} from '../bootstrap/sdk-platform.mjs';
 import {TOOL_NAMES,TOOL_PUBLIC_NAMES,TOOL_DIRECTORIES,nativeToolLibraries,toolName,retainedToolPath,privateToolPayload,toolExecutionLibraries} from '../../build/srcbuild/tool-layout.mjs';
+import {assertX64PeImage} from '../../build/lib/pe-symbols.mjs';
 import {compilerExecutionPath} from '../../build/lib/runtime-split.mjs';
 // Every selected tool is now a Cangjie producer. LSP's analysis/runtime
 // selection remains distinct from its compiler execution dependencies.
@@ -140,12 +141,12 @@ export async function toolReadiness(root) {
           if((['cjprof','cjlint'].includes(name)||rel.includes('/config/'))&&row.sha256!==built[rel].sha256)throw Error('installed copied payload differs from build: '+rel);
         }
         if(name==='cjlint') {
-          if(stage.platform!=='linux_x86_64')throw Error('Cangjie lint platform not supported');
+          if(!['linux_x86_64','windows_x86_64'].includes(stage.platform))throw Error('Cangjie lint platform not supported');
           const selected=facts.build.nativeConfiguration?.cangjie?.values;
           if(selected?.language!=='Cangjie'||!selected.host?.sdk||!selected.analysis?.sdk||!/^[0-9a-f]{40}$/.test(selected.frontend?.ref??''))throw Error('Cangjie analysis configuration missing');
           for(const key of ['artifacts','runtimeObject','llvmShim','llvmLibrary'])if(!selected.frontend[key])throw Error('Cangjie frontend input missing: '+key);
           if(Object.keys(payloads).some(rel=>/lib(?:cjlint|cangjie-lsp)\./.test(rel)))throw Error('retired C++ lint payload');
-          required.push('.target-tools/tools/cjlint/lib/libcangjie-runtime.so','.target-tools/tools/cjlint/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','.target-tools/tools/cjlint/config/cjlint_rule_list.json');
+          required.push('.target-tools/tools/cjlint/lib/libcangjie-runtime'+native.shared,'.target-tools/tools/cjlint/runtime/lib/'+native.tuple+'/libcangjie-runtime'+native.shared,'.target-tools/tools/cjlint/config/cjlint_rule_list.json');
           if(!Object.keys(payloads).some(rel=>rel.startsWith('.target-tools/tools/cjlint/modules/')))throw Error('analysis modules absent');
         }
         if(name==='cjprof') {
@@ -161,9 +162,19 @@ export async function toolReadiness(root) {
         if(selected?.rc!==0||selected.signal||selected.error)throw Error('Cangjie LSP build configuration missing');
         for(const key of ['sdk','frontendPackages','llvmLibrary','runtimeConfig','jsonBuild','llvmShim'])
           if(!selected.inputs?.[key])throw Error('Cangjie LSP input missing: '+key);
-        required.push('.target-tools/tools/lsp/lib/libcangjie-runtime.so');
+        required.push('.target-tools/tools/lsp/lib/libcangjie-runtime'+native.shared);
         if(!Object.keys(payloads).some(rel=>/^\.target-tools\/tools\/lsp\/lib\/libLLVM/.test(rel)))throw Error('Cangjie LSP LLVM payload missing');
         if(Object.keys(payloads).some(rel=>/libcangjie-lsp\./.test(rel)))throw Error('retired C++ LSP payload');
+      }
+      if(native.os==='win32') {
+        assertX64PeImage(path.join(sdk,retained),false);
+        assertX64PeImage(path.join(sdk,rel),false);
+        for(const file of Object.keys(payloads).filter(file=>/\.dll$/i.test(file)))assertX64PeImage(path.join(sdk,file),true);
+        if(['cjlint','lsp','cjhead'].includes(name)) {
+          required.push('.target-tools/tools/'+name+'/lib/libcangjie-runtime.dll');
+          if(!Object.keys(payloads).some(file=>file.toLowerCase()===('.target-tools/tools/'+name+'/lib/'+native.llvmLibrary).toLowerCase()))
+            throw Error('selected Windows LLVM DLL absent');
+        }
       }
       if(name==='cjprof')for(const rel of Object.keys(payloads).filter(rel=>rel.startsWith('tools/config/static/')))required.push('.target-tools/'+rel);
       for(const rel of required)if(!payloads[rel])throw Error('required payload absent: '+rel);

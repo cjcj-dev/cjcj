@@ -24,6 +24,7 @@ try {
   process.stdout.write(summary);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
   const outputs = {
+    final_std_artifact: selected.length === 1 && runnable.length === 1 ? runnable[0].final_std_artifact : '',
     cells: JSON.stringify({include: selected}),
     ios_targets: JSON.stringify(CROSS_STD_BUILDS.filter(row => row.family === 'ios' && selected.some(cell => cell.target === row.target)).map(row => row.runtime_target)),
     ...Object.fromEntries(['ohos', 'ios'].map(family => [`${family}_matrix`, JSON.stringify({include:

@@ -1,0 +1,45 @@
+name: Verify installed and relocated Windows SDK
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful same-commit run containing the native Windows SDK and final std
+        type: string
+        required: true
+      version:
+        description: Exact SDK version in that producer run
+        type: string
+        required: true
+      native_runtime_artifact:
+        description: Original native runtime artifact prefix selected by the producer
+        type: string
+        required: true
+      native_llvm_ref:
+        description: Producer LLVM SHA (empty pair selects repository pins)
+        type: string
+      native_runtime_ref:
+        description: Producer runtime SHA (required with explicit LLVM)
+        type: string
+      native_host_version:
+        description: Bootstrap host version for an explicit pair
+        type: string
+permissions:
+  actions: read
+  contents: read
+jobs:
+  verify:
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: windows-2025
+      platform: windows-x64
+      release_key: win32-x64
+      llvm_platform: windows_x86_64
+      sdk_runtime_dir: windows_x86_64_cjnative
+      std_artifact: final-std-native-windows-x64
+      version: ${{ inputs.version }}
+      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
+      validation_run_id: ${{ inputs.source_run_id }}
+      dry_run: true

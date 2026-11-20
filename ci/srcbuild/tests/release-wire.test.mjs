@@ -46,7 +46,7 @@ test('srcbuild exposes reusable inputs, artifact uploads, and the runtime overri
     'CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}',
     'run: npx --yes zx@8 ci/load_runtime_pin.mjs',
   ]) assert.ok(sourceBuild.includes(contract), contract);
-  assert.match(sourceBuild, /name: final-std-\$\{\{ matrix.target \}\}/);
+  assert.match(sourceBuild, /name: \$\{\{ matrix.final_std_artifact \}\}/);
   assert.match(sourceBuild, /name: final-std-windows-x64/);
   assert.doesNotMatch(sourceBuild, /final_(std|compiler)_/);
 });
@@ -66,7 +66,7 @@ test('release connects each platform row to its same-platform final std', async 
   for (const platform of platforms) {
     const job = packageJobs.find(entry => entry.with?.platform === platform);
     assert.ok(job, `no package job declares platform: ${platform}`);
-    assert.equal(job.with?.std_artifact, platform==='windows-x64'?'final-std-native-windows-x64':`final-std-${platform}`,
+    assert.equal(job.with?.std_artifact, platform==='windows-x64'?'${{ needs.source-p3-windows-x64.outputs.final_std_artifact }}':`final-std-${platform}`,
       `the ${platform} package job does not ask for final-std-${platform}`);
   }
   assert.deepEqual(packageJobsOf(release).map(job => job.with?.release_key).sort(),
@@ -81,7 +81,7 @@ test('release cross packages depend on their native phase and cross producer wit
   const cross = packages.filter(job => !nativeKeys.includes(job.with?.release_key));
   const rows = declaredKeys.filter(key => !nativeKeys.includes(key)).map(key => {
     const r = releasePlatformReadiness(key);
-    return {release_key: key, platform: r.host, std_artifact: r.host==='windows-x64'?'final-std-native-windows-x64':`final-std-${r.host}`, cross_std_artifacts: JSON.stringify(crossStdArtifacts(r))};
+    return {release_key: key, platform: r.host, std_artifact: r.host==='windows-x64'?'${{ needs.source-p3-windows-x64.outputs.final_std_artifact }}':`final-std-${r.host}`, cross_std_artifacts: JSON.stringify(crossStdArtifacts(r))};
   });
   assert.deepEqual(cross.map(job => job.with?.release_key).sort(), rows.map(row => row.release_key).sort(),
     'every non-native package must have an explicit cross contract');
@@ -100,7 +100,7 @@ test('release cross packages depend on their native phase and cross producer wit
       return jobId(producer);
     });
     assert.deepEqual([...job.needs].sort(),
-      [...new Set([jobId(native), ...producerJobs])].sort(), `${key}: native phase and cross producer dependencies`);
+      [...new Set([jobId(native), ...(host==='windows-x64'?['source-p3-windows-x64']:[]), ...producerJobs])].sort(), `${key}: native phase and cross producer dependencies`);
     const tuples = JSON.parse(job.with?.cross_std_artifacts);
     assert.deepEqual(tuples, JSON.parse(row.cross_std_artifacts), `${key}: cross std tuples`);
     const publish = release.jobs.publish;

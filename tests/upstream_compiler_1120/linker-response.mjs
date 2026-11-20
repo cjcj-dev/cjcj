@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 
-const [compiler, work] = argv._.map(String);
+const [compiler, work] = (globalThis.argv?._ ?? process.argv.slice(2)).map(String);
 if (!compiler || !work || ![compiler, work].every(p => path.isAbsolute(p))) {
   throw Error('usage: zx linker-response.mjs /absolute/bin/cjc /new/work');
 }
@@ -16,6 +16,7 @@ const flags = Array(count).fill('-L.').join(' ');
 // The public compiler receives one argument below the Windows process limit;
 // the linker would receive thousands of individually quoted arguments.
 assert(flags.length < 25000 && count * ' "-L."'.length > 32767);
+fs.mkdirSync(path.dirname(work), {recursive: true});
 fs.mkdirSync(work);
 
 function run(root, name, command, args) {

@@ -423,7 +423,7 @@ test('public Cangjie cjprof forwards the selected host JNI inputs without a C++ 
  assert.doesNotMatch(normal.stderr,/build\.py|build\.mjs clean|--dependencies/);
  assert(normal.stderr.includes('--build-dir '+root+'/selected-output/cjprof'));
  const windows=invoke([...profOptions,'--target','windows-x64']);assert.notEqual(windows.status,0);
- assert.match(windows.stderr,/selected Cangjie producer supports Linux x86-64/);
+ assert.match(windows.stderr,/selected Cangjie producer requires native Linux or Windows x86-64/);
  console.log('CJPROF_PUBLIC_HOST_INPUTS_REACHED');
 });
 
@@ -446,7 +446,7 @@ test('public Cangjie lint separates host execution and explicit/default analysis
  const defaults=invoke(options,{CJLINT_ANALYSIS_SDK:'/selected/analysis',CJLINT_FRONTEND_SOURCE:'/selected/frontend',CJLINT_FRONTEND_REF:'b'.repeat(40)});
  assert.equal(defaults.status,0,defaults.stderr);assert(defaults.stderr.includes('--analysis-sdk /selected/analysis'));
  const override=invoke(profOptions,{CJLINT_ANALYSIS_SDK:'/wrong-ambient'});assert.equal(override.status,0,override.stderr);assert.doesNotMatch(override.stderr,/wrong-ambient/);
- const cross=invoke([...profOptions,'--target','windows-x64']);assert.equal(cross.status,1);assert.match(cross.stderr,/supports Linux x86-64/);
+ const cross=invoke([...profOptions,'--target','windows-x64']);assert.equal(cross.status,1);assert.match(cross.stderr,/requires native Linux or Windows x86-64/);
 });
 
 
