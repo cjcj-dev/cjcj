@@ -1396,7 +1396,7 @@ public class StructInheritanceChecker {
                 continue
             }
             let parentDecl = parent.decl.getOrThrow()
-            if (parentDecl.astKind != childDecl.astKind) {
+            if (parentDecl.astKind != childDecl.astKind || !SameModalInputs(parentDecl, childDecl)) {
                 continue
             }
             var shouldUpdate = true
@@ -2115,7 +2115,8 @@ public class StructInheritanceChecker {
                 }
                 if (let Some(parentFuncTy) <- FuncTyFromOption(parentTy)) {
                     if (let Some(childFuncTy) <- FuncTyFromOption(child.ty)) {
-                        let sameSignature = typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)
+                        let sameSignature = SameModalInputs(parentFunc, childFunc) &&
+                            typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)
                         if (sameSignature) {
                             let inheritedByExtension = typeManager.HasExtensionRelation(childFuncTy.retTy, parentFuncTy.retTy)
                             let isParamListCorrect = HasParamListForParameterNameCheck(parentFunc) &&

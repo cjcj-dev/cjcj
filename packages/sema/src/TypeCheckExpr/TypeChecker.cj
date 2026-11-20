@@ -3554,6 +3554,31 @@ extend TypeChecker {
         return true
     }
 
+    // Pass the contextual mode only along value-producing edges. A condition, earlier statement
+    // or nested function body never inherits the result slot of its enclosing expression.
+    private func SetExpectedResultMode(expr: Expr, mode: ASTMode): Unit {
+        if (let Some(call) <- (expr as CallExpr)) {
+            call.expectedLocalMode = Some(mode)
+        } else if (let Some(b) <- (expr as Block)) {
+            if ((let Some(last) <- b.GetLastExprOrDecl()) && (let Some(value) <- (last as Expr))) {
+                SetExpectedResultMode(value, mode)
+            }
+        } else if (let Some(p) <- (expr as ParenExpr)) {
+            if (let Some(value) <- p.expr) { SetExpectedResultMode(value, mode) }
+        } else if (let Some(region) <- (expr as ExclaveExpr)) {
+            if (let Some(value) <- region.body) { SetExpectedResultMode(value, mode) }
+        } else if (let Some(branch) <- (expr as IfExpr)) {
+            if (let Some(value) <- branch.thenBody) { SetExpectedResultMode(value, mode) }
+            if (let Some(value) <- branch.elseBody) { SetExpectedResultMode(value, mode) }
+        } else if (let Some(m) <- (expr as MatchExpr)) {
+            for (arm in m.matchCases) { if (let Some(value) <- arm.exprOrDecls) { SetExpectedResultMode(value, mode) } }
+            for (arm in m.matchCaseOthers) { if (let Some(value) <- arm.exprOrDecls) { SetExpectedResultMode(value, mode) } }
+        } else if (let Some(t) <- (expr as TryExpr)) {
+            if (let Some(value) <- t.tryBlock) { SetExpectedResultMode(value, mode) }
+            for (value in t.catchBlocks) { SetExpectedResultMode(value, mode) }
+        }
+    }
+
     private func CheckBodyRetType(ctx: ASTContext, fb: FuncBody): Bool {
         let retType = fb.retType.getOrThrow()
         let retTy = retType.GetTy().getOrThrow()
@@ -3595,6 +3620,7 @@ extend TypeChecker {
             if (retTy.IsUnit()) {
                 isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, body))
             } else {
+                SetExpectedResultMode(body, retType.modal.map({ m => m.local }) ?? retType.resolvedMode)
                 isWellTyped = Check(ctx, retTy, body)
                 if (!isWellTyped && body.body.isEmpty()) {
                     if (let Some(diagValue2) <- impl.diag) {
@@ -4011,8 +4037,9 @@ extend TypeChecker {
         }
         vd.EnableAttr(Attribute.IS_CHECK_VISITED)
         SynthesizeTypeNode(ctx, vd.typeNode)
-        if ((let Some(ty) <- vd.typeNode) && (let Some(initial) <- vd.initializer) &&
-            (let Some(call) <- (initial as CallExpr))) { call.expectedLocalMode = Some(ty.resolvedMode) }
+        if ((let Some(ty) <- vd.typeNode) && (let Some(initial) <- vd.initializer)) {
+            SetExpectedResultMode(initial, ty.modal.map({ m => m.local }) ?? ty.resolvedMode)
+        }
         if (let Some(initializer) <- vd.initializer) {
             if (let Some(typeNode) <- vd.typeNode) {
                 if (!Ty.IsTyCorrect(typeNode.GetTy())) {
@@ -6016,6 +6043,8 @@ extend TypeChecker {
                 } else {
                     retTy
                 }
+                let slot = fb.retType.getOrThrow()
+                SetExpectedResultMode(innerExpr, slot.modal.map({ m => m.local }) ?? slot.resolvedMode)
                 isWellTyped = Check(ctx, targetTy, innerExpr) && isWellTyped
                 if (isWellTyped) {
                     typeCheckExprPutTargetType(ctx, innerExpr, innerExpr.GetTy() ?? targetTy)

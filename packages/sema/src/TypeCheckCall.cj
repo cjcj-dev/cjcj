@@ -1343,7 +1343,8 @@ private func ReceiverAtCall(call: CallExpr, ctx: Option<ASTContext>): ASTMode {
     return ASTMode.NOT
 }
 
-private func PermitsModalCall(typeManager: TypeManager, fd: FuncDecl, call: CallExpr, receiver: ASTMode): Bool {
+private func PermitsModalCall(typeManager: TypeManager, unit: FunctionMatchingUnit, call: CallExpr, receiver: ASTMode): Bool {
+    let fd = unit.fd
     let base = call.baseFunc ?? return true;
     if (fd.TestAttr(Attribute.CONSTRUCTOR) && !fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
         if ((let Some(m) <- call.modal) && m.local != GetReceiverMode(fd)) { return false }
@@ -1363,7 +1364,11 @@ private func PermitsModalCall(typeManager: TypeManager, fd: FuncDecl, call: Call
     }
     for (i in 0..call.args.size) {
         if (let Some(value) <- call.args[i].expr) {
-            if (value.GetTy().map({ ty => typeManager.IsModalCopyType(ty) }) ?? false) {
+            // Candidate argument checking may have rolled back the speculative expression type.
+            // Use the already matched, substituted parameter for Copyable conversions in that case.
+            if ((value.GetTy().map({ ty => typeManager.IsModalCopyType(ty) }) ?? false) ||
+                (i < unit.tysInArgOrder.size &&
+                typeManager.IsModalCopyType(typeManager.ApplySubstPack(unit.tysInArgOrder[i], unit.typeMapping)))) {
                 continue
             }
             let slot = LocalParameterMode(fd, ModeArgumentIndex(fd, call, i))
@@ -1439,7 +1444,7 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
     if (differs) {
         let receiver = ReceiverAtCall(ce, ctx)
         for (i in 0..candidates.size) {
-            if (targetMark[i]) { targetMark[i] = PermitsModalCall(typeManager, candidates[i].fd, ce, receiver) }
+            if (targetMark[i]) { targetMark[i] = PermitsModalCall(typeManager, candidates[i], ce, receiver) }
         }
     }
     var idx: Int64 = 0

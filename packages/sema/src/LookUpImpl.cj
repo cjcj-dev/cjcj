@@ -922,6 +922,8 @@ private func findRealResult(ctx: ASTContext, node: Node, isSetter: Bool, results
             } else {
                 results.add(varDecl)
             }
+            // Every usable property at this scope participates in receiver overload resolution.
+            if (targetDecl is PropDecl) { continue }
             if (let Some(refExpr) <- (node as RefExpr)) {
                 if (let Some(_) <- refExpr.callOrPattern) {
                     continue
