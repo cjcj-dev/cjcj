@@ -537,6 +537,10 @@ public class LexerImpl {
         return if (lookAheadTokenStarts.isEmpty()) { CurrentInputToken() } else { lookAheadTokenStarts[0] }
     }
 
+    public func HasTokenInput(): Bool {
+        return !enableScan
+    }
+
     // The parser may have obtained a lookahead fragment without consuming it.
     // Its original index cannot be recovered by subtracting one from curToken.
     public func GetLastTokenStart(): Int64 {

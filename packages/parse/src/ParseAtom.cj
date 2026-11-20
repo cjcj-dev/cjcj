@@ -411,6 +411,11 @@ extend ParserImpl {
                 while (Skip(TokenKind.NL)) {}
                 let ty = ParseType()
                 if (!ty.TestAttr(Attribute.IS_BROKEN)) {
+                    if (let Some(modal) <- ty.modal) {
+                        ParseDiagnoseRefactor(DiagKindRefactor.parse_diag_error,
+                            MakeRange(modal.localPos, modal.end), "unexpected modal type here", "").Emit()
+                        ty.EnableAttr(Attribute.IS_BROKEN)
+                    }
                     out.add(ty)
                 }
             },

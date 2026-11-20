@@ -3,7 +3,7 @@ package cjcj::parse
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
-import cjcj::ast.{VisitAction, Walker}
+import cjcj::ast.{ASTMode, VisitAction, Walker}
 import cjcj::basic.{DiagCategory, DiagKindRefactor}
 
 private let SHARED_CODE = #"
@@ -81,6 +81,55 @@ class ParameterListRecoveryTest {
 
 @Test
 class ParseTypePortTest {
+    @TestCase
+    func modalTypeSuffixes(): Unit {
+        for ((source, mode) in [("Int64 @local!", ASTMode.FULL), ("Int64 @local?", ASTMode.HALF),
+            ("Int64 @~local", ASTMode.NOT)]) {
+            let (ty, diag) = parseTypeNode(source)
+            let modal = ty.modal.getOrThrow()
+            @Expect(modal.local == mode, true)
+            @Expect(modal.atPos.column, 7)
+            @Expect(modal.localPos.column, 8)
+            @Expect(ty.end.column, source.size + 1)
+            @Expect(countErrors(diag), 1)
+        }
+    }
+
+    @TestCase
+    func localBangDoesNotEatAssignment(): Unit {
+        let diag = DiagnosticEngine()
+        let parser = Parser("Int64 @local!=42", diag, SourceManager())
+        let ty = parser.ParseType()
+        @Expect(ty.modal.getOrThrow().local == ASTMode.FULL, true)
+        @Expect(ty.end.column, 14)
+        @Expect(parser.Peek().kind == TokenKind.ASSIGN, true)
+        @Expect(parser.Peek().Begin().column, ty.end.column)
+        @Expect(parser.Skip(TokenKind.ASSIGN), true)
+        @Expect(parser.Peek().Value(), "42")
+        @Expect(countErrors(diag), 1)
+    }
+
+    @TestCase
+    func localModalLookaheadLeavesOtherAtTokens(): Unit {
+        for (source in ["Int64 @local !", "Int64 @~ local", "Int64 @local", "Int64 @Other!"]) {
+            let diag = DiagnosticEngine()
+            let parser = Parser(source, diag, SourceManager())
+            let ty = parser.ParseType()
+            @Expect(ty.modal.isNone(), true)
+            @Expect(parser.Peek().kind == TokenKind.AT, true)
+            @Expect(countErrors(diag), 0)
+        }
+    }
+
+    @TestCase
+    func localModalCannotBeTypeArgument(): Unit {
+        let (ty, diag) = parseTypeNode("Array<Int64 @local?>")
+        let arg = ty.GetTypeArgs()[0]
+        @Expect(arg.modal.getOrThrow().local == ASTMode.HALF, true)
+        @Expect(arg.TestAttr(Attribute.IS_BROKEN), true)
+        @Expect(countErrors(diag), 2)
+    }
+
     @TestCase
     func parseTypePosition(): Unit {
         let code = #"
