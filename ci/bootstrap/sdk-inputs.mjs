@@ -217,6 +217,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   if(installations.shim) {
     if(!installations.shim.install)throw Error('NATIVE_SHIM_INSTALL_REQUIRED');
     rows.compiler.shimInstall=await privateRoot(installations.shim.install);
+    if(native.os==='linux'&&compilerCommit===h1Commit)rows.h1.shimInstall=rows.compiler.shimInstall;
   }
   // Optional reuse is an original H1 producer, not a copied flow directory.
   // A new candidate/configuration gets a new work domain while retaining the
@@ -240,7 +241,9 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
         ||!facts.sourceChanges?.['packages/cjc/cjpm.toml']
         ||!isDeepStrictEqual(facts.startupConfiguration,{hostRuntimeFile,hostRuntimeSupportsConfigV1,
           llvmLibraryFile:path.join(rows.llvm.install,'third_party/llvm',native.llvmDirectory,native.llvmLibrary)})
-        ||!isDeepStrictEqual(facts.nativeShim,await readInstalledNativeShim({install:rows.llvm.install}))
+        ||!isDeepStrictEqual(facts.nativeShim,rows.h1.shimInstall
+          ?await compilerNativeShim({install:rows.h1.shimInstall,nativeInstall:rows.llvm.install,compilerCommit:h1Commit})
+          :await readInstalledNativeShim({install:rows.llvm.install}))
         ||!Array.isArray(commands)||commands.length!==3
         ||commands.some(row=>row.rc!==0||row.signal||row.cwd!==facts.sourceRoot)
         ||!commands[0].argv?.includes(path.join(facts.sourceRoot,'runtime_shim/cjc_runtime_config.c'))

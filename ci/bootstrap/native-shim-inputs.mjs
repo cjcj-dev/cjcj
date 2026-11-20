@@ -32,9 +32,20 @@ export async function compilerNativeShim({install, nativeInstall, compilerCommit
  const shim=await readInstalledNativeShim({install:install||nativeInstall});
  if(shim.source.commit!==compilerCommit)throw Error('NATIVE_SHIM_COMPILER_SOURCE '+shim.source.commit+' != '+compilerCommit);
  if(install) {
-  const original=await readInstalledNativeShim({install:nativeInstall});
-  if(shim.llvm.commit!==original.llvm.commit||shim.compiler.commit!==original.compiler.commit)
-   throw Error('NATIVE_SHIM_DEPENDENCY_PAIR');
+  const library=shim.configuration?.llvmLibrary;
+  let originalRequired=true;
+  if(library) {
+   const relative='third_party/llvm/lib/libLLVM-15.so';
+   if(process.platform!=='linux'||library.file!==relative||library.sha256!==await fileDigest(path.join(nativeInstall,relative)))throw Error('NATIVE_SHIM_LLVM_LIBRARY');
+   const exists=file=>fs.lstat(file).then(()=>true,e=>{if(e.code==='ENOENT')return false;throw e;});
+   originalRequired=await exists(path.join(nativeInstall,'BUILD-INPUTS.json'))||
+     await exists(path.join(nativeInstall,'share/cjcj/build-inputs/native-build.json'));
+  }
+  if(originalRequired) {
+   const original=await readInstalledNativeShim({install:nativeInstall});
+   if(shim.llvm.commit!==original.llvm.commit||shim.compiler.commit!==original.compiler.commit)
+    throw Error('NATIVE_SHIM_DEPENDENCY_PAIR');
+  }
  }
  return shim;
 }

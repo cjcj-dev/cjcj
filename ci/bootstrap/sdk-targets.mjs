@@ -244,6 +244,7 @@ export function createBootstrapTargets(input) {
     '--commit',kind==='h1'?h1.commit:kind==='std'?stdlib.commit:compiler.commit,
     ...(kind==='h1'||kind==='compiler'?['--visible-options-only',String(visibleOptionsOnly(input.visibleOptionsOnly))]:[]),
     ...(kind==='compiler' && compiler.shimInstall ? ['--shim-install',compiler.shimInstall] : []),
+    ...(kind==='h1' && h1.shimInstall ? ['--shim-install',h1.shimInstall] : []),
     ...(kind==='std' && input.stdBuildType !== undefined ? ['--build-type',input.stdBuildType] : []),
     ...(kind==='std' && input.stdLocalModeApi===true ? ['--local-mode-api'] : []),
     ...(kind==='std' && input.stdDependencies ? ['--std-dependencies',JSON.stringify(input.stdDependencies)] : []),

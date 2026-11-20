@@ -158,10 +158,11 @@ export async function nativeStage(options, {signal} = {}) {
           SB_SHA:commit,SB_PLATFORM:platform,SB_CC:options.cc,SB_OPTIMIZATION:'O1',SB_PARAMETERS_JSON:'{"compile_flags":""}'},records});
     } else {
     if(!host)throw new Error('H1_HOST_REQUIRED');
-    const shim=await readInstalledNativeShim({install:sdk});
+    const shimInstall=options['shim-install']||sdk;
+    const shim=options['shim-install']?await compilerNativeShim({install:shimInstall,nativeInstall:sdk,compilerCommit:commit}):await readInstalledNativeShim({install:sdk});
     const work=output+'.h1',inputs=path.join(work,'inputs'),productRoot=path.join(work,'out');
     await fs.mkdir(inputs,{recursive:true});await fs.mkdir(productRoot,{recursive:true});
-    await fs.copyFile(path.join(sdk,shim.object.path),path.join(inputs,'llvm-shim.o'));
+    await fs.copyFile(path.join(shimInstall,shim.object.path),path.join(inputs,'llvm-shim.o'));
     const parameters=path.join(work,'parameters.json');await atomicJson(parameters,{compile_flags:''});
     const manifest=path.join(source,'cjpm.toml'),before=await fs.readFile(manifest);
     const packageManifest=path.join(source,'packages/cjc/cjpm.toml'),packageBefore=await fs.readFile(packageManifest);
@@ -214,10 +215,11 @@ export async function nativeStage(options, {signal} = {}) {
         '-c',path.join(source,'runtime_shim/cjc_heap_defaults.c'),
         '-o',path.join(source,'runtime_shim/cjc_heap_defaults.o')],
         {cwd:source,env:{...h1env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''},records});
-      await command([path.join(host,'tools/bin/cjpm'),'build','-j'+jobs],{cwd:source,env:h1env,records});
-      const built=await resolveProductBinary(path.join(source,'target/release/bin'),'h1');
+      const target=await privateRoot(options['target-dir']||path.join(source,'target'));
+      await command([path.join(host,'tools/bin/cjpm'),'build',...(options['target-dir']?['--target-dir',target]:[]),'-j'+jobs],{cwd:source,env:h1env,records});
+      const built=await resolveProductBinary(path.join(target,'release/bin'),'h1');
       await fs.copyFile(built,path.join(productRoot,'cjcj-stage1'));
-      await fs.cp(path.join(source,'target/release'),path.join(productRoot,'release'),{recursive:true,dereference:true});
+      await fs.cp(path.join(target,'release'),path.join(productRoot,'release'),{recursive:true,dereference:true});
       compiled=await fs.readFile(manifest);
     } finally {
       await fs.writeFile(manifest,before);

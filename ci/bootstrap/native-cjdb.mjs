@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {command,copyOutputs,atomicJson,readJson,fileDigest,assembleDirectory,privateRoot} from './sdk-flow.mjs';
-import {materializeNativeSource} from './sdk-source.mjs';
+import {materializeNativeSource,verifyNativeSource} from './sdk-source.mjs';
 import {nativeHostFlatc,readInstalledNativeShim} from './native-shim-inputs.mjs';
 import {prepareNativeCompilerSource} from './native-compiler-input.mjs';
 import {nativeAstInstallation} from './native-ast-inputs.mjs';
@@ -56,25 +56,52 @@ export async function nativeCjdbShim(config) {
  await privateRoot(build);await privateRoot(install);
  if(path.resolve(install)===path.resolve(nativeInstall)||path.resolve(install).startsWith(path.resolve(nativeInstall)+path.sep))
   throw Error('NATIVE_SHIM_OUTPUT_IS_INPUT');
- const original=await readJson(path.join(nativeInstall,'BUILD-INPUTS.json'));
- await readInstalledNativeShim({install:nativeInstall,facts:original});
- const {compilerSource,commits,configuration}=original;
- if(compilerSource?.commit!==commits.compiler)throw Error('NATIVE_SHIM_SOURCE_PAIR');
+ let compilerSource,commits,configuration,llvmBuild,flatc,llvmLibrary;
+ if(config.astInstall) {
+  // A separately installed native LLVM and official AST need no previous compiler shim.
+  // Consume the actual CMake-installed flatc, schema source, and selected native headers.
+  const native=sdkPlatform(config.platform);
+  if(native.os!=='linux'||process.platform!=='linux'||native.arch!==process.arch)throw Error('NATIVE_CJDB_RUNNER_REQUIRED');
+  for(const [source,sha] of [[config.compiler,config.commits.compiler],[config.llvm,config.commits.llvm]]) {
+   if(!/^[0-9a-f]{40}$/.test(sha||''))throw Error('NATIVE_SHIM_SOURCE_PAIR');
+   await verifyNativeSource({source,commit:sha});
+  }
+  compilerSource={root:config.compiler,commit:config.commits.compiler};commits=config.commits;
+  llvmBuild=path.join(nativeInstall,'third_party/llvm');
+  const relative='third_party/flatbuffers/bin/flatc',file=path.join(config.astInstall,relative);
+  const installed=new Set((await fs.readFile(path.join(config.astBuild,'install_manifest.txt'),'utf8')).split(/\r?\n/).filter(Boolean).map(f=>path.resolve(f)));
+  if(!installed.has(file)||!installed.has(path.join(config.astInstall,'lib',native.tuple,'libcangjie-ast-support.a')))
+   throw Error('NATIVE_AST_INSTALL_MANIFEST');
+  const cache=await fs.readFile(path.join(config.astBuild,'CMakeCache.txt'),'utf8');
+  const home=/^CMAKE_HOME_DIRECTORY:[^=]+=(.*)$/m.exec(cache)?.[1];
+  if(!home||await fs.realpath(home)!==await fs.realpath(config.compiler))throw Error('NATIVE_AST_SOURCE');
+  flatc={file,path:relative,sha256:await fileDigest(file)};
+  configuration={llvm:config.llvm,flatbuffers:path.join(config.astInstall,'third_party/flatbuffers'),tools:config.tools};
+  const rel=path.posix.join('third_party/llvm',native.llvmDirectory,native.llvmLibrary);
+  llvmLibrary={file:rel,sha256:await fileDigest(path.join(nativeInstall,rel))};
+ } else {
+  const original=await readJson(path.join(nativeInstall,'BUILD-INPUTS.json'));
+  await readInstalledNativeShim({install:nativeInstall,facts:original});
+  ({compilerSource,commits,configuration}=original);
+  if(compilerSource?.commit!==commits.compiler)throw Error('NATIVE_SHIM_SOURCE_PAIR');
+  llvmBuild=original.nativeShim.configuration.llvmBuild;
+  flatc=await nativeHostFlatc(nativeInstall,original.astInstallation);
+ }
  const records=[],env={...process.env};
  // Host C++ tools must not load the target SDK's LLVM through a caller loader.
  for(const key of ['LD_LIBRARY_PATH','LD_PRELOAD','LD_AUDIT','DYLD_LIBRARY_PATH','DYLD_INSERT_LIBRARIES'])env[key]='';
  const run=(argv,options={})=>command(argv,{env,records,...options});
- const flatc=await nativeHostFlatc(nativeInstall,original.astInstallation);
  await fs.mkdir(build,{recursive:true});
  await assembleDirectory(install,async pending=>{
   const object=path.join(pending,'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o');
   await fs.mkdir(path.dirname(object),{recursive:true});
   const nativeShim=await compileCjdbShim({flatc,compiler:compilerSource.root,
-   llvm:configuration.llvm,llvmBuild:original.nativeShim.configuration.llvmBuild,
+   llvm:configuration.llvm,llvmBuild,
    flatbuffers:configuration.flatbuffers,generatedHeaders:path.join(build,'shim-schema'),
    repository:shimSource,sourceArchive:shimArchive,commit,compilerCommit:commits.compiler,
    llvmCommit:commits.llvm,object,install:pending,clang:configuration.tools.cxx,
    launcher:configuration.tools.launcher,env},run);
+  if(llvmLibrary)nativeShim.configuration.llvmLibrary=llvmLibrary;
   await atomicJson(path.join(pending,'BUILD-INPUTS.json'),{
    targets:['compiler-shim'],commits:{shim:commit,compiler:commits.compiler,llvm:commits.llvm},
    nativeInstall,nativeShim,commands:records});
