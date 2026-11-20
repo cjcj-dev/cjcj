@@ -274,9 +274,9 @@ public func LLVMGetInstructionMetadata(context: LLVMContextHandle, value: LLVMVa
 
 public func LLVMGlobalHasMetadata(context: LLVMContextHandle, global: LLVMValueRef, name: String): Bool {
     let kindID = LLVMGetMDKindID(context, name)
+    var found = false
     try (count = LibC.malloc<UIntNative>().asResource()) {
         let entries = unsafe { LLVMGlobalCopyAllMetadata(global, count.value) }
-        var found = false
         var index = 0u32
         while (index < UInt32(unsafe { count.value.read() })) {
             if (unsafe { LLVMValueMetadataEntriesGetKind(entries, index) } == kindID) {
@@ -286,8 +286,8 @@ public func LLVMGlobalHasMetadata(context: LLVMContextHandle, global: LLVMValueR
             index++
         }
         unsafe { LLVMDisposeValueMetadataEntries(entries) }
-        return found
     }
+    return found
 }
 
 public func LLVMSetGlobalMetadata(context: LLVMContextHandle, global: LLVMValueRef, name: String,
