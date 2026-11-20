@@ -34,7 +34,7 @@ on:
         required: false
         default: "{}"
       native_build_inputs_artifact:
-        description: Optional native-cjdb input prefix (Windows: completed native installation product containing native-install.tar)
+        description: 'Optional native-cjdb input prefix (Windows: completed native installation product containing native-install.tar)'
         type: string
         required: false
         default: ''
@@ -2165,7 +2165,9 @@ jobs:
     steps:
       - *checkout-cjcj
       - *actions-setup-node-v7-1-0
-      - *native-windows-tools
+      - uses: ./.github/actions/native-windows-tools
+        with:
+          native-compiler: 'true'
       - *receive-selected-native-inputs-before-choosing-the-host
       - name: Receive optional completed N and AST installation
         if: inputs.native_build_inputs_artifact != ''

@@ -17,6 +17,9 @@ if(locations.platform!==stage.platform||!jar?.path||!jar.sha256)throw Error('WIN
 const lombok=await fs.realpath(path.join(input,relative(jar.path)));
 if(!lombok.startsWith(input+path.sep)||await fileDigest(lombok)!==jar.sha256)throw Error('WINDOWS_TOOLS_LOMBOK_BYTES');
 const frontend=path.join(sdk,'share/cjcj/cjo'),shim=path.join(sdk,'share/cjcj/runtime_shim');
+// cjpm and frontend consumers link the selected MSVCRT libc++ and unwind.
+const mingw=await fs.realpath(env.CJCJ_WINDOWS_TOOLCHAIN);
+const cc=await fs.realpath(path.join(mingw,'bin/clang.exe'));
 const [type,version]=process.argv.slice(2);
 const args=[path.join(repo,'build/cli.mjs'),'--target','windows-x64','--build-type',type,'--cangjie-version',version,
   '--tools-mangle-source',path.join(repo,'packages/mangle/src'),'--tools-frontend-source',repo,'--tools-frontend-ref',stage.compilerCommit,
@@ -25,7 +28,7 @@ const args=[path.join(repo,'build/cli.mjs'),'--target','windows-x64','--build-ty
   '--tools-llvm-library',path.join(sdk,'third_party/llvm',native.llvmDirectory,native.llvmLibrary),
   '--tools-runtime-header',path.join(env.CANGJIE_WORKSPACE,'native-sources/runtime/runtime/src/Cangjie.h'),
   '--tools-lombok-jar',lombok,'build','tools'];
-const r=spawnSync(process.execPath,args,{stdio:'inherit',env:{...env,CJFMT_FRONTEND_CJO:frontend,CJFMT_FRONTEND_LIB:frontend,
+const r=spawnSync(process.execPath,args,{stdio:'inherit',env:{...env,CC:cc,MINGW_PATH:mingw,CJFMT_FRONTEND_CJO:frontend,CJFMT_FRONTEND_LIB:frontend,
   CJFMT_FRONTEND_NATIVE:path.join(shim,'cjc_runtime_config.o'),CJFMT_FRONTEND_REF:stage.compilerCommit,CJFMT_SOURCE_REF:env.TOOLS_REF}});
 if(r.error)throw r.error;
 process.exitCode=r.status??1;
