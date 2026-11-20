@@ -4,7 +4,7 @@ import cjcj::flatbuffers.ReadScalar
 
 // CHIR FlatBuffer root and file identifier. PackageFormat.fbs:9,1249;
 // PackageFormat_generated.h:8509-8542 (CHIRPackageIdentifier/GetCHIRPackage/FinishCHIRPackageBuffer).
-const CHIRFB_FILE_IDENTIFIER: String = "CHIR"
+const CHIRFB_FILE_IDENTIFIER: String = CONSTRUCTOR_ABI_CHIR_IDENTIFIER
 const CHIRFB_ROOT_TABLE: String = "CHIRPackage"
 
 func GetCHIRPackage(data: Array<UInt8>): PackageFormat_CHIRPackage {
@@ -1165,7 +1165,7 @@ const CHIRFB_CHIR_PACKAGE_VT_PACKAGELITERALINITFUNC: UInt16 = 30u16
 // Self-check for the constants above. Mirrors generated-header constants from PackageFormat_generated.h:240-8542.
 public func VerifyCHIRPackageBufferSchemaConstants(): Bool {
     var ok = true
-    ok = ok && CHIRFB_FILE_IDENTIFIER == "CHIR"
+    ok = ok && CHIRFB_FILE_IDENTIFIER == "CR01"
     ok = ok && CHIRFB_ROOT_TABLE == "CHIRPackage"
     ok = ok && CHIRFB_INVALID_POOL_ID == 0u32
     ok = ok && CHIRFB_FIRST_POOL_ID == 1u32

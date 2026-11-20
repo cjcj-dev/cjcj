@@ -16,6 +16,7 @@ import {writeStdProvenance} from '../../build/lib/provenance.mjs';
 import {stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
 import {resolveProductBinary} from '../srcbuild/lib/product-binary.mjs';
 import {acceptInstalledStd, flag, stdBuildType} from './sdk-std-resume.mjs';
+import {installCompilerChirInterface} from './compiler-chir-interface.mjs';
 import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {materializeNativeSource, nativeSourceOptions} from './sdk-source.mjs';
@@ -235,6 +236,7 @@ export async function nativeStage(options, {signal} = {}) {
     const product=path.join(bin,'cjcj-stage1');
     await fs.copyFile(path.join(productRoot,'cjcj-stage1'),product);
     const {sha256}=await import('./sdk-io.mjs');
+    await installCompilerChirInterface({source,destination:output,sdk,shim,records,env});
     await atomicJson(path.join(bin,'build-inputs.json'),{producer:'sdk-native-stage:h1',source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,startupConfiguration,visibleOptionsOnly:optionVisibility,
       sourceChanges:{'cjpm.toml':{beforeSha256:sha256(before),buildSha256:sha256(compiled)},
         'packages/cjc/cjpm.toml':{beforeSha256:sha256(packageBefore),buildSha256:sha256(packageCompiled)}},sha256:await fileDigest(product)});
@@ -273,6 +275,7 @@ export async function nativeStage(options, {signal} = {}) {
       // absolute path out of the tree, which the install guard rejects as escape.
       {from:path.join(target,'release'),to:'share/cjcj/cjo',exclude:['bin','runtime']},
       ...['cjselfhost_llvmshim.o','cjc_runtime_config.o','cjc_heap_defaults.o'].map(name=>({from:path.join(source,'runtime_shim',name),to:'share/cjcj/runtime_shim/'+name}))]);
+    await installCompilerChirInterface({source,destination,sdk,shim,records,env});
     await atomicJson(path.join(destination,'compiler-inputs.json'),{commit,nativeShim:shim,visibleOptionsOnly:optionVisibility,version:process.env.SOURCE_SDK_VERSION,parentSha256:await fileDigest(await compilerProducer(sdk)),
       stdSha256:await stdIdentity(options['std-input']||sdk, options['std-input']||sdk, {sourceSdk:sdk}),
       stdCoreSha256:await fileDigest(path.join(sdk,'lib',native.tuple,'libcangjie-std-core.a')),
