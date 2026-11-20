@@ -770,6 +770,40 @@ public func TypeCheckReferenceFilterTargetsInExtend(
     return !targets.isEmpty()
 }
 
+// A property's receiver is part of its overload identity. Filter before lookup
+// collapses duplicate declarations, for both implicit this and qualified access.
+private func FilterPropertyReceivers(tm: TypeManager, ctx: ASTContext, expr: Expr,
+    base: Option<Expr>, targets: ArrayList<Option<Decl>>): Unit {
+    var hasProperty = false
+    for (candidate in targets) {
+        if ((let Some(t) <- candidate) && t is PropDecl && IsInstanceMember(t)) { hasProperty = true; break }
+    }
+    if (!hasProperty) { return }
+    let owner = GetCurFuncBody(ctx, expr.scopeName).flatMap({ b => b.funcDecl })
+    let enclosing = owner.map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+    let actual = if (let Some(b) <- base) { CallSiteMode(b, enclosing, HashSet<Decl>()) } else { Some(enclosing) }
+    let ty = if (let Some(b) <- base) { b.GetTy() }
+        else { GetCurInheritableDecl(ctx, expr.scopeName).flatMap({ d => d.GetTy() }) }
+    let copy = ty.map({ t => tm.IsModalCopyType(t) }) ?? false
+    var exact = false
+    for (candidate in targets) {
+        if ((let Some(t) <- candidate) && (let Some(pd) <- (t as PropDecl)) && IsInstanceMember(t) &&
+            (actual.map({ m => m == PropertyMode(pd) }) ?? false)) { exact = true }
+    }
+    var i: Int64 = 0
+    while (i < targets.size) {
+        if ((let Some(t) <- targets[i]) && (let Some(pd) <- (t as PropDecl)) && IsInstanceMember(t)) {
+            let mode = PropertyMode(pd)
+            if (exact && !(actual.map({ m => m == mode }) ?? false) ||
+                !copy && !(actual.map({ m => m.IsSubMode(mode) }) ?? (mode == ASTMode.HALF))) {
+                targets.remove(at: i)
+                continue
+            }
+        }
+        i++
+    }
+}
+
 public func FilterAndCheckTargetsOfRef(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -778,6 +812,7 @@ public func FilterAndCheckTargetsOfRef(
     targets: ArrayList<Option<Decl>>,
     importManager: SemaImportManager
 ): Bool {
+    FilterPropertyReceivers(tm, ctx, re, None, targets)
     TypeCheckReferenceRemoveDuplicateTargets(tm, targets)
     TypeCheckReferenceFilterCandidatesForRef(tm, ctx, re, targets)
     if (targets.isEmpty()) {
@@ -919,6 +954,11 @@ public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
         return None
     }
     let baseExpr = ma.baseExpr.getOrThrow()
+    let candidates = ArrayList<Option<Decl>>()
+    for (candidate in targets) { candidates.add(Some(candidate)) }
+    FilterPropertyReceivers(tm, ctx, ma, ma.baseExpr, candidates)
+    targets.clear()
+    for (candidate in candidates) { targets.add(candidate.getOrThrow()) }
     if (!TypeCheckReferenceFilterTargetsInExtend(tm, ma, baseExpr.GetTy(), targets)) {
         DiagMemberAccessNotFound(diag, tm, ma, importManager)
         return None

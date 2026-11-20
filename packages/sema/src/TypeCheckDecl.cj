@@ -330,6 +330,7 @@ public func CheckPropDecl(pd: PropDecl, typeSynthesizer: (Type) -> Ty, declSynth
     }
     let typeNode = pd.typeNode.getOrThrow()
     let _ = typeSynthesizer(typeNode)
+    pd.resolvedMode = PropertyMode(pd)
     pd.SetTy(typeNode.GetTy() ?? TypeManager.GetInvalidTy())
     for (getter in pd.getters) {
         if (let Some(body) <- getter.funcBody) {

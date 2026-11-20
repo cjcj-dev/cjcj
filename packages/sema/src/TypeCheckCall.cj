@@ -1288,7 +1288,7 @@ private func FilterOverriden(typeManager: TypeManager, candidates: ArrayList<Fun
 
 // Type checking selects an overload before the whole-body lifetime walk. Inspect the
 // declared slot or a local initializer without changing the shared semantic data type.
-private func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Option<ASTMode> {
+func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Option<ASTMode> {
     if (let Some(paren) <- (expr as ParenExpr)) {
         if (let Some(inner) <- paren.expr) { return CallSiteMode(inner, receiver, seen) }
     }
@@ -1302,6 +1302,7 @@ private func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): O
     }
     if (let Some(ma) <- (expr as MemberAccess)) {
         let target = ma.GetTarget() ?? return None;
+        if (let Some(pd) <- (target as PropDecl)) { return PropertyMode(pd) }
         if (target is VarDecl && IsInstanceMember(target) && !HasLocalModifier(target, TokenKind.DEMODE)) {
             let base = ma.baseExpr ?? return None;
             return CallSiteMode(base, receiver, seen)
@@ -1311,6 +1312,7 @@ private func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): O
     if (let Some(ref) <- (expr as RefExpr)) {
         if (ref.isThis || ref.isSuper) { return receiver }
         let target = ref.GetTarget() ?? return None;
+        if (let Some(pd) <- (target as PropDecl)) { return PropertyMode(pd) }
         if (let Some(vd) <- (target as VarDeclAbstract)) {
             if (IsInstanceMember(vd) && !HasLocalModifier(vd, TokenKind.DEMODE)) { return receiver }
             if (let Some(t) <- vd.typeNode) { return t.modal.map({ m => m.local }) ?? t.resolvedMode }

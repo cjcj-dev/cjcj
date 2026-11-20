@@ -62,14 +62,18 @@ public struct ASTModalInfo {
     }
 }
 
+public func PropertyMode(pd: PropDecl): ASTMode {
+    if (let Some(t) <- pd.typeNode) { return t.modal.map({ m => m.local }) ?? t.resolvedMode }
+    return pd.resolvedMode
+}
+
 // The receiver is separate from the explicit parameter list. Default-argument
 // functions execute with the receiver contract of their enclosing declaration.
 public func GetReceiverMode(fd: FuncDecl): ASTMode {
     if (fd.TestAttr(Attribute.STATIC)) { return ASTMode.NOT }
     if (let Some(owner) <- fd.ownerFunc) { return GetReceiverMode(owner) }
     if (let Some(propertyDecl) <- fd.propDecl) {
-        if (let Some(t) <- propertyDecl.typeNode) { return t.resolvedMode }
-        return propertyDecl.resolvedMode
+        return PropertyMode(propertyDecl)
     }
     if ((let Some(body) <- fd.funcBody) && !body.paramLists.isEmpty()) {
         if (let Some(modal) <- body.paramLists[0].receiverModal) { return modal.local }

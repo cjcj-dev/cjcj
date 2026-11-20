@@ -756,11 +756,13 @@ public func GenerateIsSubtypeTypesIntrinsic(pkg: Package, typeManager: TypeManag
     return decl
 }
 
-private func FindValidPropAccessor(classDecl: ClassDecl, isGetter: Bool, name: String): Option<FuncDecl> {
+private func FindValidPropAccessor(classDecl: ClassDecl, isGetter: Bool, propertyDecl: PropDecl): Option<FuncDecl> {
     var current: Option<ClassDecl> = Some(classDecl)
     while (let Some(curClass) <- current) {
         for (member in curClass.GetMemberDecls()) {
-            if (member.identifier.Val() != name) {
+            if (!(member is PropDecl)) { continue }
+            let pd = (member as PropDecl).getOrThrow()
+            if (pd.identifier != propertyDecl.identifier || PropertyMode(pd) != PropertyMode(propertyDecl)) {
                 continue
             }
             let found = GetUsedMemberDecl(member, isGetter)
@@ -779,7 +781,7 @@ public func GetUsableGetterForProperty(propDecl: PropDecl): Option<FuncDecl> {
     }
     if (let Some(outer) <- propDecl.outerDecl) {
         if (let Some(classDecl) <- (outer as ClassDecl)) {
-            return FindValidPropAccessor(classDecl, true, propDecl.identifier.Val())
+            return FindValidPropAccessor(classDecl, true, propDecl)
         }
     }
     return None
@@ -791,7 +793,7 @@ public func GetUsableSetterForProperty(propDecl: PropDecl): Option<FuncDecl> {
     }
     if (let Some(outer) <- propDecl.outerDecl) {
         if (let Some(classDecl) <- (outer as ClassDecl)) {
-            return FindValidPropAccessor(classDecl, false, propDecl.identifier.Val())
+            return FindValidPropAccessor(classDecl, false, propDecl)
         }
     }
     return None

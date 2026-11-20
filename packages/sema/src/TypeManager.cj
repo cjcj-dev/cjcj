@@ -2182,6 +2182,7 @@ public class TypeManager {
     }
 
     public func IsFuncDeclSubType(decl: FuncDecl, funcDecl: FuncDecl): Bool {
+        if (!SameModalInputs(decl, funcDecl)) { return false }
         if (decl.identifier != funcDecl.identifier) {
             return false
         }
@@ -2248,6 +2249,7 @@ public class TypeManager {
         if (src.TestAttr(Attribute.IS_BROKEN) || target.TestAttr(Attribute.IS_BROKEN)) {
             return false
         }
+        if (!SameModalInputs(src, target)) { return false }
         if (let Some(cached) <- GetOverrideCache(Some(src), Some(target), baseTy, expectInstParent)) {
             return cached
         }
@@ -2281,6 +2283,7 @@ public class TypeManager {
     }
 
     private func IsOverrideOrShadow(src: PropDecl, target: PropDecl, baseTy: Option<Ty>): Bool {
+        if (PropertyMode(src) != PropertyMode(target)) { return false }
         if (let None <- src.outerDecl) {
             return false
         }

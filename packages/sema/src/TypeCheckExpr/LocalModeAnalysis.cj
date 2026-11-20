@@ -288,7 +288,9 @@ class LocalModeAnalysis {
             (let Some(owner) <- scopes[scopes.size - 1].funcDecl) && GetReceiverMode(owner) != ASTMode.NOT) {
             DiagMismatchedTypesWithFoundTy(diag, ref, "an unbound method or non-local receiver", "bound local receiver")
         }
-        if (decl is VarDecl && IsInstanceMember(decl) && !HasLocalModifier(decl, TokenKind.DEMODE)) {
+        if (let Some(pd) <- (decl as PropDecl)) {
+            ref.resolvedMode = PropertyMode(pd)
+        } else if (decl is VarDecl && IsInstanceMember(decl) && !HasLocalModifier(decl, TokenKind.DEMODE)) {
             for (i in 0..scopes.size) {
                 if (let Some(fd) <- scopes[scopes.size - 1 - i].funcDecl) {
                     ref.resolvedMode = GetReceiverMode(fd)
@@ -398,8 +400,11 @@ class LocalModeAnalysis {
             CheckExclave(ex)
         } else if (let Some(ma) <- (node as MemberAccess)) {
             if ((let Some(base) <- ma.baseExpr) && ma.GetTarget().isNone()) { Check(base, ASTMode.NOT) }
-            if ((let Some(base) <- ma.baseExpr) && (let Some(target) <- ma.GetTarget()) && base.resolvedMode != ASTMode.NOT) {
-                if (target is VarDecl && IsInstanceMember(target)) {
+            if ((let Some(base) <- ma.baseExpr) && (let Some(target) <- ma.GetTarget())) {
+                if (let Some(pd) <- (target as PropDecl)) {
+                    ma.resolvedMode = PropertyMode(pd)
+                    if (IsInstanceMember(pd)) { Check(base, PropertyMode(pd)) }
+                } else if (target is VarDecl && IsInstanceMember(target)) {
                     ma.resolvedMode = if (HasLocalModifier(target, TokenKind.DEMODE)) { ASTMode.NOT } else { base.resolvedMode }
                 } else if (!(target is FuncDecl && IsCallTarget(ma))) {
                     Check(base, ASTMode.NOT)

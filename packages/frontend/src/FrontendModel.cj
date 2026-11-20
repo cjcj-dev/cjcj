@@ -2792,6 +2792,7 @@ public class CjoSignatureMaterializer {
                     }
                 }
             }
+            if (let Some(t) <- varDecl.typeNode) { t.resolvedMode = decl.resolvedMode }
         }
         if (decl.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
             decl.genericDecl = ResolveFlatFullId(reader, reader.OffsetField(record.table, 10))

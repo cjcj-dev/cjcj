@@ -2864,7 +2864,7 @@ extend ParserImpl {
             ret.identifier = ExpectIdentifierWithPos(ret)
             if (Skip(TokenKind.COLON)) {
                 ret.colonPos = lastToken.Begin()
-                ret.typeNode = ParseType()
+                ret.typeNode = ParseType(compileOptions.IsLocalModeAnalysis())
             } else {
                 // C++ anchor: cangjie_compiler/src/Parse/Parser.cpp:416-419
                 ret.typeNode = InvalidType(Peek().Begin())

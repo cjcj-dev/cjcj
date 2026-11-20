@@ -64,8 +64,12 @@ private class LookUpImpl {
             if (!decl.TestAttr(Attribute.ABSTRACT)) {
                 var propIdx: Int64 = 0
                 while (propIdx < results.size) {
-                    if (results[propIdx].TestAttr(Attribute.ABSTRACT)) {
+                    let previous = results[propIdx]
+                    if (previous.TestAttr(Attribute.ABSTRACT) &&
+                        (let Some(pd) <- (previous as PropDecl)) &&
+                        PropertyMode(pd) == PropertyMode((decl as PropDecl).getOrThrow())) {
                         results.remove(at: propIdx)
+                        if (propIdx < resultsWithInstTyV.size) { resultsWithInstTyV.remove(at: propIdx) }
                     } else {
                         propIdx++
                     }
