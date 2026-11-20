@@ -7,8 +7,8 @@ import {createHash} from 'node:crypto';
 import {cleanSdkEnvironment} from '../../ci/bootstrap/sdk-platform.mjs';
 import {compilerProducer} from '../../ci/bootstrap/compiler_identity.mjs';
 
-const [install, output] = argv._.map(String);
-if (![install, output].every(p => p && path.isAbsolute(p))) throw Error('usage: zx run.mjs /installed/sdk /new/output');
+const [install, output, coreChir] = argv._.map(String);
+if (![install, output, coreChir].every(p => p && path.isAbsolute(p))) throw Error('usage: zx run.mjs /installed/sdk /new/output /producer/std.core.chir');
 const sdk = fs.realpathSync(install), tuple = 'linux_x86_64_cjnative';
 const compiler = path.join(sdk, 'bin/cjc');
 const runtime = path.join(sdk, 'runtime/lib', tuple);
@@ -42,9 +42,16 @@ fs.mkdirSync(regenerated);
 const gen=execute('stdx-schema',flatc,['--no-warnings','-c','-o',regenerated,schema]);
 if (gen.status !== 0 || !fs.existsSync(path.join(regenerated,path.basename(generated))) ||
     digest(path.join(regenerated,path.basename(generated))) !== digest(generated)) failures.push('installed stdx schema/header pair');
-const abi = execute('stdx-headers','c++',['-std=c++17','-fsyntax-only','-I'+path.join(sdk,'include'),
-  '-I'+path.join(sdk,'third_party/flatbuffers/include'),fileURLToPath(new URL('./sdk_chir.cpp',import.meta.url))]);
+const reader=path.join(output,'sdk-chir-reader');
+const abi = execute('stdx-headers','c++',['-std=c++17','-O2','-I'+path.join(sdk,'include'),
+  '-I'+path.join(sdk,'third_party/flatbuffers/include'),fileURLToPath(new URL('./sdk_chir.cpp',import.meta.url)),'-o',reader]);
 if (abi.status !== 0) failures.push('installed stdx C++ interface');
+if (abi.status===0 && execute('stdx-read-core',reader,['core',coreChir]).status!==0) failures.push('target std.core wire');
+const raw=path.join(output,'local.chir');
+const rawCompile=execute('local-wire-compile',compiler,['--experimental','--enable-local-mode','--output-type=chir',
+  fileURLToPath(new URL('./local.cj',import.meta.url)),'-o',raw]);
+if(rawCompile.status!==0) failures.push('local source wire');
+else if(abi.status===0 && execute('stdx-read-local',reader,['local',raw]).status!==0) failures.push('local source wire semantics');
 
 for (const name of ['local','ordinary','escape']) {
   const source = fileURLToPath(new URL('./'+name+'.cj',import.meta.url));

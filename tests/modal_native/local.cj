@@ -3,11 +3,12 @@ package local_consumer
 import std.runtime.getAllocatedLocalObjectSize
 
 class Cell {
-    let payload: Int64
+    demode let payload: Int64
     public exclave init(this @local!, n: Int64) { this.payload = n }
     public prop value: Int64 { get() { 0 } }
     public prop value: Int64 @local! { get() { payload } }
     public func read(this @local?): Int64 { return payload }
+    public exclave func wireRead(this @local!): Int64 { return payload }
 }
 
 var activeBytes: Int64 = -1
@@ -18,7 +19,7 @@ func exercise(n: Int64): Int64 {
     let c = Cell(n) @local!
     activeBytes = getAllocatedLocalObjectSize()
     let v = copyValue<Int64>(c.value)
-    if (v != c.read()) { return -1 }
+    if (v != c.read() || v != c.wireRead()) { return -1 }
     return v
 }
 

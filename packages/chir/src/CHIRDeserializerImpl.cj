@@ -110,9 +110,9 @@ private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
         case 75u8 => (ExprKind.INTRINSIC, false)
         case 76u8 => (ExprKind.GET_RTTI, false)
         case 77u8 => (ExprKind.GET_RTTI_STATIC, false)
-        case 78u8 => (ExprKind.EXCLAVE, false)
-        case 79u8 => (ExprKind.START_REGION, false)
-        case 80u8 => (ExprKind.END_REGION, false)
+        case CHIRFB_CHIR_EXPR_KIND_EXCLAVE => (ExprKind.EXCLAVE, false)
+        case CHIRFB_CHIR_EXPR_KIND_START_REGION => (ExprKind.START_REGION, false)
+        case CHIRFB_CHIR_EXPR_KIND_END_REGION => (ExprKind.END_REGION, false)
         case _ => (ExprKind.GOTO, false)
     }
 }

@@ -1310,7 +1310,7 @@ public open class GlobalOptions <: Option {
         if (enableLocalMode && (backend != BackendType.CJNATIVE || target.os != OSType.LINUX ||
             target.arch != ArchType.X86_64 || target.env != EnvironmentType.GNU || interpreter ||
             enIncrementalCompilation || compileCjd || !commonPartChirs.isEmpty() ||
-            outputMode == OutputMode.CHIR || IsEmitCHIREnable())) {
+            IsEmitCHIREnable())) {
             Errorln("local mode requires a Linux x86_64 GNU native source compilation")
             return false
         }

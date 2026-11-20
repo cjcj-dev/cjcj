@@ -476,7 +476,7 @@ private func ToPackageExprKind(expr: Expression): UInt8 {
         case ExprKind.GET_RTTI_STATIC => CHIRFB_CHIR_EXPR_KIND_GET_RTTI_STATIC
         case ExprKind.START_REGION => CHIRFB_CHIR_EXPR_KIND_START_REGION
         case ExprKind.END_REGION => CHIRFB_CHIR_EXPR_KIND_END_REGION
-        case ExprKind.EXCLAVE => 78u8
+        case ExprKind.EXCLAVE => CHIRFB_CHIR_EXPR_KIND_EXCLAVE
         case ExprKind.FORIN_RANGE | ExprKind.FORIN_ITER | ExprKind.FORIN_CLOSED_RANGE | ExprKind.INVALID =>
             CHIRFB_CHIR_EXPR_KIND_INVALID
     }
