@@ -11,6 +11,10 @@ public enum ASTMode <: Equatable<ASTMode> {
             case _ => false
         }
     }
+
+    public operator func !=(other: ASTMode): Bool {
+        return !(this == other)
+    }
 }
 
 // A missing suffix is None on the AST node; explicit @~local is kept as NOT.
