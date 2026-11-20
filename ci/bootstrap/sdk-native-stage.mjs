@@ -68,7 +68,20 @@ export async function nativeStage(options, {signal} = {}) {
   catch(error){if(error.message.startsWith('BUILD_JOBS'))throw Error('NATIVE_STAGE_JOBS '+error.message);throw error;}
   const native=sdkPlatform(platform), jobs=String(resources.jobs),records=[];
   if(process.platform!==native.os||process.arch!==native.arch)throw new Error('NATIVE_RUNNER_REQUIRED');
-  const hostRuntime=kind==='compiler'||options['compiler-runtime']==='target'?sdk:path.join(sdk,'.host');
+  // A directly installed official compiler owns bin/cjc and its loader paths.
+  // A selfhost stage still uses its recorded producer and execution runtime.
+  let officialStdCompiler;
+  if(kind==='std' && options['compiler-runtime']==='host') {
+    const present=file=>fs.lstat(file).then(()=>true,e=>{if(e.code==='ENOENT')return false;throw e;});
+    if(!await present(path.join(sdk,'STAGE-INPUTS.json'))) {
+      const staged=path.join(sdk,'bin','cjcj-stage1'+native.exe);
+      if(await present(staged)||await present(staged+'.entry')||await present(path.join(sdk,'libexec','compiler','cjcj-stage1'+native.exe)))
+        throw Error('STD_BOOTSTRAP_STAGED_COMPILER_MISSING_INPUTS');
+      officialStdCompiler=path.join(sdk,'bin','cjc'+native.exe);
+      await fs.access(officialStdCompiler,fs.constants.X_OK);
+    }
+  }
+  const hostRuntime=officialStdCompiler||kind==='compiler'||options['compiler-runtime']==='target'?sdk:path.join(sdk,'.host');
   const env={...cleanSdkEnvironment(sdk,platform,process.env,hostRuntime),cjHeapSize:resources.heap,
     CMAKE_BUILD_PARALLEL_LEVEL:jobs,CANGJIE_BUILD_JOBS:jobs,CJCJ_COMMIT:commit,
     CJCJ_SUPERVISOR_WORK:process.env.CJCJ_SUPERVISOR_WORK||output+'.supervision'};
@@ -132,7 +145,7 @@ export async function nativeStage(options, {signal} = {}) {
       host:JSON.parse(await fs.readFile(path.join(sdk,'STAGE-INPUTS.json'),'utf8')).selection.bootstrapHost.install,platform,work:output+'.consumers',signal});
     // Use the revision checked against the consumed source before target startup.
     // The legacy writer's trusted environment default is not a native CLI identity.
-    await writeStdProvenance({sourceDir:stdlib,sourceRoot:source,sourceRevision:commit,installPrefix:output,compiler:await compilerProducer(sdk),buildSdk:sdk,
+    await writeStdProvenance({sourceDir:stdlib,sourceRoot:source,sourceRevision:commit,installPrefix:output,compiler:officialStdCompiler??await compilerProducer(sdk),buildSdk:sdk,
       coloured:options['compiler-runtime']==='target'?'true':'bootstrap',preflightC2:options['compiler-runtime']==='target'?'stage2':'not-applicable',
       note:'native target/install '+commit});
     } finally { await atomicJson(output+'.commands.json',records); }
