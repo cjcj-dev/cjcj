@@ -13,8 +13,14 @@ private func SupportsLocalModeSyntax(): Bool { return true }
 extend ParserImpl {
     public func ParseType(): Type { return ParseType(false) }
 
-    // Only value-copy scalar parameter slots need no native region/cleanup support.
     internal func ParseType(parameterSlot: Bool): Type {
+        let ty = ParseTypeWithSuffix()
+        CheckSlotMode(ty, parameterSlot)
+        return ty
+    }
+
+    // A parenthesized list becomes a parameter list only after the arrow.
+    private func ParseTypeWithSuffix(): Type {
         let ty = ParsePrefixType()
         if (Seeing(TokenKind.ARROW)) {
             if (ty.astKind == ASTKind.FUNC_TYPE) {
@@ -25,13 +31,20 @@ extend ParserImpl {
                 ty.isBroken = true
             }
         }
-        let primitive = ty as PrimitiveType
-        let scalarSlot = parameterSlot && (primitive.map({ t => t.str == "Int64" }) ?? false)
-        ty.modal = ParseLocalModeSuffix(scalarSlot: scalarSlot)
+        ty.modal = ReadLocalModeSuffix()
         if (let Some(modal) <- ty.modal) {
             ty.end = modal.end
         }
         return ty
+    }
+
+    private func CheckSlotMode(ty: Type, parameterSlot: Bool): Unit {
+        if (!compileOptions.enableLocalMode) { return }
+        if (let Some(modal) <- ty.modal) {
+            // The public CJO subset supports only direct Int64 parameter slots.
+            if (parameterSlot && ((ty as PrimitiveType).map({ t => t.str == "Int64" }) ?? false)) { return }
+            DiagnoseUnexpectedLocalMode(modal)
+        }
     }
 
     private func ModalTokensAdjacent(first: Token, second: Token): Bool {
@@ -66,7 +79,15 @@ extend ParserImpl {
         return None
     }
 
-    internal func ParseLocalModeSuffix(scalarSlot!: Bool = false): Option<ASTModalInfo> {
+    internal func ParseLocalModeSuffix(): Option<ASTModalInfo> {
+        let suffix = ReadLocalModeSuffix()
+        if (compileOptions.enableLocalMode) {
+            if (let Some(modal) <- suffix) { DiagnoseUnexpectedLocalMode(modal) }
+        }
+        return suffix
+    }
+
+    private func ReadLocalModeSuffix(): Option<ASTModalInfo> {
         let local = PeekLocalMode(0) ?? return None
         let atPos = Peek().Begin()
         Next() // @
@@ -86,8 +107,6 @@ extend ParserImpl {
         let modal = ASTModalInfo(local, atPos, localPos, lastToken.End())
         if (!compileOptions.enableLocalMode) {
             ParseDiagnoseRefactor(DiagKindRefactor.parse_local_mode_disabled, MakeRange(atPos, modal.end)).Emit()
-        } else if (!scalarSlot) {
-            DiagnoseUnexpectedLocalMode(modal)
         }
         return Some(modal)
     }
@@ -95,6 +114,15 @@ extend ParserImpl {
     internal func DiagnoseUnexpectedLocalMode(modal: ASTModalInfo): Unit {
         ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_modal_type,
             MakeRange(modal.localPos, modal.end)).Emit()
+    }
+
+    private func RejectComponentMode(ty: Type): Bool {
+        if (let Some(modal) <- ty.modal) {
+            DiagnoseUnexpectedLocalMode(modal)
+            ty.EnableAttr(Attribute.IS_BROKEN)
+            return true
+        }
+        return false
     }
 
     public func ParsePrefixType(): Type {
@@ -222,10 +250,14 @@ extend ParserImpl {
                 return InvalidType(Peek().Begin())
             }
             ret.leftAnglePos = lastToken.Begin()
-            let typeArgument = ParseType()
+            let typeArgument = ParseTypeWithSuffix()
             ret.typeArgument = typeArgument
             if (typeArgument.IsInvalid()) {
                 return InvalidType(Peek().Begin())
+            }
+            if (RejectComponentMode(typeArgument)) {
+                ConsumeUntilAny([TokenKind.NL, TokenKind.GT])
+                return InvalidType(ret.begin)
             }
             if (!Skip(TokenKind.COMMA)) {
                 DiagVArrayTypeArgMismatch(MakeRange(ret.leftAnglePos, Peek().End()), "a type argument and size literal")
@@ -284,7 +316,7 @@ extend ParserImpl {
             SkipBlank(TokenKind.NL)
             parameterColonPos = Expect(TokenKind.COLON, "expected ':' after type parameter name").Begin()
         }
-        let parsedType = ParseType(true)
+        let parsedType = ParseTypeWithSuffix()
         parsedType.typeParameterName = parameterName.Val()
         parsedType.typeParameterNameIsRawId = parameterName.IsRaw()
         parsedType.colonPos = parameterColonPos
@@ -321,7 +353,12 @@ extend ParserImpl {
         return false
     }
 
-    private func MakeTupleType(types: ArrayList<Type>, leftParenPos: Position, rightParenPos: Position): TupleType {
+    private func MakeTupleType(types: ArrayList<Type>, leftParenPos: Position, rightParenPos: Position): Type {
+        var broken = false
+        for (typeNode in types) {
+            if (RejectComponentMode(typeNode)) { broken = true }
+        }
+        if (broken) { return InvalidType(leftParenPos) }
         let tuple = TupleType()
         tuple.leftParenPos = leftParenPos
         tuple.rightParenPos = rightParenPos
@@ -346,6 +383,7 @@ extend ParserImpl {
         funcTy.arrowPos = arrowPos
         funcTy.begin = leftParenPos
         for (typeNode in types) {
+            CheckSlotMode(typeNode, true)
             funcTy.paramTypes.add(typeNode)
         }
         funcTy.retType = ParseType()
@@ -381,11 +419,6 @@ extend ParserImpl {
         if (Skip(TokenKind.ARROW)) {
             return MakeFuncType(types, left.Begin(), right, lastToken.Begin())
         }
-        if (compileOptions.enableLocalMode) {
-            for (item in types) {
-                if (let Some(mode) <- item.modal) { DiagnoseUnexpectedLocalMode(mode) }
-            }
-        }
         if (types.size == 1) {
             let first = types[0]
             if (!first.typeParameterName.isEmpty()) {
@@ -395,6 +428,7 @@ extend ParserImpl {
                 builder.AddNote("only tuple type and function type support type parameter name")
                 builder.Emit()
             }
+            if (RejectComponentMode(first)) { return InvalidType(left.Begin()) }
             let paren = ParenType()
             paren.leftParenPos = left.Begin()
             paren.innerType = first

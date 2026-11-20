@@ -35,10 +35,13 @@ private func parseExpr(code: String): (Expr, DiagnosticEngine) {
     return (parser.ParseExpr(), diag)
 }
 
-private func parseTypeNode(code: String): (Type, DiagnosticEngine) {
+private func parseTypeNode(code: String, enabled!: Bool = false): (Type, DiagnosticEngine) {
     let sm = SourceManager()
     let diag = DiagnosticEngine()
     let parser = Parser(code, diag, sm)
+    let opts = GlobalOptions()
+    opts.enableLocalMode = enabled
+    parser.SetCompileOptions(opts)
     return (parser.ParseType(), diag)
 }
 
@@ -150,6 +153,105 @@ class LocalModeSyntaxTest {
         @Expect(arg.TestAttr(Attribute.IS_BROKEN), true)
         @Expect(countErrors(diag), 2)
     }
+    @TestCase
+    func varrayModesGoOnTheContainerNotTheElement(): Unit {
+        let (bad, badDiag) = parseTypeNode("VArray<Int64 @local!, $2>")
+        @Expect(bad.IsInvalid(), true)
+        @Expect(unexpectedModeErrors(badDiag), 1)
+        @Expect(countErrors(badDiag), 2)
+
+        let (good, goodDiag) = parseTypeNode("VArray<Int64, $2> @local?")
+        let varray = (good as VArrayType).getOrThrow()
+        @Expect(varray.modal.getOrThrow().local, ASTMode.HALF)
+        @Expect(varray.typeArgument.getOrThrow().modal.isNone(), true)
+        @Expect(unexpectedModeErrors(goodDiag), 0)
+        @Expect(countErrors(goodDiag), 1)
+    }
+
+    @TestCase
+    func parenthesesDistinguishTupleFieldsFromFunctionParameters(): Unit {
+        for ((source, modes) in [("(Int64 @local!)", 1), ("(Int64 @local?, Int8 @~local)", 2),
+            ("?(Int64 @local?)", 1)]) {
+            let (ty, diag) = parseTypeNode(source)
+            @Expect((ty as OptionType).map({opt => opt.componentType.getOrThrow().IsInvalid()}) ?? ty.IsInvalid(), true)
+            @Expect(unexpectedModeErrors(diag), modes)
+            @Expect(countErrors(diag), modes * 2)
+        }
+        let (tuple, tupleDiag) = parseTypeNode("(Int64, Int8)")
+        @Expect(tuple.astKind, ASTKind.TUPLE_TYPE)
+        @Expect(countErrors(tupleDiag), 0)
+        let (optional, optionDiag) = parseTypeNode("?(Int64) @local?")
+        @Expect(optional.astKind, ASTKind.OPTION_TYPE)
+        @Expect(optional.modal.getOrThrow().local, ASTMode.HALF)
+        @Expect(unexpectedModeErrors(optionDiag), 0)
+        let (callable, funcDiag) = parseTypeNode("((Int64 @local?) -> Int8 @local!) @local?")
+        let paren = (callable as ParenType).getOrThrow()
+        let inner = (paren.innerType.getOrThrow() as FuncType).getOrThrow()
+        @Expect(inner.paramTypes[0].modal.getOrThrow().local, ASTMode.HALF)
+        @Expect(inner.retType.getOrThrow().modal.getOrThrow().local, ASTMode.FULL)
+        @Expect(paren.modal.getOrThrow().local, ASTMode.HALF)
+        @Expect(unexpectedModeErrors(funcDiag), 0)
+        @Expect(countErrors(funcDiag), 3)
+    }
+
+    @TestCase
+    func enabledComponentsDiagnoseEachSuffixOnce(): Unit {
+        for (source in ["VArray<Int64 @local!, $2>", "VArray<String @local?, $2>",
+            "(Int64 @local!)", "(String @~local)", "(Int64 @local!, String @local?)",
+            "(String @local!, Int64 @~local)"]) {
+            let (ty, diag) = parseTypeNode(source, enabled: true)
+            @Expect(ty.IsInvalid(), true)
+            expectUnexpectedAtEachSuffix(source, diag)
+        }
+    }
+
+    @TestCase
+    func enabledParameterAndOuterSlotsFollowTheirOwnType(): Unit {
+        for (source in ["(String @local?) -> Int64", "(Int8 @local!) -> Int64",
+            "(Int64) -> Int64 @local!", "VArray<Int64, $2> @local?", "(Int64, String) @local!",
+            "((Int64) -> Int64) @~local", "((Int64) @local!) -> Int64"]) {
+            let (ty, diag) = parseTypeNode(source, enabled: true)
+            @Expect(ty.modal.isSome() || ty.astKind == ASTKind.FUNC_TYPE, true)
+            expectUnexpectedAtEachSuffix(source, diag)
+        }
+        let (ty, diag) = parseTypeNode("((Int64 @local?) -> String, Int64 @local!) -> Int64", enabled: true)
+        let outer = (ty as FuncType).getOrThrow()
+        let inner = (outer.paramTypes[0] as FuncType).getOrThrow()
+        @Expect(inner.paramTypes[0].modal.getOrThrow().local, ASTMode.HALF)
+        @Expect(outer.paramTypes[1].modal.getOrThrow().local, ASTMode.FULL)
+        @Expect(countErrors(diag), 0)
+    }
+
+    @TestCase
+    func ordinaryComponentsHaveNoModeInEitherConfiguration(): Unit {
+        for (enabled in [false, true]) {
+            for ((source, kind) in [("VArray<Int64, $2>", ASTKind.VARRAY_TYPE),
+                ("(String, Int64)", ASTKind.TUPLE_TYPE), ("(Int64)", ASTKind.PAREN_TYPE),
+                ("((Int64) -> String) -> Int64", ASTKind.FUNC_TYPE)]) {
+                let (ty, diag) = parseTypeNode(source, enabled: enabled)
+                @Expect(ty.astKind, kind)
+                @Expect(ty.modal.isNone(), true)
+                @Expect(countErrors(diag), 0)
+            }
+        }
+    }
+
+    private func expectUnexpectedAtEachSuffix(source: String, diag: DiagnosticEngine): Unit {
+        let bytes = source.toArray()
+        var expected: Int64 = 0
+        for (offset in 0..bytes.size) {
+            if (bytes[offset] != 64u8) { continue } // '@'; diagnostic starts at the next byte.
+            expected++
+            var atPosition: Int64 = 0
+            for (d in diag.GetCategoryDiagnostic(DiagCategory.PARSE)) {
+                if (d.rKind == DiagKindRefactor.parse_unexpected_modal_type &&
+                    d.mainHint.range.begin.column == offset + 2) { atPosition++ }
+            }
+            @Expect(atPosition, 1)
+        }
+        @Expect(countErrors(diag), expected)
+    }
+
     @TestCase
     func catchTypesRejectExplicitModes(): Unit {
         for ((source, restricted) in [
