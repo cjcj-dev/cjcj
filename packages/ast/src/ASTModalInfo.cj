@@ -6,6 +6,14 @@ public enum ASTMode <: Equatable<ASTMode> {
     | FULL
 
     // NOT (01) and FULL (10) can each be passed to HALF (11).
+    public func Suffix(): String {
+        return match (this) {
+            case NOT => ""
+            case HALF => " @local?"
+            case FULL => " @local!"
+        }
+    }
+
     public func IsSubMode(other: ASTMode): Bool {
         return this == other || other == ASTMode.HALF
     }

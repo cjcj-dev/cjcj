@@ -36,7 +36,7 @@ public class CjoVersionTest {
         @Assert(!data.isEmpty())
         let offset = VersionOffset(data)
         @Expect(data[offset], 2u8)
-        @Expect(data[offset + 1], 0u8)
+        @Expect(data[offset + 1], CJO_MINOR_VERSION)
         @Expect(data[offset + 2], 0u8)
         for (minor in [0u8, 1u8]) {
             let copy = data.clone()

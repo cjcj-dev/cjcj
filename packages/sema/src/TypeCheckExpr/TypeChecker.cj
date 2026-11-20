@@ -5796,10 +5796,7 @@ extend TypeChecker {
                             bodyRetTy = bodyFuncTy.retTy
                         }
                     }
-                    let cfg = FuncTyConfig()
-                    cfg.isC = targetFuncTy.isC
-                    cfg.isClosureTy = targetFuncTy.isClosureTy
-                    cfg.hasVariableLenArg = targetFuncTy.hasVariableLenArg
+                    let cfg = targetFuncTy.CopyConfig()
                     let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), bodyRetTy, cfg: cfg)
                     funcBody.SetTy(funcTy)
                     le.SetTy(funcTy)

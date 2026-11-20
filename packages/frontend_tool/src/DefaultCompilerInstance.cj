@@ -146,7 +146,8 @@ public open class DefaultCompilerInstance <: Resource {
 
     public func CompileCjoInterface(): Bool {
         if (!Compile(stage: CompileStage.SAVE_CJO) || diag.GetErrorCount() != 0) { return false }
-        RegisterCjoOutputs(core.GetSourcePackages())
+        // SaveCjo has already written these files to the driver's final output
+        // directory. There is no codegen cache file to rename in this path.
         return true
     }
 

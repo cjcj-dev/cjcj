@@ -1146,8 +1146,10 @@ public class FuncTy <: Ty {
     }
 
     public override func String(): String {
-        let params = typeArgsString(paramTys, ", ")
-        let out = "(${params}) -> ${retTy.String()}"
+        let parts = ArrayList<String>()
+        for (i in 0..paramTys.size) { parts.add(paramTys[i].String() + ParamMode(i).Suffix()) }
+        let params = JoinStrings(parts, ", ")
+        let out = "(${params}) -> ${retTy.String()}" + retMode.Suffix()
         return if (isC) { "CFunc<" + out + ">" } else { out }
     }
 

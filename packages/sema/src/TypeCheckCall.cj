@@ -2160,12 +2160,7 @@ private func IsConcreteForTyArgSynthesis(tyVarsToSolve: ArrayList<GenericsTy>, t
 }
 
 private func CloneFuncTyCfgForQuest(funcTy: FuncTy): FuncTyConfig {
-    let cfg = FuncTyConfig()
-    cfg.isC = funcTy.isC
-    cfg.isClosureTy = funcTy.isClosureTy
-    cfg.hasVariableLenArg = funcTy.hasVariableLenArg
-    cfg.noCast = funcTy.noCast
-    return cfg
+    return funcTy.CopyConfig()
 }
 
 private func UnsolvedAsQuest(typeManager: TypeManager, tyVarsToSolve: ArrayList<GenericsTy>, ty: Ty): Option<Ty> {

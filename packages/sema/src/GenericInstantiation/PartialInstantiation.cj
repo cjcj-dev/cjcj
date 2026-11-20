@@ -195,10 +195,7 @@ public class TyGeneralizer {
             for (paramTy in funcTy.paramTys) {
                 paramTys.add(Generalize(paramTy))
             }
-            let cfg = FuncTyConfig()
-            cfg.isC = funcTy.IsCFunc()
-            cfg.isClosureTy = funcTy.isClosureTy
-            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+            let cfg = funcTy.CopyConfig()
             return tyMgr.GetFunctionTy(paramTys.toArray(), Generalize(funcTy.retTy), cfg: cfg)
         }
         if (let Some(tupleTy) <- (ty as TupleTy)) {
