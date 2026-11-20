@@ -15,7 +15,8 @@ import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, {after} from 'node:test';
+import {linkedPeFixture} from './linked-pe-fixture.mjs';
 import {sdkPlatform,entryPlatformName} from '../../ci/bootstrap/sdk-platform.mjs';
 import {getTarget} from '../lib/targets.mjs';
 import {sourceToolPayloads} from '../../ci/release/source-tool-payloads.mjs';
@@ -48,7 +49,7 @@ function producerFacts(sdk,tool,binary,platform='linux-x64',source=null) {
     const producer=tool==='LSPServer'?'lsp':tool,retained='.target-tools/tools/'+producer+'/bin/'+tool+suffix;
     const publicPath='tools/bin/'+tool+suffix,recipe=publicPath+'.entry',native=getTarget(platform).spec.llvmPlatform;
     writeExecutable(path.join(sdk,retained),fs.readFileSync(binary));
-    writeExecutable(path.join(sdk,publicPath),'controlled target launcher bytes');
+    writeExecutable(path.join(sdk,publicPath),suffix ? fs.readFileSync(binary) : 'controlled target launcher bytes');
     writeFile(path.join(sdk,recipe),['cjcj-sdk-entry-v1','2',retained,entryPlatformName(native),'native-target:'+sdkPlatform(native).arch,'.target-tools/tools/'+producer+'/lib'].join('\n')+'\n');
     entry={path:publicPath,sha256:digest(fs.readFileSync(path.join(sdk,publicPath))),recipe:{path:recipe,sha256:digest(fs.readFileSync(path.join(sdk,recipe)))}};
   }
@@ -245,6 +246,7 @@ test('the payload table covers every tool the release installs', async () => {
   assert.deepEqual([...sourceToolPayloads('cjtrace-recover')], []);
 });
 
+let transportPe;
 // Transport interfaces only: these bytes do not claim native tool builds.
 for(const [platform,suffix,libraries]of [
  ['linux-x64','',['tools/lib/libcangjie-lsp.so']],
@@ -255,7 +257,11 @@ for(const [platform,suffix,libraries]of [
 ])for(const tool of ['cjfmt','LSPServer','cjcov','cjtrace-recover','hle','cjlint','cjprof','cjcompat','cjhead'])test('A8 platform '+platform+' '+tool+' transports target payload and preserves shared config',()=>{
  const work=fs.mkdtempSync(path.join(os.tmpdir(),'a8-platform-')),sdk=path.join(work,'source'),release=path.join(work,'release'),artifact=path.join(work,'artifact');
  const binary=path.join(sdk,'tools/bin/'+tool+suffix);
- writeExecutable(binary,'controlled '+platform+' '+tool+' bytes\n');
+ if(suffix&&!transportPe)transportPe=linkedPeFixture({after},'tool_transport');
+ const expected=suffix?fs.readFileSync(path.join(transportPe,'consumer.exe')):Buffer.from('controlled '+platform+' '+tool+' bytes\n');
+ const runtime=suffix?'lib/runtime.dll':'lib/libcangjie-runtime.so';
+ const runtimeBytes=suffix?fs.readFileSync(path.join(transportPe,'runtime.dll')):Buffer.from('target application runtime');
+ writeExecutable(binary,expected);
  writeExecutable(path.join(release,'tools/bin/'+tool+suffix),'base tool bytes\n');
  writeFile(path.join(sdk,'tools/config/cangjie-format.toml'),'target format\n');
  for(const lib of libraries)writeFile(path.join(sdk,lib),'target '+platform+' library\n');
@@ -264,7 +270,7 @@ for(const [platform,suffix,libraries]of [
  writeFile(path.join(release,'tools/config/other.toml'),'keep other configuration\n');
  writeFile(path.join(release,'tools/config/cangjie-format.toml'),'base format\n');
  for(const rel of sourceToolPayloads(tool,platform)) {
-  if(rel==='.target-tools/tools/lsp'||rel==='.target-tools/tools/cjhead')writeFile(path.join(sdk,rel,'lib/libcangjie-runtime.so'),'target application runtime');
+  if(rel==='.target-tools/tools/lsp'||rel==='.target-tools/tools/cjhead')writeFile(path.join(sdk,rel,runtime),runtimeBytes);
   else if(rel==='.target-tools/tools/cjlint')writeFile(path.join(sdk,rel,'config/cjlint_rule_list.json'),'target lint config');
   else if(rel.endsWith('/config/static'))writeFile(path.join(sdk,rel,'index.html'),'target prof config');
   else if(!fs.existsSync(path.join(sdk,rel)))writeFile(path.join(sdk,rel),'target native payload');
@@ -276,21 +282,21 @@ for(const [platform,suffix,libraries]of [
  const consumer=dedicated?path.join(root,'ci/release/install_hle_artifact.mjs'):install;
  const toolArgs=dedicated?[]:['--tool',tool];
  try {
-  if(tool==='cjlint'&&platform!=='linux-x64') {
+  if(tool==='cjlint'&&!['linux-x64','windows-x64'].includes(platform)) {
    assert.throws(()=>run(producer,[...toolArgs,'--platform',platform,'--binary',binary,'--sdk',sdk,'--outdir',artifact]),/CJLINT_PLATFORM_NOT_SUPPORTED/);return;
   }
   run(producer,[...toolArgs,'--platform',platform,'--binary',binary,'--sdk',sdk,'--outdir',artifact]);
   // Move the actual artifact root before consumption.
   const moved=artifact+'-moved';fs.renameSync(artifact,moved);
   run(consumer,[...toolArgs,'--platform',platform,'--artifact',moved,'--sdk',release]);
-  const results={binary:fs.readFileSync(path.join(release,['cjlint','LSPServer','cjhead'].includes(tool)?'.target-tools/tools/'+(tool==='LSPServer'?'lsp':tool)+'/bin/'+tool+suffix:'tools/bin/'+tool+suffix),'utf8'),
+  const results={binary:fs.readFileSync(path.join(release,['cjlint','LSPServer','cjhead'].includes(tool)?'.target-tools/tools/'+(tool==='LSPServer'?'lsp':tool)+'/bin/'+tool+suffix:'tools/bin/'+tool+suffix)),
    format:tool==='cjfmt'?fs.readFileSync(path.join(release,'tools/config/cangjie-format.toml'),'utf8'):null,
    repo:fs.readFileSync(path.join(release,'tools/config/cangjie-repo.toml'),'utf8'),other:fs.readFileSync(path.join(release,'tools/config/other.toml'),'utf8')};
-  console.log('A8_PLATFORM_TARGET_ASSERTION_REACHED',platform,tool,JSON.stringify(results));
-  assert.ok(results.binary.startsWith('controlled '+platform+' '+tool+' bytes\n'));
+  console.log('A8_PLATFORM_TARGET_ASSERTION_REACHED',platform,tool,JSON.stringify({...results,binary:digest(results.binary)}));
+  assert.deepEqual(results.binary.subarray(0,expected.length),expected);
   assert.deepEqual({repo:results.repo,other:results.other},{repo:'keep cjpm repository\n',other:'keep other configuration\n'});
   if(tool==='cjfmt')assert.equal(results.format,'target format\n');
-  if(['LSPServer','cjhead'].includes(tool))assert.equal(fs.readFileSync(path.join(release,'.target-tools/tools/'+(tool==='LSPServer'?'lsp':tool)+'/lib/libcangjie-runtime.so'),'utf8'),'target application runtime');
+  if(['LSPServer','cjhead'].includes(tool))assert.deepEqual(fs.readFileSync(path.join(release,'.target-tools/tools/'+(tool==='LSPServer'?'lsp':tool),runtime)),runtimeBytes);
   if(tool==='hle')assert.equal(fs.readFileSync(path.join(release,'tools/dtsparser/analysis.js'),'utf8'),'target parser\n');
   if(tool==='cjprof')for(const prefix of ['tools/config/static','.target-tools/tools/config/static']) {
    assert.equal(fs.existsSync(path.join(release,prefix,'legacy.html')),false,'artifact reinstall removes previous static member');
@@ -307,7 +313,7 @@ test('A8 workflow native callers provide their actual SDK input',()=>{
  const work=fs.mkdtempSync(path.join(os.tmpdir(),'a8-caller-')),sdk=sourceSdk(work);
  try {
   for(const call of calls){
-   const expanded=call.replace(/\\\n/g,' ').replaceAll('${{ matrix.target }}','linux-x64').replaceAll('$CANGJIE_WORKSPACE',work).replaceAll('$GITHUB_WORKSPACE',work);
+   const expanded=call.replace(/\\\n/g,' ').replaceAll('${{ matrix.target }}','linux-x64').replaceAll("\${{ runner.os == 'Windows' && '.exe' || '' }}",'').replaceAll('$CANGJIE_WORKSPACE',work).replaceAll('$GITHUB_WORKSPACE',work);
    const argv=[...expanded.matchAll(/"([^\"]*)"|(\S+)/g)].map(m=>m[1]??m[2]);
    const binary=argv[argv.indexOf('--binary')+1],artifact=argv[argv.indexOf('--outdir')+1];
    const targetSdk=argv.includes('--sdk')?argv[argv.indexOf('--sdk')+1]:null;
