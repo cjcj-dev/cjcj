@@ -115,6 +115,20 @@ jobs:
         with:
           node-version: '24.22.1'
 
+      - name: Install the Windows PE table reader
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-llvm
+
+      - name: Select PE inspection tools outside the SDK loader path
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          test -x /mingw64/bin/llvm-readobj.exe
+          echo "CJCJ_NATIVE_LLVM_BIN=$(cygpath -w /mingw64/bin)" >> "$GITHUB_ENV"
+
       - name: Resolve archive identity independently of host toolchain
         id: package-inputs
         run: node ci/release/package-key.mjs

@@ -142,6 +142,20 @@ native outputs; a source workflow cannot create this input by naming empty paths
 The eight bootstrap phases then use `sdk-targets.mjs`; native production and full
 SDK qualification remain distinct from configuration-only checks.
 
+For a native Windows tools build the same input root must also contain the
+Lombok JAR used to build cjprof. Set `cjprofLombok` in `locations.json` to
+`{"path":"dependencies/lombok.jar","sha256":"<digest of the supplied JAR>"}`.
+The tools step verifies the relative file against this digest, then invokes the
+normal tools producer with the installed stage3 frontend, shim, LLVM and stdx.
+The selected cjcj-tools commit must itself build and install the Windows tools.
+
+The manual `verify-windows-install.yml` reuses the package job on windows-2025.
+Pass the successful native producer run ID, version, its exact `std_artifact`
+output and native runtime artifact prefix. Leave both source refs empty for the
+pinned pair or provide both full SHAs and the original host version. Both SDK
+and std come from the same repository/run at the verifier commit. This workflow
+uploads consumer diagnostics; it does not publish the SDK.
+
 The same native artifact also carries the independently produced HLE dependency
 package. Extract it under an artifact-owned directory and record
 `hleDependencies` in `locations.json`, relative to that artifact root, pointing
