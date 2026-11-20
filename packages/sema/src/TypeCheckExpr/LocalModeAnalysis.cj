@@ -468,6 +468,28 @@ class LocalModeAnalysis {
             }
         } else if (let Some(call) <- (node as CallExpr)) {
             ResolveCall(call)
+        } else if (let Some(tuple) <- (node as TupleLit)) {
+            var joined: Option<ASTMode> = None
+            for (value in tuple.children) {
+                if (CopyNode(value)) { continue }
+                joined = if ((let Some(mode) <- joined) && mode != value.resolvedMode) {
+                    Some(ASTMode.HALF)
+                } else { Some(value.resolvedMode) }
+            }
+            tuple.resolvedMode = joined ?? ASTMode.NOT
+            if (tuple.resolvedMode == ASTMode.FULL) {
+                for (value in tuple.children) {
+                    if (!CopyNode(value) && External(value)) {
+                        DiagMismatchedTypesWithFoundTy(diag, value, "a value in the tuple's region", "an external local element")
+                    }
+                }
+            }
+        } else if (let Some(index) <- (node as SubscriptExpr)) {
+            if (index.isTupleAccess || index.IsVArrayAccess()) {
+                if (let Some(base) <- index.baseExpr) { index.resolvedMode = base.resolvedMode }
+            } else if (let Some(call) <- index.desugarExpr) {
+                index.resolvedMode = call.resolvedMode
+            }
         } else if (let Some(paren) <- (node as ParenExpr)) {
             if (let Some(inner) <- paren.expr) { node.resolvedMode = inner.resolvedMode }
         } else if (let Some(arg) <- (node as FuncArg)) {
@@ -513,7 +535,11 @@ class LocalModeAnalysis {
         // construction or a store into a global/field. Never infer a region from spelling.
         if (node.resolvedMode == ASTMode.NOT || !(node is Expr) || parents.size < 2) { return }
         let parent = parents[parents.size - 2]
-        if (IsBranchChild(parent, node)) { return }
+        if (IsBranchChild(parent, node) || parent is TupleLit) { return }
+        if (let Some(index) <- (parent as SubscriptExpr)) {
+            if (index.baseExpr.map({ b => refEq(b, node) }) ?? false) { return }
+            if (index.desugarExpr.map({ e => refEq(e, node) }) ?? false) { return }
+        }
         if (!(parent is VarDeclAbstract || parent is Block || parent is FuncBody || parent is FuncArg ||
             parent is MemberAccess || parent is ExclaveExpr || parent is CallExpr || parent is ParenExpr || parent is AssignExpr || parent is ReturnExpr)) {
             Check(node, ASTMode.NOT)

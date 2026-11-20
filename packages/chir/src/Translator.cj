@@ -3953,7 +3953,7 @@ public class Translator {
         let tupleType = (RequireAstTy(expr) as AstTupleTy).getOrThrow()
         var idx: Int64 = 0
         while (idx < expr.children.size) {
-            let value = TranslateExprArg(expr.children[idx], chirTy.TranslateType(tupleType.typeArgs[idx]))
+            let value = TranslateExprArg(expr.children[idx], chirTy.TranslateType(tupleType.typeArgs[idx], expr.resolvedMode))
             values.add(value)
             idx++
         }
