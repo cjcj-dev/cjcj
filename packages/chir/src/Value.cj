@@ -1252,7 +1252,7 @@ public class Function <: GlobalValue & Hashable & Equatable<Function> {
     private let genericTypeParams: ArrayList<GenericType> = ArrayList<GenericType>()
     private var returnValue: Option<LocalVar> = None
     private var genericDecl: Option<Function> = None
-    private var paramDftValHostFunc: Option<Function> = None
+    private var paramDftValHostParam: Option<Parameter> = None
     var blockId: UInt64 = 0u64
     var blockGroupId: UInt64 = 0u64
     var localId: UInt64 = 0u64
@@ -1368,9 +1368,21 @@ public class Function <: GlobalValue & Hashable & Equatable<Function> {
         isCFFIWrapper = isWrapper
     }
 
-    public func GetParamDftValHostFunc(): Option<Function> { return paramDftValHostFunc }
-    public func SetParamDftValHostFunc(hostFunc: Function): Unit { paramDftValHostFunc = hostFunc }
-    public func ClearParamDftValHostFunc(): Unit { paramDftValHostFunc = None }
+    public func GetParamDftValHostParam(): Option<Parameter> { return paramDftValHostParam }
+    public func GetParamDftValHostFunc(): Option<Function> {
+        if (let Some(param) <- paramDftValHostParam) { return param.GetOwnerFunc() }
+        return None
+    }
+    public func SetParamDftValHostParam(param: Parameter): Unit {
+        paramDftValHostParam = param
+        param.paramDftValFunc = this
+    }
+    public func ClearParamDftValHostFunc(): Unit {
+        if ((let Some(param) <- paramDftValHostParam) && (let Some(fn) <- param.paramDftValFunc) && refEq(fn, this)) {
+            param.paramDftValFunc = None
+        }
+        paramDftValHostParam = None
+    }
 
     public func GenerateBlockId(): UInt64 {
         let id = blockId
@@ -1670,7 +1682,7 @@ public class Function <: GlobalValue & Hashable & Equatable<Function> {
         if (let Some(genericFunction) <- genericDecl) {
             comments.add("genericDecl: " + genericFunction.GetIdentifier())
         }
-        if (let Some(hostFunction) <- paramDftValHostFunc) {
+        if (let Some(hostFunction) <- GetParamDftValHostFunc()) {
             comments.add("paramDftValHostFunc: " + hostFunction.GetIdentifier())
         }
         if (funcKind == FuncKind.LAMBDA) {

@@ -4110,8 +4110,7 @@ public class Translator {
                 let defaultArgFunc = TranslateNestedFunc(desugarDecl).getOrThrow()
                 let defaultArgLambda = (defaultArgFunc.AsLocalVar().getOrThrow().GetExpr().getOrThrow() as Lambda)
                     .getOrThrow()
-                defaultArgLambda.SetParamDftValHostFunc(lambda)
-                lambda.GetParam(i).paramDftValFunc = defaultArgFunc
+                defaultArgLambda.SetParamDftValHostParam(lambda.GetParam(i))
                 lambdaTrans.SetSymbolTable(desugarDecl, defaultArgFunc)
             }
         }

@@ -730,8 +730,8 @@ class CHIRDeserializerImpl {
                         }
                     }
                     if (let Some(hostValue) <- valuesById.get(CHIRFieldAt(fields, 14))) {
-                        if (let Some(hostFn) <- (hostValue as Function)) {
-                            fn.SetParamDftValHostFunc(hostFn)
+                        if (let Some(param) <- (hostValue as Parameter)) {
+                            fn.SetParamDftValHostParam(param)
                         }
                     }
                     if (let Some(rawValue) <- valuesById.get(CHIRFieldAt(fields, 20))) {
@@ -807,9 +807,9 @@ class CHIRDeserializerImpl {
                     }
                     let declId = CHIRFieldAt(payload, 9)
                     if (!declId.isEmpty()) { lambdaExpr.SetGenericDecl((expressionsById[declId] as Lambda).getOrThrow()) }
-                    if (let Some(hostExpr) <- expressionsById.get(CHIRFieldAt(payload, 8))) {
-                        if (let Some(hostLambda) <- (hostExpr as Lambda)) {
-                            lambdaExpr.SetParamDftValHostFunc(hostLambda)
+                    if (let Some(value) <- valuesById.get(CHIRFieldAt(payload, 8))) {
+                        if (let Some(param) <- value.AsParameter()) {
+                            lambdaExpr.SetParamDftValHostParam(param)
                         }
                     }
                 }
@@ -2967,6 +2967,9 @@ class CHIRDeserializerImpl {
     private func ConfigLambda(buffer: PackageFormat_Lambda, obj: Lambda): Unit {
         ConfigExpression(buffer.GetBase().getOrThrow(), obj)
         GetValue<Parameter>(buffer.GetParams())
+        if (buffer.GetParamDftValHostParam() != 0u32) {
+            obj.SetParamDftValHostParam(GetValue<Parameter>(buffer.GetParamDftValHostParam()).getOrThrow())
+        }
         if (buffer.GetGenericDecl() != 0u32) {
             obj.SetGenericDecl(GetExpression<Lambda>(buffer.GetGenericDecl()).getOrThrow())
         }
@@ -3006,8 +3009,8 @@ class CHIRDeserializerImpl {
     private func Config(buffer: PackageFormat_Function, obj: Function): Unit {
         if (obj.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) { return }
         ConfigBase(buffer.GetBase().getOrThrow().GetBase().getOrThrow().GetBase().getOrThrow(), obj)
-        if (buffer.GetParamDftValHostFunc() != 0u32) {
-            obj.SetParamDftValHostFunc(GetValue<Function>(buffer.GetParamDftValHostFunc()).getOrThrow())
+        if (buffer.GetParamDftValHostParam() != 0u32) {
+            obj.SetParamDftValHostParam(GetValue<Parameter>(buffer.GetParamDftValHostParam()).getOrThrow())
         }
         if (buffer.GetGenericDecl() != 0u32) {
             obj.SetGenericDecl(GetValue<Function>(buffer.GetGenericDecl()).getOrThrow())

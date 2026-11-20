@@ -575,6 +575,10 @@ class PackageFormat_Lambda <: Table {
         return GetField(CHIRFB_LAMBDA_VT_RETVAL, 0u32)
     }
 
+    func GetParamDftValHostParam(): UInt32 {
+        return GetField(CHIRFB_LAMBDA_VT_PARAMDFTVALHOSTPARAM, 0u32)
+    }
+
     func GetGenericDecl(): UInt32 {
         return GetField(CHIRFB_LAMBDA_VT_GENERICDECL, 0u32)
     }
@@ -600,6 +604,7 @@ class PackageFormat_Lambda <: Table {
             VerifyField<UInt32>(verifier, CHIRFB_LAMBDA_VT_BODY, 4) &&
             VerifyField<UInt32>(verifier, CHIRFB_LAMBDA_VT_RETVAL, 4) &&
             VerifyField<Bool>(verifier, CHIRFB_LAMBDA_VT_ISCOMPILETIMEVALUE, 1) &&
+            VerifyField<UInt32>(verifier, CHIRFB_LAMBDA_VT_PARAMDFTVALHOSTPARAM, 4) &&
             VerifyField<UInt32>(verifier, CHIRFB_LAMBDA_VT_GENERICDECL, 4) &&
             verifier.EndTable()
     }

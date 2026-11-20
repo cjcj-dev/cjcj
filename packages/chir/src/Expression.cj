@@ -2161,7 +2161,7 @@ public class Lambda <: Expression {
     private var identifier: String = ""
     private var srcCodeIdentifier: String = ""
     private var isLocalFunc: Bool = false
-    private var paramDftValHostFunc: Option<Lambda> = None
+    private var paramDftValHostParam: Option<Parameter> = None
     private var genericDecl: Option<Lambda> = None
     private var isCompileTimeValue: Bool = false
 
@@ -2217,12 +2217,16 @@ public class Lambda <: Expression {
     public func SetGenericDecl(decl: Lambda): Unit { genericDecl = decl }
     public func GetGenericDecl(): Option<Lambda> { return genericDecl }
 
-    public func SetParamDftValHostFunc(hostFunc: Lambda): Unit {
-        paramDftValHostFunc = hostFunc
+    public func GetParamDftValHostParam(): Option<Parameter> { return paramDftValHostParam }
+
+    public func SetParamDftValHostParam(param: Parameter): Unit {
+        paramDftValHostParam = param
+        param.paramDftValFunc = GetResult().getOrThrow()
     }
 
     public func GetParamDftValHostFunc(): Option<Lambda> {
-        return paramDftValHostFunc
+        if (let Some(param) <- paramDftValHostParam) { return param.GetOwnerLambda() }
+        return None
     }
 
     public func GetBody(): Option<BlockGroup> { return body }
@@ -2338,7 +2342,7 @@ public class Lambda <: Expression {
         if (!srcCodeIdentifier.isEmpty()) {
             parts.add("srcCodeIdentifier: " + srcCodeIdentifier)
         }
-        if (let Some(hostFunc) <- paramDftValHostFunc) {
+        if (let Some(hostFunc) <- GetParamDftValHostFunc()) {
             parts.add("paramDftValHostFunc: " + hostFunc.GetIdentifier())
         }
         return JoinStrings(parts, ", ")
@@ -2354,9 +2358,7 @@ public class Lambda <: Expression {
             cloned.SetCompileTimeValue()
         }
         if (let Some(decl) <- genericDecl) { cloned.SetGenericDecl(decl) }
-        if (let Some(hostFunc) <- GetParamDftValHostFunc()) {
-            cloned.SetParamDftValHostFunc(hostFunc)
-        }
+        cloned.paramDftValHostParam = paramDftValHostParam
         if (let Some(lambdaBody) <- body) {
             let clonedBody = lambdaBody.Clone(builder, cloned)
             for (param in GetParams()) {

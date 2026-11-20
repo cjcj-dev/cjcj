@@ -1233,10 +1233,8 @@ public class ClosureConversion {
             envParamDebug = Some(debugExpr)
         }
         ReplaceEnvVarWithMemberVar(capturedValues, envParamDebug, globalFunc, thisParam)
-        if (let Some(hostFunc) <- lambda.GetParamDftValHostFunc()) {
-            if (let Some(convertedHostFunc) <- convertedCache.get(hostFunc.nodeId)) {
-                globalFunc.SetParamDftValHostFunc(convertedHostFunc)
-            }
+        if (let Some(param) <- lambda.GetParamDftValHostParam()) {
+            globalFunc.SetParamDftValHostParam(param)
         }
         // Mirror C++ LiftLambdaToGlobalFunc step 3 (ClosureConversion.cpp:2008-2028):
         // traverse the lifted body and re-map the original generics (e.g. the

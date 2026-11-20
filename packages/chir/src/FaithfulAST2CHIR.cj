@@ -1603,7 +1603,9 @@ public class FaithfulAST2CHIR {
         for (decl in localConstFuncs.stableOrderValue) {
             CreateFuncSignatureAndSetGlobalCache(RequireFuncDecl(decl))
         }
-        for ((param, decl) in pendingDefaultArgs) { param.paramDftValFunc = globalCache.Get(decl) }
+        for ((param, decl) in pendingDefaultArgs) {
+            globalCache.Get(decl).AsFunction().getOrThrow().SetParamDftValHostParam(param)
+        }
         pendingDefaultArgs.clear()
     }
 
@@ -4495,11 +4497,6 @@ public class FaithfulAST2CHIR {
         }
         fn.SetLinkTypeInfo(GetFuncLinkage(opts, funcDecl))
         fn.SetFuncKind(GetFuncKindFromAST(funcDecl))
-        if (fn.GetFuncKind() == FuncKind.DEFAULT_PARAMETER_FUNC) {
-            let ownerFunc = funcDecl.ownerFunc ??
-                throw IllegalStateException("faithful default parameter function has no owner")
-            fn.SetParamDftValHostFunc((globalCache.Get(ownerFunc) as Function).getOrThrow())
-        }
         fn.SetFastNative(funcDecl.isFastNative)
     }
 

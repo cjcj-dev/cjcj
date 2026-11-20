@@ -907,7 +907,7 @@ class CHIRSerializerImpl {
         for (param in obj.GetGenericTypeParams()) {
             genericTypeParams.add(GetId((param as Type).getOrThrow()))
         }
-        let paramDftValHostFunc = if (let Some(value) <- obj.GetParamDftValHostFunc()) {
+        let paramDftValHostParam = if (let Some(value) <- obj.GetParamDftValHostParam()) {
             GetId((value as Value).getOrThrow())
         } else {
             0u32
@@ -927,7 +927,7 @@ class CHIRSerializerImpl {
         }
         return CreateFunctionDirect(builder, base, genericDecl, UInt8(FuncKindIndex(obj.GetFuncKind())),
             obj.IsFastNative(), obj.IsCFFIWrapper(), originalLambdaInfo,
-            if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) }, paramDftValHostFunc, body,
+            if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) }, paramDftValHostParam, body,
             if (params.isEmpty()) { None } else { Some(params) }, retVal, propLoc,
             obj.localId, obj.blockId, obj.blockGroupId)
     }
@@ -1187,7 +1187,9 @@ class CHIRSerializerImpl {
         return CreateLambdaDirect(builder, base, funcTy, obj.IsLocalFunc(), Some(obj.GetIdentifier()),
             Some(obj.GetSrcCodeIdentifier()), if (params.isEmpty()) { None } else { Some(params) },
             if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) }, body, retVal,
-            obj.IsCompileTimeValue(), if (let Some(decl) <- obj.GetGenericDecl()) {
+            obj.IsCompileTimeValue(), if (let Some(param) <- obj.GetParamDftValHostParam()) {
+                GetId((param as Value).getOrThrow())
+            } else { 0u32 }, if (let Some(decl) <- obj.GetGenericDecl()) {
                 GetId((decl as Expression).getOrThrow())
             } else { 0u32 })
     }
@@ -1799,7 +1801,7 @@ class CHIRSerializerImpl {
         fields.add(if (let Some(parentDef) <- fn.GetParentCustomTypeDef()) { CHIRBaseId(parentDef) } else { "" })
         fields.add(CHIRWireJoinList(fn.GetFeatures()))
         fields.add(if (let Some(genericDecl) <- fn.GetGenericDecl()) { CHIRValueId(genericDecl) } else { "" })
-        fields.add(if (let Some(hostFunc) <- fn.GetParamDftValHostFunc()) { CHIRValueId(hostFunc) } else { "" })
+        fields.add(if (let Some(param) <- fn.GetParamDftValHostParam()) { CHIRValueId(param) } else { "" })
         fields.add(CHIRSerializeDebugLocation(fn.GetPropLocation()))
         fields.add(CHIRSerializeAnnoInfo(fn.GetAnnoInfo()))
         fields.add(CHIRSerializeDebugLocation(fn.GetDebugLocation()))
@@ -2286,8 +2288,8 @@ class CHIRSerializerImpl {
         fields.add(CHIRSerializeGenericTypeList(lambdaExpr.GetGenericTypeParams()))
         fields.add(if (let Some(retValue) <- lambdaExpr.GetReturnValue()) { CHIRValueId(retValue) } else { "" })
         fields.add(CHIRBoolToWire(lambdaExpr.IsCompileTimeValue()))
-        fields.add(if (let Some(hostFunc) <- lambdaExpr.GetParamDftValHostFunc()) {
-            CHIRBaseId(hostFunc)
+        fields.add(if (let Some(param) <- lambdaExpr.GetParamDftValHostParam()) {
+            CHIRValueId(param)
         } else {
             ""
         })
