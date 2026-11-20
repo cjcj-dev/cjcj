@@ -79,9 +79,9 @@ class ParameterListRecoveryTest {
     }
 }
 
-@Test
 @When[env != "ohos"]
-class CallLocalModeSyntaxTest {
+@Test
+class LocalModeSyntaxTest {
     @TestCase
     func constructorSuffixKeepsFollowingMember(): Unit {
         let (expr, diag) = parseExpr("C() @local!.field")
@@ -107,11 +107,7 @@ class CallLocalModeSyntaxTest {
         @Expect(expr.TestAttr(Attribute.IS_BROKEN), true)
         @Expect(countErrors(diag), 2)
     }
-}
 
-@Test
-class ParseTypePortTest {
-    @When[env != "ohos"]
     @TestCase
     func modalTypeSuffixes(): Unit {
         for ((source, mode) in [("Int64 @local!", ASTMode.FULL), ("Int64 @local?", ASTMode.HALF),
@@ -126,7 +122,6 @@ class ParseTypePortTest {
         }
     }
 
-    @When[env != "ohos"]
     @TestCase
     func localBangDoesNotEatAssignment(): Unit {
         let diag = DiagnosticEngine()
@@ -142,6 +137,18 @@ class ParseTypePortTest {
     }
 
     @TestCase
+    func localModalCannotBeTypeArgument(): Unit {
+        let (ty, diag) = parseTypeNode("Array<Int64 @local?>")
+        let arg = ty.GetTypeArgs()[0]
+        @Expect(arg.modal.getOrThrow().local == ASTMode.HALF, true)
+        @Expect(arg.TestAttr(Attribute.IS_BROKEN), true)
+        @Expect(countErrors(diag), 2)
+    }
+}
+
+@Test
+class ParseTypePortTest {
+    @TestCase
     func localModalLookaheadLeavesOtherAtTokens(): Unit {
         for (source in ["Int64 @local !", "Int64 @~ local", "Int64 @local", "Int64 @Other!"]) {
             let diag = DiagnosticEngine()
@@ -151,16 +158,6 @@ class ParseTypePortTest {
             @Expect(parser.Peek().kind == TokenKind.AT, true)
             @Expect(countErrors(diag), 0)
         }
-    }
-
-    @When[env != "ohos"]
-    @TestCase
-    func localModalCannotBeTypeArgument(): Unit {
-        let (ty, diag) = parseTypeNode("Array<Int64 @local?>")
-        let arg = ty.GetTypeArgs()[0]
-        @Expect(arg.modal.getOrThrow().local == ASTMode.HALF, true)
-        @Expect(arg.TestAttr(Attribute.IS_BROKEN), true)
-        @Expect(countErrors(diag), 2)
     }
 
     @TestCase
