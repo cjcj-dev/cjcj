@@ -85,13 +85,19 @@ class LocalModeSyntaxTest {
     @TestCase
     func constructorSuffixKeepsFollowingMember(): Unit {
         let (expr, diag) = parseExpr("C() @local!.field")
-        let member = (expr as MemberAccess).getOrThrow()
+        let parsedMember = expr as MemberAccess
+        @Assert(parsedMember.isSome())
+        let member = parsedMember.getOrThrow()
         let call = (member.baseExpr.getOrThrow() as CallExpr).getOrThrow()
         @Expect(member.field.Val(), "field")
+        @Assert(call.modal.isSome())
         @Expect(call.modal.getOrThrow().local, ASTMode.FULL)
         @Expect(call.end.column, 12)
         @Expect(countErrors(diag), 1)
+    }
 
+    @TestCase
+    func ordinaryCallKeepsFollowingMember(): Unit {
         let (plain, plainDiag) = parseExpr("C().field")
         let plainMember = (plain as MemberAccess).getOrThrow()
         let plainCall = (plainMember.baseExpr.getOrThrow() as CallExpr).getOrThrow()
