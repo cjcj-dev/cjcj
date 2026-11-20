@@ -1291,7 +1291,7 @@ private func FilterOverriden(typeManager: TypeManager, candidates: ArrayList<Fun
 
 // Type checking selects an overload before the whole-body lifetime walk. Inspect the
 // declared slot or a local initializer without changing the shared semantic data type.
-func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Option<ASTMode> {
+public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Option<ASTMode> {
     if (let Some(paren) <- (expr as ParenExpr)) {
         if (let Some(inner) <- paren.expr) { return CallSiteMode(inner, receiver, seen) }
     }
@@ -1398,6 +1398,35 @@ private func MoreSpecificModes(left: FuncDecl, right: FuncDecl, ce: CallExpr): B
     return better
 }
 
+// Match the implicit or explicit receiver before comparing the ordinary parameter list.
+// A Copyable argument does not make a less specific receiver as good as an exact one.
+private func FilterReceiverModes(call: CallExpr, enclosing: ASTMode,
+    candidates: ArrayList<FunctionMatchingUnit>, marks: ArrayList<Bool>): Unit {
+    let base = call.baseFunc ?? return;
+    if (!(base is NameReferenceExpr)) { return }
+    var actual: Option<ASTMode> = Some(enclosing)
+    if ((let Some(member) <- (base as MemberAccess)) && (let Some(obj) <- member.baseExpr)) {
+        actual = CallSiteMode(obj, enclosing, HashSet<Decl>())
+    }
+    let m = actual ?? ASTMode.NOT
+    var exact = false
+    var sub = false
+    for (i in 0..marks.size) {
+        let fd = candidates[i].fd
+        if (!marks[i] || !IsInstanceMember(fd) || fd.TestAttr(Attribute.CONSTRUCTOR)) { continue }
+        let param = GetReceiverMode(fd)
+        if (m == param) { exact = true }
+        if (actual.isSome() && m.IsSubMode(param)) { sub = true }
+    }
+    if (!exact && !sub) { return }
+    for (i in 0..marks.size) {
+        let fd = candidates[i].fd
+        if (!marks[i] || !IsInstanceMember(fd) || fd.TestAttr(Attribute.CONSTRUCTOR)) { continue }
+        let param = GetReceiverMode(fd)
+        if ((exact && m != param) || (!exact && !m.IsSubMode(param))) { marks[i] = false }
+    }
+}
+
 private func HasAnyLocalInput(unit: FunctionMatchingUnit, call: CallExpr): Bool {
     if (GetReceiverMode(unit.fd) != ASTMode.NOT) { return true }
     for (i in 0..unit.tysInArgOrder.size) {
@@ -1446,6 +1475,7 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
         for (i in 0..candidates.size) {
             if (targetMark[i]) { targetMark[i] = PermitsModalCall(typeManager, candidates[i], ce, receiver) }
         }
+        FilterReceiverModes(ce, receiver, candidates, targetMark)
     }
     var idx: Int64 = 0
     while (idx < candidates.size) {

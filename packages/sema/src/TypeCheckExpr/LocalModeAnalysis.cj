@@ -154,36 +154,8 @@ class LocalModeAnalysis {
         DiagMismatchedTypesWithFoundTy(diag, value, ty.String() + expected.Suffix(), ty.String() + mode.Suffix())
     }
 
-    // The result of a conditional never comes from its condition, selector, or finally block.
-    private func ResultBranches(value: Expr): ArrayList<Expr> {
-        let out = ArrayList<Expr>()
-        if (let Some(paren) <- (value as ParenExpr)) {
-            if (let Some(inner) <- paren.expr) { out.add(inner) }
-        } else if (let Some(block) <- (value as Block)) {
-            if ((let Some(last) <- block.GetLastExprOrDecl()) && (let Some(e) <- (last as Expr))) { out.add(e) }
-        } else if (let Some(ie) <- (value as IfExpr)) {
-            if (let Some(b) <- ie.thenBody) { out.add(b) }
-            if (let Some(b) <- ie.elseBody) { out.add(b) }
-        } else if (let Some(me) <- (value as MatchExpr)) {
-            for (c in me.matchCases) { if (let Some(b) <- c.exprOrDecls) { out.add(b) } }
-            for (c in me.matchCaseOthers) { if (let Some(b) <- c.exprOrDecls) { out.add(b) } }
-        } else if (let Some(te) <- (value as TryExpr)) {
-            if (let Some(b) <- te.tryBlock) { out.add(b) }
-            for (b in te.catchBlocks) { out.add(b) }
-        }
-        return out
-    }
-
     private func MergeBranchModes(value: Expr): Unit {
-        if (value.TyKind() == TypeKind.TYPE_UNIT || CopyNode(value)) { return }
-        var result: Option<ASTMode> = None
-        for (branch in ResultBranches(value)) {
-            if (branch.GetTy().map({ t => t.IsNothing() }) ?? false) { continue }
-            if ((let Some(prior) <- result) && prior != branch.resolvedMode) {
-                result = Some(ASTMode.HALF)
-            } else { result = Some(branch.resolvedMode) }
-        }
-        value.resolvedMode = result ?? ASTMode.NOT
+        value.resolvedMode = JoinResultModes(typeManager, ResultBranches(value), { e => Some(e.resolvedMode) })
     }
 
     private func IsBranchChild(parent: Node, child: Node): Bool {
@@ -494,14 +466,7 @@ class LocalModeAnalysis {
         } else if (let Some(call) <- (node as CallExpr)) {
             ResolveCall(call)
         } else if (let Some(tuple) <- (node as TupleLit)) {
-            var joined: Option<ASTMode> = None
-            for (value in tuple.children) {
-                if (CopyNode(value)) { continue }
-                joined = if ((let Some(mode) <- joined) && mode != value.resolvedMode) {
-                    Some(ASTMode.HALF)
-                } else { Some(value.resolvedMode) }
-            }
-            tuple.resolvedMode = joined ?? ASTMode.NOT
+            tuple.resolvedMode = JoinResultModes(typeManager, tuple.children, { e => Some(e.resolvedMode) })
             if (tuple.resolvedMode == ASTMode.FULL) {
                 for (value in tuple.children) {
                     if (!CopyNode(value) && External(value)) {
@@ -534,9 +499,12 @@ class LocalModeAnalysis {
                 Check(defaultValue, p.resolvedMode)
             }
             if ((let Some(initExpr) <- decl.initializer) && decl.astKind != ASTKind.FUNC_PARAM) {
-                if (!scopes.isEmpty() && decl.astKind == ASTKind.VAR_DECL &&
+                if (!scopes.isEmpty() && (decl.astKind == ASTKind.VAR_DECL || decl is VarWithPatternDecl) &&
                     !decl.IsMemberDecl() && !decl.TestAttr(Attribute.GLOBAL)) {
                     decl.resolvedMode = decl.typeNode.map({ t => t.resolvedMode }) ?? initExpr.resolvedMode
+                    if ((let Some(vpd) <- (decl as VarWithPatternDecl)) && (let Some(pat) <- vpd.irrefutablePattern)) {
+                        BindTuplePatternMode(pat, decl.resolvedMode)
+                    }
                     Check(initExpr, decl.resolvedMode)
                     if (decl.resolvedMode == ASTMode.FULL && !CopyNode(decl) && External(initExpr)) {
                         DiagMismatchedTypesWithFoundTy(diag, initExpr, "an internal local initializer", "an external local value")

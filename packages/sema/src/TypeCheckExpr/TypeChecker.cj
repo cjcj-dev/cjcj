@@ -4298,6 +4298,14 @@ extend TypeChecker {
                 }
             }
             if (patternMatches && isIrrefutable) {
+                if (let Some(initValue) <- vpd.initializer) {
+                    let receiver = GetCurFuncBody(ctx, vpd.scopeName).flatMap({ b => b.funcDecl })
+                        .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+                    let mode = if (let Some(t) <- vpd.typeNode) { t.modal.map({ m => m.local }) ?? t.resolvedMode }
+                        else { BindingResultMode(impl.typeManager, initValue, receiver) ?? ASTMode.NOT }
+                    vpd.resolvedMode = mode
+                    BindTuplePatternMode(pattern, mode)
+                }
                 BindPatternBindings(ctx, pattern)
             }
             if (vpd.isConst) {

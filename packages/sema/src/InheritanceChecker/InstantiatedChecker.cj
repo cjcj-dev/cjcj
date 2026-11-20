@@ -556,7 +556,8 @@ func DiagnoseForInstantiatedMemberImpl(
             if (let Some(parentFuncTy) <- FuncTyFromOption(parent.ty)) {
                 if (let Some(childFuncTy) <- FuncTyFromOption(child.ty)) {
                     let sameStatic = parentDecl.TestAttr(Attribute.STATIC) == childDecl.TestAttr(Attribute.STATIC)
-                    if (sameStatic && checker.typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)) {
+                    if (sameStatic && SameModalInputs(parentDecl, childDecl) &&
+                        checker.typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)) {
                         let triggeredDeclType = trigger.decl.identifier.Val() + "<" +
                             Ty.GetTypesToStr(trigger.instTys, ", ") + ">"
                         let builder = DiagnoseRefactor(checker.diag,
