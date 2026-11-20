@@ -11,6 +11,7 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::incremental_compilation.IncreKind
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
 import cjcj::ast.ASTKind
+import cjcj::ast.GetReceiverMode
 import cjcj::ast.IsInstanceConstructor as AstIsInstanceConstructor
 import cjcj::ast.IsValidCFuncConstructorCall
 import cjcj::ast.IsCondition as AstIsCondition
@@ -3014,6 +3015,12 @@ public class Translator {
 
     private func GetInstCalleeInfoInGeneral(expr: AstNameReferenceExpr, resolvedFuncDecl: AstFuncDecl, thisType: Type,
         isVirtualFuncCall: Bool): FaithfulInstCalleeInfo {
+        var virtualCall = isVirtualFuncCall
+        var originalFuncDecl = if (virtualCall) {
+            TopOverriddenDecl(resolvedFuncDecl)
+        } else {
+            resolvedFuncDecl
+        }
         let translatedFuncType = RequireFuncType(chirTy.TranslateType(expr))
         let paramTys = ArrayList<Type>()
         for (paramTy in translatedFuncType.GetParamTypes()) {
@@ -3021,7 +3028,7 @@ public class Translator {
         }
         var calleeFuncTy = translatedFuncType
         if (!resolvedFuncDecl.TestAttr(AstAttribute.STATIC)) {
-            paramTys.add(thisType, at: 0)
+            paramTys.add(GetThisTypeWithModal(thisType, originalFuncDecl), at: 0)
             let retTy = if (ConstructorReturnsReceiver(resolvedFuncDecl)) {
                 thisType
             } else {
@@ -3034,12 +3041,6 @@ public class Translator {
             funcInstArgs.add(chirTy.TranslateType(instTy))
         }
         let thisDerefTy = thisType.StripAllRefs()
-        var virtualCall = isVirtualFuncCall
-        var originalFuncDecl = if (virtualCall) {
-            TopOverriddenDecl(resolvedFuncDecl)
-        } else {
-            resolvedFuncDecl
-        }
         var parentTypeOpt = GetExactParentType(thisDerefTy, originalFuncDecl, calleeFuncTy, funcInstArgs, virtualCall)
         if (parentTypeOpt.isNone()) {
             CJC_ASSERT(!virtualCall)
@@ -3053,23 +3054,17 @@ public class Translator {
                 "virtual=${virtualCall}, isStatic=${originalFuncDecl.TestAttr(AstAttribute.STATIC)}")
         }
         let parentType = parentTypeOpt.getOrThrow()
-        if (!originalFuncDecl.TestAttr(AstAttribute.STATIC)) {
-            CJC_ASSERT(!paramTys.isEmpty())
-            if (thisDerefTy.IsStruct() && parentType != thisDerefTy && originalFuncDecl.TestAttr(AstAttribute.MUT)) {
-                paramTys[0] = thisType
-            } else if (parentType.IsClass()) {
-                paramTys[0] = AddRefIfFuncIsMutOrClass(parentType, originalFuncDecl)
-                let retTy = if (ConstructorReturnsReceiver(originalFuncDecl)) {
-                    paramTys[0]
-                } else {
-                    calleeFuncTy.GetReturnType()
-                }
-                calleeFuncTy = builder.context.GetFuncTy(paramTys, retTy)
-            }
+        if (!originalFuncDecl.TestAttr(AstAttribute.STATIC) &&
+            !(thisDerefTy.IsStruct() && originalFuncDecl.TestAttr(AstAttribute.MUT))) {
+            paramTys[0] = GetThisTypeWithModal(parentType, originalFuncDecl)
+            let retTy = if (ConstructorReturnsReceiver(originalFuncDecl)) {
+                paramTys[0]
+            } else { calleeFuncTy.GetReturnType() }
+            calleeFuncTy = builder.context.GetFuncTy(paramTys, retTy)
         }
         var instThisType = thisType
         if (virtualCall && (expr as AstRefExpr).isSome()) {
-            instThisType = builder.context.GetRefTy(builder.context.GetThisTy())
+            instThisType = GetThisTypeWithModal(builder.context.GetRefTy(builder.context.GetThisTy()), resolvedFuncDecl)
         }
         return FaithfulInstCalleeInfo(parentType, instThisType, paramTys, calleeFuncTy.GetReturnType(),
             funcInstArgs, virtualCall, originalFuncDecl)
@@ -3083,7 +3078,7 @@ public class Translator {
 
         let thisType = currentFunc.GetParentCustomTypeOrExtendedType() ??
             throw IllegalStateException("faithful AST2CHIR expected parent custom/extended type when translating member call")
-        let thisTypeRef = AddRefIfFuncIsMutOrClass(thisType, calleeDecl)
+        let thisTypeRef = GetThisTypeWithModal(thisType, calleeDecl)
         var caller = currentFunc.GetParentCustomTypeDef() ??
             throw IllegalStateException("faithful AST2CHIR member call has no parent custom type def")
         if (let Some(customTy) <- (thisType as CustomType)) {
@@ -3112,6 +3107,12 @@ public class Translator {
         let replacements = ArrayList<Type>()
         AddMemberOwnerGenericReplacements(funcDecl, Some(thisType), genericParams, replacements)
         return SubstituteGenericType(ownerTy, genericParams, replacements).StripAllRefs()
+    }
+
+    private func GetThisTypeWithModal(thisType: Type, decl: AstFuncDecl): Type {
+        let ty = AddRefIfFuncIsMutOrClass(thisType, decl)
+        if (!opts.IsLocalModeAnalysis()) { return ty }
+        return builder.WithModal(ty, ASTModal2CHIRModal(GetReceiverMode(decl)))
     }
 
     private func AddRefIfFuncIsMutOrClass(thisType: Type, funcDecl: AstFuncDecl): Type {
