@@ -14,7 +14,7 @@ public class CJNATIVEBackend <: Backend {
 
     protected override func GenerateToolChain(): Bool {
         if (driverOptions.target.os == OSType.WASI) {
-            TC = Wasm_CJNATIVE(driver, driverOptions, backendCmds, SupportsWasmReturnBases)
+            TC = Wasm_CJNATIVE(driver, driverOptions, backendCmds)
             return true
         }
         if (driverOptions.target.os == OSType.LINUX) {
@@ -55,10 +55,6 @@ public class CJNATIVEBackend <: Backend {
     }
 
     protected override func PrepareDependencyPath(): Bool {
-        if (driverOptions.wasmReturnBases && !driverOptions.target.IsWasm()) {
-            eprintln("error: --wasm-return-bases requires wasm32-wasi")
-            return false
-        }
         let cjnativeBinSearchPaths = ArrayList<String>()
         if (driverOptions.environment.cangjieHome.hasValue) {
             cjnativeBinSearchPaths.add(FileUtil.JoinPath(driverOptions.environment.cangjieHome.value,
@@ -95,21 +91,6 @@ public class CJNATIVEBackend <: Backend {
         let tool = Tool(toolPath, ToolType.BACKEND, driverOptions.environment.allVariables)
         tool.SetLdLibraryPath(FileUtil.JoinPath(FileUtil.GetDirPath(toolPath), "../lib"))
         return tool
-    }
-
-    private func SupportsWasmReturnBases(option: String): Bool {
-        // Independent compiler/LLVM installations need not carry the same
-        // opt features. Probe the exact opt and environment used for lowering.
-        let opt = GenerateCJNativeBaseTool(optPath)
-        try {
-            let (rc, stdout, _) = executeWithOutput(optPath, ["--help-hidden"],
-                environment: opt.GetProcessEnvironment())
-            return rc == 0 && String.fromUtf8(stdout).split("\n").any({ line =>
-                line.trimAscii().startsWith(option + "=")
-            })
-        } catch (e: Exception) {
-            return false
-        }
     }
 
     private func GetFrontendOutputs(): ArrayList<TempFileInfo> {
@@ -177,8 +158,6 @@ public class CJNATIVEBackend <: Backend {
         ChainCompileAfterPreprocess(driverOptions.saveTemps)
         let batch = ArrayList<Tool>()
         for (objFile in objFiles) {
-            // Imported proofs belong to this link, never to a reusable object.
-            if (!driverOptions.wasmReturnBaseImport.isEmpty()) { break }
             let srcFile = objFile.filePath
             let destFile = driverOptions.GetHashedObjFileName(FileUtil.GetFileNameWithoutExtension(srcFile)) + ".o"
             if (driverOptions.aggressiveParallelCompile.hasValue &&
@@ -305,15 +284,6 @@ public class CJNATIVEBackend <: Backend {
             tool.AppendArg(bitCodeFile.filePath)
             PreprocessOfNewPassManager(tool)
             OPTSetOptions({ option: String => tool.AppendArg(option) }, driverOptions)
-            if (driverOptions.exportWasmReturnBases) {
-                let report = TempFileManager.Instance().CreateUniqueTempFileInfo(TempFileKind.T_OBJ,
-                    stem: "export-return-bases").filePath
-                driverOptions.wasmReturnBaseExports.add(report)
-                tool.AppendArg("--cj-wasm-export-return-bases=" + report)
-            }
-            if (!driverOptions.wasmReturnBaseImport.isEmpty()) {
-                tool.AppendArg("--cj-wasm-import-return-bases=" + driverOptions.wasmReturnBaseImport)
-            }
             OPTSetVerifyOptions({ option: String => tool.AppendArg(option) }, driverOptions)
             OPTSetTripleOptions({ option: String => tool.AppendArg(option) }, driverOptions)
             OPTSetCodeObfuscationOptions({ option: String => tool.AppendArg(option) }, driverOptions)

@@ -900,11 +900,12 @@ public open class GlobalOptions <: Option {
         CJC_ASSERT(!compilationCachedPath.isEmpty())
         compilationCacheNamespace = ".cached"
         if (target.IsWasm() && enIncrementalCompilation) {
-            if (let Some(identity) <- GetWasmCompilerCacheIdentity()) {
+            if (let Some(identity) <- GetWasmToolchainIdentity(cangjieHome, GetCangjieLibTargetPathName())) {
                 compilationCacheNamespace = ".cached-wasm-" + identity
             } else {
                 enIncrementalCompilation = false
-                Warningln("Wasm compiler image is unavailable; compiling without the incremental cache.")
+                Warningln("The wasm toolchain identity (lib/" + GetCangjieLibTargetPathName() +
+                    "/wasm-toolchain.id) is missing; compiling without the incremental cache.")
             }
         }
     }

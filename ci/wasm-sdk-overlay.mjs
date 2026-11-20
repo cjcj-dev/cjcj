@@ -13,6 +13,7 @@
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {buildWasmStdCore, wasmStdInputs} from './wasm-std-core.mjs';
 import {SYSROOT_DIR, checkWasmSdk, installWasiSysroot, readWasiPin, sha256File} from './wasi-toolchain.mjs';
@@ -23,6 +24,28 @@ const WASM_TARGET_DIR = 'wasi_wasm32_cjnative';
 const STD_LIB_DIR = `lib/${WASM_TARGET_DIR}`;
 const STD_MODULE_DIR = `modules/${WASM_TARGET_DIR}/std`;
 const REPLACED_LLVM_TOOLS = Object.freeze(['llc', 'opt', 'llvm-objcopy']);
+// Host-independent target half: the toolchain identity read by cjc for the wasm incremental cache
+// namespace, and the node:wasi runner.
+export const TOOLCHAIN_ID = `${STD_LIB_DIR}/wasm-toolchain.id`;
+export const RUNNER = 'tools/wasm/run_wasi.mjs';
+const RUNNER_SOURCE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'wasm-run-wasi.mjs');
+
+// The one place where host executable names differ (Windows .exe).
+export function hostExe(name, platform = process.platform) {
+  return platform === 'win32' ? `${name}.exe` : name;
+}
+
+// One line: digest over the identities of the compiler, the code generation and link tools,
+// the runtime archive and the std archives of this SDK. A different managed ABI generation
+// therefore uses a different incremental cache namespace. Build cache key, not a handshake.
+export function toolchainIdentity(sdk) {
+  const parts = ['libexec/compiler/' + hostExe('cjcj-stage1'),
+    ...['opt', 'llc', 'wasm-ld'].map(tool => `${NATIVE_LLVM_BIN}/${hostExe(tool)}`),
+    'runtime/lib/' + WASM_TARGET_DIR + '/libcangjie-runtime.a',
+    ...fs.readdirSync(path.join(sdk, STD_LIB_DIR)).filter(name => name.endsWith('.a')).sort().map(name => `${STD_LIB_DIR}/${name}`)];
+  const lines = parts.map(rel => `${rel}=${sha256File(path.join(sdk, rel))}\n`).join('');
+  return 'cjw1-' + crypto.createHash('sha256').update(lines).digest('hex').slice(0, 32);
+}
 
 // SDK manifests (top-level *.json / *.jsonl) pin files by sha256 as {"path": p, "sha256": h} or {"<p>": {"sha256": h}}.
 // Returns the sdk-relative paths whose current content no longer matches a pinned hash.
@@ -118,7 +141,7 @@ export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, std
   for (const tool of REPLACED_LLVM_TOOLS) requireFile(path.join(baseSdk, NATIVE_LLVM_BIN, tool), `base SDK ${NATIVE_LLVM_BIN}/${tool}`);
   requireFile(path.join(baseSdk, LLVM_ENTRY_BIN, 'llc'), `base SDK ${LLVM_ENTRY_BIN}/llc launcher`);
   requireFile(path.join(baseSdk, LLVM_ENTRY_BIN, 'llc.entry'), `base SDK ${LLVM_ENTRY_BIN}/llc.entry`);
-  requireFile(path.join(baseSdk, 'libexec/compiler/cjcj-stage1'), 'base SDK libexec/compiler/cjcj-stage1');
+  requireFile(path.join(baseSdk, 'libexec/compiler', hostExe('cjcj-stage1')), 'base SDK libexec/compiler/cjcj-stage1');
   requireFile(cjc, 'compiler input');
   requireFile(runtimeArchive, 'wasm runtime archive');
   const prebuilt = stdArchives.length > 0 || stdModules.length > 0;
@@ -130,7 +153,8 @@ export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, std
     throw new Error('prebuilt std requires both --std-archive and --std-module');
   }
   const stdBuild = prebuilt ? undefined : wasmStdInputs(sourceOptions);
-  if (stdBuild) requireFile(path.join(baseSdk, 'bin/cjc'), 'base SDK bin/cjc launcher');
+  if (stdBuild) requireFile(path.join(baseSdk, 'bin', hostExe('cjc')), 'base SDK bin/cjc launcher');
+  requireFile(RUNNER_SOURCE, 'node:wasi runner source');
   for (const file of stdArchives) requireFile(file, 'std archive');
   for (const file of stdModules) requireFile(file, 'std module');
   requireFile(sysrootTarball, 'wasi-sysroot tarball');
@@ -203,6 +227,8 @@ function populateSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, stdArchives, 
   }
   for (const file of stdArchives) { const rel = `${STD_LIB_DIR}/${path.basename(file)}`; put(file, path.join(dest, rel)); record(rel); }
   for (const file of stdModules) { const rel = `${STD_MODULE_DIR}/${path.basename(file)}`; put(file, path.join(dest, rel)); record(rel); }
+  put(RUNNER_SOURCE, path.join(dest, RUNNER)); record(RUNNER);
+  fs.writeFileSync(path.join(dest, TOOLCHAIN_ID), toolchainIdentity(dest) + '\n'); record(TOOLCHAIN_ID);
   const inputs = {baseSdk: path.resolve(baseSdk), sysrootTarball: {path: path.resolve(sysrootTarball), sha256: sysroot.sha256}};
   for (const [name, file] of Object.entries({cjc, runtimeArchive, lld: path.join(llvmBin, 'lld'), ...(cjpm ? {cjpm} : {})})) {
     inputs[name] = {path: path.resolve(file), sha256: sha256File(file)};

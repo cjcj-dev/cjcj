@@ -20,12 +20,8 @@ private func CheckExecuteResult(checklist: TreeMap<Int64, ToolFuture>, tools: Ha
                     Semaphore.Get().Release()
                 }
                 let tool = tools[command]
-                if (tool.wasmReturnBaseLinkMismatch) {
-                    job.wasmReturnBaseLinkMismatch = true
-                } else {
-                    let commandString = tool.GetCommandString()
-                    Errorln("${commandString}: command failed with exit code ${future.exitCode} (use -V to see invocation)")
-                }
+                let commandString = tool.GetCommandString()
+                Errorln("${commandString}: command failed with exit code ${future.exitCode} (use -V to see invocation)")
                 finishedCommands.add(command)
                 success = false
             } else if (state == ToolFutureState.SUCCESS) {
@@ -50,7 +46,6 @@ private func CheckExecuteResult(checklist: TreeMap<Int64, ToolFuture>, tools: Ha
 public class Job {
     private var backend: Option<Backend> = None
     private var verbose: Bool = false
-    var wasmReturnBaseLinkMismatch = false
 
     public init() {}
 

@@ -75,7 +75,7 @@ assert.ok(vars.switch.frames > 0, 'new compiler generated app frames');
 assert.notEqual(vars.seed.wasm, vars.switch.wasm, 'old cached app was not linked');
 const newDirs = vars.switch.dirs.filter(d => !vars.seed.dirs.includes(d));
 assert.equal(newDirs.length, 1, 'different executable gets a separate artifact namespace');
-assert.match(newDirs[0], /^\.cached-wasm-[0-9a-f]+$/);
+assert.match(newDirs[0], /^\.cached-wasm-[0-9A-Za-z._-]+$/);
 assert.deepEqual(vars.repeat.dirs, vars.switch.dirs);
 assert.doesNotMatch(vars.repeat.compile, /bin\/opt|bin\/llc|CacheCopy/, 'same image really reuses objects');
 assert.match(vars.repeat.compile, new RegExp(newDirs[0].replace('.', '\\.') + '/[^\\s]+\\.o'),

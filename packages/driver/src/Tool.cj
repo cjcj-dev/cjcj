@@ -240,8 +240,6 @@ public class Tool {
     public let toolType: ToolType
     public let name: String
     public let environmentVars: HashMap<String, String>
-    var mayRetryWithoutWasmReturnBases = false
-    var wasmReturnBaseLinkMismatch = false
     private let args: ArrayList<String> = ArrayList<String>()
     private let argKinds: ArrayList<ArgKind> = ArrayList<ArgKind>()
     private let deferredArgMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
@@ -566,24 +564,6 @@ public class Tool {
     }
 
     private func InternalImplementedCommandExec(): Bool {
-        if (name == "MergeWasmReturnBases") {
-            let full = GetFullArgs()
-            if (MergeWasmReturnBases(full[1], full[2..])) { return true }
-            eprintln("error: missing or incompatible wasm return-base records from opt")
-            return false
-        }
-        if (name == "PublishWasmReturnBaseLink") {
-            let full = GetFullArgs()
-            if (!VerifyWasmReturnBaseLink(full[1], full[2], full[3], full[4])) {
-                if (mayRetryWithoutWasmReturnBases) {
-                    wasmReturnBaseLinkMismatch = true
-                } else {
-                    eprintln("error: final wasm link could not confirm the proven return-base definitions")
-                }
-                return false
-            }
-            return CopyFile(full[5], full[6])
-        }
         if (toolType == ToolType.INTERNAL_IMPLEMENTED && name == "RemoveFile") {
             let full = GetFullArgs()
             return !FileUtil.FileExist(full[1]) || FileUtil.Remove(full[1])

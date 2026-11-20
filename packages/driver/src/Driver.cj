@@ -137,17 +137,7 @@ public class Driver {
         if (!job.Assemble(driverOptions, this)) {
             return false
         }
-        if (job.Execute()) { return true }
-        if (!job.wasmReturnBaseLinkMismatch) { return false }
-        // Nothing was published and no object compiled with an import was
-        // cached. Reuse the frontend input and rebuild the backend conservatively.
-        if (driverOptions.enableVerbose) {
-            eprintln("wasm return-base link: could not confirm selected definitions; retrying without imported proofs")
-        }
-        driverOptions.wasmReturnBaseImport = ""
-        driverOptions.disableWasmReturnBases = true
-        let conservativeJob = Job()
-        return conservativeJob.Assemble(driverOptions, this) && conservativeJob.Execute()
+        return job.Execute()
     }
 }
 

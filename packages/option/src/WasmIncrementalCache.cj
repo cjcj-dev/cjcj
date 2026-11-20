@@ -1,42 +1,28 @@
 package cjcj::option
 
 import std.core.Option as CoreOption
+import std.fs.File
 
-@When[os == "Linux"]
-import std.fs.{File, OpenMode}
-@When[os == "Linux"]
-import cjcj::utils.SipHash
-
-// Cache the actual compiler image, not argv[0] (which might name an SDK
-// launcher) or the language version (which is shared by many compilers).
-// Fixed-size chunks keep memory bounded and give the same key after relocation.
-@When[os == "Linux"]
-internal func GetWasmCompilerCacheIdentity(): CoreOption<String> {
-    let chunks = StringBuilder()
-    try (file = File("/proc/self/exe", OpenMode.Read)) {
-        let buffer = Array<UInt8>(1024 * 1024, repeat: 0u8)
-        while (true) {
-            var size: Int64 = 0
-            while (size < buffer.size) {
-                let read = file.read(buffer[size..])
-                if (read == 0) { break }
-                size += read
-            }
-            if (size == 0) { break }
-            chunks.append(size.toString())
-            chunks.append(":")
-            chunks.append(UInt64ToHex(SipHash.GetHashValue(buffer[..size])))
-            chunks.append(":")
-        }
+// The wasm incremental cache namespace is the toolchain identity that the SDK
+// producer (ci/wasm-sdk-overlay.mjs) writes to
+// $CANGJIE_HOME/lib/<target>/wasm-toolchain.id: one line, a digest over cjc,
+// opt, llc, wasm-ld, the runtime archive and the std archives of that SDK.
+// Objects produced by another toolchain (another managed ABI generation) are
+// therefore never reused. This is a build cache key, not a runtime handshake;
+// it is host independent and survives relocation of the SDK.
+internal func GetWasmToolchainIdentity(cangjieHome: String, targetDir: String): CoreOption<String> {
+    if (cangjieHome.isEmpty()) { return None }
+    let path = JoinPath(JoinPath(JoinPath(cangjieHome, "lib"), targetDir), "wasm-toolchain.id")
+    let text = try {
+        String.fromUtf8(File.readFrom(path)).trimAscii()
     } catch (_: Exception) {
         return None
     }
-    let manifest = chunks.toString()
-    return if (manifest.isEmpty()) { None } else { Some(StableHashString(manifest)) }
-}
-
-// Leave incremental use off when the running image cannot be identified.
-@When[os != "Linux"]
-internal func GetWasmCompilerCacheIdentity(): CoreOption<String> {
-    return None
+    if (text.isEmpty() || text.size > 128) { return None }
+    for (b in text.toArray()) {
+        let ok = (b >= b'0' && b <= b'9') || (b >= b'a' && b <= b'z') || (b >= b'A' && b <= b'Z') || b == b'-' ||
+            b == b'_' || b == b'.'
+        if (!ok) { return None }
+    }
+    return Some(text)
 }

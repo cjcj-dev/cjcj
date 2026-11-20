@@ -47,7 +47,7 @@ export function buildWasmStdCore(sdk, work, inputs) {
   }
 
   const output = path.join(work, 'std.core');
-  run(path.join(sdk, 'bin/cjc'), [target, '--no-prelude', '--no-sub-pkg', '-p', core, '--output-type=staticlib',
+  run(path.join(sdk, 'bin', process.platform === 'win32' ? 'cjc.exe' : 'cjc'), [target, '--no-prelude', '--no-sub-pkg', '-p', core, '--output-type=staticlib',
     '--disable-reflection', `--output=${output}`, '-V']);
   const module = output + '.cjo';
   if (!fs.statSync(module).size || !fs.statSync(output).size) throw new Error('cjc did not produce both std.core outputs');

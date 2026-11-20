@@ -6,10 +6,9 @@ private let LLVM_STRUCT_KIND: Int32 = 10
 private let LLVM_ARRAY_KIND: Int32 = 11
 private let LLVM_POINTER_KIND: Int32 = 12
 
-// Emit the C6 static table and the provenance facts consumed by the paired
-// LLVM. Only LLVM can publish transient frames after classifying allocations.
+// Emit the per-partition static root table (I-STATIC). Stack roots are not a
+// codegen concern: the LLVM root pass, the last IR pass, publishes them.
 internal func EmitWasmRoots(modules: ArrayList<CGModule>, localizedNames: HashSet<String>): Unit {
-    EmitWasmBaseAttributes(modules, localizedNames)
     for (cgMod in modules) {
         let module = cgMod.GetLLVMModule().getOrThrow()
         try (builder = IRBuilder2(cgMod)) {

@@ -26,11 +26,6 @@ public class DriverOptions <: GlobalOptions {
     public var useRuntimeRpath: Bool = false
     public var sanitizerEnableRpath: Bool = false
     public var incrementalCompileNoChange: Bool = false
-    var wasmReturnBases = false
-    var disableWasmReturnBases = false
-    var exportWasmReturnBases = false
-    let wasmReturnBaseExports = ArrayList<String>()
-    var wasmReturnBaseImport: String = ""
     public var enableObfAll: Bool = false
     public var enableObfExportSyms: Option<Bool> = None
     public var enableObfLineNumber: Option<Bool> = None
@@ -60,7 +55,6 @@ public class DriverOptions <: GlobalOptions {
 
     protected override func ParseOption(arg: OptionArgInstance): Option<Bool> {
         let id = arg.info.GetID()
-        if (id == ID.WASM_RETURN_BASES) { wasmReturnBases = true; return Some(true) }
         if (id == ID.STATIC) { linkStatic = true; return Some(true) }
         if (id == ID.TARGET_CPU) { targetCPU = arg.value; return Some(true) }
         if (id == ID.OPT_OPTIONS) { optArg = arg.value; return Some(true) }
