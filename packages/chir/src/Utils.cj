@@ -805,7 +805,7 @@ public func ComputeUnsetVirtualMethodOffset(callee: Function, methodName: String
         i++
     }
     CJC_ABORT()
-    throw IllegalStateException("virtual method offset is not available name=${methodName}")
+    throw IllegalStateException("virtual method offset is not available name=${methodName} owner=${defType.ToString()} callee=${callee.GetIdentifier()} type=${callee.GetFuncType().getOrThrow().ToString()}")
 }
 
 public func GetCalleeInSrcParentType(callee: Function, methodName: String, expectedOffset: Option<UInt64>): Function {

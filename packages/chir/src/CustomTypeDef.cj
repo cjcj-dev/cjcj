@@ -220,38 +220,14 @@ public class VirtualMethodInfo {
     }
 
     public func FuncSigIsMatched(other: FuncSigInfo, builder: CHIRBuilder): Bool {
-        let _ = builder
-        if (condition.funcName != other.funcName) {
-            return false
-        }
-        let paramTysInMethod = other.funcType.GetParamTypes()
-        let paramTysInVtable = condition.funcType.GetParamTypes()
-        if (paramTysInVtable.size != paramTysInMethod.size) {
-            return false
-        }
-        if (other.genericTypeParams.size != condition.genericTypeParams.size) {
-            return false
-        }
-        let replaceTable = HashMap<Int64, Type>()
-        var idx: Int64 = 0
-        while (idx < condition.genericTypeParams.size) {
-            replaceTable[other.genericTypeParams[idx].objectId] = condition.genericTypeParams[idx]
-            idx++
-        }
-        var paramIdx: Int64 = 0
-        while (paramIdx < paramTysInMethod.size) {
-            let paramTyInMethod = ReplaceRawGenericArgType(paramTysInMethod[paramIdx], replaceTable, builder)
-            if (!ParamTypeIsEquivalent(paramTyInMethod, paramTysInVtable[paramIdx])) {
-                return false
-            }
-            paramIdx++
-        }
-        return true
+        let args = ArrayList<Type>()
+        for (ty in other.genericTypeParams) { args.add(ty) }
+        return FuncSigIsMatched(FuncCallType(other.funcType, funcName: other.funcName, genericTypeArgs: args),
+            HashMap<Int64, Type>(), builder)
     }
 
     public func FuncSigIsMatched(other: FuncCallType, replaceTable: HashMap<Int64, Type>,
         builder: CHIRBuilder): Bool {
-        let _ = builder
         if (condition.funcName != other.funcName) {
             return false
         }
@@ -277,7 +253,11 @@ public class VirtualMethodInfo {
         var paramIdx: Int64 = 0
         while (paramIdx < genericParamTys.size) {
             let declaredInstType = ReplaceRawGenericArgType(genericParamTys[paramIdx], localReplaceTable, builder)
-            if (!ParamTypeIsEquivalent(declaredInstType, instArgTys[paramIdx])) {
+            if (paramIdx == 0 && !TestAttr(Attribute.STATIC)) {
+                if (declaredInstType.StripAllRefs().GetModalInfo() != instArgTys[0].StripAllRefs().GetModalInfo()) {
+                    return false
+                }
+            } else if (!ParamTypeIsEquivalent(declaredInstType, instArgTys[paramIdx])) {
                 return false
             }
             paramIdx++
@@ -828,10 +808,6 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
         checkAbstractMethod: Bool): Option<Function> {
         CJC_ASSERT(!funcName.isEmpty())
         let instParamTys = funcType.GetParamTypes()
-        if (!isStatic) {
-            CJC_ASSERT(!instParamTys.isEmpty())
-            instParamTys.remove(at: 0)
-        }
         var foundFunc: Option<Function> = None
         for (method in methods) {
             if (isStatic != method.TestAttr(Attribute.STATIC)) {
@@ -845,10 +821,6 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
                 continue
             }
             let originalFuncParamTys = method.GetFuncType().getOrThrow().GetParamTypes()
-            if (!method.TestAttr(Attribute.STATIC)) {
-                CJC_ASSERT(!originalFuncParamTys.isEmpty())
-                originalFuncParamTys.remove(at: 0)
-            }
             if (originalFuncParamTys.size != instParamTys.size) {
                 continue
             }
@@ -869,7 +841,12 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
             var paramIdx: Int64 = 0
             while (paramIdx < originalFuncParamTys.size) {
                 let instType = ReplaceRawGenericArgType(originalFuncParamTys[paramIdx], localReplaceTable, builder)
-                if (!instParamTys[paramIdx].IsGeneric() && !instType.IsEqual(instParamTys[paramIdx])) {
+                if (!isStatic && paramIdx == 0) {
+                    if (instType.StripAllRefs().GetModalInfo() != instParamTys[0].StripAllRefs().GetModalInfo()) {
+                        matched = false
+                        break
+                    }
+                } else if (!instParamTys[paramIdx].IsGeneric() && !instType.IsEqual(instParamTys[paramIdx])) {
                     matched = false
                     break
                 }
