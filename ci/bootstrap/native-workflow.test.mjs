@@ -116,7 +116,7 @@ test('Windows source plan, upload and package receive the same native std for pi
  const root=fixture(t),entry=job.steps.find(s=>s.id==='package-inputs');
  const gate=job.steps.find(s=>s.name==='Validate same-platform final std contract');
  const native=source.jobs['native-windows-sdk'];
- assert.equal(native['runs-on'],'windows-2025');
+ assert.equal(native['runs-on'],'${{ matrix.runner }}');
  assert.equal(native.if,"needs.plan.outputs.llvm_platforms == 'windows_x86_64'");
  assert.match(source.jobs['source-stage0'].if,/llvm_platforms != 'windows_x86_64'/);
  const programs=native.steps.map(step=>step.run||'').join('\n');
@@ -145,8 +145,9 @@ test('Windows source plan, upload and package receive the same native std for pi
   const win=invoke('windows-x64'),linux=invoke('linux-x64');
   assert.equal(win.status,0,win.stderr);assert.equal(linux.status,0,linux.stderr);
   const pin=JSON.parse(win.stdout).TOOLS_REF,other=JSON.parse(linux.stdout).TOOLS_REF;
-  assert.equal(pin,'afb5451d30904ed51ca6343e4d3cefb7458fd72d');assert.equal(other,'52adc7a2b67f8f1e711b6a50fbd0c83d85558a58');
+  assert.equal(pin,'55ac194ac5f9bfe8e30d14e42c2f2ec273ac574f');assert.equal(other,'52adc7a2b67f8f1e711b6a50fbd0c83d85558a58');
   const [cell]=JSON.parse(sourcePlan.output.matrix).include;
+  assert.equal(cell.runner,'windows-2025');
   const artifact=cell[upload.with.name.match(/^\$\{\{ matrix\.(\w+) \}\}$/)[1]];
   assert.equal(artifact,'final-std-native-windows-x64');assert.equal(sourcePlan.output.std_artifact,artifact);
   const r=spawnSync('bash',['-eu','-c',entry.run],{cwd:repo,env,encoding:'utf8'});assert.equal(r.status,0,r.stderr);

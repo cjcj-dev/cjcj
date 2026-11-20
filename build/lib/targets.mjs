@@ -116,7 +116,7 @@ const darwinX64 = Object.freeze({
 });
 
 const windowsX64 = Object.freeze({
-  nativeSourceBuild: Object.freeze({runner: 'windows-2022'}),
+  nativeSourceBuild: Object.freeze({runner: 'windows-2025'}),
   spec: Object.freeze({
     key: 'windows-x64', sdkName: 'windows-x64', archiveFormat: 'zip',
     packageHost: Object.freeze(['win32', 'x64']),

@@ -2157,7 +2157,7 @@ jobs:
   native-windows-sdk:
     needs: plan
     if: needs.plan.outputs.llvm_platforms == 'windows_x86_64'
-    runs-on: windows-2025
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}

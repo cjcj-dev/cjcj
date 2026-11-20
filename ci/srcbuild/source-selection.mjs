@@ -17,7 +17,7 @@ export function workflowSourceSelection(env=process.env) {
   // Only the native Windows SDK selects this paired producer. Propagate it
   // through the ordinary fetch options and their persisted workspace record.
   if(env.CJCJ_SRCBUILD_TARGET==='windows-x64' && env.CJCJ_NATIVE_RUNTIME_ARTIFACT) {
-    const pair={url:'https://github.com/cjcj-dev/cjcj-tools.git',tag:'afb5451d30904ed51ca6343e4d3cefb7458fd72d'};
+    const pair={url:'https://github.com/cjcj-dev/cjcj-tools.git',tag:'55ac194ac5f9bfe8e30d14e42c2f2ec273ac574f'};
     if(overrides.tools && Object.entries(overrides.tools).some(([k,v])=>pair[k]!==v))
       throw Error('WINDOWS_TOOLS_SOURCE_PAIR_CHANGED');
     overrides.tools=pair;
