@@ -18,36 +18,33 @@ public class LocalCaptureSourceTest {
             "var cell = identity(seed)\n{ => cell = replacement }()\nidentity(cell)\nreturn seed\n}\n"
         let result = CompileSource(code, stage: CompileStage.MANGLING, localMode: true)
         @Assert(result.ok)
-        var inferred = 0
-        var variables = 0
-        var reads = 0
-        var calls = 0
+        let seen = [0, 0, 0, 0]
         let probe = RequireTopLevelFunc(RequireFirstPackage(result), "probe")
         Walker(probe, localVisits: true, visitPre: { node =>
             if ((let Some(p) <- (node as FuncParam)) && p.identifier.Val() == "incoming") {
                 @Expect(p.resolvedMode, slot)
-                inferred++
+                seen[0]++
             }
             if ((let Some(v) <- (node as VarDecl)) && v.identifier.Val() == "cell") {
                 @Expect(v.resolvedMode, slot)
-                variables++
+                seen[1]++
             }
             if ((let Some(r) <- (node as RefExpr)) && (let Some(target) <- r.GetTarget()) &&
                 target.identifier.Val() == "cell") {
                 @Expect(r.resolvedMode, slot)
-                reads++
+                seen[2]++
             }
             if ((let Some(c) <- (node as CallExpr)) && (let Some(base) <- c.baseFunc) &&
                 (let Some(target) <- base.GetTarget()) && target.identifier.Val() == "identity") {
                 @Expect(c.resolvedMode, slot)
-                calls++
+                seen[3]++
             }
             VisitAction.WALK_CHILDREN
         }).Walk()
-        @Expect(inferred, 1)
-        @Expect(variables, 1)
-        @Expect(reads >= 2, true)
-        @Expect(calls, 2)
+        @Expect(seen[0], 1)
+        @Expect(seen[1], 1)
+        @Expect(seen[2] >= 2, true)
+        @Expect(seen[3], 2)
         @Assert(result.instance.PerformCHIRCompilation())
         @Assert(result.diag.GetErrorCount(), 0u64)
         var boxes = 0
