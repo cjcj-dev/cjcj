@@ -571,6 +571,7 @@ public class LocalTypeArgumentSynthesis {
     private func UnifyOne(argTTy: Tracked, paramTTy: Tracked): Bool {
         let argTy = argTTy.ty
         let paramTy = paramTTy.ty
+        if (tyMgr.IsCopyInterface(paramTy) && tyMgr.IsModalCopyType(argTy)) { return true }
         if (cms.Size() != 1) {
             return false
         }

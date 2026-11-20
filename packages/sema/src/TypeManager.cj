@@ -1414,6 +1414,7 @@ public class TypeManager {
         if (fastCheck) {
             return true
         }
+        if (IsCopyInterface(root) && IsModalCopyType(leaf)) { return true }
         if (root.IsNothing()) {
             return false
         }
@@ -3437,7 +3438,14 @@ public class TypeManager {
     }
 
     public func IsModalCopyType(ty: Ty): Bool {
-        if (Ty.IsMetCType(ty) || ty.IsPrimitive() || ty.IsNothing()) { return true }
+        if (Ty.IsMetCType(ty)) { return true }
+        if (ty is PrimitiveTy) {
+            return match (ty.kind) {
+                case TypeKind.TYPE_FLOAT16 | TypeKind.TYPE_RUNE | TypeKind.TYPE_NOTHING |
+                    TypeKind.TYPE_IDEAL_FLOAT | TypeKind.TYPE_IDEAL_INT | TypeKind.TYPE_INVALID => true
+                case _ => false
+            }
+        }
         if (ty.IsTuple() || ty.kind == TypeKind.TYPE_VARRAY) {
             for (arg in ty.typeArgs) { if (!IsModalCopyType(arg)) { return false } }
             return true

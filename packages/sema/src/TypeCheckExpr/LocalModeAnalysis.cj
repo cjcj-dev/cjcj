@@ -3,7 +3,7 @@ package cjcj::sema.TypeCheckExpr
 import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cjcj::sema.{DiagMismatchedTypesWithFoundTy, TypeManager}
+import cjcj::sema.{DiagMismatchedTypesWithFoundTy, GenerateTypeMapping, TypeManager}
 
 // Resolve modes after overload and lambda selection, before AST rewrites lose lexical owners.
 class LocalModeAnalysis {
@@ -391,8 +391,64 @@ class LocalModeAnalysis {
         }
     }
 
+    private func CopyMarkerIn(ty: Ty): Bool {
+        if (typeManager.IsCopyInterface(ty)) { return true }
+        if (let Some(ft) <- (ty as FuncTy)) {
+            for (arg in ft.paramTys) { if (CopyMarkerIn(arg)) { return true } }
+            return CopyMarkerIn(ft.retTy)
+        }
+        for (arg in ty.typeArgs) { if (CopyMarkerIn(arg)) { return true } }
+        return false
+    }
+
+    private func CheckCopyMarker(t: Type): Unit {
+        let ty = t.GetTy() ?? return;
+        if (!Ty.IsTyCorrect(ty) || !CopyMarkerIn(ty)) { return }
+        if (typeManager.IsCopyInterface(ty) && parents.size > 1) {
+            let parent = parents[parents.size - 2]
+            if (let Some(gc) <- (parent as GenericConstraint)) {
+                for (upper in gc.upperBounds) { if (refEq(upper, t)) { return } }
+            }
+            if (let Some(id) <- (parent as InheritableDecl)) {
+                for (superType in id.inheritedTypes) {
+                    if (refEq(superType, t)) {
+                        if (id is StructDecl) { return }
+                        if ((let Some(ed) <- (id as ExtendDecl)) &&
+                            (ed.extendedType.flatMap({ n => n.GetTy() }).map({ v => v.IsStruct() }) ?? false)) { return }
+                        break
+                    }
+                }
+            }
+        }
+        DiagMismatchedTypesWithFoundTy(diag, t, "a data type, or Copyable as a struct conformance or bound", ty.String())
+    }
+
+    private func CheckCopyFields(id: InheritableDecl): Unit {
+        var copy = false
+        for (superType in id.inheritedTypes) {
+            if (superType.GetTy().map({ t => typeManager.IsCopyInterface(t) }) ?? false) { copy = true; break }
+        }
+        if (!copy) { return }
+        let ty = if (let Some(ed) <- (id as ExtendDecl)) { ed.extendedType.flatMap({ t => t.GetTy() }) }
+            else { id.GetTy() }
+        let data = ty ?? return;
+        if (!data.IsStruct()) { return }
+        let decl = Ty.GetDeclPtrOfTy(ty) ?? return;
+        let mapping = GenerateTypeMapping(decl, data.typeArgs)
+        for (member in decl.GetMemberDecls()) {
+            if (member is VarDecl && !(member is PropDecl) && !member.TestAttr(Attribute.STATIC) &&
+                (let Some(ft) <- member.GetTy()) && Ty.IsTyCorrect(ft) &&
+                !CopyType(typeManager.GetInstantiatedTy(ft, mapping))) {
+                DiagMismatchedTypesWithFoundTy(diag, member, "a copyable stored field", ft.String())
+            }
+        }
+    }
+
     private func ResolveValue(node: Node): Unit {
-        if (let Some(typeNode) <- (node as Type)) {
+        if (let Some(id) <- (node as InheritableDecl)) {
+            CheckCopyFields(id)
+        } else if (let Some(typeNode) <- (node as Type)) {
+            CheckCopyMarker(typeNode)
             if (let Some(ft) <- Signature(typeNode)) { CheckSlot(typeNode, ft, ASTMode.NOT) }
         } else if (let Some(ref) <- (node as RefExpr)) {
             ResolveRef(ref)
