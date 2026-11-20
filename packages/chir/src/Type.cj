@@ -628,7 +628,8 @@ public open class BuiltinType <: Type {
     }
 
     public open override func GetExtends(builder: CHIRBuilder): ArrayList<ExtendDef> {
-        let _ = builder
+        // Extensions belong to the underlying data type, not to each mode of its values.
+        if (IsModal()) { return builder.WithModal(this, ModalInfo()).GetExtends(builder) }
         return GetExtends()
     }
 
