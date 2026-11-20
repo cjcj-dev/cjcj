@@ -72,6 +72,11 @@ public class FlatForInExpr {
                 idx++
                 continue
             }
+            if (let Some(exclave) <- (expr as Exclave)) {
+                RunOnBlockGroup(exclave.GetBody())
+                idx++
+                continue
+            }
             if (let Some(forInExpr) <- (expr as ForIn)) {
                 RunOnBlockGroup(forInExpr.GetBody())
                 RunOnBlockGroup(forInExpr.GetLatch())
