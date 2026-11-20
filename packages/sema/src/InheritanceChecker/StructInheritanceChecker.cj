@@ -2259,6 +2259,7 @@ public class StructInheritanceChecker {
 
     private func IsExtendedDefaultImpl(parent: MemberSignature, child: Decl): Bool {
         if (let Some(parentDecl) <- parent.decl) {
+            if (!SameModalInputs(child, parentDecl)) { return false }
             if ((parentDecl.astKind != ASTKind.FUNC_DECL && parentDecl.astKind != ASTKind.PROP_DECL) ||
                 !parentDecl.TestAttr(Attribute.DEFAULT)) {
                 return false

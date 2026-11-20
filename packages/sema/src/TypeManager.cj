@@ -2200,7 +2200,7 @@ public class TypeManager {
     }
 
     public func IsFuncTySubType(type1: FuncTy, type2: FuncTy): Bool {
-        return type1.SameModes(type2) && IsFuncParameterTypesIdentical(type1.paramTys, type2.paramTys) &&
+        return type1.retMode.IsSubMode(type2.retMode) && IsFuncParameterTypesIdentical(type1, type2) &&
             IsSubtype(type1.retTy, type2.retTy)
     }
 

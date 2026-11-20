@@ -102,6 +102,9 @@ public func LocalParameterMode(fd: FuncDecl, i: Int64): ASTMode {
 
 // Return modes participate in function types, but do not introduce overloads.
 public func SameModalInputs(left: Decl, right: Decl): Bool {
+    if ((let Some(a) <- (left as PropDecl)) && (let Some(b) <- (right as PropDecl))) {
+        return PropertyMode(a) == PropertyMode(b)
+    }
     let a = (left as FuncDecl) ?? return true;
     let b = (right as FuncDecl) ?? return true;
     if (GetReceiverMode(a) != GetReceiverMode(b)) { return false }
