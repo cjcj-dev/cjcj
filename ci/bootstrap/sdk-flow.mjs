@@ -253,7 +253,9 @@ export async function inventory(root) {
 export async function prepareSources(repos, records) {
   for (const [id, repo] of Object.entries(repos)) {
     if (!/^[0-9a-f]{40}$/.test(repo.commit) || !/^[0-9a-f]{40}$/.test(repo.tree)) throw new Error(`SOURCE_COMMIT ${id}`);
+    const windowsJob=process.env.CJCJ_SRCBUILD_TARGET==='windows-x64' && process.env.GITHUB_ACTIONS==='true';
     if (repo.archive) {
+      if(windowsJob)throw Error('WINDOWS_SOURCE_FIXED_CHECKOUT_REQUIRED '+id);
       await privateRoot(repo.root);
       if(!(await fs.stat(repo.root).catch(error=>{if(error.code==='ENOENT')return null;throw error;}))) {
         if(await fileDigest(repo.archive.file)!==repo.archive.sha256)throw new Error(`SOURCE_ARCHIVE ${id}`);
@@ -270,8 +272,11 @@ export async function prepareSources(repos, records) {
       // repository and a distinct destination instead of resetting a shared tree.
       if (repo.checkout && !(await fs.stat(repo.checkout).catch(()=>null))) {
         await privateRoot(repo.checkout);
-        await command(['git', 'clone', '--no-checkout', repo.root, repo.checkout], {records});
-        await command(['git', '-C', repo.checkout, 'checkout', '--detach', repo.commit], {records});
+        if(windowsJob)await command(['git','-C',repo.root,'worktree','add','--detach',repo.checkout,repo.commit],{records});
+        else {
+          await command(['git', 'clone', '--no-checkout', repo.root, repo.checkout], {records});
+          await command(['git', '-C', repo.checkout, 'checkout', '--detach', repo.commit], {records});
+        }
       }
       repo.root=effectiveSourceRoot(repo);
       const git = async (...args) => (await capture('git', ['-C', repo.root, ...args])).stdout.trim();

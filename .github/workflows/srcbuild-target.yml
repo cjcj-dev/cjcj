@@ -34,12 +34,12 @@ on:
         required: false
         default: "{}"
       native_build_inputs_artifact:
-        description: Optional native-cjdb source/dependency artifact prefix; runs the existing producer before SDK configuration
+        description: Optional native-cjdb input prefix (Windows: completed native installation product containing native-install.tar)
         type: string
         required: false
         default: ''
       native_build_inputs_run_id:
-        description: Original run containing native-cjdb.json and its real dependencies
+        description: Original run containing the selected native-cjdb inputs or Windows installation
         type: string
         required: false
         default: ''
@@ -2223,3 +2223,10 @@ jobs:
       - *upload-final-compiler-handoff
       - *verify-self-hosted-sdk
       - *upload-self-hosted-sdk-and-gate-logs
+      - name: Report Windows source compilation cache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: srcbuild-stage0
+          platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' }}

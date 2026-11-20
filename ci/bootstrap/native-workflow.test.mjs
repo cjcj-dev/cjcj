@@ -140,6 +140,12 @@ test('Windows source plan, upload and package receive the same native std for pi
   }
   const sourcePlan=plan(t,'windows-x64',Object.fromEntries(Object.entries(env).filter(([k])=>k.startsWith('CJCJ_NATIVE_'))));
   assert.equal(sourcePlan.status,0,sourcePlan.stderr);
+  const selection=native.steps.find(s=>s.name==='Resolve actual source selection'),selectedFile=path.join(root,mode+'-selected');
+  const invoke=target=>spawnSync('bash',['-eu','-c',selection.run],{cwd:repo,encoding:'utf8',env:{...selectedEnv(source),...env,CJCJ_SRCBUILD_TARGET:target,GITHUB_ENV:selectedFile}});
+  const win=invoke('windows-x64'),linux=invoke('linux-x64');
+  assert.equal(win.status,0,win.stderr);assert.equal(linux.status,0,linux.stderr);
+  const pin=JSON.parse(win.stdout).TOOLS_REF,other=JSON.parse(linux.stdout).TOOLS_REF;
+  assert.equal(pin,'8fcc76b850837090ae2886b2d719c6c12c0e4fe1');assert.equal(other,'52adc7a2b67f8f1e711b6a50fbd0c83d85558a58');
   const [cell]=JSON.parse(sourcePlan.output.matrix).include;
   const artifact=cell[upload.with.name.match(/^\$\{\{ matrix\.(\w+) \}\}$/)[1]];
   assert.equal(artifact,'final-std-native-windows-x64');assert.equal(sourcePlan.output.std_artifact,artifact);

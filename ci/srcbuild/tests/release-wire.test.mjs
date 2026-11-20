@@ -188,7 +188,10 @@ test('release has one LLVM producer per tuple', async () => {
   assert.ok(!jobsOf(release).some(job => job.with?.platform_set === 'windows-only'));
   const native = loadYaml(await workflow('srcbuild-target.yml'));
   assert.equal(native.jobs['fixed-llvm'].if, "inputs.native_runtime_artifact == ''");
-  assert.equal(native.jobs['native-cjdb'].if, "inputs.native_build_inputs_artifact != ''");
+  assert.equal(native.jobs['native-cjdb'].if, "inputs.native_build_inputs_artifact != '' && needs.plan.outputs.llvm_platforms != 'windows_x86_64'");
+  const install=native.jobs['native-windows-sdk'].steps.find(s=>s.name==='Receive optional completed N and AST installation');
+  assert.equal(install.if,"inputs.native_build_inputs_artifact != ''");
+  assert.equal(install.with['run-id'],'${{ inputs.native_build_inputs_run_id }}');
   assert.ok(native.jobs['native-cjdb'].steps.some(step => step.run?.includes('native-cjdb-job.mjs build')));
   assert.ok(jobsOf(release).some(job => job.uses === './.github/workflows/srcbuild.yml' && job.with?.targets === 'windows-x64'));
   assert.ok(!jobsOf(release).some(job => job.with?.platform_set === 'darwin-windows'));
