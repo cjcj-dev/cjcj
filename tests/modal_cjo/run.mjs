@@ -35,7 +35,8 @@ function compile(name, source, args, diag, cjoPackage = 'client') {
   return cwd;
 }
 compile('defaultSource', signatures, [], /"DiagKind":\s*"parse_local_mode_disabled"/);
-compile('nativeHeld', signatures, enabled.slice(0, 2), /local mode is unavailable/);
+const nativeDir = compile('nativeSignatures', signatures, enabled.slice(0, 2));
+assert.equal(fs.readFileSync(path.join(nativeDir, 'nativeSignatures.a')).subarray(0, 8).toString(), '!<arch>\n');
 const producer = compile('producer', signatures, enabled, undefined, 'modalsigs');
 assert(fs.statSync(path.join(producer, 'modalsigs.cjo')).size > 0);
 assert(!fs.existsSync(path.join(producer, 'producer.a')));
