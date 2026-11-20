@@ -1,5 +1,6 @@
 package ordinary_consumer
 
+import std.ast.*
 import std.runtime.getAllocatedLocalObjectSize
 
 class Cell {
@@ -24,5 +25,13 @@ main(): Int64 {
     if (answer != 73) { return 21 }
     if (activeBytes != before) { return 22 }
     if (after != before) { return 23 }
-    return 0
+    // Exercise the SDK's installed std.ast and its native parser after observing the ordinary allocation.
+    let expr = parseExpr(Tokens().append(Token(TokenKind.INTEGER_LITERAL, "73")))
+    if (let Some(lit) <- (expr as LitConstExpr)) {
+        if (lit.literal.kind == TokenKind.INTEGER_LITERAL && lit.literal.value == "73") {
+            println("std.ast parsed integer=73")
+            return 0
+        }
+    }
+    return 24
 }

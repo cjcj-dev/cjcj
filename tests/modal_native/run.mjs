@@ -22,7 +22,8 @@ const generated=path.join(sdk,'include/flatbuffers/StdxChirFormat_generated.h');
 const flatc=path.join(sdk,'third_party/flatbuffers/bin/flatc');
 const inputs = new Set([compiler,producer,schema,generated,flatc,path.join(sdk,'include/cangjie/CHIR/IR/AttributeInfo.h'),path.join(runtime,'libcangjie-runtime.so'),path.join(runtime,'libboundscheck.so'),
   path.join(llvm,'libLLVM-15.so'),path.join(sdk,'modules',tuple,'std/std.runtime.cjo'),
-  path.join(sdk,'modules',tuple,'std/std.core.cjo'),path.join(sdk,'lib',tuple,'libcangjie-std-core.a')]);
+  path.join(sdk,'modules',tuple,'std/std.core.cjo'),path.join(sdk,'modules',tuple,'std/std.ast.cjo'),
+  path.join(sdk,'lib',tuple,'libcangjie-ast-support.a'),path.join(sdk,'lib',tuple,'libcangjie-std-core.a')]);
 const identity = Object.fromEntries([...inputs].map(p => {
   const file=fs.realpathSync(p);
   if (!file.startsWith(sdk+path.sep)) throw Error('SDK input resolves outside the installation: '+p);
@@ -68,6 +69,7 @@ for (const name of ['local','ordinary','escape']) {
   const run = execute(name+'-run',exe,[]);
   const result = new RegExp('^'+name+' before=(\\d+) active=(\\d+) after=(\\d+) payload=(\\d+)\\s*$','m').exec(run.stdout??'');
   if (!result) { failures.push(name+' missing public observation'); continue; }
+  if (name==='ordinary' && !/^std\.ast parsed integer=73$/m.test(run.stdout??'')) failures.push('installed std.ast native parser');
   const [before,active,after,payload] = result.slice(1).map(BigInt);
   if (run.status !== 0 || before !== after || payload !== 73n || (name==='local' ? active<=before : active!==before))
     failures.push(name+' runtime rc='+run.status+' '+result[0].trim());
