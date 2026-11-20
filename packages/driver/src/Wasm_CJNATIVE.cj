@@ -62,7 +62,9 @@ public class Wasm_CJNATIVE <: Gnu {
             driverOptions.incrementalCompileNoChange || !driverOptions.inputObjs.isEmpty() ||
             !driverOptions.bcInputFiles.isEmpty() || !driverOptions.inputLinkOptionOrder.isEmpty() ||
             !driverOptions.inputLinkOptionsOrder.isEmpty() || !driverOptions.optArg.isEmpty() ||
-            !driverOptions.llcArg.isEmpty() || driverOptions.IsObfuscationEnabled() || objcopyPath.isEmpty()) {
+            !driverOptions.optPassOptions.isEmpty() || driverOptions.enableCoverage || driverOptions.EnableAsan() ||
+            driverOptions.EnableTsan() || driverOptions.EnableHwAsan() || !driverOptions.llcArg.isEmpty() ||
+            driverOptions.IsObfuscationEnabled() || objcopyPath.isEmpty()) {
             return
         }
         if (driverOptions.outputMode == OutputMode.STATIC_LIB && driverOptions.inputLibraryOrder.isEmpty()) {
