@@ -184,14 +184,17 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
       if(original.runtime_sha!==runtime.source.commit||original.platform!==platform
         ||original.paired_llvm_sha!==stage.sources?.llvm?.commit||!original.files)throw Error('INSTALLED_RUNTIME_NATIVE_SOURCE');
       const config=original.configuration;
-      if(received && (!stage.selection.bootstrapHost?.version || !original.build_type || !original.version
-        || !isDeepStrictEqual(config,{buildType:original.build_type,version:original.version,
-          hostVersion:stage.selection.bootstrapHost.version,pairedLlvmCommit:stage.sources.llvm.commit})
-        || (adopted && (adopted.runtimeCommit!==original.runtime_sha || adopted.llvmCommit!==original.paired_llvm_sha || adopted.hostVersion!==config.hostVersion))))
-        throw Error('INSTALLED_RUNTIME_NATIVE_CONFIGURATION');
-      if(config && (!isDeepStrictEqual(config,runtime.build?.configuration)
-        || config.pairedLlvmCommit!==original.paired_llvm_sha
-        || (target.runtime.configuration && !isDeepStrictEqual(config,target.runtime.configuration))))
+      if(received) {
+        const hostVersion=stage.selection.bootstrapHost?.version;
+        const selected={buildType:original.build_type,version:original.version,hostVersion,pairedLlvmCommit:stage.sources.llvm.commit};
+        if(!hostVersion || !selected.buildType || !selected.version || !isDeepStrictEqual(config,selected)
+          || !isDeepStrictEqual(config,runtime.build?.configuration)
+          || (target.runtime.configuration && !isDeepStrictEqual(config,target.runtime.configuration))
+          || (adopted && (adopted.runtimeCommit!==original.runtime_sha || adopted.llvmCommit!==original.paired_llvm_sha || adopted.hostVersion!==hostVersion)))
+          throw Error('INSTALLED_RUNTIME_NATIVE_CONFIGURATION');
+      } else if(config && (config.pairedLlvmCommit!==original.paired_llvm_sha
+        || config.hostVersion!==runtime.build?.configuration?.hostVersion
+        || (target.runtime.configuration && config.hostVersion!==target.runtime.configuration.hostVersion)))
         throw Error('INSTALLED_RUNTIME_NATIVE_CONFIGURATION');
       const pair=new Set(products.map(row=>row.path));
       if((received || target.runtime.install) && products.some(row=>original.files[row.path]!==row.sha256))throw Error('INSTALLED_RUNTIME_NATIVE_BYTES pair');

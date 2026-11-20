@@ -48,6 +48,7 @@ export async function checkNativeInput(request) {
   if(kind==='runtime') {
     const files=['runtime/lib/'+native.tuple+'/libcangjie-runtime'+native.shared,
       'lib/'+native.tuple+'/libcangjie-runtime.a'];
+    const received=Object.hasOwn(request,'runtimeFiles');
     let archiveInputs;
     const original=await fs.readFile(path.join(install,RUNTIME_INPUTS)).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
     const artifacts=[];
@@ -59,14 +60,14 @@ export async function checkNativeInput(request) {
       console.log('RUNTIME_PAIR_ASSERTION_REACHED '+JSON.stringify({file,stamps,masks}));
       const sourceStamp=stamps.length===1&&/^src-[0-9a-f]{64}$/.test(stamps[0]);
       if(!sourceStamp&&(stamps.length!==1||stamps[0]!==commit))throw new Error('RUNTIME_PAIR_SOURCE_STAMP');
-      if(sourceStamp||original||request.runtimeFiles) {
+      if(sourceStamp||original||received) {
         if(!original)throw new Error('RUNTIME_SOURCE_RECORD_REQUIRED');
         archiveInputs=await runtimeInputsForArtifact(install,{path:rel,sha256:await fileDigest(file)},
           {repository:request.sourceRepository??request.repository,commit,stamp:'CJRT-COMMIT:'+stamps[0],configuration:request.configuration});
       }
       if(index===0?masks!==1:masks<1)throw new Error('RUNTIME_COLOUR_PAIR');
       const sha256=await fileDigest(file);
-      if(request.runtimeFiles && request.runtimeFiles[rel]!==sha256)throw Error('NATIVE_RUNTIME_ORIGINAL_BYTES '+rel);
+      if(received && request.runtimeFiles?.[rel]!==sha256)throw Error('NATIVE_RUNTIME_ORIGINAL_BYTES '+rel);
       artifacts.push({path:rel,sha256});
     }
     if(archiveInputs)await fs.writeFile(path.join(work,RUNTIME_INPUTS),original);
