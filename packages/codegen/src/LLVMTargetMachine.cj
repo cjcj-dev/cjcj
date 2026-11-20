@@ -140,9 +140,11 @@ private func InitTargetComponent(arch: LLVMTargetArch, component: UInt32): Bool 
         case LLVMTargetArch.AArch64 => "AArch64"
         case LLVMTargetArch.X86 => "X86"
     }
+    var initialized = false
     try (cname = unsafe { LibC.mallocCString(name) }.asResource()) {
-        return unsafe { LLVMSelfhostInitTargetComponent(cname.value, component) } != 0
+        initialized = unsafe { LLVMSelfhostInitTargetComponent(cname.value, component) } != 0
     }
+    return initialized
 }
 
 public func LLVMInitializeTargetInfo(arch: LLVMTargetArch): Unit {
