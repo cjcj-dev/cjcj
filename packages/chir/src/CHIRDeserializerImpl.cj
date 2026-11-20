@@ -32,6 +32,9 @@ private func DeserializeOverflowStrategy(strategy: UInt8): OverflowStrategy {
 }
 
 private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
+    if (kind == CHIRFB_CHIR_EXPR_KIND_EXCLAVE) { return (ExprKind.EXCLAVE, false) }
+    if (kind == CHIRFB_CHIR_EXPR_KIND_START_REGION) { return (ExprKind.START_REGION, false) }
+    if (kind == CHIRFB_CHIR_EXPR_KIND_END_REGION) { return (ExprKind.END_REGION, false) }
     return match (kind) {
         case 1u8 => (ExprKind.GOTO, false)
         case 2u8 => (ExprKind.BRANCH, false)
@@ -110,9 +113,6 @@ private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
         case 75u8 => (ExprKind.INTRINSIC, false)
         case 76u8 => (ExprKind.GET_RTTI, false)
         case 77u8 => (ExprKind.GET_RTTI_STATIC, false)
-        case CHIRFB_CHIR_EXPR_KIND_EXCLAVE => (ExprKind.EXCLAVE, false)
-        case CHIRFB_CHIR_EXPR_KIND_START_REGION => (ExprKind.START_REGION, false)
-        case CHIRFB_CHIR_EXPR_KIND_END_REGION => (ExprKind.END_REGION, false)
         case _ => (ExprKind.GOTO, false)
     }
 }

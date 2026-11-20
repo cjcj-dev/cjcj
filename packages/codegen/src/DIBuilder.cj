@@ -322,7 +322,8 @@ public class DIBuilder {
         curScope = LLVMNullMetadata()
         unsafe { LLVMDIBuilderFinalizeSubprogram(raw, subprogram) }
         if (!needSubprogram) {
-            unsafe { LLVMSetSubprogram(function, LLVMNullMetadata()) }
+            // N implements setSubprogram(nullptr) as removing MD_dbg; its C setter requires a nonnull DISubprogram.
+            LLVMEraseGlobalMetadata(cgMod.GetLLVMContext(), function, "dbg")
         }
         needSubprogram = false
     }
