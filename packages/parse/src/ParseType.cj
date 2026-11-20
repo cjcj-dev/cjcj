@@ -66,10 +66,7 @@ extend ParserImpl {
         let modal = ASTModalInfo(local, atPos, first.Begin(), lastToken.End())
         // Keep local mode fail closed at the parser until Sema, persistence and
         // native lowering can all preserve the modal and its region semantics.
-        let diag = ParseDiagnoseRefactor(DiagKindRefactor.parse_diag_error, MakeRange(atPos, modal.end),
-            "local mode is disabled")
-        diag.AddMainHintArguments("local mode requires a paired compiler and runtime")
-        diag.Emit()
+        ParseDiagnoseRefactor(DiagKindRefactor.parse_local_mode_disabled, MakeRange(atPos, modal.end)).Emit()
         return Some(modal)
     }
 

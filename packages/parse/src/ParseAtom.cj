@@ -412,10 +412,8 @@ extend ParserImpl {
                 let ty = ParseType()
                 if (!ty.TestAttr(Attribute.IS_BROKEN)) {
                     if (let Some(modal) <- ty.modal) {
-                        let diag = ParseDiagnoseRefactor(DiagKindRefactor.parse_diag_error,
-                            MakeRange(modal.localPos, modal.end), "unexpected modal type here")
-                        diag.AddMainHintArguments("type argument cannot carry a local-mode suffix")
-                        diag.Emit()
+                        ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_modal_type,
+                            MakeRange(modal.localPos, modal.end)).Emit()
                         ty.EnableAttr(Attribute.IS_BROKEN)
                     }
                     out.add(ty)
