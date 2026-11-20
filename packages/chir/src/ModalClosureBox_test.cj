@@ -83,7 +83,7 @@ private class ModalCaptureFixture {
 
 @Test
 class ModalClosureBoxTest {
-    private func Box(copyable: Bool, mode: CHIRMode): ClassType {
+    private func CapturedBoxType(copyable: Bool, mode: CHIRMode): ClassType {
         let fixture = ModalCaptureFixture(copyable, ModalInfo(mode))
         let alloc = fixture.BoxAllocation()
         let boxTy = (alloc.GetType() as ClassType).getOrThrow()
@@ -97,7 +97,7 @@ class ModalClosureBoxTest {
 
     @TestCase
     func ordinaryCaptureKeepsHeapBox(): Unit {
-        let boxTy = Box(false, CHIRMode.NONE)
+        let boxTy = CapturedBoxType(false, CHIRMode.NONE)
         @Expect(boxTy.IsModal(), false)
         @Expect(refEq(boxTy, boxTy.GetClassDef().GetType().getOrThrow()), true)
         @Expect(boxTy.ToString().startsWith("Class-$Captured_"), true)
@@ -106,7 +106,7 @@ class ModalClosureBoxTest {
 
     @TestCase
     func mustLocalCaptureAllocatesBoxInLocalRegion(): Unit {
-        let boxTy = Box(false, CHIRMode.MUST)
+        let boxTy = CapturedBoxType(false, CHIRMode.MUST)
         @Expect(boxTy.GetModalInfo() == ModalInfo(CHIRMode.MUST), true)
         @Expect(boxTy.IsLocalRegion(), true)
         @Expect(boxTy.ToString().endsWith(" @local!"), true)
@@ -114,7 +114,7 @@ class ModalClosureBoxTest {
 
     @TestCase
     func maybeLocalCaptureAllocatesBoxInMaybeRegion(): Unit {
-        let boxTy = Box(false, CHIRMode.MAYBE)
+        let boxTy = CapturedBoxType(false, CHIRMode.MAYBE)
         @Expect(boxTy.GetModalInfo() == ModalInfo(CHIRMode.MAYBE), true)
         @Expect(boxTy.IsMaybeLocalRegion(), true)
     }
@@ -122,7 +122,7 @@ class ModalClosureBoxTest {
     @TestCase
     func copyableModalCaptureOpensNoRegion(): Unit {
         // `Int64 @local?` is modal but Copyable: SetMemRegion opens no region, so neither does the box.
-        let boxTy = Box(true, CHIRMode.MAYBE)
+        let boxTy = CapturedBoxType(true, CHIRMode.MAYBE)
         @Expect(boxTy.IsModal(), false)
     }
 
