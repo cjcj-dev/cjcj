@@ -8,7 +8,7 @@ public import cjcj::basic.{
 public import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.StringConvertor
-import cjcj::flatbuffers.{FlatBufferString, Vector}
+import cjcj::flatbuffers.{FlatBufferString, Vector, VerifierTemplate}
 import cjcj::basic.Diagnostic as BasicDiagnostic
 import cjcj::basic.DiagFormat as BasicDiagFormat
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -588,8 +588,14 @@ public class ImportedDeclGroup {
     }
 }
 
+private func ReadFunctionModes(cfg: FuncTyConfig, info: PackageFormat_FuncTyInfo): Unit {
+    let modes = info.GetParamModes()
+    cfg.paramModes = Array<ASTMode>(modes.size, { i => ASTMode.FromWire(modes[i]) })
+    cfg.retMode = ASTMode.FromWire(info.GetRetMode())
+}
+
 private class CjoFlatBuffer {
-    private let data: Array<UInt8>
+    public let data: Array<UInt8>
 
     public init(data: Array<UInt8>) {
         this.data = data
@@ -733,7 +739,16 @@ private class CjoFlatBuffer {
         }
         // The native header predates field 9. It verifies the surrounding
         // vectors/tables, but cannot validate the new slot before U8Field reads it.
-        return result && VerifyImportExtensions()
+        if (!result || !VerifyImportExtensions()) { return false }
+        // The installed native shim predates FuncTyInfo's appended mode fields.
+        let types = VectorField(RootTable(), 18)
+        let verifier = VerifierTemplate(data)
+        for (index in 0..VectorLength(types)) {
+            if (!PackageFormat_SemaTy(data, VectorOffsetElement(types, index)).VerifyFunctionModes(verifier)) {
+                return false
+            }
+        }
+        return true
     }
 
     private func VerifyImportExtensions(): Bool {
@@ -1996,6 +2011,7 @@ public class CjoSignatureMaterializer {
         } else if (kind == MF_TYPE_KIND_FUNC) {
             let info = typeObj.GetInfoAsFuncTyInfo().getOrThrow()
             let cfg = FuncTyConfig()
+            ReadFunctionModes(cfg, info)
             cfg.isC = info.GetIsC()
             cfg.hasVariableLenArg = info.GetHasVariableLenArg()
             ty = typeManager.GetFunctionTy(LoadTypeArgs(typeObj), LoadType(info.GetRetType()), cfg: cfg)
@@ -5867,6 +5883,7 @@ public class CjoSignatureMaterializer {
             }
             let cfg = FuncTyConfig()
             if (infoTable >= 0) {
+                ReadFunctionModes(cfg, PackageFormat_FuncTyInfo(reader.data, infoTable))
                 cfg.isC = reader.U8Field(infoTable, 6, 0u8) != 0u8
                 cfg.hasVariableLenArg = reader.U8Field(infoTable, 8, 0u8) != 0u8
             }

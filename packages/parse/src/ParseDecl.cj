@@ -1848,7 +1848,7 @@ extend ParserImpl {
             return param
         } else {
             param.colonPos = lastToken.Begin()
-            param.typeNode = ParseType()
+            param.typeNode = ParseType(ScopeKindEquals(scopeKind, ScopeKind.UNKNOWN_SCOPE))
         }
         if (Skip(TokenKind.ASSIGN)) {
             if (!param.isNamedParam) {

@@ -3741,6 +3741,7 @@ extend TypeChecker {
             hasVariableLenArg = funcDecl2.hasVariableLenArg || hasVariableLenArg
         }
         let cfg = FuncTyConfig()
+        cfg.ReadModes(fb)
         cfg.isC = isCFunc
         cfg.hasVariableLenArg = hasVariableLenArg
         let retType = fb.retType.getOrThrow()
@@ -4389,6 +4390,7 @@ extend TypeChecker {
 
     private func FunctionTyConfigForFuncBody(fb: FuncBody): FuncTyConfig {
         let cfg = FuncTyConfig()
+        cfg.ReadModes(fb)
         let isCFFIBackend = OptionIsUnsafeBackend(GlobalOptions().backend)
         if (fb.TestAttr(Attribute.C)) {
             cfg.isC = true

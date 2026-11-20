@@ -13,6 +13,8 @@ class TypeInstantiationSubstitutionTest {
         let integer = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
         let mapping = TypeSubst([(t, integer)])
         let cfg = FuncTyConfig()
+        cfg.paramModes = [ASTMode.NOT, ASTMode.FULL]
+        cfg.retMode = ASTMode.HALF
         cfg.isC = true
         cfg.isClosureTy = true
         cfg.hasVariableLenArg = true

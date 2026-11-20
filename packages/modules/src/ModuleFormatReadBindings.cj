@@ -1230,10 +1230,44 @@ public class PackageFormat_Pattern <: Table {
     }
 }
 
+private class PackageFormat_Mode <: Table {
+    init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
+    func Local(): UInt8 { return GetField(MF_MODE_VT_LOCAL, 0u8) }
+    func Verify(v: VerifierTemplate): Bool {
+        return VerifyTableStart(v) && VerifyField<UInt8>(v, MF_MODE_VT_LOCAL, 1) && Local() <= 2u8 && v.EndTable()
+    }
+}
+
 // ModuleFormat_generated.h:5815-5856 (FuncTyInfo).
 public class PackageFormat_FuncTyInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
+    private func ParamModes(): Option<Vector<Offset<Any>>> {
+        if (let Some(p) <- GetPointer(MF_FUNC_TY_INFO_VT_TYPEARGSMODE)) { return Some(Vector<Offset<Any>>(data, p)) }
+        return None
+    }
+    public func GetParamModes(): Array<UInt8> {
+        let vec = ParamModes() ?? return []
+        return Array<UInt8>(Int64(vec.size()), { i =>
+            PackageFormat_Mode(data, (vec.Get(UInt32(i)) as Int64).getOrThrow()).Local()
+        })
+    }
+    public func GetRetMode(): UInt8 {
+        let p = GetPointer(MF_FUNC_TY_INFO_VT_RETTYMODE) ?? return 0u8
+        return PackageFormat_Mode(data, p).Local()
+    }
+    public func VerifyModes(arity: UInt32, v: VerifierTemplate): Bool {
+        let ok = VerifyOffset(v, MF_FUNC_TY_INFO_VT_TYPEARGSMODE) &&
+            v.VerifyVector(GetPointer(MF_FUNC_TY_INFO_VT_TYPEARGSMODE), 4) &&
+            v.VerifyVectorOfTables(GetPointer(MF_FUNC_TY_INFO_VT_TYPEARGSMODE),
+                { p: Int64, w: VerifierTemplate => PackageFormat_Mode(data, p).Verify(w) }) &&
+            VerifyOffset(v, MF_FUNC_TY_INFO_VT_RETTYMODE) &&
+            v.VerifyTable(GetPointer(MF_FUNC_TY_INFO_VT_RETTYMODE),
+                { p: Int64, w: VerifierTemplate => PackageFormat_Mode(data, p).Verify(w) })
+        if (!ok) { return false }
+        if (let Some(modes) <- ParamModes()) { return modes.size() == arity }
+        return true
+    }
     public func GetRetType(): UInt32 { return GetField(MF_FUNC_TY_INFO_VT_RETTYPE, 0u32) }
     public func GetIsC(): Bool { return GetField(MF_FUNC_TY_INFO_VT_ISC, false) }
     public func GetHasVariableLenArg(): Bool { return GetField(MF_FUNC_TY_INFO_VT_HASVARIABLELENARG, false) }
@@ -1309,6 +1343,11 @@ public class PackageFormat_SemaTy <: Table {
     public func GetTypeArgs(): Option<Vector<UInt32>> {
         return if (let Some(p) <- GetPointer(MF_SEMA_TY_VT_TYPEARGS)) { Some(Vector<UInt32>(data, p)) } else { None }
     }
+    public func VerifyFunctionModes(v: VerifierTemplate): Bool {
+        let info = GetInfoAsFuncTyInfo() ?? return GetKind() != MF_TYPE_KIND_FUNC
+        let args = GetTypeArgs()
+        return info.VerifyModes(if (let Some(a) <- args) { a.size() } else { 0u32 }, v)
+    }
     func GetInfoType(): UInt8 { return GetField(MF_SEMA_TY_VT_INFO_TYPE, 0u8) }
     func GetInfo(): Option<Int64> { return GetPointer(MF_SEMA_TY_VT_INFO) }
 
@@ -1333,6 +1372,7 @@ public class PackageFormat_SemaTy <: Table {
             VerifyField<UInt8>(verifier, MF_SEMA_TY_VT_INFO_TYPE, 1) &&
             VerifyOffset(verifier, MF_SEMA_TY_VT_INFO) &&
             VerifySemaTyInfo(data, verifier, GetInfo(), GetInfoType()) &&
+            VerifyFunctionModes(verifier) &&
             verifier.EndTable()
     }
 }

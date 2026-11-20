@@ -10,6 +10,7 @@ import cjcj::mangle.ASTMangler
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
 import cjcj::modules.{INVALID_FORMAT_INDEX, SemaCjoManager, CJO_MAJOR_VERSION, CJO_MINOR_VERSION, CJO_PATCH_VERSION}
+import cjcj::modules.CreateFuncTyInfo
 import cjcj::modules.CreateFullId as CreateModuleFullId
 import cjcj::modules.CreateFeatureId as CreateModuleFeatureId
 import cjcj::modules.CreateFeaturesDirective as CreateModuleFeaturesDirective
@@ -927,6 +928,7 @@ public class ASTWriter <: Resource {
                     FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
                 }
                 let cfg = FuncTyConfig()
+                cfg.ReadModes(body)
                 if (let Some(declTy2) <- funcDecl.GetTy()) {
                     if (let Some(funcTy2) <- (declTy2 as FuncTy)) {
                         cfg.isC = funcTy2.isC
@@ -963,6 +965,7 @@ public class ASTWriter <: Resource {
                 FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
             }
             let cfg = FuncTyConfig()
+            cfg.ReadModes(funcType)
             cfg.isC = funcType.isC
             if (let Some(typeTy) <- funcType.GetTy()) {
                 if (let Some(funcTy) <- (typeTy as FuncTy)) {
@@ -2676,13 +2679,25 @@ public class ASTWriter <: Resource {
         return CreateSemaTy(builder, TypeKindToFlat(ty.kind), 0u32, MF_SEMA_TY_INFO_NONE, 0u32)
     }
 
+    private func SaveMode(mode: ASTMode): FlatBufferOffset {
+        builder.StartTable(1)
+        builder.AddU8(0, mode.WireValue())
+        return builder.EndTable()
+    }
+
     private func SaveFuncTyInfo(funcTy: FuncTy): FlatBufferOffset {
         let ret = SaveType(funcTy.retTy)
-        builder.StartTable(3)
-        builder.AddBool(2, funcTy.hasVariableLenArg)
-        builder.AddBool(1, funcTy.isC)
-        builder.AddU32(0, ret)
-        return builder.EndTable()
+        var params = 0u32
+        for (i in 0..funcTy.paramTys.size) {
+            if (funcTy.ParamMode(i) != ASTMode.NOT) {
+                let slots = ArrayList<FlatBufferOffset>()
+                for (j in 0..funcTy.paramTys.size) { slots.add(SaveMode(funcTy.ParamMode(j))) }
+                params = builder.CreateVectorOffsets(slots)
+                break
+            }
+        }
+        let result = if (funcTy.retMode == ASTMode.NOT) { 0u32 } else { SaveMode(funcTy.retMode) }
+        return CreateFuncTyInfo(builder, ret, funcTy.isC, funcTy.hasVariableLenArg, paramModes: params, retMode: result)
     }
 
     private func SaveGenericTyInfo(genericTy: GenericsTy): FlatBufferOffset {

@@ -1078,6 +1078,7 @@ public enum DiagKindRefactor {
     | sema_java_impl_prop_must_be_java_compatible
     | parse_local_mode_disabled
     | parse_unexpected_modal_type
+    | sema_local_api_disabled
 }
 
 public class ErrorData {
@@ -3002,6 +3003,7 @@ public let errorData: Array<ErrorData> = [
     ErrorData(message: "type of member property in exported '@Java' declaration must be java-compatible", mainHint: "'%s' is not java-compatible type", otherHints: []),
     ErrorData(message: "local mode is disabled", mainHint: "local mode is not available in this compiler build", otherHints: []),
     ErrorData(message: "unexpected modal type here", mainHint: "this type cannot carry a local-mode suffix", otherHints: []),
+    ErrorData(message: "cannot use local API '%s' when local mode is disabled", mainHint: "", otherHints: []),
 ]
 
 public let rDiagSeveritys: Array<DiagSeverity> = [
@@ -3747,6 +3749,7 @@ public let rDiagSeveritys: Array<DiagSeverity> = [
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
     DiagSeverity.DS_ERROR,
+    DiagSeverity.DS_ERROR,
 ]
 
 public let rWarnGroups: Array<WarnGroup> = [
@@ -4487,6 +4490,7 @@ public let rWarnGroups: Array<WarnGroup> = [
     WarnGroup.NONE,
     WarnGroup.UNEXPECTED_CFG,
     WarnGroup.DEPRECATED,
+    WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.NONE,
     WarnGroup.NONE,
@@ -5252,8 +5256,9 @@ public let RE_DIAG_KIND_STR: Array<String> = [
     "sema_java_impl_prop_must_be_java_compatible",
     "parse_local_mode_disabled",
     "parse_unexpected_modal_type",
+    "sema_local_api_disabled",
 ]
-public let RE_DIAG_KIND_STR_SIZE: Int64 = 742
+public let RE_DIAG_KIND_STR_SIZE: Int64 = 743
 
 public func DiagKindIndex(kind: DiagKind): Int64 {
     return match (kind) {
@@ -6292,6 +6297,7 @@ public func DiagKindRefactorIndex(kind: DiagKindRefactor): Int64 {
         case DiagKindRefactor.sema_java_impl_prop_must_be_java_compatible => 739
         case DiagKindRefactor.parse_local_mode_disabled => 740
         case DiagKindRefactor.parse_unexpected_modal_type => 741
+        case DiagKindRefactor.sema_local_api_disabled => 742
     }
 }
 
@@ -6328,6 +6334,7 @@ public func GetDiagnoseCategory(diagKind: DiagKind): DiagCategory {
 }
 
 public func GetDiagnoseCategory(diagKind: DiagKindRefactor): DiagCategory {
+    if (diagKind == DiagKindRefactor.sema_local_api_disabled) { return DiagCategory.SEMA }
     if (diagKind == DiagKindRefactor.sema_java_impl_prop_must_be_java_compatible) { return DiagCategory.SEMA }
     if (diagKind == DiagKindRefactor.sema_objc_mirror_interface_subtype_must_be_annotated) { return DiagCategory.SEMA }
     if (diagKind == DiagKindRefactor.parse_deprecated_interop_annotation ||

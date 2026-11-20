@@ -144,6 +144,12 @@ public open class DefaultCompilerInstance <: Resource {
         })
     }
 
+    public func CompileCjoInterface(): Bool {
+        if (!Compile(stage: CompileStage.SAVE_CJO) || diag.GetErrorCount() != 0) { return false }
+        RegisterCjoOutputs(core.GetSourcePackages())
+        return true
+    }
+
     protected func RegisterCjoOutputs(pkgs: ArrayList<Package>): Unit {
         for (pkg in pkgs) {
             if (pkg.IsEmpty()) {

@@ -215,7 +215,7 @@ private func getTyFromBuiltinDecl(typeManager: TypeManager, bid: BuiltInDecl, ty
             return TypeManager.GetInvalidTy()
         }
         if (let Some(funcTy) <- (typeArgs[0] as FuncTy)) {
-            let cfg = FuncTyConfig()
+            let cfg = funcTy.CopyConfig()
             cfg.isC = true
             return typeManager.GetFunctionTy(funcTy.paramTys.toArray(), funcTy.retTy, cfg: cfg)
         }
@@ -259,6 +259,7 @@ private func getTyFromASTCFuncType(typeManager: TypeManager, ctx: ASTContext, rt
         funcType.SetTy(GetTyFromASTFuncType(typeManager, ctx, funcType,
             importManager: importManager, diag: diag))
         let cfg = FuncTyConfig()
+        cfg.ReadModes(funcType)
         cfg.isC = true
         return typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
     }
@@ -725,6 +726,7 @@ public func GetTyFromASTFuncType(typeManager: TypeManager, ctx: ASTContext, func
         return TypeManager.GetInvalidTy()
     }
     let cfg = FuncTyConfig()
+    cfg.ReadModes(funcType)
     cfg.isC = funcType.isC
     return typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
 }
@@ -1048,6 +1050,7 @@ public func PreSetDeclType(typeManager: TypeManager, ctx: ASTContext,
             }
         }
         let cfg = FuncTyConfig()
+        cfg.ReadModes(funcBody)
         cfg.isC = funcBody.TestAttr(Attribute.C) ||
             (funcDecl.TestAttr(Attribute.FOREIGN) && OptionIsUnsafeBackend(backendType))
         cfg.hasVariableLenArg = funcDecl.hasVariableLenArg ||

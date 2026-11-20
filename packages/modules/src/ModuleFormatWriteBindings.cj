@@ -458,8 +458,11 @@ public func CreatePattern(builder: FlatBufferBuilder, kind: Int64, begin: ArrayL
 }
 
 // ModuleFormat_generated.h (CreateFuncTyInfo).
-func CreateFuncTyInfo(builder: FlatBufferBuilder, retType: UInt32, isC: Bool, hasVariableLenArg: Bool): FlatBufferOffset {
-    builder.StartTable(3)
+public func CreateFuncTyInfo(builder: FlatBufferBuilder, retType: UInt32, isC: Bool, hasVariableLenArg: Bool,
+    paramModes!: FlatBufferOffset = 0u32, retMode!: FlatBufferOffset = 0u32): FlatBufferOffset {
+    builder.StartTable(5)
+    builder.AddOffset(4, retMode)
+    builder.AddOffset(3, paramModes)
     builder.AddU32(0, retType, defaultValue: 0u32)
     builder.AddBool(2, hasVariableLenArg, defaultValue: false)
     builder.AddBool(1, isC, defaultValue: false)

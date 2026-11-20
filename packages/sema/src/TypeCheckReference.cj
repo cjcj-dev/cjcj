@@ -1564,6 +1564,22 @@ private func TypeCheckReferenceCheckLegalityIsSkip(node: Node): Bool {
     return false
 }
 
+// Check the resolved declaration, including bare references and nested function
+// values. Importing a package by itself does not use any of its modal APIs.
+private func HasLocalSignature(ty: Ty, seen: HashSet<Ptr<Ty>>): Bool {
+    if (!seen.add(Ptr<Ty>(ty))) { return false }
+    if (let Some(ft) <- (ty as FuncTy)) {
+        if (ft.retMode != ASTMode.NOT) { return true }
+        for (i in 0..ft.paramTys.size) {
+            if (ft.ParamMode(i) != ASTMode.NOT) { return true }
+        }
+    }
+    for (arg in ty.typeArgs) {
+        if (HasLocalSignature(arg, seen)) { return true }
+    }
+    return false
+}
+
 private func CheckLegalityOfReferenceForNameReferenceExpr(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -1571,6 +1587,12 @@ private func CheckLegalityOfReferenceForNameReferenceExpr(
     ctx: ASTContext,
     nameRef: NameReferenceExpr
 ): Unit {
+    let enabled = if (let Some(instance) <- impl.ci) { instance.globalOptions.enableLocalMode } else { false }
+    if (!enabled && (let Some(decl) <- nameRef.GetTarget()) && (let Some(ty) <- decl.GetTy()) &&
+        HasLocalSignature(ty, HashSet<Ptr<Ty>>())) {
+        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_local_api_disabled, nameRef,
+            arguments: [decl.identifier.Val()]).Emit()
+    }
     if (!nameRef.instTys.isEmpty()) {
         let _ = impl.CheckInstTypeCompleteness(ctx, nameRef)
     }

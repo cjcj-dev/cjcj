@@ -1054,7 +1054,29 @@ public class TupleTy <: Ty {
     }
 }
 
+// Locality belongs to a signature slot, never to the shared primitive Ty.
 public class FuncTyConfig {
+    public var paramModes: Array<ASTMode> = []
+    public var retMode: ASTMode = ASTMode.NOT
+
+    public func ReadModes(ft: FuncType): Unit {
+        paramModes = Array<ASTMode>(ft.paramTypes.size, { i => TypeMode(ft.paramTypes[i]) })
+        retMode = TypeMode(ft.retType)
+    }
+
+    public func ReadModes(fb: FuncBody): Unit {
+        if (!fb.paramLists.isEmpty()) {
+            let params = fb.paramLists[0].params
+            paramModes = Array<ASTMode>(params.size, { i => TypeMode(params[i].typeNode) })
+        }
+        retMode = TypeMode(fb.retType)
+    }
+
+    private func TypeMode(t: Option<Type>): ASTMode {
+        if ((let Some(node) <- t) && (let Some(m) <- node.modal)) { return m.local }
+        return ASTMode.NOT
+    }
+
     public var isC: Bool = false
     public var isClosureTy: Bool = false
     public var hasVariableLenArg: Bool = false
@@ -1064,6 +1086,32 @@ public class FuncTyConfig {
 }
 
 public class FuncTy <: Ty {
+    private let paramModes: Array<ASTMode>
+    public let retMode: ASTMode
+
+    public func ParamMode(i: Int64): ASTMode {
+        return if (paramModes.isEmpty()) { ASTMode.NOT } else { paramModes[i] }
+    }
+
+    public func CopyConfig(): FuncTyConfig {
+        let cfg = FuncTyConfig()
+        cfg.paramModes = paramModes.clone()
+        cfg.retMode = retMode
+        cfg.isC = isC
+        cfg.isClosureTy = isClosureTy
+        cfg.hasVariableLenArg = hasVariableLenArg
+        cfg.noCast = noCast
+        return cfg
+    }
+
+    public func SameModes(other: FuncTy): Bool {
+        if (paramTys.size != other.paramTys.size || retMode != other.retMode) { return false }
+        for (i in 0..paramTys.size) {
+            if (ParamMode(i) != other.ParamMode(i)) { return false }
+        }
+        return true
+    }
+
     public let paramTys: ArrayList<Ty> = ArrayList<Ty>()
     public var retTy: Ty
     public var isC: Bool = false
@@ -1073,6 +1121,11 @@ public class FuncTy <: Ty {
 
     public init(paramVector: Array<Ty>, retType: Ty, cfg!: FuncTyConfig = FuncTyConfig()) {
         super(TypeKind.TYPE_FUNC)
+        if (!cfg.paramModes.isEmpty() && cfg.paramModes.size != paramVector.size) {
+            throw IllegalArgumentException("function parameter/mode arity mismatch")
+        }
+        paramModes = cfg.paramModes.clone()
+        retMode = cfg.retMode
         retTy = retType
         name = "Function"
         isC = cfg.isC
@@ -1103,6 +1156,10 @@ public class FuncTy <: Ty {
         for (paramTy in paramTys) {
             out = hashCombine(out, Ptr<Ty>(paramTy).hashCode())
         }
+        for (i in 0..paramModes.size) {
+            if (paramModes[i] != ASTMode.NOT) { out = hashCombine(out, i * 3 + Int64(paramModes[i].WireValue())) }
+        }
+        if (retMode != ASTMode.NOT) { out = hashCombine(out, Int64(retMode.WireValue())) }
         out = hashCombine(out, boolHash(isClosureTy))
         out = hashCombine(out, boolHash(isC))
         out = hashCombine(out, boolHash(hasVariableLenArg))
@@ -1112,7 +1169,7 @@ public class FuncTy <: Ty {
 
     public override operator func ==(right: Ty): Bool {
         if (let Some(rightFunc) <- (right as FuncTy)) {
-            if (isC != rightFunc.isC || noCast != rightFunc.noCast ||
+            if (!SameModes(rightFunc) || isC != rightFunc.isC || noCast != rightFunc.noCast ||
                 hasVariableLenArg != rightFunc.hasVariableLenArg || isClosureTy != rightFunc.isClosureTy ||
                 !refEq(retTy, rightFunc.retTy) || paramTys.size != rightFunc.paramTys.size) {
                 return false

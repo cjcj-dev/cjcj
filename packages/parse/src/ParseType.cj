@@ -11,7 +11,10 @@ private func SupportsLocalModeSyntax(): Bool { return false }
 private func SupportsLocalModeSyntax(): Bool { return true }
 
 extend ParserImpl {
-    public func ParseType(): Type {
+    public func ParseType(): Type { return ParseType(false) }
+
+    // Only value-copy scalar parameter slots need no native region/cleanup support.
+    internal func ParseType(parameterSlot: Bool): Type {
         let ty = ParsePrefixType()
         if (Seeing(TokenKind.ARROW)) {
             if (ty.astKind == ASTKind.FUNC_TYPE) {
@@ -22,7 +25,9 @@ extend ParserImpl {
                 ty.isBroken = true
             }
         }
-        ty.modal = ParseLocalModeSuffix()
+        let primitive = ty as PrimitiveType
+        let scalarSlot = parameterSlot && (primitive.map({ t => t.str == "Int64" }) ?? false)
+        ty.modal = ParseLocalModeSuffix(scalarSlot: scalarSlot)
         if (let Some(modal) <- ty.modal) {
             ty.end = modal.end
         }
@@ -61,7 +66,7 @@ extend ParserImpl {
         return None
     }
 
-    internal func ParseLocalModeSuffix(): Option<ASTModalInfo> {
+    internal func ParseLocalModeSuffix(scalarSlot!: Bool = false): Option<ASTModalInfo> {
         let local = PeekLocalMode(0) ?? return None
         let atPos = Peek().Begin()
         Next() // @
@@ -79,9 +84,11 @@ extend ParserImpl {
             Next()
         }
         let modal = ASTModalInfo(local, atPos, localPos, lastToken.End())
-        // Keep local mode fail closed at the parser until Sema, persistence and
-        // native lowering can all preserve the modal and its region semantics.
-        ParseDiagnoseRefactor(DiagKindRefactor.parse_local_mode_disabled, MakeRange(atPos, modal.end)).Emit()
+        if (!compileOptions.enableLocalMode) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_local_mode_disabled, MakeRange(atPos, modal.end)).Emit()
+        } else if (!scalarSlot) {
+            DiagnoseUnexpectedLocalMode(modal)
+        }
         return Some(modal)
     }
 
@@ -277,7 +284,7 @@ extend ParserImpl {
             SkipBlank(TokenKind.NL)
             parameterColonPos = Expect(TokenKind.COLON, "expected ':' after type parameter name").Begin()
         }
-        let parsedType = ParseType()
+        let parsedType = ParseType(true)
         parsedType.typeParameterName = parameterName.Val()
         parsedType.typeParameterNameIsRawId = parameterName.IsRaw()
         parsedType.colonPos = parameterColonPos
@@ -373,6 +380,11 @@ extend ParserImpl {
         let right = lastToken.Begin()
         if (Skip(TokenKind.ARROW)) {
             return MakeFuncType(types, left.Begin(), right, lastToken.Begin())
+        }
+        if (compileOptions.enableLocalMode) {
+            for (item in types) {
+                if (let Some(mode) <- item.modal) { DiagnoseUnexpectedLocalMode(mode) }
+            }
         }
         if (types.size == 1) {
             let first = types[0]
