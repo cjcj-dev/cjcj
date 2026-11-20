@@ -144,7 +144,7 @@ private func AddLocalModeOption(options: Array<OptionInfo>): Array<OptionInfo> {
 private func AddLocalModeOption(options: Array<OptionInfo>): Array<OptionInfo> {
     let localMode = OptionInfo("--enable-local-mode", ID.ENABLE_LOCAL_MODE, Kind.FLAG, [Backend.CJNATIVE],
         [Group.GLOBAL, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE,
-        "Enable experimental Int64 parameter modes for CJO-only compilation")
+        "Enable local allocation, region lifetime checks, and modal types")
     return Array<OptionInfo>(options.size + 1, { i =>
         if (i == options.size) { localMode } else { options[i] }
     })
