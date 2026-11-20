@@ -5,7 +5,7 @@ The existing Linux `windows-x64` cross std component remains separate. No Window
 native build, language result, official runner dispatch or complete SDK package
 has been executed by this change.
 
-## Fixed sources and providers
+## Earlier platform integration inputs (historical)
 
 |Input|Fixed source / actual retained provider|Remaining production|
 |---|---|---|
@@ -77,7 +77,7 @@ Its observed unpack size952673187B is an input measurement, not a build peak.
    branch runs. CI must add the full sourceBuild cell/artifact only with this
    whole producer dependency closure; stdProducerFor alone is insufficient.
 
-## Source composition and current permission
+## Earlier integration scope and permission (historical)
 
 Required existing SDK code is reused from fixed CI
 aca347a88a2030d69f1f05cf02020a8bf73febfe; std platform/stage shape comes unchanged
@@ -85,7 +85,7 @@ from SDK3551f4788fe0e3217bd30ad2e6b0574382b0cd29. These source inputs are not a
 new complete SDK qualification. The original 3966 Windows slice is reused as
 source evidence only. Old2eabe/25fe review objects remain frozen.
 
-Current allowance: data total13GiB including retained inputs, script gates
+That integration used a data allowance of 13GiB including retained inputs, script gates
 8cores/8GiB/core0 through box+wf. No new stage/GHA/dispatch/deployment. Complete
 Windows native peak disk/RSS is UNKNOWN. Proposed native work needs an official
 runner with >=64core stage capacity or an explicit controller capacity ruling,
@@ -93,6 +93,12 @@ plus separate native build disk allowance; current script budget is insufficient
 The platform owner retains N/R/AST/host/HLE/full stdx/cross/Windows production,
 installation and package responsibility while these exact prerequisites close.
 
+
+## Paired Windows verification route
+
+This route has no fixed minimum core count. Size the runner and build jobs for
+the selected native inputs; the historical pins and resource estimates above
+do not select this build.
 
 For a validation-only build, run Source Build for the single `windows-x64`
 target at the paired cjcj commit. The Windows source cell uses one

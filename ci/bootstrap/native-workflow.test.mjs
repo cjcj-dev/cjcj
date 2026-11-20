@@ -28,7 +28,7 @@ function plan(t,target,extra={}) {
 }
 test('formal native planner routes five host tuples; declarations are not installed SDK qualification',t=>{
  for(const [target,runner,platform] of [['linux-x64','ubuntu-22.04','linux_x86_64'],['linux-aarch64','ubuntu-24.04-arm','linux_aarch64'],
-  ['darwin-arm64','macos-15','darwin_aarch64'],['darwin-x64','macos-15-intel','darwin_x86_64'],['windows-x64','windows-2022','windows_x86_64']]) {
+  ['darwin-arm64','macos-15','darwin_aarch64'],['darwin-x64','macos-15-intel','darwin_x86_64'],['windows-x64','windows-2025','windows_x86_64']]) {
   const r=plan(t,target);console.log('NATIVE_SOURCE_ROUTE_ASSERTION_REACHED '+target);assert.equal(r.status,0,r.stderr);
   const [row]=JSON.parse(r.output.matrix).include;
   assert.equal(row.target,target);assert.equal(row.runner,runner);assert.equal(row.llvm_platform,platform);assert.equal(row.input_route,'native-installations');
