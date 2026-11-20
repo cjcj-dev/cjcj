@@ -28,7 +28,7 @@ async function fixture(windows=false,cmakeCommand='cmake'){
  const directory=path.join(root,platform+(cmakeCommand==='cmake'?'':'-custom')),compiler=path.join(directory,'source'),build=path.join(directory,'build'),install=path.join(directory,'install');
  await fs.mkdir(compiler,{recursive:true});
  await fs.writeFile(path.join(compiler,'ast.c'),'int fixture_ast_value(void) { return 42; }\n');
- for(const name of ['StdAstFormat.fbs','StdAstFormat_generated.h','flatc'+(windows?'.exe':'')])
+ for(const name of ['StdAstFormat.fbs','StdAstFormat_generated.h','StdxChirFormat.fbs','StdxChirFormat_generated.h','AttributeInfo.h','flatc'+(windows?'.exe':'')])
   await fs.writeFile(path.join(compiler,name),'Explicit CMake installation fixture; no flatc execution\n');
  await fs.writeFile(path.join(compiler,'CMakeLists.txt'),`cmake_minimum_required(VERSION 3.20)
 project(NativeAstInstallationFixture C)
@@ -37,7 +37,9 @@ add_library(cangjie-ast-support STATIC ast.c)
 set_target_properties(cangjie-ast-support PROPERTIES PREFIX "lib" SUFFIX ".a")
 install(TARGETS cangjie-ast-support DESTINATION lib/${tuple})
 install(FILES StdAstFormat.fbs DESTINATION schema)
-install(FILES StdAstFormat_generated.h DESTINATION include/flatbuffers)
+install(FILES StdAstFormat_generated.h StdxChirFormat_generated.h DESTINATION include/flatbuffers)
+install(FILES StdxChirFormat.fbs DESTINATION schema)
+install(FILES AttributeInfo.h DESTINATION include/cangjie/CHIR/IR)
 install(PROGRAMS flatc${windows?'.exe':''} DESTINATION third_party/flatbuffers/bin)
 `);
  for(const args of [['init','-q'],['add','.'],['-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','Explicit native AST installation fixture']])await execute('git',['-C',compiler,...args]);

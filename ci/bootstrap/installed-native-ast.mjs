@@ -1,7 +1,7 @@
 // Consume the original native CMake installation after transport or relocation.
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {sdkPlatform} from './sdk-platform.mjs';
+import {sdkPlatform,stdxChirMembers} from './sdk-platform.mjs';
 import {fileDigest,readJson,relative} from './sdk-flow.mjs';
 
 export async function readInstalledNativeAst({install,buildResult,facts,platform,commit,llvmCommit}) {
@@ -11,7 +11,7 @@ export async function readInstalledNativeAst({install,buildResult,facts,platform
     ||facts.commits?.compiler!==commit||llvmCommit&&facts.commits?.llvm!==llvmCommit)
     throw Error('NATIVE_AST_SOURCE_PAIR');
   const library='lib/'+native.tuple+'/libcangjie-ast-support.a';
-  const members=[library,'schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',
+  const members=[library,'schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h', ...stdxChirMembers,
     'third_party/flatbuffers/bin/flatc'+native.exe];
   if(ast.library!==library||!ast.files||JSON.stringify(Object.keys(ast.files).sort())!==JSON.stringify([...members].sort()))
     throw Error('NATIVE_AST_INSTALL_SHAPE');

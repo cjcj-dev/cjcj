@@ -15,7 +15,7 @@ export function stdBuildType(value = 'relwithdebinfo') {
   return value;
 }
 export async function acceptInstalledStd({file, source, output, commit, sdk, runtime, link, platform,
-  compilerRuntime, heap, previous, expected, buildType}) {
+  compilerRuntime, heap, previous, expected, buildType, localModeApi=false}) {
   if (!file) throw new Error('STD_RESUME_RECORD missing');
   if (!previous || !expected) throw new Error('WORK_INPUTS_MISSING');
   const selectedType = stdBuildType(buildType === undefined ? flag(expected.argv, '--build-type') : buildType);
@@ -35,6 +35,7 @@ export async function acceptInstalledStd({file, source, output, commit, sdk, run
   const required = {source, output, commit, sdk, runtime, platform, 'compiler-runtime': compilerRuntime};
   if (!identity || !sameCommand(identity, expected)
       || Object.entries(required).some(([k,v]) => flag(identity.argv, '--'+k) !== v)
+      || identity.argv.includes('--local-mode-api')!==localModeApi
       || stdBuildType(flag(identity.argv, '--build-type')) !== selectedType
       || flag(identity.argv, '--heap') !== heap
       || identity.argv.includes('--resume-installed')) throw new Error('STD_RESUME_RECORD identity');
@@ -57,7 +58,7 @@ export async function acceptInstalledStd({file, source, output, commit, sdk, run
   const successful = (command, result) => command?.event === 'target-command'
     && result?.event === 'target-result' && sameCommand(command, result)
     && result.rc === 0 && !result.signal && !result.error && !result.cancelled;
-  if (!successful(buildCommand, build) || build.argv.length !== 10
+  if (!successful(buildCommand, build) || build.argv.length !== (localModeApi?11:10) || (localModeApi && build.argv[10]!=='--local_mode_api')
       || buildArgv.some((v,i) => build.argv[i] !== v) || !/^[1-9][0-9]*$/.test(build.argv[7])
       || build.argv[8] !== '--target-lib='+path.join(stdlib,'build/build/lib')
       || build.argv[9] !== '--target-lib='+link) throw new Error('STD_RESUME_RECORD build');

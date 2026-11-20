@@ -1,4 +1,5 @@
 #!/usr/bin/env zx
+import {stdxChirMembers} from '../../bootstrap/sdk-platform.mjs';
 // The package describes the directory it archives, never the current checkout
 // or a CI-provided expected tuple. Existing producer fields stay intact.
 import fs from 'node:fs/promises';
@@ -132,7 +133,7 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
     if(!build.some(row=>row.stage.startsWith('compiler.install'))||build.some(row=>row.exitCode!==0||row.error))throw Error('INSTALLED_NATIVE_PRODUCTION');
     rows.push({component:'ast-support',source:source(stage.sources.ast),build:{commands:build},
       artifacts:await Promise.all(['lib/'+native.tuple+'/libcangjie-ast-support.a','schema/StdAstFormat.fbs',
-        'include/flatbuffers/StdAstFormat_generated.h','third_party/flatbuffers/bin/flatc'+native.exe].map(rel=>artifact(sdk,rel,undefined,checkArtifact)))});
+        'include/flatbuffers/StdAstFormat_generated.h',...stdxChirMembers,'third_party/flatbuffers/bin/flatc'+native.exe].map(rel=>artifact(sdk,rel,undefined,checkArtifact)))});
     rows.push({component:'llvm-cjdb',source:source(stage.sources.llvm),build:{commands:build},
       artifacts:await Promise.all(['third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,
         ...['llc','llvm-as','llvm-dis','opt'].map(name=>'third_party/llvm/bin/'+name+native.exe)].map(rel=>nativeProduct(sdk,rel,undefined,checkArtifact)))});

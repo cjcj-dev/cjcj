@@ -2,7 +2,7 @@
 // No flattening, new receipt, or declaration of SDK/AST qualification.
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {sdkPlatform} from './sdk-platform.mjs';
+import {sdkPlatform,stdxChirMembers} from './sdk-platform.mjs';
 import {fileDigest} from './sdk-flow.mjs';
 
 export async function nativeAstInstallation({compiler, build, install, platform, source, commands, cmakeCommand='cmake'}) {
@@ -33,7 +33,7 @@ export async function nativeAstInstallation({compiler, build, install, platform,
   const manifest=(await fs.readFile(manifestFile,'utf8')).split(/\r?\n/).filter(Boolean);
   const installedFiles=new Set(manifest.map(normalized));
   const library='lib/'+native.tuple+'/libcangjie-ast-support.a';
-  const members=[library,'schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',
+  const members=[library,'schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h', ...stdxChirMembers,
     'third_party/flatbuffers/bin/flatc'+native.exe];
   const files={};
   for(const relative of members){

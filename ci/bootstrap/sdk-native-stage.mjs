@@ -58,6 +58,8 @@ export async function nativeStage(options, {signal} = {}) {
   if(kind!=='h1'&&kind!=='compiler'&&options['visible-options-only']!==undefined)
     throw Error('COMPILER_OPTION_CONFIGURATION_KIND');
   const optionVisibility=visibleOptionsOnly(options['visible-options-only']);
+  const localModeApi=options['local-mode-api']===true;
+  if(localModeApi&&kind!=='std')throw Error('STD_LOCAL_MODE_API_KIND');
   if (kind !== 'std' && options['build-type'] !== undefined) throw new Error('STD_BUILD_TYPE_KIND');
   const buildType = kind === 'std' ? stdBuildType(options['build-type']) : undefined;
   const commit = await materializeNativeSource(options,command,{signal});
@@ -80,7 +82,7 @@ export async function nativeStage(options, {signal} = {}) {
     const expected = last?.argv.includes('--resume-installed') ? last.resumeOf : last;
     if (expected?.cwd !== path.join(path.dirname(options['resume-state']), 'build', options['resume-stage'])) throw new Error('STD_RESUME_STAGE state');
     accepted = await acceptInstalledStd({file:options['accept-records'], source, output, commit, sdk, runtime,
-      link:output+'.runtime-input', platform, compilerRuntime:options['compiler-runtime'], heap:options.heap, previous, expected, buildType});
+      link:output+'.runtime-input', platform, compilerRuntime:options['compiler-runtime'], heap:options.heap, previous, expected, buildType, localModeApi});
   }
   await fs.mkdir(output,{recursive:true});
   const restoreOptionVisibility=kind==='h1'||kind==='compiler'
@@ -104,7 +106,8 @@ export async function nativeStage(options, {signal} = {}) {
       if(error.code==='ENOENT')return null;throw error;
     });
     const cached = name => cache?.match(new RegExp('^'+name+':[^=]+=(.*)$','m'))?.[1];
-    const reconfigure = cache !== null && (cached('CMAKE_BUILD_TYPE') !== cmakeType || cached('CANGJIE_TARGET_LIB') !== targetLibraries.join(';'));
+    const reconfigure = cache !== null && (cached('CMAKE_BUILD_TYPE') !== cmakeType || cached('CANGJIE_TARGET_LIB') !== targetLibraries.join(';') ||
+      (cached('CANGJIE_ENABLE_LOCAL_MODE_API')==='ON')!==localModeApi);
     if(options['resume-installed'] && reconfigure)throw new Error('STD_RESUME_BUILD_CONFIGURATION');
     await prepareRuntimeInputs({runtime, link, native, buildType, resume:!!options['resume-installed'], signal});
     if (options['resume-installed']) {
@@ -117,9 +120,10 @@ export async function nativeStage(options, {signal} = {}) {
       // an existing cache with the requested type/input while retaining its
       // toolchain, platform and other legitimate cached options.
       if(reconfigure)await command(['cmake','-S',stdlib,'-B',build,'-DCMAKE_BUILD_TYPE='+cmakeType,
-        '-DCANGJIE_TARGET_LIB='+targetLibraries.join(';'),'-U','RUNTIME_COMMON_LIB_DIR'],{cwd:stdlib,env,records});
+        '-DCANGJIE_TARGET_LIB='+targetLibraries.join(';'),
+        ...(localModeApi||cached('CANGJIE_ENABLE_LOCAL_MODE_API')!==undefined?['-DCANGJIE_ENABLE_LOCAL_MODE_API='+(localModeApi?'ON':'OFF')]:[]),'-U','RUNTIME_COMMON_LIB_DIR'],{cwd:stdlib,env,records});
       await command(['python3','-I','build.py','build','-t',buildType,'--jobs',jobs,
-        ...targetLibraries.map(directory=>'--target-lib='+directory)],{cwd:stdlib,env,records});
+        ...targetLibraries.map(directory=>'--target-lib='+directory),...(localModeApi?['--local_mode_api']:[])],{cwd:stdlib,env,records});
       await command(['python3','-I','build.py','install','--prefix',output],{cwd:stdlib,env,records});
     }
     for(const rel of stdInstallFiles(platform))
@@ -256,7 +260,7 @@ export async function nativeStage(options, {signal} = {}) {
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
     const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies','visible-options-only'].map(k=>[k,{type:'string'}]));
-    spec['resume-installed']={type:'boolean'};
+    spec['resume-installed']={type:'boolean'};spec['local-mode-api']={type:'boolean'};
     nativeSourceOptions(process.argv); // Reject duplicate identity flags before parseArgs.
     const {values}=parseArgs({options:spec});
     if(!values.kind||!values.source||!values.sdk||!values.output||!values.platform)throw new Error('native stage needs kind/source/sdk/output/platform');

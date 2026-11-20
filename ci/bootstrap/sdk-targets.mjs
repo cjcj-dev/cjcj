@@ -242,6 +242,7 @@ export function createBootstrapTargets(input) {
     ...(kind==='h1'||kind==='compiler'?['--visible-options-only',String(visibleOptionsOnly(input.visibleOptionsOnly))]:[]),
     ...(kind==='compiler' && compiler.shimInstall ? ['--shim-install',compiler.shimInstall] : []),
     ...(kind==='std' && input.stdBuildType !== undefined ? ['--build-type',input.stdBuildType] : []),
+    ...(kind==='std' && input.stdLocalModeApi===true ? ['--local-mode-api'] : []),
     ...(kind==='std' && input.stdDependencies ? ['--std-dependencies',JSON.stringify(input.stdDependencies)] : []),
     ...(phase?['--phase',phase,'--std-input',phase==='stage3'?out('stage3-std'):path.join(work,'build/stage1-std/std')]:[]),...(compilerRuntime?['--compiler-runtime',compilerRuntime]:[]),
     ...(kind==='h1'?['--host',host.install,...(native.os==='linux'?[]:['--private-tools',tools.privateRoot]),...(tools.cc?['--cc',tools.cc]:[])]:[]),...(tools.zx?['--zx',tools.zx]:[])]});

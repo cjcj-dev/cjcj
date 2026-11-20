@@ -19,7 +19,8 @@ export function fixture(check, target = 'linux-x64') {
     const ast = path.join(sdk, 'ast.a');
     fs.writeFileSync(so, 'host fixture');
     fs.writeFileSync(ast, 'ast fixture');
-    const astFiles = ['include/cangjie/AST.h', 'include/flatbuffers/StdAstFormat_generated.h',
+    const astFiles = ['include/cangjie/CHIR/IR/AttributeInfo.h', 'schema/StdxChirFormat.fbs',
+      'include/flatbuffers/StdxChirFormat_generated.h', 'include/cangjie/AST.h', 'include/flatbuffers/StdAstFormat_generated.h',
       'schema/StdAstFormat.fbs', 'third_party/flatbuffers/bin/flatc',
       'third_party/flatbuffers/include/flatbuffers.h', 'third_party/flatbuffers/cangjie/libflatbuffers.a',
       'third_party/flatbuffers/modules/flatbuffers.cjo'];

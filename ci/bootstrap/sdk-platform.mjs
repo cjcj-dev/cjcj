@@ -65,3 +65,9 @@ export function cleanSdkEnvironment(sdk,platform,base=process.env,runtimeRoot=sd
   }
   return sdkEnvironment(sdk,platform,clean,runtimeRoot);
 }
+
+// stdx compiles C++ against the compiler's CHIR API and the matching generated schema.
+export const stdxChirMembers = Object.freeze([
+  'include/cangjie/CHIR/IR/AttributeInfo.h', 'schema/StdxChirFormat.fbs',
+  'include/flatbuffers/StdxChirFormat_generated.h',
+]);

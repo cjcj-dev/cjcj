@@ -13,7 +13,7 @@ import {promisify, isDeepStrictEqual} from 'node:util';
 import {randomUUID} from 'node:crypto';
 import {atomicJson, readJson, privateRoot, fileDigest} from './sdk-flow.mjs';
 import {FIXED_INPUTS,backendArtifactPath} from './sdk-targets.mjs';
-import {sdkPlatform} from './sdk-platform.mjs';
+import {sdkPlatform,stdxChirMembers} from './sdk-platform.mjs';
 import {stage2Input} from './sdk-stage2-input.mjs';
 import {receiveNativeRuntime} from './native-runtime-input.mjs';
 import {languageSourceInputs} from '../../build/srcbuild/installed-language-source.mjs';
@@ -71,6 +71,7 @@ export async function installedFinalStd(supplied, input) {
 export async function validateSourceInputs(input) {
   if(input.compiler.shimInstall)await compilerNativeShim({install:input.compiler.shimInstall,
     nativeInstall:input.llvm.install,compilerCommit:input.compiler.commit});
+  if(input.stdLocalModeApi!==undefined && typeof input.stdLocalModeApi!=='boolean')throw Error('STD_LOCAL_MODE_API_SELECTION');
   if(input.stdDependencies&&!isDeepStrictEqual(await stdDependencyInputs(input.stdDependencies),input.stdDependencies))throw Error('STD_DEPENDENCY_INPUT_CHANGED');
   if(input.stage2?.mode==='ordinary-cjpm') {
     const native=sdkPlatform(input.platform);
@@ -153,7 +154,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o', 'tools/bin/cjdb'+native.exe],
     runtime:['runtime/lib/'+native.tuple+'/libcangjie-runtime'+native.shared,
       'runtime/lib/'+native.tuple+'/libboundscheck'+native.shared, 'lib/'+native.tuple+'/libcangjie-runtime.a'],
-    ast:['libcangjie-ast-support.a', 'schema/StdAstFormat.fbs', 'include/flatbuffers/StdAstFormat_generated.h',
+    ast:['libcangjie-ast-support.a', 'schema/StdAstFormat.fbs', 'include/flatbuffers/StdAstFormat_generated.h', ...stdxChirMembers,
       'third_party/flatbuffers/bin/flatc'+native.exe],
   };
   for (const [name, required] of Object.entries(shapes)) {
@@ -262,6 +263,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       await fs.stat(path.join(tools.privateRoot,'ts/src/sharedbuild',rel));
   }
   const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,visibleOptionsOnly:optionVisibility,
+    ...(descriptor.stdLocalModeApi!==undefined?{stdLocalModeApi:descriptor.stdLocalModeApi}:{}),
     ...(descriptor.stdDependencies?{stdDependencies:await stdDependencyInputs(descriptor.stdDependencies)}:{}),
     ...(descriptor.stdBuildType === undefined ? {} : {stdBuildType:stdBuildType(descriptor.stdBuildType)}),
     ...(descriptor.nativePair ? {nativePair:descriptor.nativePair} : {}), ...rows, stdlib:stdlib??rows.runtime,
