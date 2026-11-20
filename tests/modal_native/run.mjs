@@ -4,6 +4,8 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
+import {cleanSdkEnvironment} from '../../ci/bootstrap/sdk-platform.mjs';
+import {compilerProducer} from '../../ci/bootstrap/compiler_identity.mjs';
 
 const [install, output] = argv._.map(String);
 if (![install, output].every(p => p && path.isAbsolute(p))) throw Error('usage: zx run.mjs /installed/sdk /new/output');
@@ -11,14 +13,18 @@ const sdk = fs.realpathSync(install), tuple = 'linux_x86_64_cjnative';
 const compiler = path.join(sdk, 'bin/cjc');
 const runtime = path.join(sdk, 'runtime/lib', tuple);
 const llvm = path.join(sdk, 'third_party/llvm/lib');
-const env = {...process.env, CANGJIE_HOME:sdk, LD_LIBRARY_PATH:[runtime, llvm, path.join(sdk,'tools/lib')].join(':'),
-  PATH:[path.join(sdk, 'bin'), path.join(sdk, 'tools/bin'), '/usr/bin', '/bin'].join(':')};
-delete env.LD_PRELOAD;
-delete env.LD_AUDIT;
+const env = cleanSdkEnvironment(sdk,'linux_x86_64',{...process.env,PATH:'/usr/bin:/bin'});
 fs.mkdirSync(output);
 const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const identity = Object.fromEntries([compiler, path.join(runtime,'libcangjie-runtime.so'),path.join(runtime,'libboundscheck.so'),
-  path.join(llvm,'libLLVM-15.so')].map(p => [p,{file:fs.realpathSync(p),sha256:digest(p)}]));
+const producer = fs.existsSync(path.join(sdk,'STAGE-INPUTS.json')) ? await compilerProducer(sdk) : compiler;
+const inputs = new Set([compiler,producer,path.join(runtime,'libcangjie-runtime.so'),path.join(runtime,'libboundscheck.so'),
+  path.join(llvm,'libLLVM-15.so'),path.join(sdk,'modules',tuple,'std/std.runtime.cjo'),
+  path.join(sdk,'modules',tuple,'std/std.core.cjo'),path.join(sdk,'lib',tuple,'libcangjie-std-core.a')]);
+const identity = Object.fromEntries([...inputs].map(p => {
+  const file=fs.realpathSync(p);
+  if (!file.startsWith(sdk+path.sep)) throw Error('SDK input resolves outside the installation: '+p);
+  return [p,{file,sha256:digest(file)}];
+}));
 fs.writeFileSync(path.join(output,'inputs.json'), JSON.stringify(identity,null,2));
 function execute(name, exe, args) {
   const r = spawnSync(exe,args,{env,cwd:output,encoding:'utf8',timeout:300000,maxBuffer:128*1024*1024});
