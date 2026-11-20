@@ -134,8 +134,23 @@ private func optionValues(name: String): Array<OptionValue> {
     return EMPTY_VALUES
 }
 
+@When[env == "ohos"]
+private func AddLocalModeOption(options: Array<OptionInfo>): Array<OptionInfo> {
+    return options
+}
+
+@When[env != "ohos"]
+private func AddLocalModeOption(options: Array<OptionInfo>): Array<OptionInfo> {
+    let localMode = OptionInfo("--enable-local-mode", ID.ENABLE_LOCAL_MODE, Kind.FLAG, [Backend.CJNATIVE],
+        [Group.GLOBAL, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE,
+        "Request experimental local mode (unavailable in this compiler build)")
+    return Array<OptionInfo>(options.size + 1, { i =>
+        if (i == options.size) { localMode } else { options[i] }
+    })
+}
+
 public func CreateOptionInfos(): Array<OptionInfo> {
-    return [
+    return AddLocalModeOption([
         OptionInfo("--dump-tokens", ID.DUMP_TOKENS, Kind.FLAG, [Backend.ALL], [Group.FRONTEND, Group.STABLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Print all of the tokens in one compile unit"),
         OptionInfo("--dump-symbols", ID.DUMP_SYMBOLS, Kind.FLAG, [Backend.ALL], [Group.FRONTEND, Group.STABLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Print symbols after semantic analysis"),
         OptionInfo("--typecheck", ID.TYPE_CHECK, Kind.FLAG, [Backend.ALL], [Group.FRONTEND, Group.STABLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Parse and check type of input file(s)"),
@@ -312,5 +327,5 @@ public func CreateOptionInfos(): Array<OptionInfo> {
         OptionInfo("--cjcj-disable-lowering-concurrency", ID.CJCJ_DISABLE_LOWERING_CONCURRENCY, Kind.FLAG, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Disable concurrent function body lowering"),
         OptionInfo("--cjcj-disable-generic-concurrency", ID.CJCJ_DISABLE_GENERIC_CONCURRENCY, Kind.FLAG, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Disable concurrent generic AST cloning"),
         OptionInfo("--runtime-config", ID.RUNTIME_CONFIG, Kind.SEPARATED, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Embed a runtime configuration as an environment-variable name/value pair"),
-    ]
+    ])
 }

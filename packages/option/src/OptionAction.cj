@@ -188,6 +188,11 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.PROFILE_COMPILE_TIME) { opts.enableTimer = true; return handled() }
     if (id == ID.PROFILE_COMPILE_MEMORY) { opts.enableMemoryCollect = true; return handled() }
     if (id == ID.ENABLE_EFFECTS) { opts.enableEH = true; return handled() }
+    if (id == ID.ENABLE_LOCAL_MODE) {
+        // Keep local mode closed until both semantic checking and the paired ABI are available.
+        Errorln("local mode is unavailable in this compiler build")
+        return handled(success: false)
+    }
     if (id == ID.STATIC_STD) { opts.linkStaticStd = Some(true); return handled() }
     if (id == ID.DY_STD) { opts.linkStaticStd = Some(false); return handled() }
     if (id == ID.STATIC_LIBS || id == ID.DY_LIBS || id == ID.STATIC) { return handled() }
