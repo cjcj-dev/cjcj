@@ -12,6 +12,8 @@ const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const BRANCH_REF_PATTERN = /^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const SHARED_URL_KEYS = Object.freeze({
   LOADERLIFE_MIN_REF: 'RUNTIME_SRC_URL',
+  LINUX_X64_SDK_RUNTIME_REF: 'RUNTIME_SRC_URL',
+  LINUX_X64_SDK_LLVM_SHA: 'LLVM_URL',
 });
 
 function parseEnv(text, file) {

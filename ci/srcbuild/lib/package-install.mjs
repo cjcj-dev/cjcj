@@ -1,7 +1,7 @@
 #!/usr/bin/env zx
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {archiveInstall,atomicJson} from '../../bootstrap/sdk-flow.mjs';
+import {archiveInstall,atomicJson,readJson} from '../../bootstrap/sdk-flow.mjs';
 import {verifyInstall} from '../../bootstrap/sdk-verify-install.mjs';
 import {assertSdkCompilerRuntimeAbi} from '../../../build/lib/runtime-split.mjs';
 import {assertSdkPathParity} from '../../../build/lib/sdk-path-parity.mjs';
@@ -13,9 +13,16 @@ export function packageConsumption(target){
  if(target?.spec?.crossCompile===true)return {status:'NOT_RUN',reason:'HOST_CROSS_EXEC',platform};
  return {status:'EXECUTED',platform};
 }
-export async function packageInstall({sdk,target,version,officialSdkRoot,archive}){
+export async function packageInstall({sdk,target,version,officialSdkRoot,archive,sourcePair}){
  assertNoVerifierReportArtifacts([sdk]);assertSdkCompilerRuntimeAbi({sdk,target});
  await assertSdkPathParity(sdk,{officialRoot:officialSdkRoot,target:target.spec.key});
+ if(sourcePair){
+  const {sources,selection}=await readJson(path.join(sdk,'STAGE-INPUTS.json'));
+  if(sources?.runtime?.commit!==sourcePair.runtime || sources?.std?.commit!==sourcePair.runtime
+    || (sources?.backend??sources?.llvm)?.commit!==sourcePair.llvm
+    || (sourcePair.hostVersion && selection?.bootstrapHost?.version!==sourcePair.hostVersion))
+   throw Error('SDK_PACKAGE_SOURCE_PAIR');
+ }
  const work=path.join(path.dirname(archive),'package-test');
  const consumption=packageConsumption(target);
  const packageRegex=['linux-x64','linux-aarch64'].includes(target.spec.key);

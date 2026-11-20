@@ -6,6 +6,7 @@ import {BuildError} from '../../lib/errors.mjs';
 import {getLogger, stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
 import {assertNoVerifierReportArtifacts} from '../../../scripts/verifier_artifact_gate.mjs';
+import {developmentSdkPair,nativePair} from '../../../ci/runtime-pin.mjs';
 import {packageInstall} from '../../../ci/srcbuild/lib/package-install.mjs';
 import {archiveInstall, privateRoot} from '../../../ci/bootstrap/sdk-flow.mjs';
 import {consumerSdk, ensureDir, requireDir, requireFile} from './common.mjs';
@@ -87,8 +88,10 @@ async function packageMainSdk(config) {
   installedStdx(config); // Still required before copying or archiving an SDK.
   const cangjieDir=compilerOutput;
   organizeSdkTree(config,cangjieDir);
+  const pair = developmentSdkPair(config.target.spec.key);
+  const explicit = pair && nativePair(process.env,{requireHost:false});
   return (await packageInstall({sdk:cangjieDir,target:config.target,version:config.cangjieVersion,
-    officialSdkRoot:config.officialSdkRoot,archive:sdkArchive(config)})).archive;
+    officialSdkRoot:config.officialSdkRoot,archive:sdkArchive(config),sourcePair:explicit || pair})).archive;
 }
 
 export async function packageStdx(config) {

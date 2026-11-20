@@ -323,3 +323,21 @@ normally without rebuilding its complete peer. Libedit's configure consumes
 that ncurses prefix. Compiler environment construction uses these same prefixes;
 standalone native-CJDB descriptors must select the actual new installation and
 run their own affected native link/install gates before claiming that input.
+
+### Default managed Linux x64 development SDK
+
+The native Release runtime producer (`ci/platform_matrix/build_runtime.mjs`,
+`RUNTIME_NATIVE_PAIR=1`, `CJCJ_SRCBUILD_TARGET=linux-x64`) selects the development
+SDK pair from the scoped entries in the existing runtime and LLVM pin files.
+Use a managed checkout at the selected revision as `RUNTIME_SOURCE`. Run the
+normal target std stage with the same target, the produced runtime installation,
+the fixed compiler SDK and the managed standard library dependencies. Omit
+`--commit` to take the selected runtime source for std. In the existing
+`install --inputs` component locations, omit `commit` on all three target rows
+(runtime, std and LLVM) to use the SDK pair. The compiler product and its
+execution inputs remain independent. Public `package` for linux-x64 uses that
+pair unless a caller supplies the existing explicit native pair.
+
+The general runtime and LLVM pins, official bootstrap inputs and CI's persisted
+SDK registration are independent. The scoped pair does not select a runner
+artifact and does not enable an Actions or release source-build route.

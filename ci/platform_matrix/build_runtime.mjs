@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {nativeSourceSelection} from '../bootstrap/native-source-selection.mjs';
 import {hostPlatform} from '../host-toolchain-pin.mjs';
+import {developmentSdkPair, nativePair as requestedNativePair} from '../runtime-pin.mjs';
 import {readSourcePins} from '../native-llvm-inputs.mjs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -16,7 +17,18 @@ import {configureNativeRuntime, installNativeRuntimeDependencies, installNativeR
 import {darwinCommand} from '../release/darwin_commands.mjs';
 
 export async function buildRuntime({sourceSelection,objectRepository}={}) {
-const {selection}=nativeSourceSelection(process.env,undefined,sourceSelection);
+const sdkPair = process.env.RUNTIME_NATIVE_PAIR === '1' && !sourceSelection
+  && !requestedNativePair(process.env, {requireHost:false})
+  && developmentSdkPair(process.env.CJCJ_SRCBUILD_TARGET);
+if (sdkPair) {
+  assert.equal(hostPlatform(), 'linux_x86_64', 'LINUX_X64_SDK_RUNTIME_HOST');
+  assert.equal(process.env.RUNTIME_TARGET || 'native', 'native', 'LINUX_X64_SDK_RUNTIME_TARGET');
+  assert.equal(process.env.RUNTIME_BUILD_TYPE || 'release', 'release', 'LINUX_X64_SDK_RUNTIME_BUILD_TYPE');
+  if (process.env.CJCJ_NATIVE_HOST_VERSION)
+    assert.equal(process.env.CJCJ_NATIVE_HOST_VERSION, sdkPair.hostVersion, 'LINUX_X64_SDK_RUNTIME_HOST_VERSION');
+  process.env.CJCJ_NATIVE_HOST_VERSION = sdkPair.hostVersion;
+}
+const {selection}=nativeSourceSelection(process.env,sdkPair || undefined,sourceSelection);
 const {root} = stageBegin('runtime');
 const source = process.env.RUNTIME_SOURCE || path.join(process.cwd(), 'runtime-source');
 const version = process.env.RUNTIME_VERSION || readSourcePins().runtime.RUNTIME_VERSION;

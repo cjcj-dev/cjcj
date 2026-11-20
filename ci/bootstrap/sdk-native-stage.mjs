@@ -19,6 +19,9 @@ import {acceptInstalledStd, flag, stdBuildType} from './sdk-std-resume.mjs';
 import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {materializeNativeSource, nativeSourceOptions} from './sdk-source.mjs';
+import {developmentSdkPair} from '../runtime-pin.mjs';
+import {receiveNativeRuntime} from './native-runtime-input.mjs';
+import {runtimeSourceRepository} from '../../build/lib/runtime-source-inputs.mjs';
 import {visibleOptionsOnly,configureOptionVisibility} from './compiler-option-visibility.mjs';
 export {acceptInstalledStd} from './sdk-std-resume.mjs';
 // Runtime inputs are a private build input snapshot, not an install overlay.
@@ -60,7 +63,17 @@ export async function nativeStage(options, {signal} = {}) {
   const optionVisibility=visibleOptionsOnly(options['visible-options-only']);
   if (kind !== 'std' && options['build-type'] !== undefined) throw new Error('STD_BUILD_TYPE_KIND');
   const buildType = kind === 'std' ? stdBuildType(options['build-type']) : undefined;
-  const commit = await materializeNativeSource(options,command,{signal});
+  const sdkPair = kind === 'std' && platform === 'linux_x86_64'
+    && options['compiler-runtime'] === 'target' && !options.commit
+    && developmentSdkPair(process.env.CJCJ_SRCBUILD_TARGET);
+  const commit = await materializeNativeSource(sdkPair ? {...options,commit:sdkPair.runtime} : options,command,{signal});
+  if (sdkPair) {
+    if (buildType !== 'release') throw new Error('LINUX_X64_SDK_STD_BUILD_TYPE');
+    const selected = await receiveNativeRuntime({root:runtime,sourceRepository:await runtimeSourceRepository(source),
+      platform,llvmCommit:sdkPair.llvm,runtimeCommit:sdkPair.runtime,hostVersion:sdkPair.hostVersion,
+      work:output+'.runtime-check'});
+    if (selected.configuration.buildType !== buildType) throw new Error('LINUX_X64_SDK_RUNTIME_BUILD_TYPE');
+  }
   let resources;
   try {resources=await selectBuildResources({heap:options.heap,jobs:options.jobs});}
   catch(error){if(error.message.startsWith('BUILD_JOBS'))throw Error('NATIVE_STAGE_JOBS '+error.message);throw error;}
