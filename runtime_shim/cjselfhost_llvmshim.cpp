@@ -400,6 +400,11 @@ extern "C" void LLVMSetFastMathFlags(LLVMValueRef FPMathInst, unsigned FMF)
 
 // Mirror C++ `rawGV->addAttribute(llvm::Attribute::ReadOnly)`
 // (src/CodeGen/EmitGlobalVariableIR.cpp:63).
+extern "C" void LLVMSelfhostGlobalVariableAddDebugInfo(LLVMValueRef GV, LLVMMetadataRef Expression)
+{
+    unwrap<GlobalVariable>(GV)->addDebugInfo(unwrap<DIGlobalVariableExpression>(Expression));
+}
+
 extern "C" void LLVMSelfhostGlobalVariableAddEnumAttribute(LLVMValueRef GV, unsigned KindId)
 {
     unwrap<GlobalVariable>(GV)->addAttribute(static_cast<Attribute::AttrKind>(KindId));

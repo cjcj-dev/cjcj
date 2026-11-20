@@ -282,7 +282,7 @@ public class DIBuilder {
             }
         }
         unsafe {
-            LLVMGlobalSetMetadata(llvmValue, LLVMGetMDKindID(cgMod.GetLLVMContext(), "dbg"), globalVar)
+            LLVMSelfhostGlobalVariableAddDebugInfo(llvmValue, globalVar)
         }
         cgMod.GetCGContext().AddGlobalsOfCompileUnit(variable.GetIdentifierWithoutPrefix())
     }
@@ -306,10 +306,10 @@ public class DIBuilder {
             globalVar = unsafe {
                 LLVMDIBuilderCreateGlobalVariableExpression(raw, namespaceScope, nameCString.value,
                     UIntNative(genericName.size), linkageCString.value, UIntNative(genericName.size), defaultFile, 0u32,
-                    diType, 0, LLVMNullMetadata(), LLVMNullMetadata(), 0u32)
+                    diType, 0, createExpression(ArrayList<UInt64>()), LLVMNullMetadata(), 0u32)
             }
         }
-        LLVMSetGlobalMetadata(cgMod.GetLLVMContext(), typeTemplate, "dbg", globalVar)
+        unsafe { LLVMSelfhostGlobalVariableAddDebugInfo(typeTemplate, globalVar) }
     }
 
     public func FinalizeSubProgram(function: LLVMValueRef): Unit {
