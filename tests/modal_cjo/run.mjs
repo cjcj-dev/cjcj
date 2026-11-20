@@ -24,6 +24,10 @@ function compile(name, source, args, diag) {
   if (r.error) throw r.error;
   const ok = r.status === (diag ? 1 : 0) && (!diag || diag.test(r.stderr + r.stdout));
   console.log(name, 'compiler rc', r.status, 'expected', diag?.source ?? 'success', ok ? 'PASS' : 'FAIL');
+  if (ok && !diag) {
+    const product = cjo ? path.join(cwd, name === 'producer' ? 'modalsigs.cjo' : 'client.cjo') : archive;
+    assert(fs.statSync(product).size > 0, 'missing ' + product);
+  }
   if (!ok) failures.push(name);
   if (name === 'producer') assert(ok, 'failed to produce interface: ' + r.stderr);
   return cwd;
@@ -41,14 +45,20 @@ function consumer(name, body, options, diag) {
 const disabled = /"DiagKind":\s*"sema_local_api_disabled"/;
 consumer('unusedImport', '42', []);
 consumer('ordinary', 'let f = plain\nplainNested(f)', []);
+consumer('directDisabled', 'full(20, 22)', [], disabled);
+consumer('directEnabled', 'full(20, 22)', enabled);
 consumer('bareFull', 'let f = full\nf(20, 22)', [], disabled);
 consumer('bareHalf', 'let f = half\nf(20, 22)', [], disabled);
 consumer('nestedDisabled', 'let f = nested\n0', [], disabled);
 consumer('enabledNested', 'let f = full\nnested(f)', enabled);
 consumer('enabledHalf', 'let f = half\nnested(f)', enabled);
-consumer('wrongMode', 'nested(plain)', enabled, /mismatched|incompatible|no.match|cannot.match/i);
+const noMatch = /"DiagKind":\s*"sema_no_match_function_declaration_for_ref"/;
+consumer('wrongMode', 'nested(plain)', enabled, noMatch);
 consumer('wrongSlot', 'let f: (Int64 @local!, Int64) -> Int64 = full\nf(20, 22)', enabled,
-  /mismatched|incompatible|no.match|cannot.match/i);
+  noMatch);
 consumer('nonCopyRejected', 'let x: String @local! = "s"\n0', enabled, /"DiagKind":\s*"parse_unexpected_modal_type"/);
+const unsupported = path.join(root, 'nonCopyParam.cj');
+fs.writeFileSync(unsupported, 'package client\npublic func nope(s: String @local!): Int64 { 0 }\n');
+compile('nonCopyParam', unsupported, enabled, /"DiagKind":\s*"parse_unexpected_modal_type"/);
 assert.deepEqual(failures, []);
 console.log('CJO cross-package signature controls passed');
