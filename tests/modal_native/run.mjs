@@ -39,11 +39,15 @@ for (const name of ['local','ordinary','escape']) {
   const flags = name === 'ordinary' ? [] : ['--experimental','--enable-local-mode'];
   const compile = execute(name+'-compile', compiler, [...flags,'--diagnostic-format=json',source,'-o',exe]);
   if (name === 'escape') {
-    const line = fs.readFileSync(source,'utf8').split('\n').findIndex(s => s.trim()==='return c')+1;
+    const lines = fs.readFileSync(source,'utf8').split('\n');
     let errors = [];
     try { errors = JSON.parse(compile.stderr).Diags.filter(d => d.Severity === 'error'); } catch {}
-    if (compile.status !== 1 || fs.existsSync(exe) || !errors.some(d => d.DiagKind==='sema_mismatched_types' &&
-        d.Location?.File===source && d.Location?.Line===line)) failures.push('escape diagnostic at the returned local');
+    if (compile.status !== 1 || fs.existsSync(exe)) failures.push('escape compilation did not reject the program');
+    for (const statement of ['return c','return (if (flag) { outer } else { inner }).value']) {
+      const line = lines.findIndex(s => s.trim() === statement) + 1;
+      if (!line || !errors.some(d => d.DiagKind==='sema_mismatched_types' &&
+          d.Location?.File===source && d.Location?.Line===line)) failures.push('missing region diagnostic: '+statement);
+    }
 
     continue;
   }
