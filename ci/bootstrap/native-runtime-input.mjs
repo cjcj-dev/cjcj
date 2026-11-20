@@ -45,7 +45,7 @@ export async function receiveNativeRuntime({root, sourceRoot, sourceRepository, 
     await fs.access(path.join(root,'runtime/include/schedule.h'));
   }
   const buildConfiguration={buildType:facts.build_type,version:facts.version,hostVersion,pairedLlvmCommit:llvmCommit};
-  if(configuration&&!isDeepStrictEqual(configuration,buildConfiguration))throw new Error('NATIVE_RUNTIME_CONFIGURATION_CHANGED');
+  if(!isDeepStrictEqual(facts.configuration,buildConfiguration) || (configuration&&!isDeepStrictEqual(configuration,buildConfiguration)))throw new Error('NATIVE_RUNTIME_CONFIGURATION_CHANGED');
   await checkNativeInput({kind:'runtime',install:root,commit:runtimeCommit,sourceRepository,
     configuration:buildConfiguration,platform,work:path.join(work,'component-check')});
   console.log(`NATIVE_RUNTIME_COMPONENT_ACCEPTED runtime=${runtimeCommit} llvm=${llvmCommit} install=${root}`);

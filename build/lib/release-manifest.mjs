@@ -754,6 +754,7 @@ export async function installedReleaseRows({stage, platform, components, inputs}
     const prefix = name === 'compiler' ? 'CJCJ-COMMIT' : name === 'runtime' ? 'CJRT-COMMIT'
       : ['cjpm', ...sourceOwnedTools(native.os === 'windows')].includes(name) ? 'CJTOOL-COMMIT' : '';
     const product = facts.artifact ?? (name === 'runtime' ? facts.artifacts?.find(row => row.path.endsWith('libcangjie-runtime' + native.shared)) : facts.artifacts?.[0]);
+    if(name==='runtime' && facts.source?.status==='resolved' && !product)throw Error('INSTALLED_RUNTIME_PAIR');
     await append(component, facts, product, prefix);
     if (name === 'llvm-cjdb') for (const tool of ['llc', 'opt']) {
       const publicPath = 'third_party/llvm/bin/' + tool + native.exe;
@@ -761,7 +762,8 @@ export async function installedReleaseRows({stage, platform, components, inputs}
       if (recipe[0] !== 'cjcj-sdk-entry-v1') throw new Error('INSTALLED_RELEASE_ENTRY ' + tool);
       const retained = relative(recipe[2]), actual = await fs.realpath(path.join(stage, retained));
       if (!actual.startsWith(await fs.realpath(stage) + path.sep)) throw new Error('INSTALLED_RELEASE_ENTRY_ESCAPE ' + tool);
-      await append('llvm-' + tool, {source:facts.source, build:facts.build},
+      const owner=components.find(row=>row.component==='llvm-backend')??facts;
+      await append('llvm-' + tool, {source:owner.source, build:owner.build},
         {path:retained, sha256:await sha256(actual)}, 'CJLLVM-COMMIT');
     }
   }

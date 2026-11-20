@@ -23,7 +23,7 @@ import {readInstalledNativeAst} from './installed-native-ast.mjs';
 import {installPath as mingwInstallPath} from '../../build/toolchain/mingw.mjs';
 import {installationSelection,resolveSources} from './native-source-selection.mjs';
 import {stdBuildType,flag} from './sdk-std-resume.mjs';
-import {developmentSdkPair} from '../runtime-pin.mjs';
+import {nativePair} from '../runtime-pin.mjs';
 import {stdDependencyInputs} from './stdlib-build.mjs';
 const execute = promisify(execFile);
 
@@ -346,34 +346,41 @@ export async function prepareSourceBuildInputs(config, env=process.env, startSta
 // without constructing the bootstrap graph or requiring private stage1 tools.
 export async function prepareInstallInputs(descriptor) {
   const supplied=structuredClone(descriptor.selection), members=supplied?.targetComponents;
-  const sdkPair = supplied?.platform === 'linux_x86_64' && members
-    && ['runtime','std','llvm'].every(name => members[name] && !Object.hasOwn(members[name], 'commit'))
-    && developmentSdkPair('linux-x64');
   const work=await privateRoot(descriptor.work),install=await privateRoot(descriptor.install);
-  if (sdkPair) {
-    for (const [name,ref] of Object.entries({runtime:sdkPair.runtime,std:sdkPair.runtime,llvm:sdkPair.llvm})) {
-      const row=members[name], actual=await gitInput(row.repository,ref);
-      if ((await execute('git',['-C',actual.repository,'rev-parse','HEAD'])).stdout.trim() !== ref)
-        throw Error('LINUX_X64_SDK_COMPONENT_CHECKOUT '+name);
-      Object.assign(row,actual);
-    }
-    if (supplied.bootstrapHost?.version !== sdkPair.hostVersion) throw Error('LINUX_X64_SDK_HOST_VERSION');
-    const observed=await execute(path.join(supplied.bootstrapHost.install,'bin/cjc'),['--version']);
-    if (hostToolchainFromCjcVersion(observed.stdout) !== 'nightly-'+sdkPair.hostVersion)
-      throw Error('LINUX_X64_SDK_HOST_VERSION');
-    const runtime=members.runtime;
+  // A locations-only component install consumes the upstream selection; never
+  // interpret a target or a checkout's current HEAD as a request for a pin.
+  if (supplied?.platform==='linux_x86_64' && descriptor.layout!=='native-output' && members
+    && ['runtime','std','llvm'].every(name=>members[name] && !Object.hasOwn(members[name],'commit'))) {
+    const pair=nativePair(process.env);
+    if(!pair)throw Error('INSTALL_COMPONENT_SELECTION_REQUIRED');
+    const {runtime,std,llvm}=members;
+    for(const [row,ref] of [[runtime,pair.runtime],[std,pair.runtime],[llvm,pair.llvm]])
+      Object.assign(row,await gitInput(row.repository,ref));
+    const host=supplied.bootstrapHost;
+    const observed=await execute(path.join(host.install,'bin','cjc'),['--version']);
+    if((host.version && host.version!==pair.hostVersion)
+      || hostToolchainFromCjcVersion(observed.stdout)!=='nightly-'+pair.hostVersion)throw Error('INSTALL_COMPONENT_HOST');
+    host.version=pair.hostVersion;
     runtime.sourceRepository=await runtimeSourceRepository(runtime.repository);
     Object.assign(runtime,await receiveNativeRuntime({root:runtime.install,sourceRepository:runtime.sourceRepository,
-      platform:supplied.platform,llvmCommit:sdkPair.llvm,runtimeCommit:sdkPair.runtime,hostVersion:sdkPair.hostVersion,work}));
-    if (runtime.configuration.buildType !== 'release') throw Error('LINUX_X64_SDK_RUNTIME_BUILD_TYPE');
-    runtime.gateStatus=path.join(runtime.sourceRoot,'runtime/CMakebuild/gc-unit.status');
-    const std=await fs.readFile(path.join(members.std.install,'PROVENANCE.txt'),'utf8');
-    if (std.match(/^STD_SOURCE_COMMIT = ([a-f0-9]{40})$/m)?.[1] !== sdkPair.runtime
-      || std.match(/^BUILT_BY_CJC = ([a-f0-9]{40})$/m)?.[1] !== members.compiler?.commit)
-      throw Error('LINUX_X64_SDK_STD_SOURCE');
-    const llvm=await readJson(members.llvm.buildResult);
-    if (llvm.platform !== supplied.platform || llvm.commits?.llvm !== sdkPair.llvm)
-      throw Error('LINUX_X64_SDK_LLVM_SOURCE');
+      platform:supplied.platform,llvmCommit:members.backend?.commit??llvm.commit,runtimeCommit:runtime.commit,
+      hostVersion:host.version,work}));
+    runtime.gateStatus=path.join(runtime.sourceRoot,'runtime','CMakebuild','gc-unit.status');
+    const commands=await readJson(std.install+'.commands.json');
+    const actions=commands.filter(row=>row.argv?.includes('build.py'));
+    const accepted=commands.findLast(row=>row.argv?.[0]==='resume-accepted' && row.rc===0);
+    const [build,installed]=accepted?[accepted.build,accepted.install]:actions.slice(-2).map(row=>row.argv);
+    if(commands.some(row=>Object.hasOwn(row,'rc') && (row.rc!==0||row.signal||row.cancelled||row.error))
+      || (!accepted && (actions.length<2 || actions.slice(-2).some(row=>row.rc!==0)))
+      || flag(build??[],'-t')!==runtime.configuration.buildType || !build.includes('build')
+      || !installed?.includes('install') || path.resolve(flag(installed,'--prefix')??'.')!==path.resolve(std.install))
+      throw Error('INSTALL_COMPONENT_STD_BUILD');
+    const provenance=await fs.readFile(path.join(std.install,'PROVENANCE.txt'),'utf8');
+    if(provenance.match(/^STD_SOURCE_COMMIT = ([a-f0-9]{40})$/m)?.[1]!==std.commit
+      || provenance.match(/^BUILT_BY_CJC = ([a-f0-9]{40})$/m)?.[1]!==members.compiler?.commit)
+      throw Error('INSTALL_COMPONENT_STD');
+    const facts=await readJson(llvm.buildResult??path.join(llvm.install,'BUILD-INPUTS.json'));
+    if(facts.platform!==supplied.platform || facts.commits?.llvm!==llvm.commit)throw Error('INSTALL_COMPONENT_LLVM');
   }
   const selection=installationSelection(supplied);
   const {platform,targetComponents:target,compilerExecution:execution}=selection,native=sdkPlatform(platform);

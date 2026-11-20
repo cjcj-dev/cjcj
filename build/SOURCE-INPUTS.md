@@ -326,18 +326,26 @@ run their own affected native link/install gates before claiming that input.
 
 ### Default managed Linux x64 development SDK
 
-The native Release runtime producer (`ci/platform_matrix/build_runtime.mjs`,
-`RUNTIME_NATIVE_PAIR=1`, `CJCJ_SRCBUILD_TARGET=linux-x64`) selects the development
-SDK pair from the scoped entries in the existing runtime and LLVM pin files.
-Use a managed checkout at the selected revision as `RUNTIME_SOURCE`. Run the
-normal target std stage with the same target, the produced runtime installation,
-the fixed compiler SDK and the managed standard library dependencies. Omit
-`--commit` to take the selected runtime source for std. In the existing
-`install --inputs` component locations, omit `commit` on all three target rows
-(runtime, std and LLVM) to use the SDK pair. The compiler product and its
-execution inputs remain independent. Public `package` for linux-x64 uses that
-pair unless a caller supplies the existing explicit native pair.
+Before acquiring the component checkouts, run
+`node ci/load_runtime_pin.mjs --development-sdk OUTPUT` with
+`CJCJ_SRCBUILD_TARGET=linux-x64`, `RUNTIME_NATIVE_PAIR=1` and a native Release
+runtime build. The new output file uses the existing job environment format.
+That invocation selects the scoped pair and official bootstrap host; an
+explicit pair takes precedence. Ordinary runtime builds, public fetch/run-all
+(including saved repository choices), and other targets keep their own pins.
 
-The general runtime and LLVM pins, official bootstrap inputs and CI's persisted
-SDK registration are independent. The scoped pair does not select a runner
-artifact and does not enable an Actions or release source-build route.
+Use the selected refs for checkout and pass the output environment to
+`ci/platform_matrix/build_runtime.mjs`. For the direct target std producer
+pass the same runtime ref as `--commit`, its installed R as `--runtime`, and
+`--build-type release`. The configured SDK graph already binds commits in
+its command argv. Only a graph attempt with its original command and result
+can enter graph resume. A direct Git build may still omit its commit to build
+HEAD; that does not create graph history.
+
+Component `install --inputs` accepts its normal fully specified selection.
+For a locations-only Linux x64 component selection omit all three runtime,
+std and LLVM commits and pass the selected environment. It verifies R, std,
+N and the executing host from their original inputs. The optional llc/opt
+backend is separate from N. Package consumes the installed SDK at the selected
+consumer path, including after relocation, independent of checkout or current
+pin defaults. CI registrations and release workflows are unchanged.

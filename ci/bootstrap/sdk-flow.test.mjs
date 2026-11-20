@@ -376,6 +376,14 @@ fs.writeFileSync(out+'.c','#include <stdio.h>\\nint main(void){puts("hello from 
     return ['tools/bin/'+name,'tools/bin/'+name+'.entry','.target-tools/tools/'+(privateDir?privateDir+'/':'')+'bin/'+name];
   }),
   'tools/config/cangjie-format.toml','tools/config/cangjie-repo.toml','tools/dtsparser/analysis.js','tools/bin/node'])await put(output+'/'+rel,'finite native artifact');
+ // Give the finite producer its own Git-stamped products. Package reads
+ // these installed bytes as well as the real command log from runBuildPy.
+ for(const rel of ['runtime/lib/'+tuple+'/libcangjie-runtime.so','lib/'+tuple+'/libcangjie-runtime.a'])
+   await put(output+'/'+rel,'finite runtime\0CJRT-COMMIT:'+selected.runtime.tag+'\0');
+ await put(output+'/third_party/llvm/lib/libLLVM-15.so','finite LLVM\0CJLLVM-COMMIT:'+selected.llvm.tag+'\0');
+ const stdFiles=['modules/'+tuple+'/std/std.core.cjo','lib/'+tuple+'/libcangjie-std-core.a'];
+ await put(output+'/PROVENANCE.txt',['STD_SOURCE_COMMIT = '+selected.runtime.tag,'ARTIFACT-SHA256:',
+   ...await Promise.all(stdFiles.map(async rel=>await fileDigest(path.join(output,rel))+'  '+rel))].join('\n'));
  for(const name of ['llc','llvm-as','llvm-dis','opt'])await fs.chmod(output+'/third_party/llvm/bin/'+name,0o755);
  await put(output+'/tools/dtsparser/DEPENDENCIES.json','{}');
  await put(work+'/host/runtime/lib/'+tuple+'/libcangjie-runtime.so','finite host runtime');

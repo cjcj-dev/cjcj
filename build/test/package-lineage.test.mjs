@@ -498,6 +498,7 @@ endforeach()
   assert.notEqual(r.results[0].sha256,files[statusRel]);
   const {rows}=await writeInstalledReleaseManifest({stage:sdk,platform,...inputs});
   assert.deepEqual(rows.find(row=>row.component==='runtime').results,r.results);
+  if(backend)for(const name of ['llvm-llc','llvm-opt'])assert.equal(rows.find(row=>row.component===name).source.commit,backend.commit);
   await verifyInstalledReleaseManifest({stage:sdk,platform,...inputs});
   const lineage=await inspectPackagedLineage(sdk);console.log('NATIVE_TARGET_LINEAGE_ASSERTION_REACHED '+JSON.stringify(lineage));
   assert.equal(lineage.ok,true,lineage.message);
