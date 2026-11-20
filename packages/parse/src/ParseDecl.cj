@@ -871,19 +871,7 @@ extend ParserImpl {
             if (let None <- body.body) {
                 DiagMissingBody("main function", "", lastToken.End())
             }
-            for (anno in annos) {
-                if (anno.kind == AnnotationKind.INTRINSIC) {
-                    CheckIntrinsicFunc(ret)
-                    ret.EnableAttr(Attribute.INTRINSIC)
-                }
-                if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
-                    ret.EnableAttr(Attribute.NUMERIC_OVERFLOW)
-                    ret.overflowStrategy = anno.overflowStrategy
-                }
-                if (anno.kind == AnnotationKind.FASTNATIVE) {
-                    ret.isFastNative = true
-                }
-            }
+            ParseFuncDeclAnnos(annos, ret)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.MAIN))
             if (ret.TestAttr(Attribute.UNSAFE)) {
                 SetUnsafe(ret, modifiers: modifiers)
