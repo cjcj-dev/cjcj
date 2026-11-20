@@ -1564,8 +1564,7 @@ private func TypeCheckReferenceCheckLegalityIsSkip(node: Node): Bool {
     return false
 }
 
-// Check the resolved declaration, including bare references and nested function
-// values. Importing a package by itself does not use any of its modal APIs.
+// Function types carry their parameter and return types in typeArgs.
 private func HasLocalSignature(ty: Ty, seen: HashSet<Ptr<Ty>>): Bool {
     if (!seen.add(Ptr<Ty>(ty))) { return false }
     if (let Some(ft) <- (ty as FuncTy)) {
@@ -1580,6 +1579,29 @@ private func HasLocalSignature(ty: Ty, seen: HashSet<Ptr<Ty>>): Bool {
     return false
 }
 
+private func LocalModeEnabled(impl: TypeCheckerImpl): Bool {
+    return if (let Some(instance) <- impl.ci) { instance.globalOptions.enableLocalMode } else { false }
+}
+
+// ResolveNames has expanded aliases on the use-site Type. Visit the source
+// files, not the imported declarations, and include signatures without bodies
+// or expression references (and children skipped by expression legality).
+public func CheckLocalTypeReferences(diag: BasicDiagnosticEngine, impl: TypeCheckerImpl, pkg: Package): Unit {
+    if (LocalModeEnabled(impl)) { return }
+    for (file in pkg.files) {
+        let _ = Walker(file, visitPre: { node: Node =>
+            if (node.astKind == ASTKind.REF_TYPE || node.astKind == ASTKind.QUALIFIED_TYPE) {
+                if ((let Some(ty) <- node.GetTy()) && HasLocalSignature(ty, HashSet<Ptr<Ty>>())) {
+                    DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_local_api_disabled, node,
+                        arguments: [node.ToString()]).Emit()
+                    return VisitAction.SKIP_CHILDREN
+                }
+            }
+            return VisitAction.WALK_CHILDREN
+        }).Walk()
+    }
+}
+
 private func CheckLegalityOfReferenceForNameReferenceExpr(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -1587,8 +1609,7 @@ private func CheckLegalityOfReferenceForNameReferenceExpr(
     ctx: ASTContext,
     nameRef: NameReferenceExpr
 ): Unit {
-    let enabled = if (let Some(instance) <- impl.ci) { instance.globalOptions.enableLocalMode } else { false }
-    if (!enabled && (let Some(decl) <- nameRef.GetTarget()) && (let Some(ty) <- decl.GetTy()) &&
+    if (!LocalModeEnabled(impl) && (let Some(decl) <- nameRef.GetTarget()) && (let Some(ty) <- decl.GetTy()) &&
         HasLocalSignature(ty, HashSet<Ptr<Ty>>())) {
         DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_local_api_disabled, nameRef,
             arguments: [decl.identifier.Val()]).Emit()

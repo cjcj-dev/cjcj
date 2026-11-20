@@ -635,6 +635,7 @@ public func CheckLegalityOfUsage(
 ): LegalityOfUsageResult {
     let result = LegalityOfUsageResult()
     let threadNum = if (opts.codegenDebugMode) { 1 } else { Int64(opts.GetJobs()) }
+    CheckLocalTypeReferences(diag, impl, pkg)
     TypeCheckReferenceCheckLegalityOfReference(diag, typeManager, impl, ctx, pkg)
     AppendStaticMemberGenericIssues(result.staticMemberGenericIssues, CheckStaticMembersWithGeneric(pkg, threadNum: threadNum))
     EmitLegalityOfUsage(diag, result)
