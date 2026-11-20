@@ -86,13 +86,17 @@ function installedTool(root, producer) {
 function pcre2Counterparts(official, candidate, officialRoot, candidateRoot, target, errors) {
   const dir = 'runtime/lib/' + getTarget(target).spec.runtimeTuple + '/';
   const link = 'libpcre2-8.so', abi = link + '.0';
+  if (!official.has(dir + link)) return [];
   const oldFile = official.get(dir + abi)?.symlinkTarget;
   if (official.get(dir + link)?.symlinkTarget !== abi
       || !/^libpcre2-8\.so\.0(?:\.\d+)+$/.test(oldFile)
       || official.get(dir + oldFile)?.type !== 'file'
-      || soname(path.join(officialRoot, dir, oldFile)) !== abi) return [];
+      || soname(path.join(officialRoot, dir, oldFile)) !== abi) {
+    errors.push('pcre2-reference-chain\t' + dir + abi);
+    return [];
+  }
   for (const relative of candidate.keys()) {
-    if (path.posix.dirname(relative) + '/' === dir && /^libpcre2-8\.so(?:\.|$)/.test(path.posix.basename(relative)))
+    if (path.posix.dirname(relative) + '/' === dir && /^libpcre2-8\.so(?:\.\d+)*$/.test(path.posix.basename(relative)))
       errors.push('pcre2-flat-library\t' + relative);
   }
   const nested = dir + 'pcre2/';

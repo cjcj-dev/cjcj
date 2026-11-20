@@ -323,6 +323,9 @@ test('Linux package maps only its private PCRE2 loader chain and rejects fallbac
   await assert.rejects(check(), /pcre2-flat-library/);
   fs.rmSync(local, {recursive:true});
   await assert.rejects(check(), /pcre2-loader-chain/);
+  // If ELF inspection fails, even an exact replica of the old flat tree is unsafe.
+  fs.writeFileSync(path.join(official, dir, original), 'unreadable ELF identity');
+  await assert.rejects(check(), /pcre2-reference-chain/);
 });
 
 test('incremental Linux std copy retires flat PCRE2 and preserves private links and other libraries', t => {
@@ -337,6 +340,7 @@ test('incremental Linux std copy retires flat PCRE2 and preserves private links 
   }
   put(compiler, dir + 'libother.so');
   copyHostStd(std, compiler, target);
+  copyHostStd(std, compiler, target); // another install into the migrated output
   assert.deepEqual(fs.readdirSync(path.join(compiler, dir)).sort(), ['libother.so', 'pcre2']);
   assert.equal(fs.readlinkSync(path.join(compiler, dir, 'pcre2', link)), abi);
   assert.equal(fs.readlinkSync(path.join(compiler, dir, 'pcre2', abi)), version);
