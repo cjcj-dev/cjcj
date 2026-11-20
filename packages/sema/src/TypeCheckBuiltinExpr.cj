@@ -1063,6 +1063,10 @@ public func ChkPointerCall(typeManager: TypeManager, ctx: Option<ASTContext>, ta
     if (!ret) {
         if (let Some(arg) <- pointerExpr.arg) {
             ce.args.add(arg)
+            pointerExpr.arg = None
+        }
+        if (let Some(context) <- ctx) {
+            context.ClearTypeCheckCache(pointerExpr)
         }
         ce.desugarExpr = None
     }

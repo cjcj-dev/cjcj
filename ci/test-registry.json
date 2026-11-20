@@ -462,6 +462,11 @@
     "member": "packages/parse"
   },
   {
+    "file": "packages/sema/src/DesugarCache_test.cj",
+    "executor": "cjpm",
+    "member": "packages/sema"
+  },
+  {
     "file": "packages/sema/src/resolver_tests/GIMResolverIntegration_test.cj",
     "executor": "cjpm",
     "member": "packages/sema"
