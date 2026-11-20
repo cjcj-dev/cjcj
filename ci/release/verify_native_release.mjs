@@ -5,7 +5,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {isMain, cliArgs} from '../entry-common.mjs';
 import {parseArgs} from 'node:util';
-import {assertNativeReleaseInputs} from './native-release-inputs.mjs';
+import {assertNativeReleaseInputs, releaseSelection} from './native-release-inputs.mjs';
 import {readJson, inventory, command} from '../bootstrap/sdk-flow.mjs';
 import {selectInstalledColourSdk, colourEnvironment} from '../prepare-colour-sdk.mjs';
 import {crossStdArguments} from './cross-std-arguments.mjs';
@@ -27,21 +27,14 @@ async function compareSubtree(reference, sdk, relative) {
 }
 export async function verifyNativeRelease(options, env = process.env) {
   const {sdk, platform, version, sourceSha, runtimeRef, releaseKey = '', std, crossRoot, work} = options;
-  const {target, release, toolApplicability} = await assertNativeReleaseInputs(options);
-  assertNoVerifierReportArtifacts([sdk]);
-  assertSdkCompilerRuntimeAbi({sdk, target});
-  await verifyInstalledReleaseManifest({stage:sdk,platform:target.spec.llvmPlatform,...await installedInputs(sdk,target.spec.llvmPlatform)});
-  // The independently delivered final std remains the content/count oracle.
-  if (!std) throw new Error('NATIVE_RELEASE_STD_REQUIRED');
-  await command([process.execPath, fileURLToPath(new URL('../../scripts/check_packaged_std.mjs', import.meta.url)),
-    '--sdk', sdk, '--std', std, '--platform', platform], {signal: AbortSignal.timeout(120000)});
+  // Check the received target payloads before starting any host SDK consumers.
+  const {release} = releaseSelection(platform, releaseKey);
   const args = crossStdArguments(env.CROSS_STD_ARTIFACTS || '[]', crossRoot || '',
     {artifact: env.CROSS_STD_ARTIFACT, tuple: env.CROSS_STD_TUPLE});
   const rows = args.filter((_, i) => i % 2 === 1).filter((_, i) => args[i * 2] === '--cross-std-dir')
     .map(text => {const at = text.indexOf('='); return {tuple: text.slice(0, at), root: text.slice(at + 1)};});
-  if (JSON.stringify(rows.map(row => row.tuple).sort()) !== JSON.stringify([...release.crossTuples].sort()))
-    throw new Error('NATIVE_RELEASE_CROSS_INPUTS');
   for (const {tuple, root} of rows) {
+    if (!release.crossTuples.includes(tuple)) throw new Error('NATIVE_RELEASE_CROSS_INPUTS');
     for (const relative of ['modules/' + tuple, 'lib/' + tuple, 'runtime/lib/' + tuple])
       await compareSubtree(root, sdk, relative);
     const runtimeAt = args.findIndex((arg, i) => arg === '--cross-runtime-dir' && args[i + 1].startsWith(tuple + '='));
@@ -52,6 +45,18 @@ export async function verifyNativeRelease(options, env = process.env) {
       for (const relative of ['lib/' + tuple, 'runtime/lib/' + tuple]) await compareSubtree(runtimeRoot, sdk, relative);
     }
   }
+  if (rows.length) console.log('NATIVE_RELEASE_CROSS_VERIFIED ' + rows.map(row => row.tuple).join(','));
+  const {target, toolApplicability} = await assertNativeReleaseInputs(options);
+  assertNoVerifierReportArtifacts([sdk]);
+  assertSdkCompilerRuntimeAbi({sdk, target});
+  await verifyInstalledReleaseManifest({stage:sdk,platform:target.spec.llvmPlatform,...await installedInputs(sdk,target.spec.llvmPlatform)});
+  // The independently delivered final std remains the content/count oracle.
+  if (!std) throw new Error('NATIVE_RELEASE_STD_REQUIRED');
+  await command([process.execPath, fileURLToPath(new URL('../../scripts/check_packaged_std.mjs', import.meta.url)),
+    '--sdk', sdk, '--std', std, '--platform', platform], {signal: AbortSignal.timeout(120000)});
+  // crossStdArguments rejects duplicates; every delivered row belongs to this
+  // release. Require the complete set alongside the mandatory host std.
+  if (rows.length !== release.crossTuples.length) throw new Error('NATIVE_RELEASE_CROSS_INPUTS');
   await readInstalledStdxInputs({sdk,platform:target.spec.llvmPlatform,requireFull:true});
   await selectInstalledColourSdk(sdk, {...env, CJCJ_NATIVE_RUNTIME_REF: runtimeRef});
   const installedEnv = await colourEnvironment('run', {...env, CJCJ_NATIVE_RUNTIME_REF: runtimeRef});

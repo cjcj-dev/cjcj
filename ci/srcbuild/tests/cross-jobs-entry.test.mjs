@@ -4,9 +4,12 @@ import fs from 'node:fs/promises';
 import {writeFileSync} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import {pathToFileURL} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {crossBuildJobs} from '../lib/cross-build-jobs.mjs';
-import {CROSS_STD_BUILDS} from '../../../build/lib/targets.mjs';
+import {load as yaml} from '../../vendor/js-yaml/js-yaml.mjs';
+import {archiveInstall, fileDigest} from '../../bootstrap/sdk-flow.mjs';
+import {CROSS_STD_BUILDS, getTarget} from '../../../build/lib/targets.mjs';
 import {installCompiler} from '../../fixtures/compiler-install.mjs';
 const root=process.env.CROSS_JOBS_EVIDENCE;
 if(!root||!process.env.ZX)throw Error('CROSS_JOBS_INPUTS');
@@ -26,18 +29,28 @@ def arg(flag,default=None):
  return args[args.index(flag)+1] if flag in args else default
 with open(os.environ['CROSS_COMMAND_LOG'],'a') as f:f.write(json.dumps(dict(kind=kind,args=args,jobs=os.environ.get('CANGJIE_BUILD_JOBS')))+'\n')
 if args[0]=='build' and kind=='stdlib':
- print('CROSS_STD_CHILD_REACHED',flush=True);sys.exit(37)
+ print('CROSS_STD_CHILD_REACHED',flush=True);sys.exit(0 if os.environ.get('IOS_FINITE_STD') else 37)
+if args[0]=='install' and kind=='stdlib' and os.environ.get('IOS_FINITE_STD'):
+ root=p(arg('--prefix'));t=os.environ['CROSS_STD_TUPLE']
+ for sub,name in [('modules/'+t+'/std','std.core.cjo'),('lib/'+t,'libcangjie-std-core.a'),('runtime/lib/'+t,'libcangjie-std-core.dylib')]:
+  (root/sub).mkdir(parents=True);(root/sub/name).write_text('finite std fixture: '+t+'/'+name)
+ sys.exit(0)
 if kind=='runtime' and (os.environ.get('CROSS_STD_TUPLE') or '').startswith('ios_'):
  tuple=os.environ['CROSS_STD_TUPLE'];arch='x86_64' if 'x86_64' in tuple else 'aarch64'
- macho=bytearray(64);struct.pack_into('<I',macho,0,0xfeedfacf);struct.pack_into('<I',macho,4,0x01000007 if arch=='x86_64' else 0x0100000c);struct.pack_into('<I',macho,12,6)
+ def macho(name):
+  original=os.environ.get('IOS_REPLAY_INSTALL')
+  if original:return (p(original)/'runtime/lib'/tuple/name).read_bytes()
+  ident=b'@rpath/'+name.encode()+b'\0';size=(24+len(ident)+7)//8*8
+  cmds=struct.pack('<6I',13,size,24,0,0,0)+ident.ljust(size-24,b'\0')+struct.pack('<6I',50,24,7 if 'simulator' in tuple else 2,0,0,0)
+  return struct.pack('<8I',0xfeedfacf,0x01000007 if arch=='x86_64' else 0x0100000c,0,6,2,len(cmds),0,0)+cmds
  if args[0]=='build':
   built=p('CMakebuild/runtime-staging/lib')/(arch+'_Release');built.mkdir(parents=True,exist_ok=True)
-  (built/'libboundscheck.dylib').write_bytes(macho)
+  for name in ['libboundscheck.dylib','libcangjie-runtime.dylib']:(built/name).write_bytes(macho(name))
   print('CROSS_RUNTIME_CHILD_REACHED',flush=True)
  if args[0]=='install':
   root=p(arg('--prefix'));lib=root/'runtime/lib'/tuple;lib.mkdir(parents=True,exist_ok=True)
   objects=root/'lib'/tuple;objects.mkdir(parents=True,exist_ok=True)
-  (lib/'libcangjie-runtime.dylib').write_bytes(macho);(objects/'cjstart.o').write_text('finite object fixture')
+  (lib/'libcangjie-runtime.dylib').write_bytes(macho('libcangjie-runtime.dylib'));(objects/'cjstart.o').write_text('finite object fixture')
  sys.exit(0)
 if kind=='runtime' and args[0]=='build':
  target=arg('--target');family,arch=target.split('-',1);tuple='linux_'+family+'_'+arch+'_cjnative'
@@ -70,7 +83,7 @@ async function fixture(label,{ios=false}={}){
  }
  const ndk=work+'/ndk',ohos=work+'/ohos';
  await fs.mkdir(ndk+'/toolchains/llvm/prebuilt',{recursive:true});await fs.mkdir(ohos+'/native/llvm/bin',{recursive:true});
- const env={...process.env,CANGJIE_WORKSPACE:work,CJCJ_BOOTSTRAP_WORK:work+'/native-bootstrap',CJCJ_NATIVE_RUNTIME_REF:ref,RUNTIME_VERSION:'1.3.0-fixture',CJCJ_STAGE3_CANGJIE_VERSION:'1.3.0-fixture',
+ const env={...process.env,CANGJIE_WORKSPACE:work,CJCJ_BOOTSTRAP_WORK:work+'/native-bootstrap',CJCJ_NATIVE_RUNTIME_REF:ref,RUNTIME_SRC_URL:repo,RUNTIME_VERSION:'1.3.0-fixture',CJCJ_STAGE3_CANGJIE_VERSION:'1.3.0-fixture',
   ANDROID_NDK_ROOT:ndk,OHOS_SDK_HOME:ohos,CROSS_COMMAND_LOG:work+'/children.jsonl',CANGJIE_BUILD_JOBS:'2',STD_BUILD_JOBS:'1',CMAKE_BUILD_PARALLEL_LEVEL:'4',PYTHONDONTWRITEBYTECODE:'1'};
  if(ios){
   // Explicit platform/command fixture on Linux; no Darwin or iOS execution claim.
@@ -78,7 +91,8 @@ async function fixture(label,{ios=false}={}){
   const preload=work+'/darwin-fixture.mjs';
   await fs.writeFile(preload,"Object.defineProperty(process,'platform',{value:'darwin'});Object.defineProperty(process,'arch',{value:'arm64'});\n");
   await fs.writeFile(bin+'/xcrun','#!'+process.execPath+'\nconsole.log(process.argv.includes("--find")?'+JSON.stringify(bin+'/clang')+':'+JSON.stringify(work+'/fixture-sysroot')+');\n',{mode:0o755});
-  Object.assign(env,{NODE_OPTIONS:'--import='+preload,PATH:bin+path.delimiter+env.PATH});
+  await fs.writeFile(bin+'/lipo','#!'+process.execPath+'\nconsole.log(process.env.CROSS_STD_TUPLE.includes("x86_64")?"x86_64":"arm64");\n',{mode:0o755});
+  Object.assign(env,{NODE_OPTIONS:'--import='+pathToFileURL(preload).href,PATH:bin+path.delimiter+env.PATH});
  }
  const invoke=(name,extra={})=>run(label+'-'+name,[process.env.ZX,path.resolve('ci/srcbuild/steps/build-'+name+'.mjs')],{env:{...env,...extra}});
  const records=async()=>((await fs.readFile(env.CROSS_COMMAND_LOG,'utf8')).trim().split('\n').map(line=>JSON.parse(line)));
@@ -125,4 +139,101 @@ test('public iOS caller consumes its installed Darwin compiler and AST inputs be
  assert.equal(runtime.jobs,'2');assert.equal(std.args[std.args.indexOf('-j')+1],'1');
  assert.equal(std.args[std.args.indexOf('--target')+1],target.runtime_target);
  }
+});
+
+// The stage2 compiler and Xcode commands are finite stand-ins. Production JS
+// owns checkout, build/install argv, artifact layout, assembly and reception.
+test('source-ios products enter the same SDK that compose receives after relocation', async () => {
+  const workflow = async name => yaml(await fs.readFile(new URL('../../../.github/workflows/' + name, import.meta.url), 'utf8'));
+  const {jobs} = await workflow('srcbuild-target.yml');
+  const source = jobs['source-ios'], packaging = jobs.srcbuild;
+  const step = (job, match) => job.steps.find(s => s.run?.includes(match));
+  const upload = source.steps.find(s => s.uses?.startsWith('actions/upload-artifact@'));
+  const download = packaging.steps.find(s => s.with?.pattern === 'final-std-ios-*');
+  const installation = step(packaging, 'install-ios-final-std.mjs');
+  assert.ok(packaging.needs.includes('source-ios') && packaging.if.includes("needs.source-ios.result == 'success'"));
+  assert.equal(installation.if, upload.if);
+  assert.equal(download.if, installation.if);
+  assert.equal(download.with.path, installation.env.IOS_ARTIFACT_DIR);
+  assert.ok(packaging.steps.indexOf(download) < packaging.steps.indexOf(installation));
+  assert.ok(packaging.steps.indexOf(installation) < packaging.steps.indexOf(step(packaging, 'steps/package-install.mjs')));
+  const recipe = (await workflow('release.yml')).jobs['package-darwin-arm64-ios'].with;
+  const selected = JSON.parse(recipe.cross_std_artifacts);
+  const entry = command => path.resolve(command.split(' ').at(-1));
+  const f = await fixture('ios product transport', {ios: true});
+  const work = f.env.CANGJIE_WORKSPACE;
+  const receive = path.join(work, 'runner temp');
+  const artifacts = download.with.path.replace('${{ runner.temp }}', receive);
+  const sdk = path.join(work, 'software', 'cangjie');
+  const runtimeRef = f.env.CJCJ_NATIVE_RUNTIME_REF;
+  const sourceSha = 'c'.repeat(40);
+  for (const target of CROSS_STD_BUILDS.filter(t => t.family === 'ios')) {
+    const original = process.env.IOS_REPLAY_ARTIFACTS;
+    const replay = original && path.join(original, target.runtime_target, 'x/ios-source/cangjie_runtime/runtime-install');
+    const result = run('produce-'+target.tuple, [process.env.ZX, entry(step(source, 'build-ios-final-std.mjs').run)], {
+      env: {...f.env, CROSS_STD_TUPLE: target.tuple, IOS_FINITE_STD: '1', ...(replay && {IOS_REPLAY_INSTALL: replay})}});
+    assert.equal(result.status, 0, result.stderr);
+    const name = upload.with.name.replace('${{ matrix.artifact }}', target.artifact);
+    assert.ok(selected.some(row => row.artifact === name && row.tuple === target.tuple));
+    const product = upload.with.path.replace('${{ env.CANGJIE_WORKSPACE }}', work).replace('${{ matrix.artifact }}', name);
+    // Local file transport in place of the two Actions. No source tree is copied.
+    await fs.cp(product, path.join(artifacts, name), {recursive: true});
+  }
+  await fs.mkdir(sdk, {recursive:true});
+  const facts = {phase:'stage3',platform:'darwin_aarch64',runtimeCommit:runtimeRef,compilerCommit:sourceSha};
+  await fs.writeFile(path.join(sdk,'STAGE-INPUTS.json'), JSON.stringify(facts));
+  const host = path.join(sdk, 'modules/darwin_aarch64_cjnative/std/host.cjo');
+  await fs.mkdir(path.dirname(host), {recursive:true}); await fs.writeFile(host, 'independent host control');
+  const install = label => run(label, [process.execPath,entry(installation.run)], {env:{...process.env,
+    CJCJ_SRCBUILD_TARGET:recipe.platform, CANGJIE_WORKSPACE:work, CJCJ_NATIVE_RUNTIME_REF:runtimeRef, IOS_ARTIFACT_DIR:artifacts}});
+  const first = install('install-first'); assert.equal(first.status,0,first.stderr);
+  const [{tuple,artifact}] = selected;
+  const stale = path.join(sdk,'lib',tuple,'obsolete.a');
+  await fs.writeFile(stale,'old SDK'); const again = install('install-restored-sdk');
+  assert.equal(again.status,0,again.stderr); await assert.rejects(fs.stat(stale), {code:'ENOENT'});
+  const bad = path.join(artifacts,artifact,'ios-build.json');
+  const good = await fs.readFile(bad,'utf8');
+  await fs.writeFile(bad, JSON.stringify({...JSON.parse(good),runtimeRef:'0'.repeat(40)}));
+  const rejected = install('install-wrong-std-ref');
+  assert.equal(rejected.status,1); assert.match(rejected.stderr,/IOS_FINAL_STD_IDENTITY/);
+  await fs.writeFile(bad,good);
+  assert.equal(await fs.readFile(host,'utf8'),'independent host control');
+  const version='fixture', archiveDir=path.join(work,'sdk artifact');
+  const archive=path.join(archiveDir,'cangjie-sdk-'+getTarget(recipe.platform).spec.sdkName+'-'+version+'-cjcj.tar.gz');
+  // Archive facts are test data; this fixture contains no executable host SDK.
+  await fs.writeFile(path.join(sdk,'BUILD-MANIFEST.json'),JSON.stringify({target:recipe.platform,version,
+    consumption:{status:'EXECUTED',platform:facts.platform}}));
+  await archiveInstall({install:sdk,archive,test:{required:selected.flatMap(({tuple})=>[
+    'modules/'+tuple+'/std/std.core.cjo','lib/'+tuple+'/libcangjie-std-core.a','runtime/lib/'+tuple+'/libboundscheck.dylib'])},vars:{}});
+  await fs.rename(sdk,sdk+'-unavailable');
+  const compose = entry(step((await workflow('build-release-package.yml')).jobs.package, 'compose-package.mjs').run);
+  const consume = label => run(label,[process.execPath,compose],{env:{...process.env,
+    NATIVE_SDK_ARTIFACT_DIR:archiveDir,NATIVE_SDK_INSTALL_DIR:path.join(work,'received '+label),RELEASE_PLATFORM:recipe.platform,
+    CJCJ_NATIVE_SDK_VERSION:version,CJCJ_RELEASE_SOURCE_SHA:sourceSha,CJCJ_NATIVE_RUNTIME_REF:runtimeRef,
+    FINAL_STD_DIR:path.join(work,'host std'),RELEASE_DIST:path.join(work,'dist '+label),RELEASE_KEY:recipe.release_key,
+    CROSS_STD_ARTIFACTS:recipe.cross_std_artifacts,CROSS_STD_DIR:artifacts}});
+  const checkCross = result => {
+    assert.equal(result.status,1);
+    assert.ok(result.stdout.includes('NATIVE_RELEASE_CROSS_VERIFIED '+selected.map(row=>row.tuple).join(',')),result.stderr);
+    assert.match(result.stderr,/ENOENT.*TOOLS-INPUTS.json/);
+  };
+  checkCross(consume('compose-good'));
+  const reference=path.join(artifacts,artifact,'cross-runtime');
+  const bounds='runtime/lib/'+tuple+'/libboundscheck.dylib';
+  const file=path.join(reference,bounds), manifest=path.join(reference,'CROSS-RUNTIME.json');
+  const bytes=await fs.readFile(file), originalManifest=await fs.readFile(manifest);
+  // The hash matches the changed payload. Only its dylib identity is wrong.
+  await fs.copyFile(path.join(path.dirname(file),'libcangjie-runtime.dylib'),file);
+  const record=JSON.parse(originalManifest);record.files.find(row=>row.path===bounds).sha256=await fileDigest(file);
+  await fs.writeFile(manifest,JSON.stringify(record));
+  const wrong=consume('compose-wrong-id');assert.equal(wrong.status,1);
+  assert.match(wrong.stderr,/install name @rpath\/libcangjie-runtime.dylib is not @rpath\/libboundscheck.dylib/);
+  const simulator = selected.find(row => row.tuple === 'ios_simulator_aarch64_cjnative');
+  await fs.copyFile(path.join(artifacts,simulator.artifact,'cross-runtime/runtime/lib',simulator.tuple,'libboundscheck.dylib'),file);
+  record.files.find(row=>row.path===bounds).sha256=await fileDigest(file);
+  await fs.writeFile(manifest,JSON.stringify(record));
+  const swapped=consume('compose-wrong-platform');assert.equal(swapped.status,1);
+  assert.match(swapped.stderr,/targets iossimulator, not ios for/);
+  await fs.writeFile(file,bytes); await fs.writeFile(manifest,originalManifest);
+  checkCross(consume('compose-restored'));
 });
