@@ -4699,6 +4699,8 @@ extend TypeChecker {
                 let originalCtor = IsInstanceConstructor(member) && member.astKind == ASTKind.FUNC_DECL &&
                     member.identifier.Val() == "init"
                 if (originalCtor) {
+                    if ((let Some(modal) <- ce.modal) &&
+                        GetReceiverMode((member as FuncDecl).getOrThrow()) != modal.local) { continue }
                     ctorCandidates.add(Some((member as FuncDecl).getOrThrow()))
                 }
             }

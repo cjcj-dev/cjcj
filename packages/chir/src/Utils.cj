@@ -406,7 +406,8 @@ public func GetInstMemberTypeByNameCheckingReadOnly(rootType: CustomType, names:
     let currentName = names[0]
     let member = GetMemberVarByName(customTypeDef, currentName)
     let isReadOnly = member.TestAttr(Attribute.READONLY)
-    let memberTy = ReplaceRawGenericArgType(member.ty, instMap, builder)
+    let memberTy = builder.WithModal(ReplaceRawGenericArgType(member.ty, instMap, builder),
+        if (member.TestAttr(Attribute.DEMODE)) { ModalInfo() } else { rootType.modal })
     if (names.size > 1) {
         let pureMemberTy = memberTy.StripAllRefs()
         if (pureMemberTy.IsNominal()) {

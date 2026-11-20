@@ -110,6 +110,9 @@ private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
         case 75u8 => (ExprKind.INTRINSIC, false)
         case 76u8 => (ExprKind.GET_RTTI, false)
         case 77u8 => (ExprKind.GET_RTTI_STATIC, false)
+        case 78u8 => (ExprKind.EXCLAVE, false)
+        case 79u8 => (ExprKind.START_REGION, false)
+        case 80u8 => (ExprKind.END_REGION, false)
         case _ => (ExprKind.GOTO, false)
     }
 }
@@ -135,6 +138,8 @@ class CHIRDeserializerImpl {
     private let id2Value: HashMap<UInt32, Value> = HashMap<UInt32, Value>()
     private let id2Expression: HashMap<UInt32, Expression> = HashMap<UInt32, Expression>()
     private let id2CustomTypeDef: HashMap<UInt32, CustomTypeDef> = HashMap<UInt32, CustomTypeDef>()
+    private let parameterDefaults = ArrayList<(Parameter, UInt32)>()
+    private let textParameterDefaults = ArrayList<(Parameter, String)>()
     private let genericTypeConfig: ArrayList<(GenericType, PackageFormat_GenericType)> =
         ArrayList<(GenericType, PackageFormat_GenericType)>()
 
@@ -211,6 +216,7 @@ class CHIRDeserializerImpl {
             }
             id++
         }
+        for ((param, id) in parameterDefaults) { param.paramDftValFunc = GetValue<Value>(id).getOrThrow() }
         var genericIndex: Int64 = 0
         while (genericIndex < genericTypeConfig.size) {
             let (genericType, rawGenericType) = genericTypeConfig[genericIndex]
@@ -256,6 +262,7 @@ class CHIRDeserializerImpl {
         configureExpressionPayloadLinks()
         configureBlockPredecessors()
         configureBlockGroups()
+        for ((param, id) in textParameterDefaults) { param.paramDftValFunc = valuesById[id] }
         configurePackageFunctions(pkg)
         return pkg
     }
@@ -478,6 +485,7 @@ class CHIRDeserializerImpl {
             CHIRApplyAnnoInfo(param.GetAnnoInfo(), CHIRFieldAt(fields, 4))
             CHIRApplyBaseInfo(param, CHIRFieldAt(fields, 5), CHIRFieldAt(fields, 6), annotationText: CHIRFieldAt(fields, 7))
             valuesById[CHIRFieldAt(fields, 0)] = param
+            if (fields.size > 8 && !fields[8].isEmpty()) { textParameterDefaults.add((param, fields[8])) }
         }
     }
 
@@ -819,6 +827,7 @@ class CHIRDeserializerImpl {
                 let paramFields = CHIRWireSplitFields(item)
                 let paramTy = CHIRParseType(CHIRFieldAt(paramFields, 3), builder, customDefs)
                 let param = Parameter(paramTy, CHIRFieldAt(paramFields, 1), lambdaExpr)
+                if (paramFields.size > 8 && !paramFields[8].isEmpty()) { textParameterDefaults.add((param, paramFields[8])) }
                 builder.context.RegisterValue(param)
                 param.SetSrcCodeIdentifier(CHIRFieldAt(paramFields, 2))
                 CHIRApplyAnnoInfo(param.GetAnnoInfo(), CHIRFieldAt(paramFields, 4))
@@ -1040,6 +1049,15 @@ class CHIRDeserializerImpl {
         if (kind == ExprKind.GET_INSTANTIATE_VALUE && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "instantiate") {
             return builder.CreateGetInstantiateValue(resultTypeOrInvalid(resultTy), operands[0],
                 CHIRParseTypeList(CHIRFieldAt(payload, 1), builder, customDefs), block)
+        }
+        if (kind == ExprKind.EXCLAVE) {
+            CJC_ASSERT(blockGroups.size == 1)
+            let expr = builder.CreateExclave(block)
+            expr.AppendBlockGroup(blockGroups[0])
+            return expr
+        }
+        if (kind == ExprKind.START_REGION || kind == ExprKind.END_REGION) {
+            return builder.CreateRegionBoundary(kind, block)
         }
         if (kind == ExprKind.GET_RTTI_STATIC && CHIRFieldAt(payload, 0) == "rttiStatic") {
             return builder.CreateGetRTTIStatic(resultTypeOrInvalid(resultTy),
@@ -1936,6 +1954,8 @@ class CHIRDeserializerImpl {
             let result = builder.CreateBlockGroup(ownedExpression.GetTopLevelFunc().getOrThrow())
             if (let Some(lambda) <- (ownedExpression as Lambda)) {
                 lambda.InitBody(result)
+            } else if (ownedExpression is Exclave) {
+                ownedExpression.AppendBlockGroup(result)
             }
             blockGroup = result
         }
@@ -1961,6 +1981,7 @@ class CHIRDeserializerImpl {
             return builder.CreateParameter(ty, INVALID_LOCATION,
                 GetValue<Function>(obj.GetOwnedFunc()).getOrThrow())
         }
+        if (obj.GetParamDftValFunc() != 0u32) { parameterDefaults.add((result, obj.GetParamDftValFunc())) }
         result.SetSrcCodeIdentifier(obj.GetSrcCodeIdentifier().getOrThrow().str())
         if (let Some(annoInfo) <- obj.GetAnnoInfo()) {
             result.SetAnnoInfo(Create(annoInfo))
@@ -2166,6 +2187,10 @@ class CHIRDeserializerImpl {
                 CJC_ASSERT(operands.size == 1)
                 return DeserializeConstant(resultTy.getOrThrow(),
                     (operands[0] as LiteralValue).getOrThrow(), owner)
+            case ExprKind.EXCLAVE => return builder.CreateExclave(owner)
+            case ExprKind.START_REGION | ExprKind.END_REGION =>
+                CJC_ASSERT(operands.isEmpty())
+                return builder.CreateRegionBoundary(kind, owner)
             case ExprKind.EXIT => return builder.CreateExit(None, owner)
             case ExprKind.GET_EXCEPTION => return builder.CreateGetException(resultTy.getOrThrow(), owner)
             case ExprKind.GET_RTTI =>

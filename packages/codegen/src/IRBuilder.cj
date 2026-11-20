@@ -1367,7 +1367,7 @@ public class IRBuilder2 <: Resource {
     }
 
     public func TryCreateGenericStore(value: CGValue, dest: CGValue, boxType!: Option<Type> = None,
-        strength!: GCWriteStrength = GCWriteStrength.UNKNOWN): Option<LLVMValueRef> {
+        strength!: GCWriteStrength = GCWriteStrength.UNKNOWN, writeKind!: ModalWriteKind = ModalWriteKind.ORDINARY): Option<LLVMValueRef> {
         let valueCGType = value.GetCGType() ?? return None
         let destCGType = dest.GetCGType() ?? return None
         let destElementCGType = destCGType.GetPointerElementType() ?? return None
@@ -1414,7 +1414,7 @@ public class IRBuilder2 <: Resource {
 
         SetInsertPoint(blocks[0])
         if (let Some(baseObject) <- managedBase) {
-            CallGCWrite(rawValue, baseObject, rawDest, strength)
+            CallGCWrite(rawValue, baseObject, rawDest, strength, writeKind: writeKind)
         } else {
             CreateStore(rawValue, genericDest)
         }
@@ -1422,7 +1422,7 @@ public class IRBuilder2 <: Resource {
 
         SetInsertPoint(blocks[1])
         if (let Some(baseObject) <- managedBase) {
-            CallGCWriteGeneric(baseObject, rawDest, rawValue, genericSize)
+            CallGCWriteGeneric(baseObject, rawDest, rawValue, genericSize, writeKind: writeKind)
         } else {
             let destStorage = if (dest.IsSRetArg() && IsLLVMArgument(rawDest)) {
                 CreateLoad(destElementCGType.GetLLVMType(), rawDest, name: "generic.store.sret")
@@ -1614,14 +1614,14 @@ public class IRBuilder2 <: Resource {
     }
 
     public func TryCreateManagedMemberStore(value: CGValue, dest: CGValue,
-        strength: GCWriteStrength): Option<LLVMValueRef> {
+        strength: GCWriteStrength, writeKind!: ModalWriteKind = ModalWriteKind.ORDINARY): Option<LLVMValueRef> {
         let baseObject = GetTrackedManagedBase(dest.GetRawValue()) ?? return None
         let valueCGType = value.GetCGType() ?? return None
         let destCGType = dest.GetCGType() ?? return None
         let destElementCGType = destCGType.GetPointerElementType() ?? return None
         if (destElementCGType.GetSize().isNone()) {
             return Some(StoreUnknownSizeManagedMemberValue(baseObject, dest.GetRawValue(), value, valueCGType,
-                destElementCGType, strength))
+                destElementCGType, strength, writeKind: writeKind))
         }
         if (valueCGType.IsStructPtrType()) {
             return Some(StoreStructManagedMemberValue(baseObject, dest.GetRawValue(), value, valueCGType))
@@ -1630,13 +1630,13 @@ public class IRBuilder2 <: Resource {
             return Some(StoreVArrayManagedMemberValue(baseObject, dest.GetRawValue(), value, valueCGType))
         }
         if (valueCGType.IsReference() || IsOptionLikeRefValue(valueCGType)) {
-            return Some(CallGCWrite(value.GetRawValue(), baseObject, dest.GetRawValue(), strength))
+            return Some(CallGCWrite(value.GetRawValue(), baseObject, dest.GetRawValue(), strength, writeKind: writeKind))
         }
         return None
     }
 
     private func StoreUnknownSizeManagedMemberValue(baseObject: LLVMValueRef, dest: LLVMValueRef, value: CGValue,
-        valueCGType: CGType, destElementCGType: CGType, strength: GCWriteStrength): LLVMValueRef {
+        valueCGType: CGType, destElementCGType: CGType, strength: GCWriteStrength, writeKind!: ModalWriteKind = ModalWriteKind.ORDINARY): LLVMValueRef {
         let destTy = destElementCGType.GetOriginal()
         let blockNames = ArrayList<String>()
         blockNames.add("gcwrite_ref")
@@ -1650,11 +1650,11 @@ public class IRBuilder2 <: Resource {
         CreateCondBr(CreateTypeInfoIsReferenceCall(destTy), blocks[0], blocks[1])
 
         SetInsertPoint(blocks[0])
-        CallGCWrite(value.GetRawValue(), baseObject, dest, strength)
+        CallGCWrite(value.GetRawValue(), baseObject, dest, strength, writeKind: writeKind)
         CreateBr(blocks[2])
 
         SetInsertPoint(blocks[1])
-        CallGCWriteGeneric(baseObject, dest, value.GetRawValue(), size)
+        CallGCWriteGeneric(baseObject, dest, value.GetRawValue(), size, writeKind: writeKind)
         CreateBr(blocks[2])
 
         SetInsertPoint(blocks[2])
@@ -3024,19 +3024,21 @@ public class IRBuilder2 <: Resource {
         let args = ArrayList<LLVMValueRef>()
         args.add(typeInfoArg)
         args.add(size)
-        CheckNoHeapAlloc(ALLOCA_GENERIC_INTRINSIC_NAME)
-        return CreateIntrinsicCall(ALLOCA_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
+        let intrinsicName = if (tyForInfo.IsLocalRegion()) { "llvm.cj.alloca.local.generic" } else { ALLOCA_GENERIC_INTRINSIC_NAME }
+        CheckNoHeapAlloc(intrinsicName)
+        return CreateIntrinsicCall(intrinsicName, ArrayList<LLVMTypeRef>(), args,
             name: "sret.generic")
     }
 
-    public func CallIntrinsicAllocaGeneric(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
+    public func CallIntrinsicAllocaGeneric(parameters: ArrayList<LLVMValueRef>, isLocal!: Bool = false): LLVMValueRef {
         CJC_ASSERT(parameters.size == 2)
         let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
         let args = ArrayList<LLVMValueRef>()
         args.add(CreateBitCast(parameters[0], i8PtrType, name: "alloca.generic.ti"))
         args.add(parameters[1])
-        CheckNoHeapAlloc(ALLOCA_GENERIC_INTRINSIC_NAME)
-        return CreateIntrinsicCall(ALLOCA_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
+        let intrinsicName = if (isLocal) { "llvm.cj.alloca.local.generic" } else { ALLOCA_GENERIC_INTRINSIC_NAME }
+        CheckNoHeapAlloc(intrinsicName)
+        return CreateIntrinsicCall(intrinsicName, ArrayList<LLVMTypeRef>(), args,
             name: "sret.generic")
     }
 
@@ -3979,16 +3981,22 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CallGCWrite(value: LLVMValueRef, baseObj: LLVMValueRef, fieldPtr: LLVMValueRef,
-        strength: GCWriteStrength): LLVMValueRef {
+        strength: GCWriteStrength, writeKind!: ModalWriteKind = ModalWriteKind.ORDINARY): LLVMValueRef {
         let gcRefType = CGType.GetRefType(GetLLVMContext())
         let gcRefPtrType = unsafe { LLVMPointerType(gcRefType, 1u32) }
         let args = ArrayList<LLVMValueRef>()
         args.add(CreatePointerCast(value, gcRefType, name: "gcwrite.val"))
         args.add(CreatePointerCast(baseObj, gcRefType, name: "gcwrite.base"))
         args.add(CreatePointerCast(fieldPtr, gcRefPtrType, name: "gcwrite.field"))
-        args.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), strength.Encode(), 0) })
+        let name = match (writeKind) {
+            case ModalWriteKind.ORDINARY =>
+                args.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), strength.Encode(), 0) })
+                GCWRITE_REF_INTRINSIC_NAME
+            case ModalWriteKind.MAYBE_LOCAL => "llvm.cj.maybe.local.write.ref"
+            case ModalWriteKind.DEMODE => "llvm.cj.demode.write.ref"
+        }
         CheckNoWriteBarrierRec()
-        return CreateIntrinsicCallNoInvoke(GCWRITE_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+        return CreateIntrinsicCallNoInvoke(name, ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGCWriteStaticRef(value: LLVMValueRef, place: LLVMValueRef): LLVMValueRef {
@@ -4124,7 +4132,7 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CallGCWriteGeneric(baseObject: LLVMValueRef, dest: LLVMValueRef, source: LLVMValueRef,
-        size: LLVMValueRef): LLVMValueRef {
+        size: LLVMValueRef, writeKind!: ModalWriteKind = ModalWriteKind.ORDINARY): LLVMValueRef {
         let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
         let basePtrTy = CGType.GetRefType(GetLLVMContext())
         let destPtrTy = unsafe { LLVMPointerType(i8Type, 1u32) }
@@ -4134,7 +4142,11 @@ public class IRBuilder2 <: Resource {
         args.add(source)
         args.add(size)
         CheckNoWriteBarrierRec()
-        return CreateIntrinsicCallNoInvoke(GCWRITE_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+        let name = match (writeKind) {
+            case ModalWriteKind.ORDINARY => GCWRITE_GENERIC_INTRINSIC_NAME
+            case _ => "llvm.cj.maybe.local.write.generic"
+        }
+        return CreateIntrinsicCallNoInvoke(name, ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGCWriteGenericPayload(dest: LLVMValueRef, source: LLVMValueRef,
@@ -6105,10 +6117,10 @@ public class IRBuilder2 <: Resource {
         args.add(rawTypeInfoArg)
         args.add(lengthArg)
         let intrinsicName = if (isArrayElementGeneric) {
-            MALLOC_ARRAY_GENERIC_INTRINSIC_NAME
+            if (rawArrayTy.IsLocalRegion()) { "llvm.cj.malloc.local.array.generic" } else { MALLOC_ARRAY_GENERIC_INTRINSIC_NAME }
         } else {
             args.add(elementSize)
-            MALLOC_ARRAY_INTRINSIC_NAME
+            if (rawArrayTy.IsLocalRegion()) { "llvm.cj.malloc.local.array" } else { MALLOC_ARRAY_INTRINSIC_NAME }
         }
         CheckNoHeapAlloc(intrinsicName)
         let arrayValue = CreateIntrinsicCall(intrinsicName, ArrayList<LLVMTypeRef>(), args, name: "rawarray")
@@ -6143,7 +6155,7 @@ public class IRBuilder2 <: Resource {
 
     public func CallClassIntrinsicAlloc(classTy: Type): LLVMValueRef {
         let objectValue = CallClassIntrinsicAlloc(ArrayList<LLVMValueRef>([CreateTypeInfo(classTy),
-            GetLayoutSize_32(classTy)]))
+            GetLayoutSize_32(classTy)]), isLocal: classTy.IsLocalRegion())
         if (!objectValue.isNull()) {
             if (classTy.IsClass()) {
                 AddClassMallocMetadata(objectValue, classTy)
@@ -6156,14 +6168,15 @@ public class IRBuilder2 <: Resource {
         return objectValue
     }
 
-    public func CallClassIntrinsicAlloc(parameters: ArrayList<LLVMValueRef>): LLVMValueRef {
+    public func CallClassIntrinsicAlloc(parameters: ArrayList<LLVMValueRef>, isLocal!: Bool = false): LLVMValueRef {
         CJC_ASSERT(parameters.size == 2)
         let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
         let args = ArrayList<LLVMValueRef>()
         args.add(CreateBitCast(parameters[0], i8PtrType, name: "class.ti"))
         args.add(parameters[1])
-        CheckNoHeapAlloc(MALLOC_OBJECT_INTRINSIC_NAME)
-        let objectValue = CreateIntrinsicCall(MALLOC_OBJECT_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
+        let intrinsicName = if (isLocal) { "llvm.cj.malloc.local.object" } else { MALLOC_OBJECT_INTRINSIC_NAME }
+        CheckNoHeapAlloc(intrinsicName)
+        let objectValue = CreateIntrinsicCall(intrinsicName, ArrayList<LLVMTypeRef>(), args,
             name: "class.alloc")
         if (!objectValue.isNull()) {
             AddRetAttr(objectValue, "noalias")
@@ -6235,8 +6248,9 @@ public class IRBuilder2 <: Resource {
         let args = ArrayList<LLVMValueRef>()
         args.add(typeInfoArg)
         args.add(GetLayoutSize32(valueTy, valueCGType))
-        CheckNoHeapAlloc(MALLOC_OBJECT_INTRINSIC_NAME)
-        let objectValue = CreateIntrinsicCall(MALLOC_OBJECT_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args,
+        let intrinsicName = if (valueTy.IsLocalRegion()) { "llvm.cj.malloc.local.object" } else { MALLOC_OBJECT_INTRINSIC_NAME }
+        CheckNoHeapAlloc(intrinsicName)
+        let objectValue = CreateIntrinsicCall(intrinsicName, ArrayList<LLVMTypeRef>(), args,
             name: "generic.alloc")
         if (!objectValue.isNull()) {
             AddRetAttr(objectValue, "noalias")

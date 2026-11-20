@@ -493,6 +493,9 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     }
 
     public open func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        if (kind == ExprKind.START_REGION || kind == ExprKind.END_REGION) {
+            return builder.CreateRegionBoundary(kind, parent)
+        }
         let clonedOperands = GetOperands()
         return builder.CreateExpression(kind, None, clonedOperands, parent)
     }

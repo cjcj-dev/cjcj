@@ -270,7 +270,7 @@ class ParameterBuilder {
 
     public init(builder: FlatBufferBuilder) {
         this.builder = builder
-        builder.StartTable(5)
+        builder.StartTable(6)
     }
 
     public func add_base(base: FlatBufferOffset): Unit {
@@ -293,13 +293,16 @@ class ParameterBuilder {
         builder.AddOffset(4, annoInfo)
     }
 
+    public func add_paramDftValFunc(id: UInt32): Unit { builder.AddU32(5, id) }
+
     public func Finish(): FlatBufferOffset {
         return builder.EndTable()
     }
 }
 
-func CreateParameter(builder: FlatBufferBuilder, base: FlatBufferOffset, ownedFunc: UInt32, ownedLambda: UInt32, srcCodeIdentifier: FlatBufferOffset, annoInfo: FlatBufferOffset): FlatBufferOffset {
+func CreateParameter(builder: FlatBufferBuilder, base: FlatBufferOffset, ownedFunc: UInt32, ownedLambda: UInt32, srcCodeIdentifier: FlatBufferOffset, annoInfo: FlatBufferOffset, defaultId: UInt32): FlatBufferOffset {
     let tableBuilder = ParameterBuilder(builder)
+    tableBuilder.add_paramDftValFunc(defaultId)
     tableBuilder.add_annoInfo(annoInfo)
     tableBuilder.add_srcCodeIdentifier(srcCodeIdentifier)
     tableBuilder.add_ownedLambda(ownedLambda)
@@ -308,9 +311,9 @@ func CreateParameter(builder: FlatBufferBuilder, base: FlatBufferOffset, ownedFu
     return tableBuilder.Finish()
 }
 
-func CreateParameterDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, ownedFunc: UInt32, ownedLambda: UInt32, srcCodeIdentifier: Option<String>, annoInfo: FlatBufferOffset): FlatBufferOffset {
+func CreateParameterDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, ownedFunc: UInt32, ownedLambda: UInt32, srcCodeIdentifier: Option<String>, annoInfo: FlatBufferOffset, defaultId: UInt32): FlatBufferOffset {
     let srcCodeIdentifierOffset = if (let Some(value) <- srcCodeIdentifier) { builder.CreateSharedString(value) } else { 0u32 }
-    return CreateParameter(builder, base, ownedFunc, ownedLambda, srcCodeIdentifierOffset, annoInfo)
+    return CreateParameter(builder, base, ownedFunc, ownedLambda, srcCodeIdentifierOffset, annoInfo, defaultId)
 }
 
 class LocalVarBuilder {

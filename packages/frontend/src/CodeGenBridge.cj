@@ -17,6 +17,7 @@ import cjcj::chir.CHIRType
 import cjcj::chir.CHIRTypeCache
 import cjcj::chir.CallGraphAnalysis
 import cjcj::chir.BCHIR
+import cjcj::chir.SetMemRegion
 import cjcj::chir.BoxRecursionValueType
 import cjcj::chir.ClosureConversion
 import cjcj::chir.ConstAnalysisWrapper
@@ -490,6 +491,10 @@ private class ToCHIR {
             UpdateMemberVarPath(builder).RunOnPackage(current)
             let _ = NoSideEffectMarker().RunOnPackage(current)
             BoxRecursionValueType(current, builder).Run()
+            if (instance.invocation.globalOptions.IsLocalModeAnalysis()) {
+                SetMemRegion(builder).RunOnPackage(current)
+                DumpCHIRToFile("SetMemoryRegion")
+            }
             DumpCHIRToFile("Canonicalization")
         }
     }

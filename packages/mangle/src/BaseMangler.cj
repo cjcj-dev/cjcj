@@ -152,7 +152,7 @@ public open class BaseMangler {
             }
             reverseDecls(newPrefix)
             var mangled = DeclName(funcDecl, newPrefix, genericsTypeStack, true, withSuffix: false)
-            mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX
+            mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleReceiverMode(funcDecl)
             mangled += MangleFuncParams(funcDecl, genericsTypeStack, false)
             return mangled
         }
@@ -180,10 +180,10 @@ public open class BaseMangler {
             let ownerMangled = DeclName(funcDecl, newPrefix, genericsTypeStack, true, withSuffix: true)
             mangled += MANGLE_CANGJIE_PREFIX + MANGLE_FUNC_PARA_INIT_PREFIX +
                 ownerMangled[mangledPrefix.size..ownerMangled.size - 1]
-            mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX
+            mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleReceiverMode(funcDecl)
         } else {
             mangled = DeclName(funcDecl, prefix, genericsTypeStack, true, withSuffix: false)
-            mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX
+            mangled += MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleReceiverMode(funcDecl)
         }
         mangled += MangleFuncParams(funcDecl, genericsTypeStack, false)
         return mangled
@@ -654,6 +654,14 @@ public open class BaseMangler {
         }
         mangled += retTy + MangleTypeMode(funcTy.retMode) + params + MANGLE_SUFFIX
         return mangled
+    }
+
+    private func MangleReceiverMode(fd: FuncDecl): String {
+        return match (GetReceiverMode(fd)) {
+            case ASTMode.NOT => ""
+            case ASTMode.FULL => "WLE"
+            case ASTMode.HALF => "WlE"
+        }
     }
 
     public func MangleFuncParams(funcDecl: FuncDecl, genericsTypeStack: ArrayList<String>, declare: Bool,

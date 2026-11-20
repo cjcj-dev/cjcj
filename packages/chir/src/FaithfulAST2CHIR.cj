@@ -5,6 +5,7 @@ import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.SourceManager as BasicSourceManager
+import cjcj::ast.GetReceiverMode
 import cjcj::option.GlobalOptions
 import cjcj::option.OSType
 import cjcj::option.OutputMode
@@ -1573,6 +1574,8 @@ public class FaithfulAST2CHIR {
         CollectDeclToList(decl, globalAndStaticVars, globalAndStaticVarSet)
     }
 
+    private let pendingDefaultArgs = ArrayList<(Parameter, AstFuncDecl)>()
+
     private func CacheTopLevelDeclToGlobalSymbolTable(): Unit {
         CacheCustomTypeDefToGlobalSymbolTable()
         TranslateAllCustomTypeTy()
@@ -1598,6 +1601,8 @@ public class FaithfulAST2CHIR {
         for (decl in localConstFuncs.stableOrderValue) {
             CreateFuncSignatureAndSetGlobalCache(RequireFuncDecl(decl))
         }
+        for ((param, decl) in pendingDefaultArgs) { param.paramDftValFunc = globalCache.Get(decl) }
+        pendingDefaultArgs.clear()
     }
 
     private func CacheCustomTypeDefToGlobalSymbolTable(): Unit {
@@ -4564,6 +4569,7 @@ public class FaithfulAST2CHIR {
             let paramTy = funcTy.GetParamType(i + offset)
             let paramLoc = TranslateLocationWithoutScope(builder.context, param.begin, param.end)
             let chirParam = builder.CreateParameter(paramTy, paramLoc, fn)
+            if (let Some(decl) <- param.desugarDecl) { pendingDefaultArgs.add((chirParam, decl)) }
             chirParam.SetSrcCodeIdentifier(param.identifier.GetRawText())
         }
         globalCache.Set(funcDecl, fn)
@@ -4669,6 +4675,7 @@ public class FaithfulAST2CHIR {
             let paramTy = funcTy.GetParamType(i + offset)
             let paramLoc = TranslateLocationWithoutScope(builder.context, param.begin, param.end)
             let chirParam = builder.CreateParameter(paramTy, paramLoc, fn)
+            if (let Some(decl) <- param.desugarDecl) { pendingDefaultArgs.add((chirParam, decl)) }
             chirParam.SetSrcCodeIdentifier(param.identifier.GetRawText())
         }
         globalCache.Set(funcDecl, fn)
@@ -4877,6 +4884,10 @@ public class FaithfulAST2CHIR {
         while (paramIndex < paramTys.size) {
             let parameter = builder.CreateParameter(paramTys[paramIndex], paramLoc[paramIndex], fn)
             parameter.SetSrcCodeIdentifier(paramSrcCodeIdentifiers[paramIndex])
+            let astIndex = paramIndex - (paramTys.size - body.paramLists[0].params.size)
+            if (astIndex >= 0 && (let Some(decl) <- body.paramLists[0].params[astIndex].desugarDecl)) {
+                pendingDefaultArgs.add((parameter, decl))
+            }
             paramIndex++
         }
         let offset: Int64 = if (HasImplicitThisParam(funcDecl)) { 1 } else { 0 }
@@ -4897,7 +4908,11 @@ public class FaithfulAST2CHIR {
         let explicitParamCount = GetExplicitParamCount(funcDecl)
         let astTypeAlreadyHasThis = baseParams.size > explicitParamCount
         let params = ArrayList<Type>()
-        params.add(AddRefIfFuncIsMutOrClass(chirType.TranslateType(outerDecl), funcDecl))
+        let receiver = chirType.TranslateType(outerDecl)
+        let receiverTy = if (opts.IsLocalModeAnalysis()) {
+            builder.WithModal(receiver, ASTModal2CHIRModal(GetReceiverMode(funcDecl)))
+        } else { receiver }
+        params.add(AddRefIfFuncIsMutOrClass(receiverTy, funcDecl))
         var paramIndex: Int64 = if (astTypeAlreadyHasThis) { 1 } else { 0 }
         while (paramIndex < baseParams.size) {
             params.add(baseParams[paramIndex])

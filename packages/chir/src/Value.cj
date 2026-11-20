@@ -247,6 +247,7 @@ public open class Value <: Base & Hashable & Equatable<Value> {
 }
 
 public class Parameter <: Value {
+    public var paramDftValFunc: Option<Value> = None
     private var ownerFunc: Option<Function> = None
     private var ownerLambda: Option<Lambda> = None
     private var srcCodeIdentifier: String = ""
@@ -961,6 +962,14 @@ public class BlockGroup <: Value & Hashable & Equatable<BlockGroup> {
         newGroup.CopyBaseInfoFrom(this)
         CloneBlocks(builder, newGroup)
         return newGroup
+    }
+
+    public func Clone(builder: CHIRBuilder, exclave: Exclave): BlockGroup {
+        let group = builder.CreateBlockGroup(exclave.GetTopLevelFunc().getOrThrow())
+        exclave.AppendBlockGroup(group)
+        group.CopyBaseInfoFrom(this)
+        CloneBlocks(builder, group)
+        return group
     }
 
     private func CloneBlocks(builder: CHIRBuilder, target: BlockGroup): Unit {

@@ -474,6 +474,9 @@ private func ToPackageExprKind(expr: Expression): UInt8 {
         case ExprKind.INTRINSIC => CHIRFB_CHIR_EXPR_KIND_INTRINSIC
         case ExprKind.GET_RTTI => CHIRFB_CHIR_EXPR_KIND_GET_RTTI
         case ExprKind.GET_RTTI_STATIC => CHIRFB_CHIR_EXPR_KIND_GET_RTTI_STATIC
+        case ExprKind.START_REGION => CHIRFB_CHIR_EXPR_KIND_START_REGION
+        case ExprKind.END_REGION => CHIRFB_CHIR_EXPR_KIND_END_REGION
+        case ExprKind.EXCLAVE => 78u8
         case ExprKind.FORIN_RANGE | ExprKind.FORIN_ITER | ExprKind.FORIN_CLOSED_RANGE | ExprKind.INVALID =>
             CHIRFB_CHIR_EXPR_KIND_INVALID
     }
@@ -802,8 +805,9 @@ class CHIRSerializerImpl {
         } else {
             0u32
         }
+        let defaultId = if (let Some(value) <- obj.paramDftValFunc) { GetId(value) } else { 0u32 }
         return CreateParameterDirect(builder, base, ownedFunc, ownedLambda,
-            Some(obj.GetSrcCodeIdentifier()), Serialize(obj.GetAnnoInfo()))
+            Some(obj.GetSrcCodeIdentifier()), Serialize(obj.GetAnnoInfo()), defaultId)
     }
 
     private func Serialize(obj: LocalVar): FlatBufferOffset {
@@ -1367,7 +1371,7 @@ class CHIRSerializerImpl {
                 ExprKind.TUPLE | ExprKind.BOX | ExprKind.UNBOX_TO_VALUE | ExprKind.GET_EXCEPTION |
                 ExprKind.RAW_ARRAY_LITERAL_INIT | ExprKind.RAW_ARRAY_INIT_BY_VALUE | ExprKind.VARRAY |
                 ExprKind.VARRAY_BUILDER | ExprKind.CAST_TO_GENERIC | ExprKind.CAST_TO_CONCRETE |
-                ExprKind.UNBOX_TO_REF | ExprKind.GET_RTTI =>
+                ExprKind.UNBOX_TO_REF | ExprKind.GET_RTTI | ExprKind.EXCLAVE | ExprKind.START_REGION | ExprKind.END_REGION =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_EXPRESSION
                 Serialize(obj)
             case ExprKind.INVALID =>
@@ -2116,6 +2120,7 @@ class CHIRSerializerImpl {
         fields.add(CHIRSerializeDebugLocation(param.GetDebugLocation()))
         fields.add(CHIRSerializeAttributes(param))
         fields.add(CHIRSerializeBaseAnnotations(param))
+        fields.add(if (let Some(value) <- param.paramDftValFunc) { CHIRValueId(value) } else { "" })
         return CHIRWireJoinFields(fields)
     }
 

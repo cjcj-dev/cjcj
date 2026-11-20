@@ -1667,7 +1667,7 @@ extend ParserImpl {
                 !ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY) &&
                 Seeing(TokenKind.THIS) && PeekLocalMode(1).isSome()) {
                 Next()
-                list.receiverModal = ParseLocalModeSuffix()
+                list.receiverModal = ParseLocalModeSuffix(receiverOrCall: true)
                 if (!Skip(TokenKind.COMMA) && !Seeing(TokenKind.RPAREN)) {
                     DiagExpectedRightDelimiter("(", list.leftParenPos)
                     list.end = lastToken.End()

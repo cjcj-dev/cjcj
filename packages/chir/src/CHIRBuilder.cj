@@ -615,6 +615,17 @@ public class CHIRBuilder {
         return expr
     }
 
+    public func CreateExclave(parent: Block): Exclave {
+        let expr = Exclave(parent)
+        StoreAllocatedPtrInFuncOrLambda(parent.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
+        return expr
+    }
+
+    public func CreateRegionBoundary(kind: ExprKind, parent: Block): Expression {
+        CJC_ASSERT(kind == ExprKind.START_REGION || kind == ExprKind.END_REGION)
+        return CreateExpression(kind, context.GetUnitTy(), ArrayList<Value>(), parent)
+    }
+
     public func CreateGetException(resultTy: Type, parent: Block): GetException {
         let expr = GetException(parent)
         expr.ConnectOperandsAndGroups()

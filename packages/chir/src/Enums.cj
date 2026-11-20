@@ -167,7 +167,7 @@ public enum Attribute {
     | NON_RECOMPILE | UNREACHABLE | NO_SIDE_EFFECT | COMMON | SPECIFIC | SKIP_ANALYSIS
     | DESERIALIZED | INITIALIZER | UNSAFE | JAVA_FOREIGN | JAVA_EXPORT | OBJ_C_FOREIGN
     | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED | DOES_NOT_THROW | OBJ_C_EXPORT | MATCH_PATTERN | PLUGIN_ADDED
-    | FAST_NATIVE
+    | DEMODE | EXCLAVE | FAST_NATIVE
     // FEATURE_DEBT(CJCJ_RUNTIME_SPEC §3.2/§7): selfhost-only extension domain;
     // upstream CHIR AttributeInfo.h still ends its C++ attribute domain at 39.
     | NO_HEAP_ALLOC | NO_WRITE_BARRIER | NO_WRITE_BARRIER_REC | NO_STACK_GROW | SYSTEM_STACK
@@ -217,6 +217,8 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.OBJ_C_EXPORT => 39
         case Attribute.MATCH_PATTERN => 40
         case Attribute.PLUGIN_ADDED => 41
+        case Attribute.DEMODE => 42
+        case Attribute.EXCLAVE => 43
         case Attribute.FAST_NATIVE => 71
         case Attribute.NO_HEAP_ALLOC => 76
         case Attribute.NO_WRITE_BARRIER_REC => 77
@@ -233,6 +235,8 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.COMPILER_ADD => "compilerAdd"
         case Attribute.CONST => "compileTimeVal"
         case Attribute.DESERIALIZED => "deserialized"
+        case Attribute.DEMODE => "demode"
+        case Attribute.EXCLAVE => "exclave"
         case Attribute.FAST_NATIVE => "fastNative"
         case Attribute.FINAL => "final"
         case Attribute.FOREIGN => "foreign"
@@ -501,7 +505,7 @@ public enum ExprKind {
     | INSTANCEOF | CLASS_STATIC_CAST | NUMERIC_CAST | GET_EXCEPTION | RAW_ARRAY_ALLOCATE | RAW_ARRAY_LITERAL_INIT
     | RAW_ARRAY_INIT_BY_VALUE | VARRAY | VARRAY_BUILDER | INTRINSIC | SPAWN
     | GET_INSTANTIATE_VALUE | BOX | UNBOX_TO_VALUE | CAST_TO_GENERIC | CAST_TO_CONCRETE
-    | UNBOX_TO_REF | GET_RTTI | GET_RTTI_STATIC
+    | UNBOX_TO_REF | GET_RTTI | GET_RTTI_STATIC | START_REGION | END_REGION | EXCLAVE
 }
 
 public func ExprKindIndex(kind: ExprKind): Int64 {
@@ -589,6 +593,9 @@ public func ExprKindIndex(kind: ExprKind): Int64 {
         case ExprKind.UNBOX_TO_REF => 80
         case ExprKind.GET_RTTI => 81
         case ExprKind.GET_RTTI_STATIC => 82
+        case ExprKind.START_REGION => 83
+        case ExprKind.END_REGION => 84
+        case ExprKind.EXCLAVE => 85
     }
 }
 
@@ -677,12 +684,15 @@ public func ExprKindName(kind: ExprKind): String {
         case ExprKind.UNBOX_TO_REF => "UnBoxToRef"
         case ExprKind.GET_RTTI => "GetRTTI"
         case ExprKind.GET_RTTI_STATIC => "GetRTTIStatic"
+        case ExprKind.START_REGION => "StartRegion"
+        case ExprKind.END_REGION => "EndRegion"
+        case ExprKind.EXCLAVE => "Exclave"
     }
 }
 
 public func ExprKindMajor(kind: ExprKind): ExprMajorKind {
     let index = ExprKindIndex(kind)
-    if (index >= ExprKindIndex(ExprKind.GOTO) && index <= ExprKindIndex(ExprKind.TRY_RAW_ARRAY_ALLOCATE)) {
+    if (kind == ExprKind.EXCLAVE || (index >= ExprKindIndex(ExprKind.GOTO) && index <= ExprKindIndex(ExprKind.TRY_RAW_ARRAY_ALLOCATE))) {
         return ExprMajorKind.TERMINATOR
     }
     if (index >= ExprKindIndex(ExprKind.NEG) && index <= ExprKindIndex(ExprKind.BITNOT)) {

@@ -82,9 +82,9 @@ extend ParserImpl {
         return None
     }
 
-    internal func ParseLocalModeSuffix(): Option<ASTModalInfo> {
+    internal func ParseLocalModeSuffix(receiverOrCall!: Bool = false): Option<ASTModalInfo> {
         let suffix = ReadLocalModeSuffix()
-        if (compileOptions.enableLocalMode) {
+        if (compileOptions.enableLocalMode && !(receiverOrCall && compileOptions.IsLocalModeAnalysis())) {
             if (let Some(modal) <- suffix) { DiagnoseUnexpectedLocalMode(modal) }
         }
         return suffix

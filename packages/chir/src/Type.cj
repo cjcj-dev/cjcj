@@ -1495,7 +1495,8 @@ public open class CustomType <: Type {
         let currentIdx = path[0]
         let member = customTypeDef.GetAllInstanceVars()[Int64(currentIdx)]
         let isReadOnly = member.TestAttr(Attribute.READONLY)
-        let memberTy = ReplaceRawGenericArgType(member.ty, instMap, builder)
+        let memberTy = builder.WithModal(ReplaceRawGenericArgType(member.ty, instMap, builder),
+            if (member.TestAttr(Attribute.DEMODE)) { ModalInfo() } else { modal })
         if (path.size > 1) {
             var pureMemberTy = memberTy
             while (pureMemberTy.IsRef()) {
@@ -1533,7 +1534,8 @@ public open class CustomType <: Type {
         }
         let result = ArrayList<Type>()
         for (member in def.GetDirectInstanceVars()) {
-            result.add(ReplaceRawGenericArgType(member.ty, replaceTable, builder))
+            result.add(builder.WithModal(ReplaceRawGenericArgType(member.ty, replaceTable, builder),
+                if (member.TestAttr(Attribute.DEMODE)) { ModalInfo() } else { modal }))
         }
         return result
     }
@@ -1542,7 +1544,8 @@ public open class CustomType <: Type {
         let out = ArrayList<Type>()
         if (let Some(classTy) <- (this as ClassType)) {
             if (let Some(superTy) <- classTy.GetSuperClassTy(builder: builder)) {
-                for (fieldTy in superTy.GetInstantiatedMemberTys(builder)) {
+                let superView = (builder.WithModal(superTy, modal) as ClassType).getOrThrow()
+                for (fieldTy in superView.GetInstantiatedMemberTys(builder)) {
                     out.add(fieldTy)
                 }
             }

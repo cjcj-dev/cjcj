@@ -418,7 +418,7 @@ extend ParserImpl {
             callExpr.rightParenPos = lastToken.Begin()
             callExpr.end = lastToken.End()
             if (closed && !newlineSkipped) {
-                callExpr.modal = ParseLocalModeSuffix()
+                callExpr.modal = ParseLocalModeSuffix(receiverOrCall: true)
                 if (let Some(modal) <- callExpr.modal) {
                     callExpr.end = modal.end
                 }

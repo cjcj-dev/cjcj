@@ -235,6 +235,7 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     }
     return CreateTypedStoreForAddress(irBuilder, value, addr,
         strength: GetAddressStoreStrength(irBuilder, addrOperand, chirExpr),
+        writeKind: ClassifyAddressWrite(irBuilder, addrOperand),
         isVolatileReference: IsVolatileReferenceAddress(irBuilder, addrOperand))
 }
 
@@ -287,15 +288,15 @@ private func TryGenerateBoxRetValueStore(irBuilder: IRBuilder2, chirExpr: Expres
 
 public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, addr: CGValue,
     boxType!: Option<Type> = None, strength!: GCWriteStrength = GCWriteStrength.UNKNOWN,
-    isVolatileReference!: Bool = false): LLVMValueRef {
+    writeKind!: ModalWriteKind = ModalWriteKind.ORDINARY, isVolatileReference!: Bool = false): LLVMValueRef {
     if (isVolatileReference) {
         return irBuilder.CallReferenceVolatileStore(value.GetRawValue(), addr.GetRawValue())
     }
     ReportTypedStoreDestinationProvenance(irBuilder, value, addr)
-    if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr, boxType: boxType, strength: strength)) {
+    if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr, boxType: boxType, strength: strength, writeKind: writeKind)) {
         return genericStore
     }
-    if (let Some(memberStore) <- irBuilder.TryCreateManagedMemberStore(value, addr, strength)) {
+    if (let Some(memberStore) <- irBuilder.TryCreateManagedMemberStore(value, addr, strength, writeKind: writeKind)) {
         return memberStore
     }
     if (let Some(valueCGType) <- value.GetCGType()) {
@@ -738,6 +739,7 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         }
         return CreateTypedStoreForAddress(irBuilder, storeValue, storeAddr,
             strength: GetMemberStoreStrength(irBuilder, lhs, path, chirExpr),
+            writeKind: ClassifyMemberWrite(irBuilder, lhs, path),
             isVolatileReference: IsVolatileReferenceMember(irBuilder, lhs, path))
     }
     if (let Some(storeByName) <- (chirExpr as StoreElementByName)) {
@@ -755,6 +757,7 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
                 }
                 return CreateTypedStoreForAddress(irBuilder, byNameValue, byNameAddr,
                     strength: GetMemberStoreStrength(irBuilder, storeByName.GetLocation(), path, chirExpr),
+                    writeKind: ClassifyMemberWrite(irBuilder, storeByName.GetLocation(), path),
                     isVolatileReference: IsVolatileReferenceMember(irBuilder, storeByName.GetLocation(), path))
             }
         }

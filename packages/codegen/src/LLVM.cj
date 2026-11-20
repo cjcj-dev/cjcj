@@ -339,6 +339,7 @@ foreign {
     func LLVMSelfhostInvokeGetNormalDest(invokeInst: LLVMValueRef): LLVMBasicBlockRef
     func LLVMSelfhostInvokeGetUnwindDest(invokeInst: LLVMValueRef): LLVMBasicBlockRef
     func LLVMSelfhostBasicBlockGetFirstInsertionPoint(block: LLVMBasicBlockRef): LLVMValueRef
+    func LLVMSelfhostMarkNoTail(call: LLVMValueRef): Unit
     func LLVMSelfhostGetInsertPointInstruction(builder: LLVMBuilderRef): LLVMValueRef
     func LLVMSelfhostCreateCall(builder: LLVMBuilderRef, functionTy: LLVMTypeRef, callee: LLVMValueRef,
         args: CPointer<LLVMValueRef>, argCount: UInt32, name: CString): LLVMValueRef

@@ -73,6 +73,11 @@ class LocalModeAnalysis {
         if (HasMode(ft) && (body.generic.isSome() || ft.HasGeneric())) {
             DiagMismatchedTypesWithFoundTy(diag, body, "a monomorphic local-mode signature", ft.String())
         }
+        if (let Some(receiver) <- body.paramLists[0].receiverModal) {
+            if ((body.funcDecl.map({ fd => IsInstanceMember(fd) && !fd.TestAttr(Attribute.STATIC) }) ?? false) == false) {
+                DiagMismatchedTypesWithFoundTy(diag, body, "an instance receiver", receiver.local.Suffix())
+            }
+        }
         let params = body.paramLists[0].params
         if (params.size != ft.paramTys.size) { return }
         for (i in 0..params.size) {
@@ -131,6 +136,15 @@ class LocalModeAnalysis {
     }
 
     private func ResolveRef(ref: RefExpr): Unit {
+        if ((ref.isThis || ref.isSuper) && !scopes.isEmpty()) {
+            for (i in 0..scopes.size) {
+                if (let Some(fd) <- scopes[scopes.size - 1 - i].funcDecl) {
+                    ref.resolvedMode = GetReceiverMode(fd)
+                    if (i > 0 && ref.resolvedMode != ASTMode.NOT) { Check(ref, ASTMode.NOT) }
+                    return
+                }
+            }
+        }
         let decl = ref.GetTarget() ?? return;
         ref.resolvedMode = decl.resolvedMode
         if (decl.resolvedMode == ASTMode.NOT || scopes.isEmpty() ||
@@ -149,6 +163,18 @@ class LocalModeAnalysis {
 
     private func ResolveCall(call: CallExpr): Unit {
         let base = call.baseFunc ?? return;
+        let decl = call.resolvedFunction
+        let ctor = call.callKind == CallKind.CALL_OBJECT_CREATION || call.callKind == CallKind.CALL_STRUCT_CREATION
+        let enumCtor = decl.map({ fd => fd.TestAttr(Attribute.ENUM_CONSTRUCTOR) }) ?? false
+        var createdMode = if (ctor) { decl.map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT } else { ASTMode.NOT }
+        if (let Some(postfix) <- call.modal) {
+            if ((!ctor && !enumCtor) || (ctor && createdMode != postfix.local)) {
+                DiagMismatchedTypesWithFoundTy(diag, call, "a matching constructor receiver", postfix.local.Suffix())
+                return
+            }
+            createdMode = postfix.local
+        }
+        if (ctor || enumCtor) { call.resolvedMode = createdMode }
         var sig = Signature(base)
         if (sig.isNone() && (let Some(fd) <- call.resolvedFunction)) { sig = Signature(fd) }
         if (sig.isNone()) {
@@ -158,7 +184,7 @@ class LocalModeAnalysis {
             return
         }
         let ft = sig.getOrThrow()
-        call.resolvedMode = ft.retMode
+        if (!ctor && !enumCtor) { call.resolvedMode = ft.retMode }
         let ordered = call.desugarArgs
         if (let Some(args) <- ordered) {
             for (i in 0..args.size) {

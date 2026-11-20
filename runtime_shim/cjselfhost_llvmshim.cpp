@@ -596,6 +596,15 @@ extern "C" LLVMValueRef LLVMSelfhostBasicBlockGetFirstInsertionPoint(LLVMBasicBl
     return wrap(&*insertPoint);
 }
 
+// The region stub identifies the owner by its caller frame. LLVM 15's
+// LLVMSetTailCall(false) clears a hint but does not forbid tail calls.
+extern "C" void LLVMSelfhostMarkNoTail(LLVMValueRef call)
+{
+    if (auto *inst = llvm::dyn_cast<llvm::CallInst>(llvm::unwrap(call))) {
+        inst->setTailCallKind(llvm::CallInst::TCK_NoTail);
+    }
+}
+
 extern "C" LLVMValueRef LLVMSelfhostGetInsertPointInstruction(LLVMBuilderRef Builder)
 {
     auto *builder = unwrap(Builder);

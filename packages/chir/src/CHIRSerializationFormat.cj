@@ -315,6 +315,8 @@ func CHIRKnownAttributes(): ArrayList<Attribute> {
     attrs.add(Attribute.OBJ_C_EXPORT)
     attrs.add(Attribute.MATCH_PATTERN)
     attrs.add(Attribute.PLUGIN_ADDED)
+    attrs.add(Attribute.DEMODE)
+    attrs.add(Attribute.EXCLAVE)
     attrs.add(Attribute.FAST_NATIVE)
     attrs.add(Attribute.NO_HEAP_ALLOC)
     attrs.add(Attribute.NO_WRITE_BARRIER)
@@ -368,6 +370,8 @@ func CHIRAttributeFromIndex(index: Int64): Attribute {
         case 39 => Attribute.OBJ_C_EXPORT
         case 40 => Attribute.MATCH_PATTERN
         case 41 => Attribute.PLUGIN_ADDED
+        case 42 => Attribute.DEMODE
+        case 43 => Attribute.EXCLAVE
         case 71 => Attribute.FAST_NATIVE
         case 76 => Attribute.NO_HEAP_ALLOC
         case 77 => Attribute.NO_WRITE_BARRIER_REC
@@ -491,6 +495,9 @@ func CHIRExprKindFromIndex(index: Int64): ExprKind {
         case 80 => ExprKind.UNBOX_TO_REF
         case 81 => ExprKind.GET_RTTI
         case 82 => ExprKind.GET_RTTI_STATIC
+        case 83 => ExprKind.START_REGION
+        case 84 => ExprKind.END_REGION
+        case 85 => ExprKind.EXCLAVE
         case _ => ExprKind.INVALID
     }
 }
