@@ -233,7 +233,7 @@ class PackageFormat_Parameter <: Table {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_PARAMETER_VT_SRCCODEIDENTIFIER)) { Some(FlatBufferString(data, pointerPos)) } else { None }
     }
 
-    func GetParamDftValFunc(): UInt32 { return GetField(14u16, 0u32) }
+    func GetParamDftValFunc(): UInt32 { return GetField(CHIRFB_PARAMETER_VT_PARAMDFTVALFUNC, 0u32) }
 
     func GetAnnoInfo(): Option<PackageFormat_AnnoInfo> {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_PARAMETER_VT_ANNOINFO)) { Some(PackageFormat_AnnoInfo(data, pointerPos)) } else { None }
@@ -249,7 +249,7 @@ class PackageFormat_Parameter <: Table {
             verifier.VerifyString(GetPointer(CHIRFB_PARAMETER_VT_SRCCODEIDENTIFIER)) &&
             VerifyOffset(verifier, CHIRFB_PARAMETER_VT_ANNOINFO) &&
             verifier.VerifyTable(GetPointer(CHIRFB_PARAMETER_VT_ANNOINFO), {tablePos: Int64, active: VerifierTemplate => PackageFormat_AnnoInfo(data, tablePos).Verify(active)}) &&
-            VerifyField<UInt32>(verifier, 14u16, 4) && verifier.EndTable()
+            VerifyField<UInt32>(verifier, CHIRFB_PARAMETER_VT_PARAMDFTVALFUNC, 4) && verifier.EndTable()
     }
 }
 
