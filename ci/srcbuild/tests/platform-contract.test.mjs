@@ -553,7 +553,7 @@ test('arm soak produces every artifact its package job downloads, each exactly o
   const gate = loadYaml(consumer).jobs.package.steps.find(step => step.name === 'Validate same-platform final std contract');
   assert.ok(gate, 'package consumer declares its final std gate');
   const resolved = effectiveInputs(consumer, callerInputs);
-  const gateEnv = Object.fromEntries(Object.entries(gate.env).map(([name, value]) => [name, substitute(value, resolved)]));
+  const gateEnv = {SELECTED_STD_ARTIFACT:substitute(gate.env.SELECTED_STD_ARTIFACT, resolved)};
   assert.equal(gate.env.EXPECTED_STD_ARTIFACT,'${{ steps.package-inputs.outputs.std_artifact }}');
   const keyWork=fsSync.mkdtempSync(path.join(os.tmpdir(),'std-consumer-'));
   try {

@@ -5,6 +5,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {isMain, cliArgs} from '../entry-common.mjs';
 import {nativePair} from '../runtime-pin.mjs';
+import {spawnSync} from 'node:child_process';
 import {parseArgs} from 'node:util';
 import {assertNativeReleaseInputs} from './native-release-inputs.mjs';
 import {readJson, inventory, command} from '../bootstrap/sdk-flow.mjs';
@@ -26,6 +27,26 @@ async function compareSubtree(reference, sdk, relative) {
       throw new Error(`NATIVE_RELEASE_PAYLOAD_MISMATCH ${relative}/${name}`);
   }
 }
+// Exercise the public lint launcher with its own installed rules and analysis
+// modules. The control must lose precisely the mutable-variable diagnostic.
+async function consumeWindowsLint(sdk,work,env) {
+  const dir=path.join(work,'cjlint'),src=path.join(dir,'src'),file=path.join(src,'main.cj');
+  await fs.mkdir(src,{recursive:true});
+  const exe=path.join(sdk,'tools/bin/cjlint.exe');
+  for(const [label,keyword] of [['positive','var'],['control','let']]) {
+    const report=path.join(dir,label+'.json');
+    await fs.writeFile(file,`package example\n${keyword} value = 1\nfunc api(): Int64 { value }\n`);
+    const args=['-f',src,'-o',report],r=spawnSync(exe,args,{cwd:dir,env,encoding:'utf8'});
+    await fs.writeFile(path.join(dir,label+'.command.json'),JSON.stringify({argv:[exe,...args],cwd:dir,
+      rc:r.status,signal:r.signal,error:r.error?.message,stdout:r.stdout,stderr:r.stderr},null,2));
+    if(r.error||r.status!==0)throw Object.assign(Error('WINDOWS_CJLINT_PROCESS '+label),{rc:r.status??1});
+    const findings=await readJson(report);
+    const matches=findings.filter(row=>row.defectType==='G_VAR_01_prefer_immutable_var'
+      &&path.resolve(row.file)===file&&row.analyzerName==='cangjieCodeCheck');
+    if(matches.length!==(keyword==='var'?1:0))throw Error('WINDOWS_CJLINT_FINDINGS '+label);
+  }
+}
+
 export async function verifyNativeRelease(options, env = process.env) {
   const {sdk, platform, version, sourceSha, runtimeRef, releaseKey = '', std, crossRoot, work} = options;
   const {target, release, toolApplicability} = await assertNativeReleaseInputs(options);
@@ -72,6 +93,7 @@ export async function verifyNativeRelease(options, env = process.env) {
   if (target.spec.os === 'windows')
     await command([process.execPath, path.join(root, 'tests/upstream_compiler_1120/linker-response.mjs'),
       path.join(sdk, 'bin/cjc' + target.spec.exeSuffix), path.join(work, 'linker-response')], {env: installedEnv});
+  if(target.spec.os==='windows')await consumeWindowsLint(sdk,work,installedEnv);
   // Compiler smoke is not a lint/LSP macro consumer. Preserve this missing
   // business gate after the independent installed consumers, rather than
   // preventing them from running or promoting a copied installation to PASS.

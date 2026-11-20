@@ -188,6 +188,7 @@ jobs:
           path: |
             dist/**/smoke/*.log
             dist/**/smoke/*.json
+            dist/**/cjlint/*.json
             dist/**/linker-response/*/*.json
             dist/**/linker-response/*/*.stdout
             dist/**/linker-response/*/*.stderr
