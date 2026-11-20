@@ -103,8 +103,19 @@ test('Android and Windows independent controls retain their producer and consume
 
 // Binary-format fixtures qualify the shared manifest/installer only. They are
 // deliberately not described as built iOS runtime or final std artifacts.
-for (const [tuple, cpu] of [['ios_aarch64_cjnative', 0x0100000c],
-  ['ios_simulator_aarch64_cjnative', 0x0100000c], ['ios_simulator_x86_64_cjnative', 0x01000007]]) {
+// mach_header_64 (MH_DYLIB), then LC_ID_DYLIB @rpath/<name> and LC_BUILD_VERSION
+// naming the deployment platform (PLATFORM_IOS 2, PLATFORM_IOSSIMULATOR 7).
+function machoDylibFixture(cpu, platform, name) {
+  const install = Buffer.from(`@rpath/${name}\0`);
+  const id = Buffer.alloc(Math.ceil((24 + install.length) / 8) * 8);
+  id.writeUInt32LE(0xd, 0); id.writeUInt32LE(id.length, 4); id.writeUInt32LE(24, 8); install.copy(id, 24);
+  const build = Buffer.alloc(24); build.writeUInt32LE(0x32, 0); build.writeUInt32LE(24, 4); build.writeUInt32LE(platform, 8);
+  const header = Buffer.alloc(32); header.writeUInt32LE(0xfeedfacf, 0); header.writeUInt32LE(cpu, 4); header.writeUInt32LE(6, 12);
+  header.writeUInt32LE(2, 16); header.writeUInt32LE(id.length + build.length, 20);
+  return Buffer.concat([header, id, build]);
+}
+for (const [tuple, cpu, platform] of [['ios_aarch64_cjnative', 0x0100000c, 2],
+  ['ios_simulator_aarch64_cjnative', 0x0100000c, 7], ['ios_simulator_x86_64_cjnative', 0x01000007, 7]]) {
   test(`${tuple}: installer preserves declared binary bytes and rejects changed transport`, async t => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ios-artifact-'));
     t.after(() => fs.rm(dir, {recursive: true, force: true}));
@@ -114,8 +125,7 @@ for (const [tuple, cpu] of [['ios_aarch64_cjnative', 0x0100000c],
     const input = path.join(source, 'runtime-install'), stage = path.join(source, 'installed-sdk');
     const files = new Map([[`lib/${tuple}/cjstart.o`, Buffer.from('fixture-start-object')]]);
     for (const name of ['libcangjie-runtime.dylib', 'libboundscheck.dylib']) {
-      const bytes = Buffer.alloc(64); bytes.writeUInt32LE(0xfeedfacf, 0); bytes.writeUInt32LE(cpu, 4); bytes.writeUInt32LE(6, 12);
-      bytes.write(name, 32); files.set(`runtime/lib/${tuple}/${name}`, bytes);
+      files.set(`runtime/lib/${tuple}/${name}`, machoDylibFixture(cpu, platform, name));
     }
     for (const [file, bytes] of files) {
       await fs.mkdir(path.dirname(path.join(input, file)), {recursive: true});
