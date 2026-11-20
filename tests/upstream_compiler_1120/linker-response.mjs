@@ -37,11 +37,16 @@ for (const [name, long, save] of [['short', false, false], ['long', true, false]
   const stdout = run(root, 'cjc', compiler, ['-V', source, '-o', executable,
     ...(long ? ['--link-options', flags] : []), ...(save ? ['--save-temps', saveDir] : [])]);
   const commands = stdout.split(/\r?\n/);
+  const windowsResponse = /^"[^"\r\n]*\bld\.lld\.exe" "@([^"\r\n]+\.rsp)"$/i;
+  const output = executable.replaceAll('\\', '/');
+  // The driver also uses ld -r for intermediate objects; count the flags on the final link.
   const linker = windows
-    ? commands.find(line => /^"[^"\r\n]*\bld\.lld\.exe" /i.test(line))
-    : commands.find(line => /^'[^'\r\n]*\b(?:ld|ld\.lld)' /i.test(line));
-  assert(linker, `${name}: linker command must be executed`);
-  const response = windows ? linker.match(/^"[^"\r\n]+" "@([^"\r\n]+\.rsp)"$/i)?.[1] : undefined;
+    ? commands.find(line => /^"[^"\r\n]*\bld\.lld\.exe" /i.test(line) &&
+      (windowsResponse.test(line) || line.replaceAll('\\', '/').includes(` "-o" "${output}"`)))
+    : commands.find(line => /^'[^'\r\n]*\b(?:ld|ld\.lld)' /i.test(line) &&
+      line.includes(` '-o' '${output}'`));
+  assert(linker, `${name}: final linker command must be executed`);
+  const response = windows ? linker.match(windowsResponse)?.[1] : undefined;
   assert.equal(Boolean(response), windows && long, `${name}: effective linker command`);
   if (!windows) {
     assert(!/ '@[^']+'/.test(linker), `${name}: Linux uses direct arguments`);
