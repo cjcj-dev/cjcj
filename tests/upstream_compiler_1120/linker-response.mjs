@@ -36,8 +36,18 @@ for (const [name, long, save] of [['short', false, false], ['long', true, false]
   const executable = path.join(root, windows ? 'sample.exe' : 'sample');
   const stdout = run(root, 'cjc', compiler, ['-V', source, '-o', executable,
     ...(long ? ['--link-options', flags] : []), ...(save ? ['--save-temps', saveDir] : [])]);
-  const response = stdout.match(/^"[^"\r\n]*\bld\.lld\.exe" "@([^"\r\n]+\.rsp)"\r?$/im)?.[1];
+  const commands = stdout.split(/\r?\n/);
+  const linker = windows
+    ? commands.find(line => /^"[^"\r\n]*\bld\.lld\.exe" /i.test(line))
+    : commands.find(line => /^'[^'\r\n]*\b(?:ld|ld\.lld)' /i.test(line));
+  assert(linker, `${name}: linker command must be executed`);
+  const response = windows ? linker.match(/^"[^"\r\n]+" "@([^"\r\n]+\.rsp)"$/i)?.[1] : undefined;
   assert.equal(Boolean(response), windows && long, `${name}: effective linker command`);
+  if (!windows) {
+    assert(!/ '@[^']+'/.test(linker), `${name}: Linux uses direct arguments`);
+    assert.equal([...linker.matchAll(/ '-L\.'/g)].length, long ? count : 0,
+      `${name}: forwarded link flags`);
+  }
   if (response) {
     assert.equal(fs.existsSync(response), save, `${name}: response file lifetime`);
     if (save) {
