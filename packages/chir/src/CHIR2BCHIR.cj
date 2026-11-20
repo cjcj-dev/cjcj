@@ -177,7 +177,7 @@ public class CHIR2BCHIR {
     private func CollectMethods(def: CustomTypeDef, info: BCHIRSClassInfo): Unit {
         for (vtable in def.GetDefVTable().GetTypeVTables()) {
             for (funcInfo in vtable.GetVirtualMethods()) {
-                let methodName = MangleMethodName(funcInfo.GetMethodName(), funcInfo.GetMethodSigType())
+                let methodName = MangleMethodName(funcInfo.GetMethodName(), funcInfo.GetMethodSigType(), omitFirstArg: true)
                 let method = funcInfo.GetVirtualMethod().getOrThrow()
                 if (!method.IsPureAbstract()) {
                     info.vtable[methodName] = method.GetIdentifierWithoutPrefix()

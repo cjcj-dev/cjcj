@@ -1393,7 +1393,8 @@ public class UpdateOperatorVTable {
                 if (idx == SPLIT_OPERATOR_NAME_PREFIX.size - 1) {
                     let vt = user.GetDefVTable().GetExpectedTypeVTable(infType).GetVirtualMethods()[index]
                     CJC_ASSERT(vt.GetMethodName() == methodInfo.GetMethodName())
-                    CJC_ASSERT(vt.GetMethodSigType().IsEqual(methodInfo.GetMethodSigType()))
+                    CJC_ASSERT(vt.TestAttr(Attribute.STATIC) == methodInfo.TestAttr(Attribute.STATIC))
+                    CJC_ASSERT(vt.FuncSigIsMatched(methodInfo.GetCondition(), builder))
                     user.UpdateVtableItem(infType, index, ovfFunc, extDef.GetExtendedType().getOrThrow(), newName)
                 } else {
                     let newFuncInfo = CloneVirtualMethodInfo(methodInfo)
@@ -1412,7 +1413,8 @@ public class UpdateOperatorVTable {
                 if (idx == SPLIT_OPERATOR_NAME_PREFIX.size - 1) {
                     let vt = user.GetDefVTable().GetExpectedTypeVTable(infType).GetVirtualMethods()[index]
                     CJC_ASSERT(vt.GetMethodName() == methodInfo.GetMethodName())
-                    CJC_ASSERT(vt.GetMethodSigType().IsEqual(methodInfo.GetMethodSigType()))
+                    CJC_ASSERT(vt.TestAttr(Attribute.STATIC) == methodInfo.TestAttr(Attribute.STATIC))
+                    CJC_ASSERT(vt.FuncSigIsMatched(methodInfo.GetCondition(), builder))
                     user.UpdateVtableItem(infType, index, methodInfo.GetVirtualMethod(), None, newName)
                 } else {
                     let newMethodInfo = CloneVirtualMethodInfo(methodInfo)
