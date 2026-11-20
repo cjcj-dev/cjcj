@@ -80,6 +80,36 @@ class ParameterListRecoveryTest {
 }
 
 @Test
+@When[env != "ohos"]
+class CallLocalModeSyntaxTest {
+    @TestCase
+    func constructorSuffixKeepsFollowingMember(): Unit {
+        let (expr, diag) = parseExpr("C() @local!.field")
+        let member = (expr as MemberAccess).getOrThrow()
+        let call = (member.baseExpr.getOrThrow() as CallExpr).getOrThrow()
+        @Expect(member.field.Val(), "field")
+        @Expect(call.modal.getOrThrow().local, ASTMode.FULL)
+        @Expect(call.end.column, 12)
+        @Expect(countErrors(diag), 1)
+
+        let (plain, plainDiag) = parseExpr("C().field")
+        let plainMember = (plain as MemberAccess).getOrThrow()
+        let plainCall = (plainMember.baseExpr.getOrThrow() as CallExpr).getOrThrow()
+        @Expect(plainCall.modal.isNone(), true)
+        @Expect(plainMember.field.Val(), "field")
+        @Expect(countErrors(plainDiag), 0)
+    }
+
+    @TestCase
+    func primitiveConversionRejectsPostfixMode(): Unit {
+        let (expr, diag) = parseExpr("Int64(0) @local!")
+        @Expect(expr.astKind, ASTKind.TYPE_CONV_EXPR)
+        @Expect(expr.TestAttr(Attribute.IS_BROKEN), true)
+        @Expect(countErrors(diag), 2)
+    }
+}
+
+@Test
 class ParseTypePortTest {
     @When[env != "ohos"]
     @TestCase

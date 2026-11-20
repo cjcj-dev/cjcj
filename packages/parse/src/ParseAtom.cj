@@ -309,6 +309,14 @@ extend ParserImpl {
         }
         ret.rightParenPos = lastToken.Begin()
         ret.end = lastToken.End()
+        if (!newlineSkipped) {
+            if (let Some(modal) <- ParseLocalModeSuffix()) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_modal_type,
+                    MakeRange(modal.localPos, modal.end)).Emit()
+                ret.EnableAttr(Attribute.IS_BROKEN)
+                ret.end = modal.end
+            }
+        }
         return ret
     }
 

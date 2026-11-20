@@ -410,12 +410,19 @@ extend ParserImpl {
                 { pos: Position => callExpr.args[callExpr.args.size - 1].commaPos = pos },
                 { => callExpr.args.add(ParseFuncArg()) },
                 TokenKind.RPAREN)
-            if (!Skip(TokenKind.RPAREN) && !callExpr.TestAttr(Attribute.HAS_BROKEN)) {
+            let closed = Skip(TokenKind.RPAREN)
+            if (!closed && !callExpr.TestAttr(Attribute.HAS_BROKEN)) {
                 callExpr.EnableAttr(Attribute.HAS_BROKEN)
                 DiagExpectedRightDelimiter("(", callExpr.leftParenPos)
             }
             callExpr.rightParenPos = lastToken.Begin()
             callExpr.end = lastToken.End()
+            if (closed && !newlineSkipped) {
+                callExpr.modal = ParseLocalModeSuffix()
+                if (let Some(modal) <- callExpr.modal) {
+                    callExpr.end = modal.end
+                }
+            }
         }
         return callExpr
     }

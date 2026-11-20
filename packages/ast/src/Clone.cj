@@ -1143,6 +1143,7 @@ public class ASTCloner {
         let target = CallExpr()
         target.baseFunc = CloneExpr(source.baseFunc, visitFunc)
         target.leftParenPos = source.leftParenPos
+        target.modal = source.modal
         target.needCheckToTokens = source.needCheckToTokens
         let cloneTable = HashMap<Node, FuncArg>()
         for (arg in source.args) {
@@ -2387,6 +2388,7 @@ public class ASTCloner {
         }
         if (let Some(src) <- (source as CallExpr)) {
             if (let Some(dst) <- (target as CallExpr)) {
+                dst.modal = src.modal
                 dst.baseFunc = cloneExpr(src.baseFunc, visitFunc)
                 if (let Some(baseFunc) <- dst.baseFunc) {
                     if (let Some(member) <- (baseFunc as MemberAccess)) {
