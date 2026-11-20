@@ -115,6 +115,7 @@ public enum ASTKind {
     | FEATURES_DIRECTIVE
     | FILE
     | NODE
+    | EXCLAVE_EXPR
 }
 
 public func ASTKindIndex(kind: ASTKind): Int64 {
@@ -233,6 +234,7 @@ public func ASTKindIndex(kind: ASTKind): Int64 {
         case ASTKind.FEATURES_DIRECTIVE => 111
         case ASTKind.FILE => 112
         case ASTKind.NODE => 113
+        case ASTKind.EXCLAVE_EXPR => 114
     }
 }
 
@@ -360,7 +362,8 @@ public let AST_KIND_VALUES: Array<String> = [
     "features_set",
     "features_directive",
     "file",
-    "node"
+    "node",
+    "exclave_expr"
 ]
 
 public func ASTKindName(kind: ASTKind): String {
@@ -479,5 +482,6 @@ public func ASTKindName(kind: ASTKind): String {
         case ASTKind.FEATURES_DIRECTIVE => "features_directive"
         case ASTKind.FILE => "file"
         case ASTKind.NODE => "node"
+        case ASTKind.EXCLAVE_EXPR => "exclave_expr"
     }
 }

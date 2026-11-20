@@ -8140,6 +8140,24 @@ extend TypeChecker {
         return None
     }
 
+    private func SynthesizeExclaveExpr(ctx: ASTContext, expr: ExclaveExpr): Ty {
+        let block = expr.body.getOrThrow()
+        let owner = GetCurFuncBody(ctx, expr.scopeName)
+        var result: Ty = TypeManager.GetNothingTy()
+        if ((let Some(body) <- owner) && (let Some(ty) <- body.GetTy()) && (let Some(ft) <- (ty as FuncTy))) {
+            if (ft.retTy.kind == TypeKind.TYPE_QUEST) {
+                let inferred = SynthesizeBlock(ctx, SynPos.EXPR_ARG, block)
+                if (Ty.IsTyCorrect(inferred) && !inferred.HasQuestTy() && !inferred.HasIdealTy()) { result = inferred }
+            } else if (body.funcDecl.map({ fd => fd.TestAttr(Attribute.CONSTRUCTOR) || fd.IsFinalizer() }) ?? false) {
+                let _ = SynthesizeBlock(ctx, SynPos.EXPR_ARG, block)
+            } else if (!CheckBlock(ctx, ft.retTy, block)) { result = TypeManager.GetInvalidTy() }
+        } else {
+            let _ = SynthesizeBlock(ctx, SynPos.EXPR_ARG, block)
+        }
+        expr.SetTy(result)
+        return FinishSynthesize(ctx, expr, result)
+    }
+
     private func SynthesizeThrowExpr(ctx: ASTContext, throwExpr: ThrowExpr): Ty {
         if (let Some(innerExpr) <- throwExpr.expr) {
             let _ = Synthesize(ctx, innerExpr)
@@ -8481,6 +8499,7 @@ extend TypeChecker {
             assign.SetTy(assignTy)
             return FinishSynthesize(ctx, assign, assignTy)
         }
+        if (let Some(ex) <- (expr as ExclaveExpr)) { return SynthesizeExclaveExpr(ctx, ex) }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             return SynthesizeThrowExpr(ctx, throwExpr)
         }
@@ -8768,6 +8787,7 @@ extend TypeChecker {
             }
             return FinishCheck(ctx, expr, this.ChkRefExpr(ctx, realTarget, nameRef))
         }
+        if (let Some(ex) <- (expr as ExclaveExpr)) { return FinishCheck(ctx, ex, Ty.IsTyCorrect(SynthesizeExclaveExpr(ctx, ex))) }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             let throwTy = SynthesizeThrowExpr(ctx, throwExpr)
             return FinishCheck(ctx, throwExpr, Ty.IsTyCorrect(throwTy) &&

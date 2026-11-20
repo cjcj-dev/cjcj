@@ -15,7 +15,7 @@ public import cjcj::ast.{
     IfExpr, IncOrDecExpr, InterpolationExpr, InvalidExpr, IsExpr, JumpExpr, LambdaExpr, LetPatternDestructor,
     LitConstExpr, LitConstKind, MacroExpandExpr, MatchCase, MatchCaseOther, MatchExpr, MemberAccess, OptionalChainExpr,
     OptionalExpr, ParenExpr, PerformExpr, PrimitiveTypeExpr, QuoteExpr, RangeExpr, RefExpr, ResumeExpr,
-    ReturnExpr, SpawnExpr, StrInterpolationExpr, SubscriptExpr, SynchronizedExpr, ThrowExpr, TokenPart,
+    ReturnExpr, SpawnExpr, StrInterpolationExpr, SubscriptExpr, SynchronizedExpr, ExclaveExpr, ThrowExpr, TokenPart,
     TrailingClosureExpr, TryExpr, TupleLit, TypeConvExpr, UnaryExpr, WildcardExpr, WhileExpr, DoWhileExpr,
     ForInExpr, StringKind, SugarKind, CallKind
 }

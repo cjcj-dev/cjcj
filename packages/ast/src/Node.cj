@@ -220,7 +220,7 @@ public open class Node <: Hashable & Equatable<Node> {
     }
 
     public func IsExpr(): Bool {
-        return ASTKindIndex(astKind) >= ASTKindIndex(ASTKind.EXPR) &&
+        return astKind == ASTKind.EXCLAVE_EXPR || ASTKindIndex(astKind) >= ASTKindIndex(ASTKind.EXPR) &&
             ASTKindIndex(astKind) <= ASTKindIndex(ASTKind.INVALID_EXPR)
     }
 

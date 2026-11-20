@@ -1007,6 +1007,12 @@ public class ASTCloner {
         return target
     }
 
+    private static func CloneExclaveExpr(source: ExclaveExpr, visitFunc: (Node, Node) -> Unit): ExclaveExpr {
+        let target = ExclaveExpr()
+        target.body = CloneBlock(source.body, visitFunc)
+        return target
+    }
+
     private static func CloneThrowExpr(source: ThrowExpr, visitFunc: (Node, Node) -> Unit): ThrowExpr {
         let target = ThrowExpr()
         target.throwPos = source.throwPos
@@ -1446,6 +1452,7 @@ public class ASTCloner {
             case ASTKind.TOKEN_PART => CloneTokenPart((source as TokenPart).getOrThrow(), visitFunc)
             case ASTKind.QUOTE_EXPR => CloneQuoteExpr((source as QuoteExpr).getOrThrow(), visitFunc)
             case ASTKind.TRY_EXPR => CloneTryExpr((source as TryExpr).getOrThrow(), visitFunc)
+            case ASTKind.EXCLAVE_EXPR => CloneExclaveExpr((source as ExclaveExpr).getOrThrow(), visitFunc)
             case ASTKind.THROW_EXPR => CloneThrowExpr((source as ThrowExpr).getOrThrow(), visitFunc)
             case ASTKind.PERFORM_EXPR => ClonePerformExpr((source as PerformExpr).getOrThrow(), visitFunc)
             case ASTKind.RESUME_EXPR => CloneResumeExpr((source as ResumeExpr).getOrThrow(), visitFunc)
@@ -1587,6 +1594,7 @@ public class ASTCloner {
             case ASTKind.MATCH_CASE_OTHER => MatchCaseOther()
             case ASTKind.MATCH_EXPR => MatchExpr()
             case ASTKind.TRY_EXPR => TryExpr()
+            case ASTKind.EXCLAVE_EXPR => ExclaveExpr()
             case ASTKind.THROW_EXPR => ThrowExpr()
             case ASTKind.PERFORM_EXPR => PerformExpr()
             case ASTKind.RESUME_EXPR => ResumeExpr()
@@ -2292,6 +2300,7 @@ public class ASTCloner {
                 dst.finallyLambda = if (let Some(lambda) <- src.finallyLambda) { CloneNode(lambda, visitFunc) as LambdaExpr } else { None }
             }
         }
+        if ((let Some(src) <- (source as ExclaveExpr)) && (let Some(dst) <- (target as ExclaveExpr))) { dst.body = cloneBlock(src.body, visitFunc) }
         if (let Some(src) <- (source as ThrowExpr)) { if (let Some(dst) <- (target as ThrowExpr)) { dst.throwPos = src.throwPos; dst.expr = cloneExpr(src.expr, visitFunc) } }
         if (let Some(src) <- (source as PerformExpr)) { if (let Some(dst) <- (target as PerformExpr)) { dst.performPos = src.performPos; dst.expr = cloneExpr(src.expr, visitFunc) } }
         if (let Some(src) <- (source as ResumeExpr)) {

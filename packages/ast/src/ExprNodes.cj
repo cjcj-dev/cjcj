@@ -446,6 +446,17 @@ public class TryExpr <: Expr {
     }
 }
 
+public class ExclaveExpr <: Expr {
+    public var body: Option<Block> = None
+    public init() { super(ASTKind.EXCLAVE_EXPR) }
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(block) <- body) { out.add(block) }
+        return out
+    }
+    public override func ToString(): String { return "exclave " + body.getOrThrow().ToString() }
+}
+
 public class ThrowExpr <: Expr {
     public var throwPos: Position = INVALID_POSITION
     public var expr: Option<Expr> = None

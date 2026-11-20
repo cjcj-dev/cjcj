@@ -91,6 +91,7 @@ import cjcj::ast.TupleTy as AstTupleTy
 import cjcj::ast.TryExpr as AstTryExpr
 import cjcj::ast.TypePattern as AstTypePattern
 import cjcj::ast.TypeConvExpr as AstTypeConvExpr
+import cjcj::ast.ExclaveExpr as AstExclaveExpr
 import cjcj::ast.ThrowExpr as AstThrowExpr
 import cjcj::ast.UnaryExpr as AstUnaryExpr
 import cjcj::ast.VarDecl as AstVarDecl
@@ -956,6 +957,7 @@ public class Translator {
             case ASTKind.LAMBDA_EXPR => trans.Visit(RequireNodeAsLambdaExpr(nodePtr))
             case ASTKind.MATCH_EXPR => trans.Visit(RequireNodeAsMatchExpr(nodePtr))
             case ASTKind.TRY_EXPR => trans.Visit(RequireNodeAsTryExpr(nodePtr))
+            case ASTKind.EXCLAVE_EXPR => trans.Visit((nodePtr as AstExclaveExpr).getOrThrow())
             case ASTKind.THROW_EXPR => trans.Visit(RequireNodeAsThrowExpr(nodePtr))
             case ASTKind.ARRAY_LIT => trans.Visit(RequireNodeAsArrayLit(nodePtr))
             case ASTKind.ARRAY_EXPR => trans.Visit(RequireNodeAsArrayExpr(nodePtr))
@@ -3828,6 +3830,34 @@ public class Translator {
             }
             return None
         }
+        return None
+    }
+
+    public func Visit(expr: AstExclaveExpr): Option<Value> {
+        let outer = CurrentBlock()
+        let owner = outer.GetFuncOrLambdaBody().getOrThrow()
+        let dest = if (let Some(fn) <- owner.GetOwnerFunc()) { fn.GetReturnValue() }
+            else { (owner.GetOwnerExpression().getOrThrow() as Lambda).getOrThrow().GetReturnValue() }
+        let subgroup = builder.CreateBlockGroup(CurrentFunction())
+        let ex = builder.CreateExclave(outer)
+        outer.AppendExpression(ex)
+        ex.AppendBlockGroup(subgroup)
+        let loc = TranslateLocation(expr)
+        ex.SetDebugLocation(loc)
+        blockGroupStack.add(subgroup)
+        let entry = builder.CreateBlock(subgroup)
+        subgroup.SetEntryBlock(entry)
+        let body = expr.body.getOrThrow()
+        let ret = Visit(body)
+        CreateGoto(GetBlockByAST(body), entry)
+        if ((let Some(value) <- ret) && (let Some(slot) <- dest)) { CreateAndAppendWrappedStore(value, slot, loc) }
+        let exit = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(exit)
+        exit.SetDebugLocation(loc)
+        exit.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+        currentBlock = CreateBlock()
+        maybeUnreachable[CurrentBlock()] = ex
         return None
     }
 

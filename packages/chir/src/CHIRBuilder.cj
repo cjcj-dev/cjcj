@@ -1,7 +1,7 @@
 package cjcj::chir
 
 import std.collection.*
-import cjcj::utils.OverflowStrategy
+import cjcj::utils.{CJC_ASSERT, OverflowStrategy}
 
 public class CHIRBuilder {
     public let context: CHIRContext

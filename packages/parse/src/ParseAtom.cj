@@ -68,6 +68,18 @@ extend ParserImpl {
             }
             return ret
         }
+        if (compileOptions.IsLocalModeAnalysis() && tokenKind == TokenKind.IDENTIFIER && Peek().Value() == "exclave") {
+            let next = lexer.LookAheadSkipNL(1)
+            if (!next.isEmpty() && next[0].kind == TokenKind.LCURL) {
+                let expr = ExclaveExpr()
+                expr.begin = Peek().Begin()
+                Next()
+                let block = ParseBlock(ScopeKind.FUNC_BODY)
+                expr.body = block
+                expr.end = block.end
+                return expr
+            }
+        }
         if (Seeing(TokenKind.IDENTIFIER) || SeeingContextualKeyword()) {
             return ParseRefExpr(ek)
         }
