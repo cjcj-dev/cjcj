@@ -496,7 +496,7 @@ test('source-build workflow connects every native runner to its LLVM and std art
     'the source SDK job no longer depends on fixed-llvm');
   for (const edge of [
     'name: fixed-llvm-tools-${{ matrix.llvm_platform }}',
-    'name: ${{ matrix.final_std_artifact }}',
+    'name: ${{ matrix.std_artifact }}',
     'path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-stage2',
   ]) assert.ok(workflow.includes(edge), edge);
 

@@ -5,14 +5,15 @@ import {toolReadiness,toolSdkInputs,toolRuntimeInputs} from '../cangjie-test/too
 import path from 'node:path';
 import {isDeepStrictEqual} from 'node:util';
 import {readJson, fileDigest} from '../bootstrap/sdk-flow.mjs';
-import {getTarget, getReleasePlatform} from '../../build/lib/targets.mjs';
+import {getBuildTarget} from '../../build/lib/build-target.mjs';
+import {getReleasePlatform} from '../../build/lib/targets.mjs';
 import {sourceOwnedTools} from '../../build/lib/release-component-provenance.mjs';
 import {sourceToolPayloads} from './source-tool-payloads.mjs';
 import {retainedToolPath, toolName} from '../../build/srcbuild/tool-layout.mjs';
 import {installedStageOutput} from '../srcbuild/lib/installed-stage-output.mjs';
 
 export function releaseSelection(platform, releaseKey = '') {
-  const target = getTarget(platform);
+  const target = getBuildTarget(platform);
   const release = getReleasePlatform(releaseKey || target.spec.packageHost.join('-'));
   if (release.host !== platform || release.excluded || release.crossCompiledHost)
     throw new Error('NATIVE_RELEASE_PLATFORM');

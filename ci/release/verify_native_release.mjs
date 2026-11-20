@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {isMain, cliArgs} from '../entry-common.mjs';
+import {nativePair} from '../runtime-pin.mjs';
 import {parseArgs} from 'node:util';
 import {assertNativeReleaseInputs} from './native-release-inputs.mjs';
 import {readJson, inventory, command} from '../bootstrap/sdk-flow.mjs';
@@ -29,7 +30,6 @@ export async function verifyNativeRelease(options, env = process.env) {
   const {sdk, platform, version, sourceSha, runtimeRef, releaseKey = '', std, crossRoot, work} = options;
   const {target, release, toolApplicability} = await assertNativeReleaseInputs(options);
   if (platform==='windows-x64') {
-    const {nativePair}=await import('../runtime-pin.mjs');
     const pair=nativePair(env),stage=await readJson(path.join(sdk,'STAGE-INPUTS.json'));
     if(!pair || stage.selection?.targetComponents?.llvm?.commit!==pair.llvm
       || stage.selection?.bootstrapHost?.version!==pair.hostVersion || pair.runtime!==runtimeRef)
@@ -75,7 +75,7 @@ export async function verifyNativeRelease(options, env = process.env) {
   // Compiler smoke is not a lint/LSP macro consumer. Preserve this missing
   // business gate after the independent installed consumers, rather than
   // preventing them from running or promoting a copied installation to PASS.
-  const pending=Object.entries(toolApplicability).filter(([,row])=>row.applicability?.status==='NOT_CONSUMED').map(([name])=>name);
+  const pending=Object.entries(toolApplicability).filter(([,row])=>row.applicability?.status==='NOT_CONSUMED'||(platform==='windows-x64'&&!row.ready)).map(([name])=>name);
   if(pending.length)throw new Error('NATIVE_RELEASE_TOOL_CONSUMPTION_NOT_RUN '+pending.join(','));
   console.log(`NATIVE_RELEASE_CONSUMED platform=${platform} version=${version} source=${sourceSha}`);
 }

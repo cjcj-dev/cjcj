@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 // R stdlib/build.py owns its CMake graph; cjpm owns the compiler workspace.
 import fs from 'node:fs/promises';
+import {npxZx} from './zx-cli.mjs';
 import path from 'node:path';
 import {selectBuildResources} from '../build-resources.mjs';
 import {fileURLToPath} from 'node:url';
@@ -219,7 +220,9 @@ export async function nativeStage(options, {signal} = {}) {
     const shimInstall=options['shim-install']||sdk;
     const shim=await compilerNativeShim({install:options['shim-install'],nativeInstall:sdk,compilerCommit:commit});
     env.CJCJ_LLVM_SHIM_O=path.join(shimInstall,shim.object.path);
-    await command([options.zx||'zx',path.join(source,'runtime_shim/build_shim.mjs')],{cwd:source,env,records});
+    const shimScript=path.join(source,'runtime_shim/build_shim.mjs');
+    await command(!options.zx && native.os==='win32' ? await npxZx(shimScript,env) :
+      [options.zx||'zx',shimScript],{cwd:source,env,records});
     try {
       await prepareTrimpath(source);
       // A completed user installation need not contain the bootstrap .host

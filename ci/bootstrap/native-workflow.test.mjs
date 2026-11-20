@@ -117,7 +117,7 @@ test('Windows source plan, upload and package receive the same native std for pi
  const gate=job.steps.find(s=>s.name==='Validate same-platform final std contract');
  const upload=source.jobs['source-stage3'].steps.find(s=>s.name==='Upload final source-built std install root');
  assert.equal(gate.env.EXPECTED_STD_ARTIFACT,'${{ steps.package-inputs.outputs.std_artifact }}');
- assert.equal(caller.std_artifact,'${{ needs.source-p3-windows-x64.outputs.final_std_artifact }}');
+ assert.equal(caller.std_artifact,'${{ needs.source-p3-windows-x64.outputs.std_artifact }}');
  for(const mode of ['default','explicit']){
   const fields={...inputs,...(mode==='default'?{native_llvm_ref:'',native_runtime_ref:'',native_host_version:''}:{})};
   const env={...process.env,RELEASE_PLATFORM:caller.platform,RELEASE_KEY:caller.release_key,
@@ -130,7 +130,7 @@ test('Windows source plan, upload and package receive the same native std for pi
   assert.equal(sourcePlan.status,0,sourcePlan.stderr);
   const [cell]=JSON.parse(sourcePlan.output.matrix).include;
   const artifact=cell[upload.with.name.match(/^\$\{\{ matrix\.(\w+) \}\}$/)[1]];
-  assert.equal(artifact,'final-std-native-windows-x64');assert.equal(sourcePlan.output.final_std_artifact,artifact);
+  assert.equal(artifact,'final-std-native-windows-x64');assert.equal(sourcePlan.output.std_artifact,artifact);
   const r=spawnSync('bash',['-eu','-c',entry.run],{cwd:repo,env,encoding:'utf8'});assert.equal(r.status,0,r.stderr);
   const expected=fs.readFileSync(env.GITHUB_OUTPUT,'utf8').trim().slice('std_artifact='.length);
   for(const [selected,rc] of [[artifact,0],['final-std-windows-x64',1]]){

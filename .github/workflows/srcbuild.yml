@@ -3,9 +3,9 @@ name: Self-hosted source SDK and final std
 on:
   workflow_call:
     outputs:
-      final_std_artifact:
+      std_artifact:
         description: Native final std name for a single runnable source target
-        value: ${{ jobs.plan.outputs.final_std_artifact }}
+        value: ${{ jobs.plan.outputs.std_artifact }}
     inputs:
       native_runtime_artifact:
         description: Existing native-runtime-install artifact prefix
@@ -244,7 +244,7 @@ jobs:
     name: Select targets
     runs-on: ubuntu-24.04
     outputs:
-      final_std_artifact: ${{ steps.select.outputs.final_std_artifact }}
+      std_artifact: ${{ steps.select.outputs.std_artifact }}
       matrix: ${{ steps.select.outputs.matrix }}
       llvm_platforms: ${{ steps.select.outputs.llvm_platforms }}
       has_runnable: ${{ steps.select.outputs.has_runnable }}

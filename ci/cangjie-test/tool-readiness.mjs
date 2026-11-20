@@ -69,7 +69,7 @@ export async function toolReadiness(root) {
       const changed=[];
       let compilerUnknown=false;
       const compilerFile=await fs.realpath(compilerExecutionPath(path.join(sdk,'bin','cjc'+native.exe)));
-      const compilerRelative=path.relative(sdk,compilerFile);
+      const compilerRelative=path.relative(sdk,compilerFile).split(path.sep).join('/');
       if(installed)for(const key of ['platform','compilerFile','compilerCommit','runtimeCommit']) {
         if(installed.stage?.[key]!==stage[key])throw Error('installed SDK selection differs: '+key);
       }
@@ -163,7 +163,7 @@ export async function toolReadiness(root) {
         for(const key of ['sdk','frontendPackages','llvmLibrary','runtimeConfig','jsonBuild','llvmShim'])
           if(!selected.inputs?.[key])throw Error('Cangjie LSP input missing: '+key);
         required.push('.target-tools/tools/lsp/lib/libcangjie-runtime'+native.shared);
-        if(!Object.keys(payloads).some(rel=>/^\.target-tools\/tools\/lsp\/lib\/libLLVM/.test(rel)))throw Error('Cangjie LSP LLVM payload missing');
+        if(!Object.keys(payloads).some(rel=>/^\.target-tools\/tools\/lsp\/lib\/libLLVM/i.test(rel)))throw Error('Cangjie LSP LLVM payload missing');
         if(Object.keys(payloads).some(rel=>/libcangjie-lsp\./.test(rel)))throw Error('retired C++ LSP payload');
       }
       if(native.os==='win32') {
@@ -172,6 +172,7 @@ export async function toolReadiness(root) {
         for(const file of Object.keys(payloads).filter(file=>/\.dll$/i.test(file)))assertX64PeImage(path.join(sdk,file),true);
         if(['cjlint','lsp','cjhead'].includes(name)) {
           required.push('.target-tools/tools/'+name+'/lib/libcangjie-runtime.dll');
+          if(name==='cjlint')required.push('.target-tools/tools/cjlint/modules/'+native.tuple+'/std/std.core.cjo');
           if(!Object.keys(payloads).some(file=>file.toLowerCase()===('.target-tools/tools/'+name+'/lib/'+native.llvmLibrary).toLowerCase()))
             throw Error('selected Windows LLVM DLL absent');
         }

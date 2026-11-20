@@ -5,10 +5,10 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {isMain, cliArgs} from '../entry-common.mjs';
 import {command, privateRoot, fileDigest, readJson} from '../bootstrap/sdk-flow.mjs';
-import {getTarget} from '../../build/lib/targets.mjs';
+import {getBuildTarget} from '../../build/lib/build-target.mjs';
 import {selectInstalledColourSdk} from '../prepare-colour-sdk.mjs';
 export async function unpackNativeSdk(input, destination, targetKey, env = process.env) {
-  const target = getTarget(targetKey);
+  const target = getBuildTarget(targetKey);
   // Both public build/cli package and srcbuild package-install archive the
   // same installation. Keep their existing names and validate package facts.
   const prefix = 'cangjie-sdk-' + target.spec.sdkName + '-';

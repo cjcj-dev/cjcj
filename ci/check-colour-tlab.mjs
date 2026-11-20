@@ -2,6 +2,7 @@
 // Byte-layout check from the fixed #715 scanner (LLVM 67934046); this does not
 // establish that a compiler or a generated program executed successfully.
 import fs from 'node:fs';
+import {readPeSymbols} from '../build/lib/pe-symbols.mjs';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -21,9 +22,15 @@ export function inspect(file) {
   const oldArray = count(bytes, '4d8b09498b014d8b5108');
   const newObject = count(bytes, '498b17488b02488b4a08');
   const newArray = count(bytes, '498b014d8b5108') - oldArray;
-  const symbols = spawnSync('nm', ['-u', file], {encoding: 'utf8'});
-  if (symbols.status !== 0) throw new Error(`nm failed rc=${symbols.status} signal=${symbols.signal}: ${symbols.stderr || symbols.error}`);
-  const refs = [...new Set(symbols.stdout.split(/\r?\n/).map(line => line.trim().split(/\s+/).at(-1))
+  let imports;
+  if (process.platform === 'win32') {
+    imports = readPeSymbols(file, {spec:{llvmBinDir:process.env.CJCJ_NATIVE_LLVM_BIN}}, 'imports');
+  } else {
+    const symbols = spawnSync('nm', ['-u', file], {encoding: 'utf8'});
+    if (symbols.status !== 0) throw new Error(`nm failed rc=${symbols.status} signal=${symbols.signal}: ${symbols.stderr || symbols.error}`);
+    imports = symbols.stdout;
+  }
+  const refs = [...new Set(imports.split(/\r?\n/).map(line => line.trim().split(/\s+/).at(-1))
     .filter(name => name.split('@')[0].startsWith('g_cjLoad')))].sort();
   return {file, sha256: createHash('sha256').update(bytes).digest('hex'),
     three_level: oldObject + oldArray, two_level: newObject + newArray, colour_refs: refs};

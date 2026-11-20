@@ -6,7 +6,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {getBuildTarget} from '../lib/build-target.mjs';
-import {readPeSymbols} from '../lib/pe-symbols.mjs';
+import {assertX64PeImage,readPeSymbols} from '../lib/pe-symbols.mjs';
 import {readRuntimeSymbols, readCompilerSymbols, countLoadBadMask} from '../lib/runtime-split.mjs';
 
 // Existing apparatus dependencies: Clang 15 C producer, LLVM 14 COFF reader/linker.
@@ -46,6 +46,10 @@ function fixture(t, symbol) {
 for (const [symbol, count] of [['g_cjLoadBadMask', 1], ['ordinary_fixture_symbol', 0]]) {
   test(`real PE import/export tables count ${symbol} without nm dynamic ELF flags`, t => {
     const root = fixture(t, symbol);
+    assertX64PeImage(path.join(root,'consumer.exe'),false);
+    assertX64PeImage(path.join(root,'runtime.dll'),true);
+    assert.throws(()=>assertX64PeImage(path.join(root,'runtime.dll'),false),/expected executable/);
+    assert.equal(readPeSymbols(path.join(root,'consumer.exe'),target,'libraries'),'runtime.dll');
     const exported = readRuntimeSymbols(path.join(root, 'runtime.dll'), target);
     const imported = readCompilerSymbols(path.join(root, 'consumer.exe'), target);
     console.log('WINDOWS_PE_SYMBOL_ASSERT_REACHED ' + symbol);

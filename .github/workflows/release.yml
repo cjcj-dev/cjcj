@@ -299,7 +299,7 @@ jobs:
       llvm_platform: windows_x86_64
       sdk_runtime_dir: windows_x86_64_cjnative
       release_key: win32-x64
-      std_artifact: ${{ needs.source-p3-windows-x64.outputs.final_std_artifact }}
+      std_artifact: ${{ needs.source-p3-windows-x64.outputs.std_artifact }}
       cross_std_artifacts: '[]'
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
@@ -404,7 +404,7 @@ jobs:
       llvm_platform: windows_x86_64
       sdk_runtime_dir: windows_x86_64_cjnative
       release_key: win32-x64-android
-      std_artifact: ${{ needs.source-p3-windows-x64.outputs.final_std_artifact }}
+      std_artifact: ${{ needs.source-p3-windows-x64.outputs.std_artifact }}
       cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"},{"tuple":"linux_x86_64_cjnative","artifact":"final-std-linux-x64"}]'
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
@@ -488,7 +488,7 @@ jobs:
       llvm_platform: windows_x86_64
       sdk_runtime_dir: windows_x86_64_cjnative
       release_key: win32-x64-ohos
-      std_artifact: ${{ needs.source-p3-windows-x64.outputs.final_std_artifact }}
+      std_artifact: ${{ needs.source-p3-windows-x64.outputs.std_artifact }}
       cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"}]'
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}

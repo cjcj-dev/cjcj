@@ -209,7 +209,7 @@ export function finalStdArtifact(target, producer) {
 export function sourceBuildCells({nativeInputs=false}={}) {
   return [...registry.values()].filter(target => target.sourceBuild || nativeInputs && target.nativeSourceBuild).map(({spec, sourceBuild, nativeSourceBuild}) => ({
     target: spec.key,
-    final_std_artifact: finalStdArtifact(spec.key, spec.key),
+    std_artifact: finalStdArtifact(spec.key, spec.key),
     runner: (nativeSourceBuild || sourceBuild).runner,
     llvm_platform: spec.llvmPlatform,
     static_libs: spec.needsStaticLibs,
