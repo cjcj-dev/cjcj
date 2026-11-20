@@ -15,7 +15,7 @@ import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test, {after} from 'node:test';
+import test from 'node:test';
 import {linkedPeFixture} from './linked-pe-fixture.mjs';
 import {sdkPlatform,entryPlatformName} from '../../ci/bootstrap/sdk-platform.mjs';
 import {getTarget} from '../lib/targets.mjs';
@@ -254,13 +254,16 @@ for(const [platform,suffix,libraries]of [
  ['darwin-x64','',['tools/lib/libcangjie-lsp.dylib']],
  ['darwin-arm64','',['tools/lib/libcangjie-lsp.dylib']],
  ['windows-x64','.exe',['tools/bin/libcangjie-lsp.dll','tools/lib/libcangjie-lsp.dll.a']],
-])for(const tool of ['cjfmt','LSPServer','cjcov','cjtrace-recover','hle','cjlint','cjprof','cjcompat','cjhead'])test('A8 platform '+platform+' '+tool+' transports target payload and preserves shared config',()=>{
+])for(const tool of ['cjfmt','LSPServer','cjcov','cjtrace-recover','hle','cjlint','cjprof','cjcompat','cjhead'])test('A8 platform '+platform+' '+tool+' transports target payload and preserves shared config',t=>{
  const work=fs.mkdtempSync(path.join(os.tmpdir(),'a8-platform-')),sdk=path.join(work,'source'),release=path.join(work,'release'),artifact=path.join(work,'artifact');
  const binary=path.join(sdk,'tools/bin/'+tool+suffix);
- if(suffix&&!transportPe)transportPe=linkedPeFixture({after},'tool_transport');
- const expected=suffix?fs.readFileSync(path.join(transportPe,'consumer.exe')):Buffer.from('controlled '+platform+' '+tool+' bytes\n');
+ if(suffix&&!transportPe){
+  const linked=linkedPeFixture(t,'tool_transport');
+  transportPe={exe:fs.readFileSync(path.join(linked,'consumer.exe')),dll:fs.readFileSync(path.join(linked,'runtime.dll'))};
+ }
+ const expected=suffix?transportPe.exe:Buffer.from('controlled '+platform+' '+tool+' bytes\n');
  const runtime=suffix?'lib/runtime.dll':'lib/libcangjie-runtime.so';
- const runtimeBytes=suffix?fs.readFileSync(path.join(transportPe,'runtime.dll')):Buffer.from('target application runtime');
+ const runtimeBytes=suffix?transportPe.dll:Buffer.from('target application runtime');
  writeExecutable(binary,expected);
  writeExecutable(path.join(release,'tools/bin/'+tool+suffix),'base tool bytes\n');
  writeFile(path.join(sdk,'tools/config/cangjie-format.toml'),'target format\n');

@@ -6,6 +6,10 @@ on:
         description: Successful same-commit run containing the native Windows SDK and final std
         type: string
         required: true
+      std_artifact:
+        description: Exact std_artifact output of the selected Windows producer
+        required: true
+        type: string
       version:
         description: Exact SDK version in that producer run
         type: string
@@ -35,7 +39,7 @@ jobs:
       release_key: win32-x64
       llvm_platform: windows_x86_64
       sdk_runtime_dir: windows_x86_64_cjnative
-      std_artifact: final-std-native-windows-x64
+      std_artifact: ${{ inputs.std_artifact }}
       version: ${{ inputs.version }}
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
