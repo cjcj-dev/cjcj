@@ -1196,6 +1196,9 @@ private func CompareFuncCandidates(typeManager: TypeManager, left: FunctionMatch
         }
         var pos: Int64 = 0
         while (pos < left.tysInArgOrder.size) {
+            let l = LocalParameterMode(left.fd, ModeArgumentIndex(left.fd, ce, pos))
+            let r = LocalParameterMode(right.fd, ModeArgumentIndex(right.fd, ce, pos))
+            if (!l.IsSubMode(r) && !typeManager.IsModalCopyType(left.tysInArgOrder[pos])) { return false }
             if (left.tysInArgOrder[pos].IsNumeric() && right.tysInArgOrder[pos].IsNumeric() &&
                 CompareIntAndFloat(left.tysInArgOrder[pos], right.tysInArgOrder[pos]) == ComparisonRes.GT) {
                 return false
@@ -1329,6 +1332,7 @@ func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Option<AS
 }
 
 private func ModeArgumentIndex(fd: FuncDecl, call: CallExpr, i: Int64): Int64 {
+    if (i >= call.args.size) { return i }
     let name = GetArgName(fd, call.args[i])
     return GetParamTyAccordingToArgName(fd, name).map({ p => p.index }) ?? i
 }
@@ -1389,6 +1393,38 @@ private func MoreSpecificModes(left: FuncDecl, right: FuncDecl, ce: CallExpr): B
     return better
 }
 
+private func HasAnyLocalInput(unit: FunctionMatchingUnit, call: CallExpr): Bool {
+    if (GetReceiverMode(unit.fd) != ASTMode.NOT) { return true }
+    for (i in 0..unit.tysInArgOrder.size) {
+        if (LocalParameterMode(unit.fd, ModeArgumentIndex(unit.fd, call, i)) != ASTMode.NOT) { return true }
+    }
+    return false
+}
+
+// Equivalent data types with Copyable elements can tie even after ordinary generic comparison.
+// Only a RawArray intrinsic may break such a tie on the mode of the first parameter.
+private func CompareRawArrayIntrinsicModes(tm: TypeManager, left: FunctionMatchingUnit,
+    right: FunctionMatchingUnit, call: CallExpr): Option<Bool> {
+    let n = left.tysInArgOrder.size
+    if (!left.fd.TestAttr(Attribute.INTRINSIC) || !right.fd.TestAttr(Attribute.INTRINSIC) ||
+        n == 0 || n != right.tysInArgOrder.size || n != call.args.size) { return None }
+    let arr = tm.ApplySubstPack(left.tysInArgOrder[0], left.typeMapping)
+    if (!arr.IsArray() || arr.typeArgs.isEmpty() || !tm.IsModalCopyType(arr.typeArgs[0]) ||
+        !SameTy(arr, tm.ApplySubstPack(right.tysInArgOrder[0], right.typeMapping))) { return None }
+    let a = LocalParameterMode(left.fd, ModeArgumentIndex(left.fd, call, 0))
+    let b = LocalParameterMode(right.fd, ModeArgumentIndex(right.fd, call, 0))
+    if (a == b) { return None }
+    for (i in 1..n) {
+        let ty = tm.ApplySubstPack(left.tysInArgOrder[i], left.typeMapping)
+        if (!SameTy(ty, tm.ApplySubstPack(right.tysInArgOrder[i], right.typeMapping))) { return None }
+        if (LocalParameterMode(left.fd, ModeArgumentIndex(left.fd, call, i)) !=
+            LocalParameterMode(right.fd, ModeArgumentIndex(right.fd, call, i)) && !tm.IsModalCopyType(ty)) { return None }
+    }
+    if (a.IsSubMode(b)) { return Some(true) }
+    if (b.IsSubMode(a)) { return Some(false) }
+    return None
+}
+
 private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<FunctionMatchingUnit>, ce: CallExpr,
     ctx: Option<ASTContext>): ArrayList<Int64> {
     let targetMark = ArrayList<Bool>()
@@ -1418,8 +1454,14 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
                 otherIdx++
                 continue
             }
-            let leftToRight = CompareFuncCandidates(typeManager, candidates[idx], candidates[otherIdx], ce)
-            let rightToLeft = CompareFuncCandidates(typeManager, candidates[otherIdx], candidates[idx], ce)
+            var leftToRight = CompareFuncCandidates(typeManager, candidates[idx], candidates[otherIdx], ce)
+            var rightToLeft = CompareFuncCandidates(typeManager, candidates[otherIdx], candidates[idx], ce)
+            if (!leftToRight && !rightToLeft) {
+                if (let Some(leftBetter) <- CompareRawArrayIntrinsicModes(typeManager, candidates[idx], candidates[otherIdx], ce)) {
+                    leftToRight = leftBetter
+                    rightToLeft = !leftBetter
+                }
+            }
             if (leftToRight && !rightToLeft) {
                 targetMark[otherIdx] = false
             } else if (!leftToRight && rightToLeft) {
@@ -1433,6 +1475,15 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
             otherIdx++
         }
         idx++
+    }
+    var hasOrdinary = false
+    for (i in 0..targetMark.size) {
+        if (targetMark[i] && !HasAnyLocalInput(candidates[i], ce)) { hasOrdinary = true; break }
+    }
+    if (hasOrdinary) {
+        for (i in 0..targetMark.size) {
+            if (targetMark[i] && HasAnyLocalInput(candidates[i], ce)) { targetMark[i] = false }
+        }
     }
     let out = ArrayList<Int64>()
     var markIdx: Int64 = 0

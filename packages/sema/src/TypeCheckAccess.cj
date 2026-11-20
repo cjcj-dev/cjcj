@@ -378,7 +378,7 @@ public func IsLegalAccess(typeManager: TypeManager, curComposite: Option<Symbol>
         })
     if (target.TestAttr(Attribute.GLOBAL) || flag) {
         if (target.TestAttr(Attribute.PRIVATE)) {
-            return IsSameFile(accessSite, target)
+            return isTargetVisibleToNode(target, accessSite)
         }
         return AccessIsVisible(target, relation)
     }
