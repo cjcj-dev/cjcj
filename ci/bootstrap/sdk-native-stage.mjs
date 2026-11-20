@@ -263,6 +263,8 @@ export async function nativeStage(options, {signal} = {}) {
     const bin=path.join(output,'bin');await fs.mkdir(bin,{recursive:true});
     const product=path.join(bin,'cjcj-stage1');
     await fs.copyFile(path.join(productRoot,'cjcj-stage1'),product);
+    await fs.mkdir(path.join(output,'tools/bin'),{recursive:true});
+    await fs.copyFile(product,path.join(output,'tools/bin/chir-dis'));
     const {sha256}=await import('./sdk-io.mjs');
     await installCompilerChirInterface({source,destination:output,sdk,shim,records,env});
     await atomicJson(path.join(bin,'build-inputs.json'),{producer:'sdk-native-stage:h1',source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,startupConfiguration,visibleOptionsOnly:optionVisibility,
@@ -290,6 +292,7 @@ export async function nativeStage(options, {signal} = {}) {
     const product=await resolveProductBinary(path.join(target,'release/bin'),options.phase||'stage2',{windows:native.os==='win32'});
     await assembleDirectory(output, async destination => {
     await copyOutputs(destination,[{from:product,to:'bin/cjcj-stage1'+native.exe},
+      {from:product,to:'tools/bin/chir-dis'+native.exe},
       // These are the new compiler's link inputs. The package manager's host
       // execution libraries can belong to an older compiler and must not travel
       // with this output. Carry dependencies as normal producer artifacts so an
