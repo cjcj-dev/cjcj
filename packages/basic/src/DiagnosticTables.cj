@@ -3001,7 +3001,7 @@ public let errorData: Array<ErrorData> = [
     ErrorData(message: "only '@ObjC' foreign interface can inherit super '@ObjC' foreign interface", mainHint: "'%s' must be annotated with '@ObjC foreign'", otherHints: []),
     ErrorData(message: "type of member property in exported '@Java' declaration must be java-compatible", mainHint: "'%s' is not java-compatible type", otherHints: []),
     ErrorData(message: "local mode is disabled", mainHint: "local mode is not available in this compiler build", otherHints: []),
-    ErrorData(message: "unexpected modal type here", mainHint: "type argument cannot carry a local-mode suffix", otherHints: []),
+    ErrorData(message: "unexpected modal type here", mainHint: "this type cannot carry a local-mode suffix", otherHints: []),
 ]
 
 public let rDiagSeveritys: Array<DiagSeverity> = [
