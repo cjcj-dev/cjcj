@@ -72,6 +72,12 @@ export async function nativeStage(options, {signal} = {}) {
   try {resources=await selectBuildResources({heap:options.heap,jobs:options.jobs});}
   catch(error){if(error.message.startsWith('BUILD_JOBS'))throw Error('NATIVE_STAGE_JOBS '+error.message);throw error;}
   const native=sdkPlatform(platform), jobs=String(resources.jobs),records=[];
+  if(astInclude){
+    const root=path.dirname(astInclude);
+    if(path.basename(astInclude)!=='include' || ![path.join(root,'libcangjie-ast-support.a'),
+        path.join(root,'lib',native.tuple,'libcangjie-ast-support.a')].includes(astLibrary))
+      throw Error('STD_AST_SELECTION');
+  }
   if(process.platform!==native.os||process.arch!==native.arch)throw new Error('NATIVE_RUNNER_REQUIRED');
   // A directly installed official compiler owns bin/cjc and its loader paths.
   // A selfhost stage still uses its recorded producer and execution runtime.
@@ -147,7 +153,9 @@ export async function nativeStage(options, {signal} = {}) {
       // build.py only configures a missing native build directory. Reconfigure
       // an existing cache with the requested type/input while retaining its
       // toolchain, platform and other legitimate cached options.
-      if(reconfigure)await command(['cmake','-S',stdlib,'-B',build,'-DCMAKE_BUILD_TYPE='+cmakeType,
+      // R expands CANGJIE_HOME when generating the archive copy rule. A reused
+      // cache can have the same header root but still name a previous SDK.
+      if(reconfigure || (astInclude && cache!==null))await command(['cmake','-S',stdlib,'-B',build,'-DCMAKE_BUILD_TYPE='+cmakeType,
         '-DCANGJIE_TARGET_LIB='+targetLibraries.join(';'),
         ...(astInclude||includeChanged?['-DCANGJIE_INCLUDE='+selectedInclude]:[]),
         ...(localModeApi||cached('CANGJIE_ENABLE_LOCAL_MODE_API')!==undefined?['-DCANGJIE_ENABLE_LOCAL_MODE_API='+(localModeApi?'ON':'OFF')]:[]),'-U','RUNTIME_COMMON_LIB_DIR'],{cwd:stdlib,env,records});
