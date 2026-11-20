@@ -805,6 +805,8 @@ class CHIRDeserializerImpl {
                             lambdaExpr.SetReturnValue(retLocal)
                         }
                     }
+                    let declId = CHIRFieldAt(payload, 9)
+                    if (!declId.isEmpty()) { lambdaExpr.SetGenericDecl((expressionsById[declId] as Lambda).getOrThrow()) }
                     if (let Some(hostExpr) <- expressionsById.get(CHIRFieldAt(payload, 8))) {
                         if (let Some(hostLambda) <- (hostExpr as Lambda)) {
                             lambdaExpr.SetParamDftValHostFunc(hostLambda)
@@ -2965,6 +2967,9 @@ class CHIRDeserializerImpl {
     private func ConfigLambda(buffer: PackageFormat_Lambda, obj: Lambda): Unit {
         ConfigExpression(buffer.GetBase().getOrThrow(), obj)
         GetValue<Parameter>(buffer.GetParams())
+        if (buffer.GetGenericDecl() != 0u32) {
+            obj.SetGenericDecl(GetExpression<Lambda>(buffer.GetGenericDecl()).getOrThrow())
+        }
         if (let Some(returnValue) <- GetValue<LocalVar>(buffer.GetRetVal())) {
             obj.SetReturnValue(returnValue)
         }

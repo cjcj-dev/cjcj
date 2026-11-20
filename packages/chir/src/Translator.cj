@@ -4094,6 +4094,12 @@ public class Translator {
         let lambdaValue = lambda.GetResult() ??
             throw IllegalStateException("faithful AST2CHIR nested FuncDecl lambda has no result")
         localValSymbolTable.Set(funcDecl, lambdaValue)
+        if (funcDecl.TestAttr(AstAttribute.GENERIC) && (let Some(manager) <- gim)) {
+            for (inst in manager.GetInstantiatedDecls(funcDecl)) {
+                let expr = GetSymbolTable(inst).AsLocalVar().getOrThrow().GetExpr().getOrThrow()
+                (expr as Lambda).getOrThrow().SetGenericDecl(lambda)
+            }
+        }
         lambdaTrans.BindLambdaParams(funcBody, lambda, funcTy)
         let hostParams = funcBody.paramLists[0].params
         for (i in 0..hostParams.size) {

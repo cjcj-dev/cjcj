@@ -1131,6 +1131,7 @@ const CHIRFB_LAMBDA_VT_GENERICTYPEPARAMS: UInt16 = 16u16
 const CHIRFB_LAMBDA_VT_BODY: UInt16 = 18u16
 const CHIRFB_LAMBDA_VT_RETVAL: UInt16 = 20u16
 const CHIRFB_LAMBDA_VT_ISCOMPILETIMEVALUE: UInt16 = 22u16
+const CHIRFB_LAMBDA_VT_GENERICDECL: UInt16 = 26u16
 
 // GetInstantiateValue table field slot offsets. PackageFormat.fbs:1154-1157;
 // PackageFormat_generated.h:7817-7820 (GetInstantiateValue::FlatBuffersVTableOffset).

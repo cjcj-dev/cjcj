@@ -31,7 +31,8 @@ private func CallNeedsRegion(expr: Expression): Bool {
     }
     if ((let Some(local) <- callee.AsLocalVar()) && (let Some(def) <- local.GetExpr()) &&
         (let Some(lambda) <- (def as Lambda))) {
-        return SignatureNeedsRegion(lambda.GetParams(), lambda.GetReturnType())
+        let decl = lambda.GetGenericDecl() ?? lambda
+        return SignatureNeedsRegion(decl.GetParams(), decl.GetReturnType())
     }
     return false
 }

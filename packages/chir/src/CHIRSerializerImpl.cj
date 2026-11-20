@@ -1187,7 +1187,9 @@ class CHIRSerializerImpl {
         return CreateLambdaDirect(builder, base, funcTy, obj.IsLocalFunc(), Some(obj.GetIdentifier()),
             Some(obj.GetSrcCodeIdentifier()), if (params.isEmpty()) { None } else { Some(params) },
             if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) }, body, retVal,
-            obj.IsCompileTimeValue())
+            obj.IsCompileTimeValue(), if (let Some(decl) <- obj.GetGenericDecl()) {
+                GetId((decl as Expression).getOrThrow())
+            } else { 0u32 })
     }
 
     private func Dispatch(obj: Type): FlatBufferOffset {
@@ -2289,6 +2291,7 @@ class CHIRSerializerImpl {
         } else {
             ""
         })
+        fields.add(if (let Some(decl) <- lambdaExpr.GetGenericDecl()) { CHIRBaseId(decl) } else { "" })
         return expressionPayload("lambda", fields)
     }
 

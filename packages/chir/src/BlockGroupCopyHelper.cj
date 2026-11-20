@@ -155,6 +155,11 @@ public class BlockGroupCopyHelper {
     }
 
     private static func ReplaceExprOperandsInExpression(expr: Expression, valueMap: HashMap<Int64, Value>): Unit {
+        if ((let Some(lambda) <- (expr as Lambda)) && (let Some(decl) <- lambda.GetGenericDecl()) &&
+            (let Some(result) <- valueMap.get(decl.GetResult().getOrThrow().nodeId))) {
+            let clonedDecl = result.AsLocalVar().getOrThrow().GetExpr().getOrThrow()
+            lambda.SetGenericDecl((clonedDecl as Lambda).getOrThrow())
+        }
         if (expr.GetExprKind() != ExprKind.DEBUGEXPR) {
             let allOperands = expr.GetOperands()
             var idx: Int64 = 0

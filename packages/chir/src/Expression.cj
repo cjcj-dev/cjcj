@@ -2162,6 +2162,7 @@ public class Lambda <: Expression {
     private var srcCodeIdentifier: String = ""
     private var isLocalFunc: Bool = false
     private var paramDftValHostFunc: Option<Lambda> = None
+    private var genericDecl: Option<Lambda> = None
     private var isCompileTimeValue: Bool = false
 
     public init(operands: ArrayList<Value>, body: BlockGroup, parent: Option<Block>) {
@@ -2212,6 +2213,9 @@ public class Lambda <: Expression {
     public func GetSrcCodeIdentifier(): String {
         return srcCodeIdentifier
     }
+
+    public func SetGenericDecl(decl: Lambda): Unit { genericDecl = decl }
+    public func GetGenericDecl(): Option<Lambda> { return genericDecl }
 
     public func SetParamDftValHostFunc(hostFunc: Lambda): Unit {
         paramDftValHostFunc = hostFunc
@@ -2349,6 +2353,7 @@ public class Lambda <: Expression {
         if (IsCompileTimeValue()) {
             cloned.SetCompileTimeValue()
         }
+        if (let Some(decl) <- genericDecl) { cloned.SetGenericDecl(decl) }
         if (let Some(hostFunc) <- GetParamDftValHostFunc()) {
             cloned.SetParamDftValHostFunc(hostFunc)
         }
