@@ -41,7 +41,7 @@ extend ParserImpl {
     private func CheckSlotMode(ty: Type, parameterSlot: Bool): Unit {
         if (!compileOptions.enableLocalMode) { return }
         if (let Some(modal) <- ty.modal) {
-            if (parameterSlot && compileOptions.IsLocalModeAnalysis() && (ty as RefType).isSome()) {
+            if (parameterSlot && compileOptions.IsLocalModeAnalysis()) {
                 return // Sema checks the resolved nominal type, including aliases and generic arguments.
             }
             // The public CJO subset supports only direct Int64 parameter slots.

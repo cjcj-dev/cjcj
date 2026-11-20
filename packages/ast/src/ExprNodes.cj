@@ -1129,6 +1129,7 @@ public class CallExpr <: Expr {
     public let args: ArrayList<FuncArg> = ArrayList<FuncArg>()
     public var rightParenPos: Position = INVALID_POSITION
     public var modal: Option<ASTModalInfo> = None
+    public var expectedLocalMode: Option<ASTMode> = None
     public var resolvedFunction: Option<FuncDecl> = None
     public var callKind: CallKind = CallKind.CALL_INVALID
     public var desugarArgs: Option<ArrayList<Option<FuncArg>>> = None

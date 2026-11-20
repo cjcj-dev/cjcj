@@ -263,7 +263,15 @@ class LocalModeAnalysis {
 
     private func ResolveCall(call: CallExpr): Unit {
         let base = call.baseFunc ?? return;
-        let decl = call.resolvedFunction
+        if ((let Some(lowered) <- call.desugarExpr) && (let Some(array) <- (lowered as ArrayExpr)) && !array.isValueArray) {
+            call.resolvedMode = array.resolvedMode
+            for (arg in array.args) {
+                if (let Some(value) <- arg.expr) { Check(value, ASTMode.NOT) }
+            }
+            return
+        }
+        var decl = call.resolvedFunction
+        if (decl.isNone() && (let Some(target) <- base.GetTarget())) { decl = target as FuncDecl }
         let ctor = call.callKind == CallKind.CALL_OBJECT_CREATION || call.callKind == CallKind.CALL_STRUCT_CREATION
         let enumCtor = decl.map({ fd => fd.TestAttr(Attribute.ENUM_CONSTRUCTOR) }) ?? false
         var createdMode = if (ctor) { decl.map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT } else { ASTMode.NOT }
@@ -329,6 +337,7 @@ class LocalModeAnalysis {
         } else if (let Some(ex) <- (node as ExclaveExpr)) {
             CheckExclave(ex)
         } else if (let Some(ma) <- (node as MemberAccess)) {
+            if ((let Some(base) <- ma.baseExpr) && ma.GetTarget().isNone()) { Check(base, ASTMode.NOT) }
             if ((let Some(base) <- ma.baseExpr) && (let Some(target) <- ma.GetTarget()) && base.resolvedMode != ASTMode.NOT) {
                 if (target is VarDecl && IsInstanceMember(target)) {
                     ma.resolvedMode = if (HasLocalModifier(target, TokenKind.DEMODE)) { ASTMode.NOT } else { base.resolvedMode }
@@ -350,13 +359,17 @@ class LocalModeAnalysis {
                 Check(defaultValue, p.resolvedMode)
             }
             if ((let Some(initExpr) <- decl.initializer) && decl.astKind != ASTKind.FUNC_PARAM) {
-                if (decl.typeNode.isNone() && !scopes.isEmpty() && decl.astKind == ASTKind.VAR_DECL &&
+                if (!scopes.isEmpty() && decl.astKind == ASTKind.VAR_DECL &&
                     !decl.IsMemberDecl() && !decl.TestAttr(Attribute.GLOBAL)) {
-                    decl.resolvedMode = initExpr.resolvedMode
+                    decl.resolvedMode = decl.typeNode.map({ t => t.resolvedMode }) ?? initExpr.resolvedMode
+                    Check(initExpr, decl.resolvedMode)
                     if (decl.resolvedMode == ASTMode.FULL && !CopyNode(decl) && External(initExpr)) {
                         DiagMismatchedTypesWithFoundTy(diag, initExpr, "an internal local initializer", "an external local value")
                     }
                 } else {
+                    if ((let Some(t) <- decl.typeNode) && t.resolvedMode != ASTMode.NOT) {
+                        DiagMismatchedTypesWithFoundTy(diag, decl, "a non-local stored declaration", t.resolvedMode.Suffix())
+                    }
                     Check(initExpr, ASTMode.NOT)
                 }
             }

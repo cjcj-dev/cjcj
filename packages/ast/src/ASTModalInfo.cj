@@ -82,3 +82,29 @@ public func HasLocalModifier(decl: Decl, kind: TokenKind): Bool {
     for (modifier in decl.modifiers) { if (modifier.modifier == kind) { return true } }
     return false
 }
+
+public func LocalParameterMode(fd: FuncDecl, i: Int64): ASTMode {
+    if (let Some(body) <- fd.funcBody) {
+        if (!body.paramLists.isEmpty() && i < body.paramLists[0].params.size) {
+            let param = body.paramLists[0].params[i]
+            if ((let Some(t) <- param.typeNode) && (let Some(m) <- t.modal)) { return m.local }
+        }
+    }
+    if ((let Some(ty) <- fd.GetTy()) && (let Some(ft) <- (ty as FuncTy)) && i < ft.paramTys.size) {
+        return ft.ParamMode(i)
+    }
+    return ASTMode.NOT
+}
+
+// Return modes participate in function types, but do not introduce overloads.
+public func SameModalInputs(left: Decl, right: Decl): Bool {
+    let a = (left as FuncDecl) ?? return true;
+    let b = (right as FuncDecl) ?? return true;
+    if (GetReceiverMode(a) != GetReceiverMode(b)) { return false }
+    let body = a.funcBody ?? return true;
+    if (body.paramLists.isEmpty()) { return true }
+    for (i in 0..body.paramLists[0].params.size) {
+        if (LocalParameterMode(a, i) != LocalParameterMode(b, i)) { return false }
+    }
+    return true
+}

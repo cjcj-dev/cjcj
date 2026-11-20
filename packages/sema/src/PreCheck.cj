@@ -870,7 +870,7 @@ private func preCheckFuncSameSignature(typeManager: TypeManager, left: FuncDecl,
             }
         }
     }
-    return visibilityMatch &&
+    return visibilityMatch && SameModalInputs(left, fd) &&
         typeManager.IsFuncParameterTypesIdentical(paramTys1, paramTys2, typeMapping: substituteMap) &&
         fd.TestAttr(Attribute.STATIC) == left.TestAttr(Attribute.STATIC) &&
         fd.TestAttr(Attribute.CONSTRUCTOR) == left.TestAttr(Attribute.CONSTRUCTOR) &&

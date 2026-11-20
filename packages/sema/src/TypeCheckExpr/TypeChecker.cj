@@ -4011,6 +4011,8 @@ extend TypeChecker {
         }
         vd.EnableAttr(Attribute.IS_CHECK_VISITED)
         SynthesizeTypeNode(ctx, vd.typeNode)
+        if ((let Some(ty) <- vd.typeNode) && (let Some(initial) <- vd.initializer) &&
+            (let Some(call) <- (initial as CallExpr))) { call.expectedLocalMode = Some(ty.resolvedMode) }
         if (let Some(initializer) <- vd.initializer) {
             if (let Some(typeNode) <- vd.typeNode) {
                 if (!Ty.IsTyCorrect(typeNode.GetTy())) {

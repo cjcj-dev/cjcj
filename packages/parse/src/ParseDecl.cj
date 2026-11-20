@@ -2059,7 +2059,7 @@ extend ParserImpl {
     public func ParseTypeAndExpr(ret: VarDeclAbstract): Unit {
         if (Skip(TokenKind.COLON)) {
             ret.colonPos = lastToken.Begin()
-            ret.typeNode = ParseType()
+            ret.typeNode = ParseType(compileOptions.IsLocalModeAnalysis())
             if (let Some(typeNode) <- ret.typeNode) {
                 if (typeNode.TestAttr(Attribute.IS_BROKEN) || typeNode.TestAttr(Attribute.HAS_BROKEN)) {
                     ret.EnableAttr(Attribute.HAS_BROKEN)
