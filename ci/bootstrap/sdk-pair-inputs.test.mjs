@@ -70,7 +70,7 @@ test('explicit final std reuse must retain the actual producer build type',async
 });
 
 test('selected AST explicit reuse needs the object dependencies and the selected archive',async t=>{
- const root=await fs.mkdtemp(path.join(os.tmpdir(),'final-pair-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'final-pair-'));
  const src=path.join(root,'R/stdlib'),dir=path.join(src,'build/build'),install=path.join(root,'std');
  const ast=path.join(root,'ast'),include=path.join(ast,'include'),library=path.join(ast,'libcangjie-ast-support.a');
  const tuple='linux_x86_64_cjnative',archive='libcangjie-std-astFFI.a';
@@ -100,4 +100,5 @@ test('selected AST explicit reuse needs the object dependencies and the selected
  await fs.copyFile(library,library+'.original');run('ar',['qD',library,'support.o']);
  assert.equal(await installedFinalStd(supplied,input),undefined);await fs.copyFile(library+'.original',library);
  await fs.unlink(path.join(dir,'.ninja_deps'));assert.equal(await installedFinalStd(supplied,input),undefined);
+ await fs.rm(root,{recursive:true,force:true});
 });

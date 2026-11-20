@@ -47,36 +47,37 @@ async function installation(root, required) {
 // compare the installed archive with the result of R's deterministic append:
 // a matching build.py argv alone cannot identify what the object included.
 async function matchesFinalStdAst(build, install, input, ast) {
+  const decline=reason=>{console.log('Final std AST reuse declined: '+reason);return false;};
   const args=build.argv.slice(build.argv.indexOf('build.py')+2);
   const includes=args.filter(arg=>arg==='-I' || arg==='--include' || arg.startsWith('--include=') || /^-I./.test(arg));
   const include=flag(args,'--include')??flag(args,'-I')??includes[0]?.match(/^-I(.+)$/)?.[1];
   if(includes.length!==1 || include!==ast.include ||
-      build.argv.includes('--local_mode_api')!==(input.stdLocalModeApi===true))return false;
+      build.argv.includes('--local_mode_api')!==(input.stdLocalModeApi===true))return decline('build.py arguments');
   const dir=path.join(build.cwd,'build/build'), src=path.dirname(build.cwd);
   const cache=await fs.readFile(path.join(dir,'CMakeCache.txt'),'utf8');
   const cached=key=>cache.split(/\r?\n/).find(l=>l.startsWith(key+':'))?.split('=').slice(1).join('=');
-  if(cached('CMAKE_GENERATOR')!=='Ninja' || cached('CANGJIE_INCLUDE')!==ast.include)return false;
+  if(cached('CMAKE_GENERATOR')!=='Ninja' || cached('CANGJIE_INCLUDE')!==ast.include)return decline('CMake selection');
   const ninja=cached('CMAKE_MAKE_PROGRAM');
-  if(!ninja)return false;
+  if(!ninja)return decline('Ninja not recorded');
   const target='libs/std/ast/native/CMakeFiles/cangjie-std-astFFI-objs.dir/ast_api.cpp';
   const obj=target+(sdkPlatform(input.platform).os==='win32'?'.obj':'.o');
   const {stdout}=await execute(ninja,['-t','deps',obj],{cwd:dir});
   const deps=stdout.trimEnd().split(/\r?\n/);
-  if(!deps.shift()?.endsWith('(VALID)'))return false;
+  if(!deps.shift()?.endsWith('(VALID)'))return decline('missing object dependencies');
   const files=deps.map(line=>path.resolve(dir,line.trim()));
   const astHeaders=files.filter(f=>f.split(path.sep).includes('cangjie') && f.includes(path.sep+'include'+path.sep+'cangjie'+path.sep));
   if(!files.includes(path.join(ast.include,'cangjie/CHIR/IR/AttributeInfo.h')) ||
       !files.includes(path.join(ast.include,'cangjie/AST/Node.h')) ||
-      astHeaders.some(f=>!f.startsWith(ast.include+path.sep)))return false;
+      astHeaders.some(f=>!f.startsWith(ast.include+path.sep)))return decline('object header dependencies');
   await checkStdAstOutput({source:src,output:install,platform:input.platform});
   const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'std-ast-compare-'));
   try {
     const copy=path.join(tmp,'ffi.a');
     await fs.copyFile(ast.library,copy);
     const ar=sdkPlatform(input.platform).os==='linux'?'ar':cached('CMAKE_AR');
-    if(!ar)return false;
+    if(!ar)return decline('no archiver');
     await execute(ar,['qD',copy,path.join(dir,obj)]);
-    return await fileDigest(copy)===await fileDigest(path.join(dir,'libcangjie-std-astFFI.a'));
+    return await fileDigest(copy)===await fileDigest(path.join(dir,'libcangjie-std-astFFI.a')) || decline('archive contents');
   } finally {await fs.rm(tmp,{recursive:true,force:true});}
 }
 // Reuse a completed native std producer through its existing command log and
@@ -113,6 +114,7 @@ export async function installedFinalStd(supplied, input) {
       // An imported installation need not retain its build directory or tools.
       if(!['ENOENT','ENOTDIR'].includes(error.code) && typeof error.code!=='number' &&
           !['STD_AST_FFI_INSTALL_MISMATCH','STD_AST_MODULE'].includes(error.message))throw error;
+      console.log('Final std AST reuse declined: '+error.message);
       return undefined;
     }
   }
