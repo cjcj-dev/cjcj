@@ -3019,7 +3019,6 @@ public class IRBuilder2 <: Resource {
     public func CallAllocaGenericWithTypeInfoAndSize(chirTy: Type, typeInfoValue: LLVMValueRef,
         size: LLVMValueRef): LLVMValueRef {
         let tyForInfo = chirTy.StripAllRefs()
-        EnsureAllocaGenericLayoutMetadata(tyForInfo, typeInfoValue)
         let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
         let typeInfoArg = CreateBitCast(typeInfoValue, i8PtrType, name: "sret.ti")
         let args = ArrayList<LLVMValueRef>()
@@ -3048,31 +3047,6 @@ public class IRBuilder2 <: Resource {
             return unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), UInt64(staticSize), 0) }
         }
         return GetSizeFromTypeInfo(typeInfoValue)
-    }
-
-    private func EnsureAllocaGenericLayoutMetadata(chirTy: Type, typeInfoValue: LLVMValueRef): Unit {
-        if (typeInfoValue.isNull() || chirTy.IsGeneric()) {
-            return
-        }
-        let cgType = CGType.GetOrCreate(cgMod, chirTy)
-        let layoutType = cgType.GetLayoutType()
-        let layoutName = if (!layoutType.isNull() && unsafe { LLVMGetTypeKind(layoutType) } == LLVM_STRUCT_TYPE_KIND) {
-            LLVMCStringToString(unsafe { LLVMGetStructName(layoutType) }) ?? ""
-        } else if (chirTy.IsClass()) {
-            GetClassObjLayoutName(chirTy.ToString())
-        } else if (chirTy.IsRawArray()) {
-            ARRAY_LAYOUT_PREFIX + chirTy.ToString()
-        } else if (chirTy.IsString()) {
-            STRUCT_TYPE_PREFIX + "std.core:String"
-        } else if (chirTy.IsStruct() || chirTy.IsTuple() || chirTy.IsEnum()) {
-            STRUCT_TYPE_PREFIX + chirTy.ToString()
-        } else {
-            return
-        }
-        if (layoutName.isEmpty()) {
-            return
-        }
-        LLVMSetGlobalStringMetadata(GetLLVMContext(), typeInfoValue, GC_TYPE_META_NAME, layoutName)
     }
 
     private func GetReturnValue(calleeType: CGFunctionType, callBase: LLVMValueRef,

@@ -248,13 +248,11 @@ public func LLVMSetInstructionMetadata(context: LLVMContextHandle, value: LLVMVa
 }
 
 public func LLVMEraseInstructionMetadata(context: LLVMContextHandle, value: LLVMValueRef, name: String): Unit {
-    if (value.isNull()) {
+    if (context.raw.isNull() || name.isEmpty() || value.isNull()) {
         return
     }
     let kindID = LLVMGetMDKindID(context, name)
-    if (kindID != 0u32) {
-        unsafe { LLVMSetMetadata(value, kindID, LLVMNullValue()) }
-    }
+    unsafe { LLVMSetMetadata(value, kindID, LLVMNullValue()) }
 }
 
 public func LLVMHasInstructionMetadata(value: LLVMValueRef): Bool {
@@ -263,13 +261,10 @@ public func LLVMHasInstructionMetadata(value: LLVMValueRef): Bool {
 
 public func LLVMGetInstructionMetadata(context: LLVMContextHandle, value: LLVMValueRef,
     name: String): Option<LLVMValueRef> {
-    if (value.isNull()) {
+    if (context.raw.isNull() || name.isEmpty() || value.isNull()) {
         return None
     }
     let kindID = LLVMGetMDKindID(context, name)
-    if (kindID == 0u32) {
-        return None
-    }
     let metadataValue = unsafe { LLVMGetMetadata(value, kindID) }
     if (metadataValue.isNull()) {
         return None
@@ -277,25 +272,39 @@ public func LLVMGetInstructionMetadata(context: LLVMContextHandle, value: LLVMVa
     return Some(metadataValue)
 }
 
-public func LLVMSetGlobalMetadata(context: LLVMContextHandle, global: LLVMValueRef, name: String,
-    metadata: LLVMMetadataRef): Unit {
-    if (global.isNull() || metadata.isNull()) {
-        return
-    }
+public func LLVMGlobalHasMetadata(context: LLVMContextHandle, global: LLVMValueRef, name: String): Bool {
     let kindID = LLVMGetMDKindID(context, name)
-    if (kindID != 0u32) {
-        unsafe { LLVMGlobalSetMetadata(global, kindID, metadata) }
+    try (count = LibC.malloc<UIntNative>().asResource()) {
+        let entries = unsafe { LLVMGlobalCopyAllMetadata(global, count.value) }
+        var found = false
+        var index = 0u32
+        while (index < UInt32(unsafe { count.value.read() })) {
+            if (unsafe { LLVMValueMetadataEntriesGetKind(entries, index) } == kindID) {
+                found = true
+                break
+            }
+            index++
+        }
+        unsafe { LLVMDisposeValueMetadataEntries(entries) }
+        return found
     }
 }
 
-public func LLVMEraseGlobalMetadata(context: LLVMContextHandle, global: LLVMValueRef, name: String): Unit {
-    if (global.isNull()) {
+public func LLVMSetGlobalMetadata(context: LLVMContextHandle, global: LLVMValueRef, name: String,
+    metadata: LLVMMetadataRef): Unit {
+    if (context.raw.isNull() || name.isEmpty() || global.isNull() || metadata.isNull()) {
         return
     }
     let kindID = LLVMGetMDKindID(context, name)
-    if (kindID != 0u32) {
-        unsafe { LLVMGlobalEraseMetadata(global, kindID) }
+    unsafe { LLVMGlobalSetMetadata(global, kindID, metadata) }
+}
+
+public func LLVMEraseGlobalMetadata(context: LLVMContextHandle, global: LLVMValueRef, name: String): Unit {
+    if (context.raw.isNull() || name.isEmpty() || global.isNull()) {
+        return
     }
+    let kindID = LLVMGetMDKindID(context, name)
+    unsafe { LLVMGlobalEraseMetadata(global, kindID) }
 }
 
 public func LLVMSetGlobalStringMetadata(context: LLVMContextHandle, global: LLVMValueRef, name: String,

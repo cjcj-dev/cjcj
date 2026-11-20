@@ -373,7 +373,7 @@ public open class CGType {
             if (let Some(rawLayout) <- layoutType) {
                 let structName = LLVMCStringToString(unsafe { LLVMGetStructName(rawLayout) }) ?? ""
                 if (!structName.isEmpty()) {
-                    if (LLVMGetInstructionMetadata(cgMod.GetLLVMContext(), ti, GC_TYPE_META_NAME).isNone()) {
+                    if (!LLVMGlobalHasMetadata(cgMod.GetLLVMContext(), ti, GC_TYPE_META_NAME)) {
                         LLVMSetGlobalStringMetadata(cgMod.GetLLVMContext(), ti, GC_TYPE_META_NAME, structName)
                     }
                     cgCtx.AddGeneratedStructType(structName)

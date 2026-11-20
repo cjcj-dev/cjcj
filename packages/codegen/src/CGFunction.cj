@@ -222,7 +222,7 @@ public class CGFunction <: CGValue {
                 AddSRetAttribute(function, sretType)
             }
             if (!functionType.closureParamIndices.isEmpty()) {
-                LLVMSetInstructionMetadata(cgMod.GetLLVMContext(), function, "ClosureParamIndices",
+                LLVMSetGlobalMetadata(cgMod.GetLLVMContext(), function, "ClosureParamIndices",
                     LLVMCreateMDTuple(cgMod.GetLLVMContext(), functionType.closureParamIndices))
             }
             let functionValue = (chirFunc as Function).getOrThrow()
