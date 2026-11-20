@@ -103,6 +103,9 @@ their original build records in the selected native inputs. If supplying
 `native_build_inputs_artifact` separately on Windows, its Windows artifact
 must contain the completed producer's `native-install.tar` and its original
 BUILD-INPUTS; a bundle of source/build inputs cannot supply this installation.
+If the native inputs also declare the optional JSON source dependency, its
+Windows descriptor supplies only its repository and fixed commit; the job
+checks it out beside the other native sources. Do not include source trees.
 The download uses the selected run ID. Other targets keep their own input route.
 The paired Windows tools commit must be readable by fixed Git fetch; the
 generic tools pin remains in effect for other targets.

@@ -4,7 +4,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {readJson,atomicJson,relative} from './sdk-flow.mjs';
-import {readNativeToolDependencies} from '../../build/srcbuild/native-tool-dependencies.mjs';
+import {prepareNativeToolDependencies,readNativeToolDependencies} from '../../build/srcbuild/native-tool-dependencies.mjs';
 export async function configureNativeToolInput({root,workspace,platform,envFile}) {
   root=await fs.realpath(root);
   const locations=await readJson(path.join(root,'locations.json'));
@@ -19,6 +19,13 @@ export async function configureNativeToolInput({root,workspace,platform,envFile}
   for(const name of ['json']) {
     const row=selection[name];
     if(!row)throw Error('GHA_NATIVE_TOOL_SOURCE '+name);
+    if(platform==='windows_x86_64'){
+      // A descriptor can name a fixed dependency, but must not transport
+      // its source tree. Materialize it in this job's private workspace.
+      if(row.path!==undefined)throw Error('WINDOWS_NATIVE_TOOL_DEPENDENCY_REQUIRES_GIT '+name);
+      resolved[name]={repo:row.repo,commit:row.commit,path:path.join(workspace,'native-sources',name)};
+      continue;
+    }
     relative(row.path);
     const source=await fs.realpath(path.resolve(path.dirname(file),row.path));
     if(!source.startsWith(root+path.sep))throw Error('GHA_NATIVE_TOOL_SOURCE_PATH '+name);
@@ -27,6 +34,7 @@ export async function configureNativeToolInput({root,workspace,platform,envFile}
   const output=path.join(workspace,'native-tool-dependencies.json');
   await atomicJson(output,resolved);
   await readNativeToolDependencies(output,['cjlint']);
+  if(platform==='windows_x86_64')await prepareNativeToolDependencies({toolsDependencies:output},['cjlint']);
   if(envFile)await fs.appendFile(envFile,'CJCJ_NATIVE_TOOL_DEPENDENCIES='+output+'\n');
   return output;
 }
