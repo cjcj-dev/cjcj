@@ -202,6 +202,45 @@ class LocalModeSyntaxTest {
         }
     }
 
+    @TestCase
+    func inheritanceRejectsExplicitModesAndKeepsBothBounds(): Unit {
+        for ((source, restricted) in [
+            ("class C <: I @local! & J {}", 1),
+            ("interface C <: I & J @local? {}", 1),
+            ("struct C <: I @~local & J {}", 1),
+            ("extend C <: I & J @local! {}", 1),
+            ("class C <: I & J {}", 0),
+            ("interface C <: I & J {}", 0),
+            ("struct C <: I & J {}", 0),
+            ("extend C <: I & J {}", 0)
+        ]) {
+            let (node, diag) = parseDecl(source)
+            let inherited = (node as InheritableDecl).getOrThrow()
+            @Expect(inherited.inheritedTypes.size, 2)
+            @Expect(inherited.TestAttr(Attribute.HAS_BROKEN), restricted == 1)
+            @Expect(unexpectedModeErrors(diag), restricted)
+            @Expect(countErrors(diag), restricted * 2)
+            @Expect(inherited.end.column, source.size + 1)
+        }
+    }
+
+    @TestCase
+    func genericConstraintRejectsAnExplicitModeAndKeepsTheBody(): Unit {
+        for ((source, restricted) in [
+            ("func f<T>(x: T): T where T <: I @~local & J { x }", 1),
+            ("func f<T>(x: T): T where T <: I & J { x }", 0)
+        ]) {
+            let (node, diag) = parseDecl(source)
+            let f = (node as FuncDecl).getOrThrow()
+            let constraint = f.GetGeneric().getOrThrow().genericConstraints[0]
+            @Expect(constraint.upperBounds.size, 2)
+            @Expect(constraint.TestAttr(Attribute.HAS_BROKEN), restricted == 1)
+            @Expect(unexpectedModeErrors(diag), restricted)
+            @Expect(countErrors(diag), restricted * 2)
+            @Expect(f.funcBody.getOrThrow().body.isSome())
+        }
+    }
+
     private func unexpectedModeErrors(diag: DiagnosticEngine): Int64 {
         var count = 0
         for (diagnostic in diag.GetCategoryDiagnostic(DiagCategory.PARSE)) {

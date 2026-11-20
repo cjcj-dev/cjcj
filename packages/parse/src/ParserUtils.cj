@@ -844,6 +844,17 @@ extend ParserImpl {
         return ret
     }
 
+    // Inherited and generic bounds must be data types. Keep consuming the
+    // bounds so a bad suffix does not swallow the other bounds or the body.
+    internal func ParseNonModalBound(owner: Node): Type {
+        let bound = ParseType()
+        if (let Some(modal) <- bound.modal) {
+            DiagnoseUnexpectedLocalMode(modal)
+            owner.EnableAttr(Attribute.HAS_BROKEN)
+        }
+        return bound
+    }
+
     public func ParseGenericUpperBound(genericConstraint: GenericConstraint): Bool {
         var illegalConstraint = false
         if (!Skip(TokenKind.UPPERBOUND)) {
@@ -860,7 +871,7 @@ extend ParserImpl {
             if (lastToken.kind == TokenKind.BITAND) {
                 genericConstraint.bitAndPos.add(lastToken.Begin())
             }
-            let upperBound = ParseType()
+            let upperBound = ParseNonModalBound(genericConstraint)
             if (!upperBound.TestAttr(Attribute.IS_BROKEN) && upperBound.astKind != ASTKind.THIS_TYPE) {
                 genericConstraint.upperBounds.add(upperBound)
             } else {

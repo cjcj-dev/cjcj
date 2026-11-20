@@ -2464,7 +2464,7 @@ extend ParserImpl {
     public func ParseInheritedTypes(decl: InheritableDecl): Unit {
         decl.upperBoundPos = lastToken.Begin()
         while (true) {
-            let inheritedType = ParseType()
+            let inheritedType = ParseNonModalBound(decl)
             // C++: Parse/ParseDecl.cpp:1295-1304 ParserImpl::ParseInheritedTypes.
             if (let Some(refType) <- (inheritedType as RefType) &&
                 refType.ref.identifier == decl.identifier) {
@@ -2485,7 +2485,7 @@ extend ParserImpl {
 
     public func ParseStructInheritedTypes(structDecl: StructDecl): Unit {
         while (true) {
-            let interfaceType = ParseType()
+            let interfaceType = ParseNonModalBound(structDecl)
             if (interfaceType.astKind == ASTKind.REF_TYPE || interfaceType.astKind == ASTKind.QUALIFIED_TYPE) {
                 structDecl.inheritedTypes.add(interfaceType)
             } else if (!interfaceType.TestAttr(Attribute.IS_BROKEN)) {
@@ -2762,7 +2762,7 @@ extend ParserImpl {
                     if (lastToken.kind == TokenKind.BITAND && !ret.inheritedTypes.isEmpty()) {
                         ret.inheritedTypes[ret.inheritedTypes.size - 1].bitAndPos = lastToken.Begin()
                     }
-                    ret.inheritedTypes.add(ParseType())
+                    ret.inheritedTypes.add(ParseNonModalBound(ret))
                     if (!Skip(TokenKind.BITAND)) {
                         break
                     }
