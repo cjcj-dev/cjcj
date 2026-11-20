@@ -659,43 +659,33 @@ extend ParserImpl {
         return ret
     }
 
-    private func ParseFuncDeclAnnos(annos: ArrayList<Annotation>, funcDecl: FuncDecl): Unit {
-        funcDecl.annotations.clear()
+    private func ParseFuncDeclAnnos(annos: ArrayList<Annotation>, decl: Decl): Unit {
+        decl.annotations.clear()
         for (anno in annos) {
-            funcDecl.annotations.add(anno)
+            decl.annotations.add(anno)
             if (anno.kind == AnnotationKind.INTRINSIC) {
-                funcDecl.EnableAttr(Attribute.INTRINSIC)
-            }
-            if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
-                funcDecl.EnableAttr(Attribute.NUMERIC_OVERFLOW)
-                funcDecl.overflowStrategy = anno.overflowStrategy
-            }
-            if (anno.kind == AnnotationKind.FASTNATIVE) {
-                funcDecl.isFastNative = true
+                decl.EnableAttr(Attribute.INTRINSIC)
+            } else if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
+                decl.EnableAttr(Attribute.NUMERIC_OVERFLOW)
+                if (let Some(fd) <- (decl as FuncDecl)) {
+                    fd.overflowStrategy = anno.overflowStrategy
+                } else if (let Some(ctor) <- (decl as PrimaryCtorDecl)) {
+                    ctor.overflowStrategy = anno.overflowStrategy
+                } else {
+                    (decl as MainDecl).getOrThrow().overflowStrategy = anno.overflowStrategy
+                }
+            } else if (anno.kind == AnnotationKind.FASTNATIVE) {
+                if (let Some(fd) <- (decl as FuncDecl)) {
+                    fd.isFastNative = true
+                } else if (let Some(ctor) <- (decl as PrimaryCtorDecl)) {
+                    ctor.isFastNative = true
+                } else {
+                    (decl as MainDecl).getOrThrow().isFastNative = true
+                }
             }
             @When[backend == "cjnative"]
-            let isFrozenAnno = anno.kind == AnnotationKind.FROZEN
-            @When[backend != "cjnative"]
-            let isFrozenAnno = false
-            if (isFrozenAnno) {
-                funcDecl.isFrozen = true
-            }
-        }
-    }
-
-    private func ParseFuncDeclAnnos(annos: ArrayList<Annotation>, funcDecl: PrimaryCtorDecl): Unit {
-        funcDecl.annotations.clear()
-        for (anno in annos) {
-            funcDecl.annotations.add(anno)
-            if (anno.kind == AnnotationKind.INTRINSIC) {
-                funcDecl.EnableAttr(Attribute.INTRINSIC)
-            }
-            if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
-                funcDecl.EnableAttr(Attribute.NUMERIC_OVERFLOW)
-                funcDecl.overflowStrategy = anno.overflowStrategy
-            }
-            if (anno.kind == AnnotationKind.FASTNATIVE) {
-                funcDecl.isFastNative = true
+            if (anno.kind == AnnotationKind.FROZEN && (let Some(fd) <- (decl as FuncDecl))) {
+                fd.isFrozen = true
             }
         }
     }
