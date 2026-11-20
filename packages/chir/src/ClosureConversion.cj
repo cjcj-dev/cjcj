@@ -1773,7 +1773,15 @@ public class ClosureConversion {
             throw IllegalStateException("ClosureConversion mutable capture has no defining expression")
         let parent = envExpr.GetParentBlock() ??
             throw IllegalStateException("ClosureConversion mutable capture has no parent block")
-        let classTy = RequireClassType(classDef)
+        // The box must live in the same region as the variable it holds, or the runtime write barrier
+        // rejects it ("heap object must not reference local object"). Gate on IsLocalRegion() to match
+        // SetMemRegion, which opens no region for a modal but Copyable capture (`Int64 @local?`).
+        // Official !2370 f463f5a8, ClosureConversion.cpp:1131-1143 @63bf237b.
+        let envTy = env.GetType() ??
+            throw IllegalStateException("ClosureConversion mutable capture has no type")
+        let capturedTy = envTy.StripAllRefs()
+        let boxModal = if (capturedTy.IsLocalRegion()) { capturedTy.GetModalInfo() } else { ModalInfo() }
+        let classTy = builder.WithModal(RequireClassType(classDef), boxModal)
         let obj = builder.CreateAllocate(builder.context.GetRefTy(classTy), classTy, parent)
         obj.SetDebugLocation(envExpr.GetDebugLocation())
         obj.MoveBefore(envExpr)

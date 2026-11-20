@@ -377,6 +377,11 @@ public class CHIRBuilder {
         return expr
     }
 
+    // Official CHIRBuilder::WithModal (CHIRBuilder.h:45-48 @63bf237b).
+    public func WithModal(ty: Type, modal: ModalInfo): Type {
+        return context.WithModal(ty, modal)
+    }
+
     public func CreateAllocate(resultTy: Type, allocatedTy: Type, parent: Block): Allocate {
         let expr = Allocate(allocatedTy, parent)
         expr.ConnectOperandsAndGroups()

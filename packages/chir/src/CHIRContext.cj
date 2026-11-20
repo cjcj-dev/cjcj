@@ -282,77 +282,83 @@ public class CHIRContext {
         return anyTy
     }
 
-    public func GetTupleTy(fieldTys: ArrayList<Type>): TupleType {
+    public func GetTupleTy(fieldTys: ArrayList<Type>, modal!: ModalInfo = ModalInfo()): TupleType {
         var hashValue = HashArgTypes(fieldTys)
         hashValue = HashValue(hashValue, TypeKind.TYPE_TUPLE)
+        hashValue = HashModal(hashValue, modal)
         let ty = GetType(hashValue, { allocatedTy: Type =>
             if (let Some(tupleTy) <- (allocatedTy as TupleType)) {
-                return TypeArgsAreEqual(tupleTy.argTys, fieldTys)
+                return TypeArgsAreEqual(tupleTy.argTys, fieldTys) && tupleTy.modal == modal
             }
             return false
-        }, { => TupleType(fieldTys) })
+        }, { => TupleType(fieldTys, modal: modal) })
         return (ty as TupleType).getOrThrow()
     }
 
     public func GetFuncTy(paramTys: ArrayList<Type>, retTy: Type, hasVarLenParam!: Bool = false,
-        isCFunc!: Bool = false): FuncType {
+        isCFunc!: Bool = false, modal!: ModalInfo = ModalInfo()): FuncType {
         let argTys = paramTys.clone()
         argTys.add(retTy)
         var hashValue = HashArgTypes(argTys)
         hashValue = HashValue(hashValue, isCFunc)
         hashValue = HashValue(hashValue, hasVarLenParam)
         hashValue = HashValue(hashValue, TypeKind.TYPE_FUNC)
+        hashValue = HashModal(hashValue, modal)
         let ty = GetType(hashValue, { allocatedTy: Type =>
             if (let Some(funcTy) <- (allocatedTy as FuncType)) {
                 return TypeArgsAreEqual(funcTy.argTys, argTys) && funcTy.IsCFunc() == isCFunc &&
-                    funcTy.HasVarArg() == hasVarLenParam
+                    funcTy.HasVarArg() == hasVarLenParam && funcTy.modal == modal
             }
             return false
-        }, { => FuncType(paramTys, retTy, hasVarLenParam: hasVarLenParam, isCFunc: isCFunc) })
+        }, { => FuncType(paramTys, retTy, hasVarLenParam: hasVarLenParam, isCFunc: isCFunc, modal: modal) })
         return (ty as FuncType).getOrThrow()
     }
 
-    public func GetRawArrayTy(elementTy: Type, dims!: UInt64 = 1u64): RawArrayType {
+    public func GetRawArrayTy(elementTy: Type, dims!: UInt64 = 1u64, modal!: ModalInfo = ModalInfo()): RawArrayType {
         let argTys = ArrayList<Type>()
         argTys.add(elementTy)
         var hashValue = HashArgTypes(argTys)
         hashValue = HashValue(hashValue, dims)
         hashValue = HashValue(hashValue, TypeKind.TYPE_RAWARRAY)
+        hashValue = HashModal(hashValue, modal)
         let ty = GetType(hashValue, { allocatedTy: Type =>
             if (let Some(rawArrayTy) <- (allocatedTy as RawArrayType)) {
-                return TypeArgsAreEqual(rawArrayTy.argTys, argTys) && rawArrayTy.GetDims() == dims
+                return TypeArgsAreEqual(rawArrayTy.argTys, argTys) && rawArrayTy.GetDims() == dims &&
+                    rawArrayTy.modal == modal
             }
             return false
-        }, { => RawArrayType(elementTy, dims: dims) })
+        }, { => RawArrayType(elementTy, dims: dims, modal: modal) })
         return (ty as RawArrayType).getOrThrow()
     }
 
-    public func GetCPointerTy(elementTy: Type): CPointerType {
+    public func GetCPointerTy(elementTy: Type, modal!: ModalInfo = ModalInfo()): CPointerType {
         let argTys = ArrayList<Type>()
         argTys.add(elementTy)
         var hashValue = HashArgTypes(argTys)
         hashValue = HashValue(hashValue, TypeKind.TYPE_CPOINTER)
+        hashValue = HashModal(hashValue, modal)
         let ty = GetType(hashValue, { allocatedTy: Type =>
             if (let Some(pointerTy) <- (allocatedTy as CPointerType)) {
-                return TypeArgsAreEqual(pointerTy.argTys, argTys)
+                return TypeArgsAreEqual(pointerTy.argTys, argTys) && pointerTy.modal == modal
             }
             return false
-        }, { => CPointerType(elementTy) })
+        }, { => CPointerType(elementTy, modal: modal) })
         return (ty as CPointerType).getOrThrow()
     }
 
-    public func GetVArrayTy(elementTy: Type, size: UInt64): VArrayType {
+    public func GetVArrayTy(elementTy: Type, size: UInt64, modal!: ModalInfo = ModalInfo()): VArrayType {
         let argTys = ArrayList<Type>()
         argTys.add(elementTy)
         var hashValue = HashArgTypes(argTys)
         hashValue = HashValue(hashValue, size)
         hashValue = HashValue(hashValue, TypeKind.TYPE_VARRAY)
+        hashValue = HashModal(hashValue, modal)
         let ty = GetType(hashValue, { allocatedTy: Type =>
             if (let Some(varrayTy) <- (allocatedTy as VArrayType)) {
-                return TypeArgsAreEqual(varrayTy.argTys, argTys) && varrayTy.size == size
+                return TypeArgsAreEqual(varrayTy.argTys, argTys) && varrayTy.size == size && varrayTy.modal == modal
             }
             return false
-        }, { => VArrayType(elementTy, size) })
+        }, { => VArrayType(elementTy, size, modal: modal) })
         return (ty as VArrayType).getOrThrow()
     }
 
@@ -408,40 +414,141 @@ public class CHIRContext {
         return (ty as GenericType).getOrThrow()
     }
 
-    public func GetStructTy(def: StructDef, args: ArrayList<Type>): StructType {
+    public func GetStructTy(def: StructDef, args: ArrayList<Type>, modal!: ModalInfo = ModalInfo()): StructType {
         var hashValue = HashArgTypes(args)
         hashValue = HashValue(hashValue, def.nodeId)
+        hashValue = HashModal(hashValue, modal)
         let ty = GetType(hashValue, { allocatedTy: Type =>
             if (let Some(structTy) <- (allocatedTy as StructType)) {
-                return TypeArgsAreEqual(structTy.argTys, args) && refEq(structTy.GetStructDef(), def)
+                return TypeArgsAreEqual(structTy.argTys, args) && refEq(structTy.GetStructDef(), def) &&
+                    structTy.modal == modal
             }
             return false
-        }, { => StructType(def, args) })
+        }, { => StructType(def, args, modal: modal) })
         return (ty as StructType).getOrThrow()
     }
 
-    public func GetClassTy(def: ClassDef, args: ArrayList<Type>): ClassType {
+    public func GetClassTy(def: ClassDef, args: ArrayList<Type>, modal!: ModalInfo = ModalInfo()): ClassType {
         var hashValue = HashArgTypes(args)
         hashValue = HashValue(hashValue, def.nodeId)
+        hashValue = HashModal(hashValue, modal)
         let ty = GetType(hashValue, { allocatedTy: Type =>
             if (let Some(classTy) <- (allocatedTy as ClassType)) {
-                return TypeArgsAreEqual(classTy.argTys, args) && refEq(classTy.GetClassDef(), def)
+                return TypeArgsAreEqual(classTy.argTys, args) && refEq(classTy.GetClassDef(), def) &&
+                    classTy.modal == modal
             }
             return false
-        }, { => ClassType(def, args) })
+        }, { => ClassType(def, args, modal: modal) })
         return (ty as ClassType).getOrThrow()
     }
 
-    public func GetEnumTy(def: EnumDef, args: ArrayList<Type>): EnumType {
+    public func GetEnumTy(def: EnumDef, args: ArrayList<Type>, modal!: ModalInfo = ModalInfo()): EnumType {
         var hashValue = HashArgTypes(args)
         hashValue = HashValue(hashValue, def.nodeId)
+        hashValue = HashModal(hashValue, modal)
         let ty = GetType(hashValue, { allocatedTy: Type =>
             if (let Some(enumTy) <- (allocatedTy as EnumType)) {
-                return TypeArgsAreEqual(enumTy.argTys, args) && refEq(enumTy.GetEnumDef(), def)
+                return TypeArgsAreEqual(enumTy.argTys, args) && refEq(enumTy.GetEnumDef(), def) &&
+                    enumTy.modal == modal
             }
             return false
-        }, { => EnumType(def, args) })
+        }, { => EnumType(def, args, modal: modal) })
         return (ty as EnumType).getOrThrow()
+    }
+
+    // Interns a modal variant of a builtin scalar; NONE keeps the context singletons.
+    private func GetBuiltinTy(kind: TypeKind, modal: ModalInfo): Type {
+        if (modal.local == CHIRMode.NONE) {
+            return match (kind) {
+                case TypeKind.TYPE_INT8 => int8Ty
+                case TypeKind.TYPE_INT16 => int16Ty
+                case TypeKind.TYPE_INT32 => int32Ty
+                case TypeKind.TYPE_INT64 => int64Ty
+                case TypeKind.TYPE_INT_NATIVE => intNativeTy
+                case TypeKind.TYPE_UINT8 => uint8Ty
+                case TypeKind.TYPE_UINT16 => uint16Ty
+                case TypeKind.TYPE_UINT32 => uint32Ty
+                case TypeKind.TYPE_UINT64 => uint64Ty
+                case TypeKind.TYPE_UINT_NATIVE => uintNativeTy
+                case TypeKind.TYPE_FLOAT16 => float16Ty
+                case TypeKind.TYPE_FLOAT32 => float32Ty
+                case TypeKind.TYPE_FLOAT64 => float64Ty
+                case TypeKind.TYPE_RUNE => runeTy
+                case TypeKind.TYPE_BOOLEAN => boolTy
+                case TypeKind.TYPE_UNIT => unitTy
+                case TypeKind.TYPE_NOTHING => nothingTy
+                case TypeKind.TYPE_VOID => voidTy
+                case TypeKind.TYPE_CSTRING => cstringTy
+                case _ => throw IllegalStateException("CHIRContext.GetBuiltinTy: not a builtin scalar kind")
+            }
+        }
+        var hashValue = HashArgTypes(ArrayList<Type>())
+        hashValue = HashValue(hashValue, kind)
+        hashValue = HashModal(hashValue, modal)
+        return GetType(hashValue, { allocatedTy: Type =>
+            return allocatedTy.kind == kind && allocatedTy.argTys.isEmpty() && allocatedTy.modal == modal
+        }, { =>
+            let created: Type = match (kind) {
+                case TypeKind.TYPE_INT8 | TypeKind.TYPE_INT16 | TypeKind.TYPE_INT32 | TypeKind.TYPE_INT64 |
+                    TypeKind.TYPE_INT_NATIVE | TypeKind.TYPE_UINT8 | TypeKind.TYPE_UINT16 | TypeKind.TYPE_UINT32 |
+                    TypeKind.TYPE_UINT64 | TypeKind.TYPE_UINT_NATIVE => IntType(kind, modal: modal)
+                case TypeKind.TYPE_FLOAT16 | TypeKind.TYPE_FLOAT32 | TypeKind.TYPE_FLOAT64 => FloatType(kind, modal: modal)
+                case TypeKind.TYPE_RUNE => RuneType(modal: modal)
+                case TypeKind.TYPE_BOOLEAN => BooleanType(modal: modal)
+                case TypeKind.TYPE_UNIT => UnitType(modal: modal)
+                case TypeKind.TYPE_NOTHING => NothingType(modal: modal)
+                case TypeKind.TYPE_VOID => VoidType(modal: modal)
+                case TypeKind.TYPE_CSTRING => CStringType(modal: modal)
+                case _ => throw IllegalStateException("CHIRContext.GetBuiltinTy: not a builtin scalar kind")
+            }
+            return created
+        })
+    }
+
+    // Official CHIRContext::WithModal / WithModalImpl (CHIRContext.cpp @63bf237b): re-interns `ty` with
+    // `modal` on its outermost data type; Ref and Box wrappers are looked through and preserved.
+    public func WithModal(ty: Type, modal: ModalInfo): Type {
+        if (let Some(refTy) <- (ty as RefType)) {
+            return GetRefTy(WithModal(refTy.GetBaseType(), modal))
+        }
+        if (let Some(boxTy) <- (ty as BoxType)) {
+            return GetBoxTy(WithModal(boxTy.GetBaseType(), modal))
+        }
+        if (modal == ty.modal) {
+            return ty
+        }
+        return match (ty.kind) {
+            case TypeKind.TYPE_INT8 | TypeKind.TYPE_INT16 | TypeKind.TYPE_INT32 | TypeKind.TYPE_INT64 |
+                TypeKind.TYPE_INT_NATIVE | TypeKind.TYPE_UINT8 | TypeKind.TYPE_UINT16 | TypeKind.TYPE_UINT32 |
+                TypeKind.TYPE_UINT64 | TypeKind.TYPE_UINT_NATIVE | TypeKind.TYPE_FLOAT16 | TypeKind.TYPE_FLOAT32 |
+                TypeKind.TYPE_FLOAT64 | TypeKind.TYPE_RUNE | TypeKind.TYPE_BOOLEAN | TypeKind.TYPE_UNIT |
+                TypeKind.TYPE_NOTHING | TypeKind.TYPE_VOID | TypeKind.TYPE_CSTRING => GetBuiltinTy(ty.kind, modal)
+            case TypeKind.TYPE_TUPLE => GetTupleTy((ty as TupleType).getOrThrow().GetElementTypes(), modal: modal)
+            case TypeKind.TYPE_FUNC =>
+                let funcTy = (ty as FuncType).getOrThrow()
+                GetFuncTy(funcTy.GetParamTypes(), funcTy.GetReturnType(), hasVarLenParam: funcTy.HasVarArg(),
+                    isCFunc: funcTy.IsCFunc(), modal: modal)
+            case TypeKind.TYPE_STRUCT =>
+                let structTy = (ty as StructType).getOrThrow()
+                GetStructTy(structTy.GetStructDef(), structTy.GetTypeArgs(), modal: modal)
+            case TypeKind.TYPE_ENUM =>
+                let enumTy = (ty as EnumType).getOrThrow()
+                GetEnumTy(enumTy.GetEnumDef(), enumTy.GetTypeArgs(), modal: modal)
+            case TypeKind.TYPE_CLASS =>
+                let classTy = (ty as ClassType).getOrThrow()
+                GetClassTy(classTy.GetClassDef(), classTy.GetTypeArgs(), modal: modal)
+            case TypeKind.TYPE_RAWARRAY =>
+                let rawArrayTy = (ty as RawArrayType).getOrThrow()
+                GetRawArrayTy(rawArrayTy.GetElementType(), dims: rawArrayTy.GetDims(), modal: modal)
+            case TypeKind.TYPE_VARRAY =>
+                let varrayTy = (ty as VArrayType).getOrThrow()
+                GetVArrayTy(varrayTy.GetElementType(), varrayTy.GetSize(), modal: modal)
+            case TypeKind.TYPE_CPOINTER =>
+                GetCPointerTy((ty as CPointerType).getOrThrow().GetElementType(), modal: modal)
+            // Official re-interns generics with modal upper bounds; cjcj interns generics by name only,
+            // so a modal generic has no CHIR identity yet and must not be silently aliased.
+            case _ => throw IllegalStateException("CHIRContext.WithModal: no modal CHIR identity for ${ty.ToString()}")
+        }
     }
 
     public func ToSelectorType(kind: TypeKind): Type {

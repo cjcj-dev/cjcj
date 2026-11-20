@@ -20,6 +20,7 @@ import cjcj::ast.StructTy as AstStructTy
 import cjcj::ast.InterfaceTy as AstInterfaceTy
 import cjcj::ast.EnumTy as AstEnumTy
 import cjcj::ast.GenericsTy as AstGenericsTy
+import cjcj::ast.ASTMode
 
 public class CHIRTypeCacheEntry {
     public let astTy: AstTy
@@ -175,6 +176,19 @@ public class CHIRType {
 
     public func GetGlobalNominalCache(): ArrayList<CHIRNominalCacheEntry> {
         return chirTypeCache.globalNominalCache
+    }
+
+    // Official CHIRType::TranslateType(AST::ModalTy) (CHIRType.cpp:271-297 @63bf237b): a local mode is
+    // derived from the NOT translation and interned through WithModal, which looks through the Ref that
+    // reference types already carry. `mode` must be the Sema-resolved mode of the declaration or
+    // expression; no Sema producer of such a mode exists yet for local variables.
+    public func TranslateType(ty: AstTy, mode: ASTMode): Type {
+        let base = TranslateType(ty)
+        let chirModal = ASTModal2CHIRModal(mode)
+        if (chirModal.local == CHIRMode.NONE) {
+            return base
+        }
+        return builder.WithModal(base, chirModal)
     }
 
     public func TranslateType(ty: AstTy): Type {
