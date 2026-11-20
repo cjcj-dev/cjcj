@@ -26,6 +26,6 @@ const args=[path.join(repo,'build/cli.mjs'),'--target','windows-x64','--build-ty
   '--tools-runtime-header',path.join(env.CANGJIE_WORKSPACE,'native-sources/runtime/runtime/src/Cangjie.h'),
   '--tools-lombok-jar',lombok,'build','tools'];
 const r=spawnSync(process.execPath,args,{stdio:'inherit',env:{...env,CJFMT_FRONTEND_CJO:frontend,CJFMT_FRONTEND_LIB:frontend,
-  CJFMT_FRONTEND_REF:stage.compilerCommit,CJFMT_SOURCE_REF:env.TOOLS_REF}});
+  CJFMT_FRONTEND_NATIVE:path.join(shim,'cjc_runtime_config.o'),CJFMT_FRONTEND_REF:stage.compilerCommit,CJFMT_SOURCE_REF:env.TOOLS_REF}});
 if(r.error)throw r.error;
 process.exitCode=r.status??1;

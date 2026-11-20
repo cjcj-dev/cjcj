@@ -14,6 +14,14 @@ export function workflowSourceSelection(env=process.env) {
   // environment selection alongside the workspace's normal source options.
   if(env.CANGJIE_COMPILER_URL&&env.CANGJIE_COMPILER_SHA&&!overrides.compiler)
     overrides.compiler={url:env.CANGJIE_COMPILER_URL,tag:env.CANGJIE_COMPILER_SHA};
+  // Only the native Windows SDK selects this paired producer. Propagate it
+  // through the ordinary fetch options and their persisted workspace record.
+  if(env.CJCJ_SRCBUILD_TARGET==='windows-x64' && env.CJCJ_NATIVE_RUNTIME_ARTIFACT) {
+    const pair={url:'https://github.com/cjcj-dev/cjcj-tools.git',tag:'8fcc76b850837090ae2886b2d719c6c12c0e4fe1'};
+    if(overrides.tools && Object.entries(overrides.tools).some(([k,v])=>pair[k]!==v))
+      throw Error('WINDOWS_TOOLS_SOURCE_PAIR_CHANGED');
+    overrides.tools=pair;
+  }
   const repos=makeRepos({overrides,env}),result={};
   for(const name of REPO_NAMES) {
     const {url,tag}=repos[name];

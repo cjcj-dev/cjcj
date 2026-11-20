@@ -185,7 +185,7 @@ async function lintBuildPayloads(config) {
     if(process.platform!=='win32'||config.target.spec.crossCompile)throw Error('CJLINT_NATIVE_WINDOWS_REQUIRED');
     const sdk=facts.host.sdk,tuple=config.target.spec.runtimeTuple;
     const roots=[path.join(sdk,'runtime/lib',tuple),path.join(sdk,'lib',tuple),
-      path.join(sdk,'third_party/llvm/bin'),path.join(sdk,'tools/lib')];
+      path.join(sdk,'third_party/llvm/bin'),path.join(sdk,'tools/lib'),path.join(sdk,'bin')];
     const selected=new Set(),queue=[facts.executable];
     const target={spec:{llvmBinDir:config.target.spec.llvmBinDir || path.join(sdk,'third_party/llvm/bin')}};
     for(const image of queue)for(const dll of readPeSymbols(image,target,'libraries').split('\n').filter(Boolean)) {

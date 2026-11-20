@@ -92,3 +92,25 @@ runner with >=64core stage capacity or an explicit controller capacity ruling,
 plus separate native build disk allowance; current script budget is insufficient.
 The platform owner retains N/R/AST/host/HLE/full stdx/cross/Windows production,
 installation and package responsibility while these exact prerequisites close.
+
+
+For a validation-only build, run Source Build for the single `windows-x64`
+target at the paired cjcj commit. The Windows source cell uses one
+`windows-2025` checkout through stage0, both std phases, stage1 compiler,
+stage3, stdx, the ten native tools and package-install. Provide completed
+Windows host, N/AST, runtime, HLE, tool dependencies and the Lombok jar with
+their original build records in the selected native inputs. If supplying
+`native_build_inputs_artifact` separately on Windows, its Windows artifact
+must contain the completed producer's `native-install.tar` and its original
+BUILD-INPUTS; a bundle of source/build inputs cannot supply this installation.
+The download uses the selected run ID. Other targets keep their own input route.
+The paired Windows tools commit must be readable by fixed Git fetch; the
+generic tools pin remains in effect for other targets.
+
+Use the same workflow commit for Verify installed and relocated Windows SDK,
+passing the successful Source Build run ID, SDK version and its actual
+`std_artifact` output. Both jobs need read access to the selected inputs and
+source; neither requires release write permission. The release consumer runs
+the installed tools again after unpacking with the original tree parked. Its
+cjprof CLI and Java tests use the small heap graph from
+`cjcj-tools@52adc7a2:packages/cjprof/tests/heap.data`.

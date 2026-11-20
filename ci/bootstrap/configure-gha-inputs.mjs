@@ -14,6 +14,7 @@ import {prepareNativeInputs} from './sdk-inputs.mjs';
 import {nativePair} from './native-runtime-input.mjs';
 import {hostPlatform, readHostToolchainPin} from '../host-toolchain-pin.mjs';
 import {nativeInstallationLocations} from './native-installation-locations.mjs';
+import {checkoutExactSource,fetchSource} from '../../build/lib/git.mjs';
 import {buildConfig} from '../../build/lib/config.mjs';
 import {nativeSourceSelection} from './native-source-selection.mjs';
 import {stdDependencySources} from './stdlib-build.mjs';
@@ -35,6 +36,11 @@ export async function configureGhaInputs(env=process.env) {
   await configureNativeToolInput({root,workspace,platform,envFile:env.GITHUB_ENV});
   const sources={compiler:path.resolve(env.GITHUB_WORKSPACE)};
   const stdDependencies=stdDependencySources();
+  const windows=platform==='windows_x86_64';
+  const existing=new Map(Object.values(config.repos).map(repo=>[repo.url,config.repoPath(repo.name)]));
+  // The workflow checkout has no required .git suffix in its remote URL.
+  const origin=windows?(await capture('git',['-C',sources.compiler,'remote','get-url','origin'])).stdout.trim():'';
+  if(windows)existing.set(origin.replace(/(?:\.git)?$/,'.git'),sources.compiler);
   for(const [name,{repository:url,commit}] of Object.entries({...selection,...stdDependencies})) {
     const source=path.join(workspace,'native-sources',name);
     await fs.mkdir(path.dirname(source),{recursive:true});
@@ -42,7 +48,17 @@ export async function configureGhaInputs(env=process.env) {
       const head=await capture('git',['-C',source,'rev-parse','HEAD']);
       const origin=await capture('git',['-C',source,'config','--get','remote.origin.url']);
       const dirty=await capture('git',['-C',source,'status','--porcelain']);
-      if(head.stdout.trim()!==commit||origin.stdout.trim()!==url||dirty.stdout.trim())throw new Error('GHA_NATIVE_SOURCE_REUSE_CHANGED '+name);
+      if(head.stdout.trim()!==commit||origin.stdout.trim().replace(/\.git$/,'')!==url.replace(/\.git$/,'')||dirty.stdout.trim())throw new Error('GHA_NATIVE_SOURCE_REUSE_CHANGED '+name);
+    } else if(windows) {
+      const root=existing.get(url);
+      if(root){
+        const found=await capture('git',['-C',root,'cat-file','-e',commit+'^{commit}']).then(()=>true,()=>false);
+        if(!found)await fetchSource(url,commit,{cwd:root});
+        await command(['git','-C',root,'worktree','add','--detach',source,commit]);
+      }else{
+        await checkoutExactSource(url,source,commit);
+        existing.set(url,source);
+      }
     } else {
       await command(['git','clone','--no-checkout','--filter=blob:none',url,source]);
       await command(['git','-C',source,'fetch','--depth=1','origin',commit]);

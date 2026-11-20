@@ -115,7 +115,19 @@ test('Windows source plan, upload and package receive the same native std for pi
  const release=workflow('release.yml'),caller=release.jobs['package-p3-windows-x64'].with;
  const root=fixture(t),entry=job.steps.find(s=>s.id==='package-inputs');
  const gate=job.steps.find(s=>s.name==='Validate same-platform final std contract');
- const upload=source.jobs['source-stage3'].steps.find(s=>s.name==='Upload final source-built std install root');
+ const native=source.jobs['native-windows-sdk'];
+ assert.equal(native['runs-on'],'windows-2025');
+ assert.equal(native.if,"needs.plan.outputs.llvm_platforms == 'windows_x86_64'");
+ assert.match(source.jobs['source-stage0'].if,/llvm_platforms != 'windows_x86_64'/);
+ const programs=native.steps.map(step=>step.run||'').join('\n');
+ assert.doesNotMatch(programs,/job-handoff|native-cjdb-job\.mjs materialize/);
+ for(const phase of ['stage0','stage1-initial-std','stage1-std','stage1-compiler'])assert.ok(programs.includes('gha_run.sh '+phase));
+ const production=native.steps.filter(step=>step.run);
+ let previous=-1;
+ for(const name of ['Resolve actual source selection','Download pinned source','Verify source revisions','Configure native bootstrap from actual repositories and target installations','Bootstrap stage0 compiler','Bootstrap stage1-initial-std','Bootstrap stage1-std','Bootstrap stage1 compiler','Build stage 3 compiler and final std','Build stdx from source','Build Windows SDK tools with the installed stage3 frontend','Test and archive installed SDK']){
+   const i=production.findIndex(s=>s.name===name);assert.ok(i>previous,name);previous=i;
+ }
+ const upload=native.steps.find(s=>s.name==='Upload final source-built std install root');
  assert.equal(gate.env.EXPECTED_STD_ARTIFACT,'${{ steps.package-inputs.outputs.std_artifact }}');
  assert.equal(caller.std_artifact,'${{ needs.source-p3-windows-x64.outputs.std_artifact }}');
  for(const mode of ['default','explicit']){

@@ -203,6 +203,7 @@ jobs:
             dist/**/smoke/*.log
             dist/**/smoke/*.json
             dist/**/cjlint/*.json
+            dist/**/cjprof/*.json
             dist/**/linker-response/*/*.json
             dist/**/linker-response/*/*.stdout
             dist/**/linker-response/*/*.stderr

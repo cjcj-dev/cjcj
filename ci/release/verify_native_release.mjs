@@ -10,6 +10,7 @@ import {parseArgs} from 'node:util';
 import {assertNativeReleaseInputs} from './native-release-inputs.mjs';
 import {readJson, inventory, command} from '../bootstrap/sdk-flow.mjs';
 import {selectInstalledColourSdk, colourEnvironment} from '../prepare-colour-sdk.mjs';
+import {consumeWindowsProfiler} from './windows-profiler.mjs';
 import {crossStdArguments} from './cross-std-arguments.mjs';
 import {verifyCrossRuntime} from './cross-runtime.mjs';
 import {readInstalledStdxInputs} from '../../build/lib/installed-stdx-inputs.mjs';
@@ -93,7 +94,10 @@ export async function verifyNativeRelease(options, env = process.env) {
   if (target.spec.os === 'windows')
     await command([process.execPath, path.join(root, 'tests/upstream_compiler_1120/linker-response.mjs'),
       path.join(sdk, 'bin/cjc' + target.spec.exeSuffix), path.join(work, 'linker-response')], {env: installedEnv});
-  if(target.spec.os==='windows')await consumeWindowsLint(sdk,work,installedEnv);
+  if(target.spec.os==='windows'){
+    await consumeWindowsLint(sdk,work,installedEnv);
+    await consumeWindowsProfiler(sdk,work,installedEnv);
+  }
   // Compiler smoke is not a lint/LSP macro consumer. Preserve this missing
   // business gate after the independent installed consumers, rather than
   // preventing them from running or promoting a copied installation to PASS.
