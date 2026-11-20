@@ -83,6 +83,7 @@ export async function validateSourceInputs(input) {
     platform:input.platform,llvmCommit:input.llvm.commit,runtimeCommit:input.runtime.commit,
     hostVersion:input.host.version,work:input.work});
   const expectedMacro=await fs.readFile(new URL('../../packages/macro/src/InvokeUtil.cj',import.meta.url),'utf8');
+  const workingText=text=>process.platform==='win32'?text.replaceAll('\r\n','\n'):text;
   for(const [name,row] of Object.entries({llvm:input.llvm,runtime:input.runtime,stdlib:input.stdlib??input.runtime,ast:input.ast,h1:input.h1,compiler:input.compiler})) {
     const actual=await gitInput(row.repository,row.commit);
     if(actual.tree!==row.tree)throw new Error('NATIVE_SOURCE_TREE '+name);
@@ -91,7 +92,7 @@ export async function validateSourceInputs(input) {
     // normal bootstrap and historical C2 retain their H1 compatibility check.
     if(name==='compiler'||name==='h1'&&input.stage2?.mode!=='ordinary-cjpm') {
       const {stdout}=await execute('git',['-C',row.repository,'show',row.commit+':packages/macro/src/InvokeUtil.cj']);
-      if((process.platform==='win32'?stdout.replaceAll('\r\n','\n'):stdout)!==(process.platform==='win32'?expectedMacro.replaceAll('\r\n','\n'):expectedMacro))throw new Error('NATIVE_MACRO_SOURCE '+name);
+      if(workingText(stdout)!==workingText(expectedMacro))throw new Error('NATIVE_MACRO_SOURCE '+name);
     }
   }
   if(input.stage2) {
@@ -261,7 +262,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       throw new Error('H1_REUSE_PRODUCER_MISMATCH');
     rows.h1={...rows.h1,product,configuration:facts,buildResult:path.resolve(reused.buildResult)};
   }
-  // Only the unchanged non-Linux producer still consumes private tools.
+  // Only the Darwin producer still consumes private tools.
   // Linux preparation and H1 reuse must not require retired private scripts.
   if(native.os==='darwin'&&!installations.stage2) {
     if(!tools.privateRoot)throw Error('NATIVE_H1_PRIVATE_PRODUCER_REQUIRED');

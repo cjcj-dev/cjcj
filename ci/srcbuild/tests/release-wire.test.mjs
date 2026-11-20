@@ -134,7 +134,7 @@ test('component provenance, final std, and Python inputs are fail-closed in the 
   assert.equal(compose.run, 'node ci/release/compose-package.mjs');
   assert.equal(compose.if, undefined, 'dry-run cannot skip installation consumption');
   const checks = await fs.readFile(path.join(root, 'ci/release/verify_native_release.mjs'), 'utf8');
-  for (const gate of ['assertNativeReleaseInputs(options)', 'assertSdkCompilerRuntimeAbi({sdk, target})',
+  for (const gate of ['assertNativeReleaseInputs(options,env)', 'consumeInstalledLspMacro({sdk,work,platform:target.spec.llvmPlatform,env:installedEnv})', 'assertSdkCompilerRuntimeAbi({sdk, target})',
     'selectInstalledColourSdk(sdk,', 'scripts/verify_packaged_cjdb.mjs', 'ci/smoke/run_smoke.mjs', 'readInstalledStdxInputs({sdk,platform:target.spec.llvmPlatform,requireFull:true})',
     "if (target.spec.os === 'windows')", 'tests/upstream_compiler_1120/linker-response.mjs'])
     assert.ok(checks.includes(gate), gate);

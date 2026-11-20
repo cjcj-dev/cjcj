@@ -8,6 +8,9 @@ import {fileURLToPath} from 'node:url';
 import {archiveInstall,fileDigest} from '../bootstrap/sdk-flow.mjs';
 import {zipCommand} from '../bootstrap/sdk-archive.mjs';
 import {unpackNativeSdk} from './receive_native_sdk.mjs';
+import {cleanSdkEnvironment} from '../bootstrap/sdk-platform.mjs';
+import {windowsJobSeed} from '../bootstrap/configure-gha-inputs.mjs';
+import {windowsToolsSource} from '../srcbuild/source-selection.mjs';
 import {shimCommand} from '../bootstrap/zx-cli.mjs';
 import {withWindowsCompilerLinks} from '../bootstrap/windows-compiler-links.mjs';
 
@@ -35,6 +38,25 @@ test('Windows ZIP ignores MSYS PATH on write and read',()=>{
   const env={SystemRoot:'C:\\Windows',PATH:'C:\\msys64\\usr\\bin'};
   for(const op of ['create','extract'])assert.equal(zipCommand(op,'D:\\work dir\\sdk.zip','cangjie','win32',env)[0],
     'C:\\Windows\\System32\\tar.exe');
+});
+test('Windows target preserves the host Path and removes the previous SDK on drive-letter paths',()=>{
+  const env=cleanSdkEnvironment('D:/new SDK','windows_x86_64',{CANGJIE_HOME:'C:/old SDK',Path:'c:\\Old SDK\\bin;C:\\Windows\\System32;D:\\tools'});
+  assert.equal(env.Path,undefined);
+  assert.ok(env.PATH.endsWith(';C:\\Windows\\System32;D:\\tools'));assert.doesNotMatch(env.PATH,/old sdk/i);
+});
+test('job selects the seed from its actual checkout; artifact code, missing tools source and mismatched head fail',async()=>{
+  const root=await fs.mkdtemp(path.join(parent,'job checkout ')),cli=path.join(root,'zx cli.mjs');
+  await fs.writeFile(cli,'');
+  const git=(...args)=>{const r=spawnSync('git',['-C',root,...args],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
+  const repo='https://fixture.invalid/private/compiler';
+  git('init','-q');git('remote','add','origin',repo);
+  git('-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-qm','seed');
+  const head=git('rev-parse','HEAD'),env={GITHUB_SHA:head,CJCJ_ZX_CLI:cli};
+  assert.deepEqual(await windowsJobSeed(root,{},env),{repository:repo,commit:head});
+  await assert.rejects(windowsJobSeed(root,{tools:{privateRoot:'source/from/artifact'}},env),/WINDOWS_H1_ARTIFACT_SOURCE/);
+  await assert.rejects(windowsJobSeed(root,{},{...env,GITHUB_SHA:'0'.repeat(40)}),/WINDOWS_BOOTSTRAP_JOB_CHECKOUT/);
+  await assert.rejects(windowsJobSeed(root,{},{...env,CJCJ_ZX_CLI:'zx'}),/WINDOWS_BOOTSTRAP_ZX_CLI/);
+  assert.throws(()=>windowsToolsSource({}),/WINDOWS_TOOLS_READ_REPOSITORY_REQUIRED/);
 });
 test('stage shim uses Node with distinct CLI and script path arguments',async()=>{
   const root=await fs.mkdtemp(path.join(parent,'shim & paths '));

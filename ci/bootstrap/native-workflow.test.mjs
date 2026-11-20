@@ -127,6 +127,11 @@ test('Windows source plan, upload and package receive the same native std for pi
  for(const name of ['Resolve actual source selection','Download pinned source','Verify source revisions','Configure native bootstrap from actual repositories and target installations','Bootstrap stage0 compiler','Bootstrap stage1-initial-std','Bootstrap stage1-std','Bootstrap stage1 compiler','Build stage 3 compiler and final std','Build stdx from source','Build Windows SDK tools with the installed stage3 frontend','Test and archive installed SDK']){
    const i=production.findIndex(s=>s.name===name);assert.ok(i>previous,name);previous=i;
  }
+ const archive=native.steps.find(s=>s.name==='Upload complete native Windows SDK');
+ const paths=archive.with.path.trim().split('\n');
+ assert.equal(archive.with['if-no-files-found'],'error');
+ assert.equal(paths.length,2);assert.match(paths[0],/\/software\/cangjie-sdk-windows-x64-.*-cjcj\.zip$/);
+ assert.equal(paths[1],paths[0]+'.sha256');
  const upload=native.steps.find(s=>s.name==='Upload final source-built std install root');
  assert.equal(gate.env.EXPECTED_STD_ARTIFACT,'${{ steps.package-inputs.outputs.std_artifact }}');
  assert.equal(caller.std_artifact,'${{ needs.source-p3-windows-x64.outputs.std_artifact }}');

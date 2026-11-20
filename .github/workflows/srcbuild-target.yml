@@ -2246,7 +2246,30 @@ jobs:
       - *archive-final-compiler-handoff
       - *upload-final-compiler-handoff
       - *verify-self-hosted-sdk
-      - *upload-self-hosted-sdk-and-gate-logs
+      # Both files share the same upload root: the receiver selects them by
+      # basename. Logs in RUNNER_TEMP must not change that root.
+      - name: Upload complete native Windows SDK
+        uses: actions/upload-artifact@v7
+        with:
+          name: cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}
+          if-no-files-found: error
+          include-hidden-files: true
+          path: |
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-windows-x64-${{ steps.version.outputs.value }}-cjcj.zip
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-windows-x64-${{ steps.version.outputs.value }}-cjcj.zip.sha256
+      - name: Retain Windows source SDK consumer evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: srcbuild-lsp-${{ matrix.target }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/cjcj-srcbuild-verify/*.log
+            .srcbuild/shim-build.log
+            ${{ env.CANGJIE_WORKSPACE }}/software/**/lsp-macro/**/server.*
+            ${{ env.CANGJIE_WORKSPACE }}/software/**/lsp-macro/**/compile.*
+            ${{ env.CANGJIE_WORKSPACE }}/software/**/lsp-macro/**/requests.lsp
       - name: Report Windows source compilation cache
         if: always()
         uses: ./.github/actions/sccache-report

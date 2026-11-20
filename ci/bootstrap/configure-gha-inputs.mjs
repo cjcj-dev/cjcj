@@ -19,6 +19,14 @@ import {buildConfig} from '../../build/lib/config.mjs';
 import {nativeSourceSelection} from './native-source-selection.mjs';
 import {stdDependencySources} from './stdlib-build.mjs';
 export {NATIVE_REPOSITORIES} from './native-source-selection.mjs';
+export async function windowsJobSeed(checkout,locations,env) {
+  if(locations.tools?.privateRoot!==undefined)throw Error('WINDOWS_H1_ARTIFACT_SOURCE');
+  if(!env.CJCJ_ZX_CLI||!path.isAbsolute(env.CJCJ_ZX_CLI)||!(/\.m?js$/i.test(env.CJCJ_ZX_CLI))||!(await fs.stat(env.CJCJ_ZX_CLI)).isFile())throw Error('WINDOWS_BOOTSTRAP_ZX_CLI');
+  const git=async(...args)=>(await capture('git',['-C',checkout,...args])).stdout.trim();
+  const head=await git('rev-parse','HEAD');
+  if(!/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'')||head!==env.GITHUB_SHA)throw Error('WINDOWS_BOOTSTRAP_JOB_CHECKOUT');
+  return {repository:await git('remote','get-url','origin'),commit:head};
+}
 export async function configureGhaInputs(env=process.env) {
   if(!env.CANGJIE_WORKSPACE||!env.GITHUB_WORKSPACE||!env.CJCJ_NATIVE_INPUT_ROOT||!env.CJCJ_BOOTSTRAP_BASE)
     throw new Error('GHA_NATIVE_LOCATIONS_REQUIRED');
@@ -38,15 +46,8 @@ export async function configureGhaInputs(env=process.env) {
   const stdDependencies=stdDependencySources();
   const windows=platform==='windows_x86_64';
   const existing=new Map(Object.values(config.repos).map(repo=>[repo.url,config.repoPath(repo.name)]));
-  // The workflow checkout has no required .git suffix in its remote URL.
-  const origin=windows?(await capture('git',['-C',sources.compiler,'remote','get-url','origin'])).stdout.trim():'';
   if(windows){
-    if(locations.tools?.privateRoot!==undefined)throw Error('WINDOWS_H1_ARTIFACT_SOURCE');
-    if(!env.CJCJ_ZX_CLI||!path.isAbsolute(env.CJCJ_ZX_CLI)||!(await fs.stat(env.CJCJ_ZX_CLI)).isFile())throw Error('WINDOWS_BOOTSTRAP_ZX_CLI');
-    const head=(await capture('git',['-C',sources.compiler,'rev-parse','HEAD'])).stdout.trim();
-    if(!/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'')||head!==env.GITHUB_SHA)throw Error('WINDOWS_BOOTSTRAP_JOB_CHECKOUT');
-    // H builds the seed from the same fixed source and macro ABI as C2/C3.
-    selection.h1={repository:origin,commit:head};
+    selection.h1=await windowsJobSeed(sources.compiler,locations,env);
     sources.h1=sources.compiler;
   }
   for(const [name,{repository:url,commit}] of Object.entries({...selection,...stdDependencies})) {

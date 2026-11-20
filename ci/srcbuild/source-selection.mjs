@@ -8,7 +8,6 @@ import {makeRepos,REPO_NAMES} from '../../build/lib/config.mjs';
 export const windowsToolsCommit='fb66583a50e30ff20cd04c7d0c71dcf6acad5beb';
 export function windowsToolsSource(env) {
   const repo=env.WINDOWS_TOOLS_REPOSITORY;
-  if(!repo&&env.GITHUB_ACTIONS!=='true')return {url:'https://github.com/cjcj-dev/cjcj-tools.git',tag:windowsToolsCommit};
   if(!/^[\w.-]+\/[\w.-]+$/.test(repo||'')||repo.split('/').some(s=>s==='.'||s==='..'))throw Error('WINDOWS_TOOLS_READ_REPOSITORY_REQUIRED');
   return {url:new URL(repo,env.GITHUB_SERVER_URL+'/').href,tag:windowsToolsCommit};
 }

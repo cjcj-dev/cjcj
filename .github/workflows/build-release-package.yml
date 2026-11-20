@@ -205,6 +205,9 @@ jobs:
           path: |
             dist/**/smoke/*.log
             dist/**/smoke/*.json
+            dist/**/lsp-macro/**/server.*
+            dist/**/lsp-macro/**/compile.*
+            dist/**/lsp-macro/**/requests.lsp
             dist/**/cjlint/*.json
             dist/**/cjprof/*.json
             dist/**/linker-response/*/*.json

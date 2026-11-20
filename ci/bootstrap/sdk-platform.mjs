@@ -43,8 +43,20 @@ export function entryPlatformName(platform) {
 }
 
 // PATH is also the Windows DLL loader. Keep both tool and library search paths.
+function pathEnvironment(base,native) {
+  const env={...base};
+  if(native.os==='win32'){
+    // A plain object copied from process.env loses Windows' case folding.
+    const keys=Object.keys(env).filter(k=>k.toUpperCase()==='PATH');
+    const value=env.PATH??env[keys[0]];
+    for(const key of keys)delete env[key];
+    if(value!==undefined)env.PATH=value;
+  }
+  return env;
+}
 export function sdkEnvironment(sdk, platform, base = process.env, runtimeRoot = sdk) {
   const native = sdkPlatform(platform), delimiter = native.os === 'win32' ? ';' : ':';
+  base=pathEnvironment(base,native);
   const tools = [sdk+'/bin', sdk+'/tools/bin', sdk+'/third_party/llvm/bin'];
   const libraries = [runtimeRoot+'/runtime/lib/'+native.tuple, runtimeRoot+'/lib/'+native.tuple,
     sdk+'/third_party/llvm/'+native.llvmDirectory, sdk+'/tools/lib'];
@@ -56,12 +68,14 @@ export function sdkEnvironment(sdk, platform, base = process.env, runtimeRoot = 
 // Installed consumers must not inherit an earlier SDK's module/library search
 // path. Keep unrelated build controls (including jobserver descriptors) intact.
 export function cleanSdkEnvironment(sdk,platform,base=process.env,runtimeRoot=sdk) {
-  const clean={...base};
+  const native=sdkPlatform(platform),clean=pathEnvironment(base,native);
   for(const key of ['CANGJIE_HOME','CANGJIE_PATH','LIBRARY_PATH','LD_LIBRARY_PATH','LD_PRELOAD','LD_AUDIT',
     'DYLD_LIBRARY_PATH','DYLD_FALLBACK_LIBRARY_PATH','DYLD_INSERT_LIBRARIES','CPATH','C_INCLUDE_PATH','CPLUS_INCLUDE_PATH'])delete clean[key];
   if(base.CANGJIE_HOME) {
     const delimiter=sdkPlatform(platform).os==='win32'?';':':';
-    clean.PATH=(base.PATH||'').split(delimiter).filter(p=>p!==base.CANGJIE_HOME&&!p.startsWith(base.CANGJIE_HOME+'/')&&!p.startsWith(base.CANGJIE_HOME+'\\')).join(delimiter);
+    const key=p=>native.os==='win32'?p.replaceAll('\\','/').toLowerCase():p;
+    const previous=key(base.CANGJIE_HOME).replace(/\/+$/,'');
+    clean.PATH=(clean.PATH||'').split(delimiter).filter(p=>key(p)!==previous&&!key(p).startsWith(previous+'/')).join(delimiter);
   }
   return sdkEnvironment(sdk,platform,clean,runtimeRoot);
 }
