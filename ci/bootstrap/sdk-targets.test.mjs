@@ -1,6 +1,41 @@
 import test from'node:test';import assert from'node:assert/strict';import {createBootstrapTargets,validateBootstrapTargets,FIXED_INPUTS,BOOTSTRAP_PHASES}from'./sdk-targets.mjs';import {targetOrder}from'./sdk-flow.mjs';import {PLATFORMS}from'./sdk-io.mjs';import{readHostToolchainPin}from'../host-toolchain-pin.mjs';
 import {bootstrap} from './bootstrap.mjs';
 function inputs(platform){const row=(commit,name)=>({commit,tree:'a'.repeat(40),repository:'/fixture/'+name+'.git',install:'/fixture/'+name,configuration:{fixture:true},buildResult:'/fixture/'+name+'/result.json',sourceRoot:'/fixture/'+name+'-producer'});const runtime=row(FIXED_INPUTS.runtime,'R');return{platform,work:'/fixture/work',install:'/fixture/install',host:{version:readHostToolchainPin(platform).replace(/^nightly-/, ''),install:'/fixture/H'},llvm:row(FIXED_INPUTS.llvm,'N'),runtime,ast:row(FIXED_INPUTS.compiler,'AST'),h1:{...row(FIXED_INPUTS.h1,'H1'),product:'/fixture/H1/compiler'},compiler:row('b'.repeat(40),'C'),stdlib:{...runtime,install:'/fixture/std',buildResult:'/fixture/std/result.json',sourceRoot:'/fixture/std-producer'},tools:{privateRoot:'/fixture/tools'}};}
+test('std uses the selected native AST archive and headers through build and resume',async t=>{
+ const {flag,acceptInstalledStd}=await import('./sdk-std-resume.mjs');
+ const fs=await import('node:fs/promises'), os=await import('node:os'), path=await import('node:path');
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'paired-ast-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const input=inputs('linux_x86_64'),lib='lib/linux_x86_64_cjnative/libcangjie-ast-support.a';
+ input.ast={...input.ast,install:path.join(root,'native ast'),astInstallation:{library:lib}};
+ input.stdLocalModeApi=true;
+ const graph=createBootstrapTargets(input);
+ const include=path.join(input.ast.install,'include');
+ for(const id of ['std-bootstrap','stage1-std','stage3-std']){
+  const argv=graph.stages.find(s=>s.id===id).commands[0].argv;
+  assert.equal(flag(argv,'--std-ast-include'),include);
+  assert.equal(flag(argv,'--std-ast-library'),path.join(input.ast.install,lib));
+ }
+ const argv=graph.stages.find(s=>s.id==='stage3-std').commands[0].argv,cwd=root;
+ const source=flag(argv,'--source'),output=flag(argv,'--output'),link=output+'.runtime-input';
+ const expected={argv,cwd},terminal={event:'target-result',...expected,rc:0,wall:1};
+ const previous={commands:[terminal]},file=path.join(root,'events');
+ const build=['python3','-I','build.py','build','-t','relwithdebinfo','--jobs','2',
+  '--target-lib='+path.join(source,'stdlib/build/build/lib'),'--target-lib='+link,'--include='+include,'--local_mode_api'];
+ async function accept(inner){
+  const rows=[{event:'target-command',...expected}];
+  for(const args of [inner,['python3','-I','build.py','install','--prefix',output]]){
+   for(const event of ['target-command','target-result'])rows.push({event,argv:args,cwd:path.join(source,'stdlib'),rc:0});
+  }
+  await fs.writeFile(file,[...rows,terminal].map(row=>JSON.stringify(row)).join('\n'));
+  return acceptInstalledStd({file,previous,expected,source,output,link,commit:flag(argv,'--commit'),sdk:flag(argv,'--sdk'),
+   runtime:flag(argv,'--runtime'),platform:input.platform,compilerRuntime:'target'});
+ }
+ assert.deepEqual((await accept(build)).build.argv,build);
+ await assert.rejects(()=>accept(build.map(a=>a.startsWith('--include=')?'--include=/mixed/wire':a)),/STD_RESUME_RECORD build/);
+ await assert.rejects(()=>accept(build.filter(a=>!a.startsWith('--include='))),/STD_RESUME_RECORD build/);
+ const ordinary=inputs('linux_x86_64');ordinary.compiler.install=ordinary.ast.install;
+ assert.equal(flag(createBootstrapTargets(ordinary).stages.find(s=>s.id==='stage3-std').commands[0].argv,'--std-ast-include'),undefined);
+});
 test('the public bootstrap graph forwards one option policy to H1 and both compiler stages',()=>{
  for(const setting of [undefined,true,false]) {
   const input=inputs('linux_x86_64');delete input.h1.product;

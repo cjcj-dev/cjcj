@@ -59,6 +59,10 @@ export async function nativeStage(options, {signal} = {}) {
   if(kind!=='h1'&&kind!=='compiler'&&options['visible-options-only']!==undefined)
     throw Error('COMPILER_OPTION_CONFIGURATION_KIND');
   const optionVisibility=visibleOptionsOnly(options['visible-options-only']);
+  const astInclude=options['std-ast-include'], astLibrary=options['std-ast-library'];
+  if ((astInclude!==undefined || astLibrary!==undefined) &&
+      (kind!=='std' || !path.isAbsolute(astInclude||'') || !path.isAbsolute(astLibrary||'')))
+    throw Error('STD_AST_SELECTION');
   const localModeApi=options['local-mode-api']===true;
   if(localModeApi&&kind!=='std')throw Error('STD_LOCAL_MODE_API_KIND');
   if (kind !== 'std' && options['build-type'] !== undefined) throw new Error('STD_BUILD_TYPE_KIND');
@@ -95,8 +99,10 @@ export async function nativeStage(options, {signal} = {}) {
       && flag(row.argv, '--output') === output && flag(row.argv, '--kind') === 'std').at(-1);
     const expected = last?.argv.includes('--resume-installed') ? last.resumeOf : last;
     if (expected?.cwd !== path.join(path.dirname(options['resume-state']), 'build', options['resume-stage'])) throw new Error('STD_RESUME_STAGE state');
+    if(flag(expected.argv,'--std-ast-include')!==astInclude || flag(expected.argv,'--std-ast-library')!==astLibrary)
+      throw Error('STD_RESUME_RECORD AST selection');
     accepted = await acceptInstalledStd({file:options['accept-records'], source, output, commit, sdk, runtime,
-      link:output+'.runtime-input', platform, compilerRuntime:options['compiler-runtime'], heap:options.heap, previous, expected, buildType, localModeApi});
+      link:output+'.runtime-input', platform, compilerRuntime:options['compiler-runtime'], heap:options.heap, previous, expected, buildType, localModeApi, astInclude, astLibrary});
   }
   await fs.mkdir(output,{recursive:true});
   const restoreOptionVisibility=kind==='h1'||kind==='compiler'
@@ -105,6 +111,12 @@ export async function nativeStage(options, {signal} = {}) {
   if(kind==='std') {
     try {
     await verifyStdBuildInputs(sdk,platform);
+    if(astInclude){
+      for(const rel of ['cangjie/Parse/Parser.h','cangjie/CHIR/IR/AttributeInfo.h'])
+        if(!(await fs.stat(path.join(astInclude,rel))).isFile())throw Error('STD_AST_HEADER '+rel);
+      const support=path.join(sdk,'lib',native.tuple,'libcangjie-ast-support.a');
+      if(await fileDigest(astLibrary)!==await fileDigest(support))throw Error('STD_AST_SUPPORT_MISMATCH');
+    }
     if(!options['resume-installed']) {
       const previous=await fs.readFile(output+'.commands.json','utf8').then(JSON.parse).catch(error=>{if(error.code==='ENOENT')return [];throw error;});
       await prepareStdDependencies({source,dependencies:options['std-dependencies']?JSON.parse(options['std-dependencies']):undefined,previous,records});
@@ -120,9 +132,11 @@ export async function nativeStage(options, {signal} = {}) {
       if(error.code==='ENOENT')return null;throw error;
     });
     const cached = name => cache?.match(new RegExp('^'+name+':[^=]+=(.*)$','m'))?.[1];
-    const reconfigure = cache !== null && (cached('CMAKE_BUILD_TYPE') !== cmakeType || cached('CANGJIE_TARGET_LIB') !== targetLibraries.join(';') ||
+    const selectedInclude=astInclude??'';
+    const includeChanged=cache!==null && (cached('CANGJIE_INCLUDE')??'')!==selectedInclude;
+    const reconfigure = cache !== null && (includeChanged || cached('CMAKE_BUILD_TYPE') !== cmakeType || cached('CANGJIE_TARGET_LIB') !== targetLibraries.join(';') ||
       (cached('CANGJIE_ENABLE_LOCAL_MODE_API')==='ON')!==localModeApi);
-    if(options['resume-installed'] && reconfigure)throw new Error('STD_RESUME_BUILD_CONFIGURATION');
+    if(options['resume-installed'] && (reconfigure || (astInclude && cache===null)))throw new Error('STD_RESUME_BUILD_CONFIGURATION');
     await prepareRuntimeInputs({runtime, link, native, buildType, resume:!!options['resume-installed'], signal});
     if (options['resume-installed']) {
       const acceptedRow = {event: 'target-result', argv: ['resume-accepted', options['accept-records']], cwd: stdlib, rc: 0, signal: null,
@@ -135,13 +149,24 @@ export async function nativeStage(options, {signal} = {}) {
       // toolchain, platform and other legitimate cached options.
       if(reconfigure)await command(['cmake','-S',stdlib,'-B',build,'-DCMAKE_BUILD_TYPE='+cmakeType,
         '-DCANGJIE_TARGET_LIB='+targetLibraries.join(';'),
+        ...(astInclude||includeChanged?['-DCANGJIE_INCLUDE='+selectedInclude]:[]),
         ...(localModeApi||cached('CANGJIE_ENABLE_LOCAL_MODE_API')!==undefined?['-DCANGJIE_ENABLE_LOCAL_MODE_API='+(localModeApi?'ON':'OFF')]:[]),'-U','RUNTIME_COMMON_LIB_DIR'],{cwd:stdlib,env,records});
+      // R's AST_SUPPORT archive copies the selected support library and appends
+      // ast_api.o, but its Ninja edge only orders the object target. Regenerate
+      // this derived archive on paired builds and when leaving a paired cache.
+      if(astInclude || includeChanged)await fs.rm(path.join(build,'libcangjie-std-astFFI.a'),{force:true});
       await command(['python3','-I','build.py','build','-t',buildType,'--jobs',jobs,
-        ...targetLibraries.map(directory=>'--target-lib='+directory),...(localModeApi?['--local_mode_api']:[])],{cwd:stdlib,env,records});
+        ...targetLibraries.map(directory=>'--target-lib='+directory),...(astInclude?['--include='+astInclude]:[]),...(localModeApi?['--local_mode_api']:[])],{cwd:stdlib,env,records});
       await command(['python3','-I','build.py','install','--prefix',output],{cwd:stdlib,env,records});
     }
     for(const rel of stdInstallFiles(platform))
       if(!(await fs.stat(path.join(output,rel))).isFile())throw new Error('STD_INSTALL_SHAPE '+rel);
+    if(astInclude){
+      const archive='libcangjie-std-astFFI.a';
+      if(await fileDigest(path.join(build,archive))!==await fileDigest(path.join(output,'lib',native.tuple,archive)))
+        throw Error('STD_AST_FFI_INSTALL_MISMATCH');
+      await fs.access(path.join(output,'modules',native.tuple,'std/std.ast.cjo'));
+    }
     if(options['compiler-runtime']==='target')await assertFinalStdInput({sdk,std:output,runtime,
       host:JSON.parse(await fs.readFile(path.join(sdk,'STAGE-INPUTS.json'),'utf8')).selection.bootstrapHost.install,platform,work:output+'.consumers',signal});
     // Use the revision checked against the consumed source before target startup.
@@ -287,7 +312,7 @@ export async function nativeStage(options, {signal} = {}) {
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies','visible-options-only'].map(k=>[k,{type:'string'}]));
+    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies','std-ast-include','std-ast-library','visible-options-only'].map(k=>[k,{type:'string'}]));
     spec['resume-installed']={type:'boolean'};spec['local-mode-api']={type:'boolean'};
     nativeSourceOptions(process.argv); // Reject duplicate identity flags before parseArgs.
     const {values}=parseArgs({options:spec});

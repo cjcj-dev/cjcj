@@ -15,10 +15,13 @@ export function stdBuildType(value = 'relwithdebinfo') {
   return value;
 }
 export async function acceptInstalledStd({file, source, output, commit, sdk, runtime, link, platform,
-  compilerRuntime, heap, previous, expected, buildType, localModeApi=false}) {
+  compilerRuntime, heap, previous, expected, buildType, localModeApi, astInclude, astLibrary}) {
   if (!file) throw new Error('STD_RESUME_RECORD missing');
   if (!previous || !expected) throw new Error('WORK_INPUTS_MISSING');
   const selectedType = stdBuildType(buildType === undefined ? flag(expected.argv, '--build-type') : buildType);
+  localModeApi??=expected.argv.includes('--local-mode-api');
+  astInclude??=flag(expected.argv,'--std-ast-include');
+  astLibrary??=flag(expected.argv,'--std-ast-library');
   if (compilerRuntime !== 'target') throw new Error('STD_RESUME_RECORD compiler-runtime');
   let text;
   try { text = await fs.readFile(file, 'utf8'); }
@@ -36,6 +39,7 @@ export async function acceptInstalledStd({file, source, output, commit, sdk, run
   if (!identity || !sameCommand(identity, expected)
       || Object.entries(required).some(([k,v]) => flag(identity.argv, '--'+k) !== v)
       || identity.argv.includes('--local-mode-api')!==localModeApi
+      || flag(identity.argv,'--std-ast-include')!==astInclude || flag(identity.argv,'--std-ast-library')!==astLibrary
       || stdBuildType(flag(identity.argv, '--build-type')) !== selectedType
       || flag(identity.argv, '--heap') !== heap
       || identity.argv.includes('--resume-installed')) throw new Error('STD_RESUME_RECORD identity');
@@ -58,10 +62,11 @@ export async function acceptInstalledStd({file, source, output, commit, sdk, run
   const successful = (command, result) => command?.event === 'target-command'
     && result?.event === 'target-result' && sameCommand(command, result)
     && result.rc === 0 && !result.signal && !result.error && !result.cancelled;
-  if (!successful(buildCommand, build) || build.argv.length !== (localModeApi?11:10) || (localModeApi && build.argv[10]!=='--local_mode_api')
-      || buildArgv.some((v,i) => build.argv[i] !== v) || !/^[1-9][0-9]*$/.test(build.argv[7])
-      || build.argv[8] !== '--target-lib='+path.join(stdlib,'build/build/lib')
-      || build.argv[9] !== '--target-lib='+link) throw new Error('STD_RESUME_RECORD build');
+  const tail=['--target-lib='+path.join(stdlib,'build/build/lib'),'--target-lib='+link,
+    ...(astInclude?['--include='+astInclude]:[]),...(localModeApi?['--local_mode_api']:[])];
+  if (!successful(buildCommand, build) || !/^[1-9][0-9]*$/.test(build.argv[7])
+      || JSON.stringify(build.argv)!==JSON.stringify([...buildArgv,build.argv[7],...tail]))
+    throw new Error('STD_RESUME_RECORD build');
   if (!successful(installCommand, install) || JSON.stringify(install.argv) !== JSON.stringify(
     ['python3','-I','build.py','install','--prefix',output])) throw new Error('STD_RESUME_RECORD install');
   if (actions.length !== 4 || after.slice(end + 1).some(row => row.cwd === stdlib

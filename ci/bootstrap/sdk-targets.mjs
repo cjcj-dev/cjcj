@@ -245,6 +245,8 @@ export function createBootstrapTargets(input) {
     ...(kind==='h1'||kind==='compiler'?['--visible-options-only',String(visibleOptionsOnly(input.visibleOptionsOnly))]:[]),
     ...(kind==='compiler' && compiler.shimInstall ? ['--shim-install',compiler.shimInstall] : []),
     ...(kind==='h1' && h1.shimInstall ? ['--shim-install',h1.shimInstall] : []),
+    ...(kind==='std' && (ast.astInstallation || ast.install!==compiler.install) ? ['--std-ast-include',path.join(ast.install,'include'),
+      '--std-ast-library',path.join(ast.install,ast.astInstallation?.library??'libcangjie-ast-support.a')] : []),
     ...(kind==='std' && input.stdBuildType !== undefined ? ['--build-type',input.stdBuildType] : []),
     ...(kind==='std' && input.stdLocalModeApi===true ? ['--local-mode-api'] : []),
     ...(kind==='std' && input.stdDependencies ? ['--std-dependencies',JSON.stringify(input.stdDependencies)] : []),
