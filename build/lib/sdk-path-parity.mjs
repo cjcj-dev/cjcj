@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {nativeToolLibraries, retainedToolPath} from '../srcbuild/tool-layout.mjs';
+import {getTarget} from './targets.mjs';
 import {BuildError} from './errors.mjs';
 import {pinnedOfficialSdkRoot} from './package-lineage.mjs';
 
@@ -79,6 +80,34 @@ function installedTool(root, producer) {
     && installedFile(root, to) && installedFile(root, retained);
 }
 
+// std installs the Linux 8-bit library privately so SDK users do not put
+// PCRE2 on the global library path. Map only the pinned loader chain; other
+// entries (including other architectures in the reference) keep normal parity.
+function pcre2Counterparts(official, candidate, officialRoot, candidateRoot, target, errors) {
+  const dir = 'runtime/lib/' + getTarget(target).spec.runtimeTuple + '/';
+  const link = 'libpcre2-8.so', abi = link + '.0';
+  const oldFile = official.get(dir + abi)?.symlinkTarget;
+  if (official.get(dir + link)?.symlinkTarget !== abi
+      || !/^libpcre2-8\.so\.0(?:\.\d+)+$/.test(oldFile)
+      || official.get(dir + oldFile)?.type !== 'file'
+      || soname(path.join(officialRoot, dir, oldFile)) !== abi) return [];
+  for (const relative of candidate.keys()) {
+    if (path.posix.dirname(relative) + '/' === dir && /^libpcre2-8\.so(?:\.|$)/.test(path.posix.basename(relative)))
+      errors.push('pcre2-flat-library\t' + relative);
+  }
+  const nested = dir + 'pcre2/';
+  const file = candidate.get(nested + abi)?.symlinkTarget;
+  if (candidate.get(nested + link)?.symlinkTarget !== abi
+      || !/^libpcre2-8\.so\.0(?:\.\d+)+$/.test(file)
+      || candidate.get(nested + file)?.type !== 'file'
+      || soname(path.join(candidateRoot, nested + file)) !== abi) {
+    errors.push('pcre2-loader-chain\t' + nested + abi);
+    return [];
+  }
+  return [[link, link], [abi, abi], [oldFile, file]].map(([before, after]) =>
+    ({official:dir + before, candidate:nested + after, soname:abi}));
+}
+
 export function compareSdkPathSets(officialRoot, candidateRoot, {target} = {}) {
   const exclusions = [...OFFICIAL_PATH_EXCLUSIONS];
   // This command packages one native target. Cross-target release assembly
@@ -98,9 +127,12 @@ export function compareSdkPathSets(officialRoot, candidateRoot, {target} = {}) {
   const nativeLinux = ['linux-x64', 'linux-aarch64'].includes(target);
   const lint = nativeLinux && installedTool(candidateRoot, 'cjlint');
   const prof = nativeLinux && installedTool(candidateRoot, 'cjprof');
-  const missing = [], typeMismatches = [], counterparts = [];
+  const missing = [], typeMismatches = [], layoutErrors = [];
+  const counterparts = nativeLinux ? pcre2Counterparts(official, candidate, officialRoot, candidateRoot, target, layoutErrors) : [];
+  const relocatedPcre2 = new Set(counterparts.map(row => row.official));
   for (const officialEntry of officialEntries) {
     const relative = officialEntry.relativePath;
+    if (relocatedPcre2.has(relative)) continue;
     let candidateEntry = candidate.get(relative);
     if (!candidateEntry && lint && relative.startsWith('tools/config/')) {
       const relocated = '.target-tools/tools/cjlint/config/' + relative.slice('tools/config/'.length);
@@ -169,6 +201,7 @@ export function compareSdkPathSets(officialRoot, candidateRoot, {target} = {}) {
     candidateEntries,
     officialPaths,
     candidatePaths,
+    layoutErrors: Object.freeze(layoutErrors),
     missingInCandidate: Object.freeze(missing),
     counterparts: Object.freeze(counterparts),
     extraInCandidate: Object.freeze(candidatePaths.filter(relative => !official.has(relative))),
@@ -195,8 +228,9 @@ export async function assertSdkPathParity(candidateRoot, {officialRoot, target} 
       throw new BuildError('package.sdk-path-parity', `package-link-outside\t${entry.relativePath}\t${entry.symlinkTarget}`);
     }
   }
-  if (result.missingInCandidate.length || result.typeMismatches.length) {
+  if (result.layoutErrors.length || result.missingInCandidate.length || result.typeMismatches.length) {
     const differences = [
+      ...result.layoutErrors,
       ...result.missingInCandidate.map(relative => `missing-official-path\t${relative}`),
       ...result.typeMismatches.map(mismatch => (
         `type-mismatch\t${mismatch.relativePath}`

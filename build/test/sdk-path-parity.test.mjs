@@ -282,6 +282,47 @@ test('native Linux loader-name links accept changed internal versions and reject
   await assertSdkPathParity(candidate, options);
 });
 
+test('Linux package maps only its private PCRE2 loader chain and rejects fallback or a stale flat copy',
+  {skip: process.platform !== 'linux'}, async t => {
+  const {official, candidate} = fixture(t);
+  const dir = 'runtime/lib/linux_x86_64_cjnative/';
+  const link = 'libpcre2-8.so', abi = link + '.0', original = abi + '.14.0', updated = abi + '.15.0';
+  function chain(root, prefix, version) {
+    sharedLibrary(root, prefix + version, abi);
+    fs.symlinkSync(version, path.join(root, prefix, abi));
+    fs.symlinkSync(abi, path.join(root, prefix, link));
+  }
+  chain(official, dir, original);
+  chain(candidate, dir + 'pcre2/', updated);
+  const options = {officialRoot:official, target:'linux-x64'};
+  const check = () => assertSdkPathParity(candidate, options);
+  const result = await check();
+  assert.deepEqual(result.counterparts.map(row => [row.official, row.candidate]),
+    [[link,link], [abi,abi], [original,updated]].map(([a,b]) => [dir + a, dir + 'pcre2/' + b]));
+  for (const target of [undefined, 'windows-x64', 'linux-aarch64'])
+    await assert.rejects(assertSdkPathParity(candidate, {officialRoot:official, target}), /missing-official-path/);
+
+  const local = path.join(candidate, dir, 'pcre2');
+  fs.unlinkSync(path.join(local, link));
+  await assert.rejects(check(), /pcre2-loader-chain/);
+  fs.symlinkSync(updated, path.join(local, link)); // bypasses the required SONAME link
+  await assert.rejects(check(), /pcre2-loader-chain/);
+  fs.unlinkSync(path.join(local, link));
+  fs.symlinkSync(abi, path.join(local, link));
+  fs.renameSync(path.join(local, updated), path.join(candidate, 'other.so'));
+  await assert.rejects(check(), /package-link-invalid/);
+  fs.symlinkSync('../../../../other.so', path.join(local, updated));
+  await assert.rejects(check(), /pcre2-loader-chain/);
+  fs.unlinkSync(path.join(local, updated));
+  sharedLibrary(candidate, dir + 'pcre2/' + updated, link + '.1');
+  await assert.rejects(check(), /pcre2-loader-chain/);
+  sharedLibrary(candidate, dir + 'pcre2/' + updated, abi);
+  chain(candidate, dir, original);
+  await assert.rejects(check(), /pcre2-flat-library/);
+  fs.rmSync(local, {recursive:true});
+  await assert.rejects(check(), /pcre2-loader-chain/);
+});
+
 // Exercise the actual public package path on retained installed products.
 // Stop just after the real parity call, before consumers or SDK writes; 78
 // records arrival at this finite boundary, never successful packaging.
