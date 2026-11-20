@@ -121,6 +121,20 @@ test('target SDKs overlay the std-built flatbuffers cjo after the AST toolchain 
   assert.equal(c.stages.find(s=>s.id==='stage0-run').copies.find(copy=>copy.to==='third_party/flatbuffers/modules'),undefined);
   assert.equal(c.stages.find(s=>s.id==='stage0-run').copies.find(copy=>copy.owner==='AST'&&copy.to==='third_party/flatbuffers').exclude,undefined);
 });
+test('first modal std uses H1 to build for R before target modules exist',()=>{
+  const input=inputs('linux_x86_64');input.stdLocalModeApi=true;
+  const config=createBootstrapTargets(input);
+  const stage=id=>config.stages.find(s=>s.id===id);
+  const first=stage('stage0-run');
+  const hostRoot=first.copies.find(row=>row.owner==='H'&&row.to==='');
+  for(const rel of ['lib','runtime','modules'])assert.ok(hostRoot.exclude.includes(rel));
+  assert.ok(first.copies.some(row=>row.owner==='R'&&row.from===input.runtime.install&&row.to===''));
+  assert.ok(first.copies.some(row=>row.owner==='compiler execution runtime'&&row.from===input.host.install+'/runtime'));
+  assert.deepEqual(first.copies.filter(row=>row.owner==='std'),[]);
+  assert.equal(first.metadata.sources.std.status,'not-built');
+  assert.ok(stage('std-bootstrap').commands[0].argv.includes('--local-mode-api'));
+  assert.ok(stage('stage1-initial').copies.some(row=>row.owner==='std'&&row.from==='${output.std-bootstrap}'&&row.to===''));
+});
 test('macro runtime link follows the compiler process runtime, not a second image',()=>{
   const c=createBootstrapTargets(inputs('linux_x86_64'));
   // H1 runs with the H runtime image copied into its own execution prefix.

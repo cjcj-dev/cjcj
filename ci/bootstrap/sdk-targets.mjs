@@ -86,6 +86,9 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   const {llvm,runtime,ast,backend}=target;
   if(backend&&(bootstrap||hostObjects||layout==='native-output'))throw Error('INSTALL_BACKEND_LAYOUT');
   product??=target.compiler.product;std??=target.std.install;
+  // H1 builds the first paired std from source, before any target modules exist.
+  // Its host libraries are private compiler execution inputs, never target libraries.
+  const firstTargetStd=bootstrap && execution.stage==='stage0-run' && !hostObjects;
   const compilerName='bin/cjcj-stage1'+exe;
   const prefix=path.relative('.',compilerExecutionRoot('.',selection));
   const executionNative=sdkPlatform(execution.platform??platform),execTuple=executionNative.tuple;
@@ -116,8 +119,8 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     ...(!hostObjects?[
       {from:runtime.install,to:'',owner:'R',exclude:['RUNTIME-INPUTS.json','NATIVE-INPUTS.json','SOURCE_SHA',...(ast?['include']:[])]},
       ...(ast?[{from:runtime.install+'/include',to:'runtime/include',owner:'R'}]:[]),
-      {from:std,to:'',owner:'std',exclude:stdInstallationExcludes(platform)},
-      {from:std+'/third_party/flatbuffers/modules',to:'third_party/flatbuffers/modules',owner:'std'},
+      ...(!firstTargetStd?[{from:std,to:'',owner:'std',exclude:stdInstallationExcludes(platform)},
+        {from:std+'/third_party/flatbuffers/modules',to:'third_party/flatbuffers/modules',owner:'std'}]:[]),
     ]:[]),
     ...(!bootstrap&&prefix?[
       {from:execution.runtime.install+'/runtime/lib/'+execTuple,to:prefix+'/runtime/lib/'+execTuple,owner:'compiler execution runtime'},
@@ -261,15 +264,15 @@ export function createBootstrapTargets(input) {
       copies:[...recipe.copies,...(['stage2','stage3'].includes(id)?[
         {from:'${build}/compiler/share/cjcj',to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
         {from:'${build}/compiler/compiler-inputs.json',to:'compiler-inputs.json',owner:'compiler'}]:[])],
-      metadata:{phase:id,platform,selection,compilerRole:hostObjects||['stage1-initial','stage1-std'].includes(id)?'transitional-ordinary-compiler':'r-host-compiler',
-        macroSdk:hostObjects||['stage1-initial','stage1-std'].includes(id)?'UNSUPPORTED':'REQUIRES_INSTALLED_GATE',compilerFile:'libexec/compiler/cjcj-stage1'+exe,runtimeCommit:runtime.commit,
+      metadata:{phase:id,platform,selection,compilerRole:transitional?'transitional-ordinary-compiler':'r-host-compiler',
+        macroSdk:transitional?'UNSUPPORTED':'REQUIRES_INSTALLED_GATE',compilerFile:'libexec/compiler/cjcj-stage1'+exe,runtimeCommit:runtime.commit,
         compilerCommit:['stage0-run','stage1-initial','stage1-std'].includes(id)?h1.commit:compiler.commit,stdSource:std,
         sources:{compiler:{repository:['stage0-run','stage1-initial','stage1-std'].includes(id)?h1.repository:compiler.repository,
           commit:['stage0-run','stage1-initial','stage1-std'].includes(id)?h1.commit:compiler.commit},
-          std:hostObjects?{status:'unresolved',reason:'host SDK std; see host input'}:{repository:stdlib.repository,commit:stdlib.commit},
+          std:hostObjects?{status:'unresolved',reason:'host SDK std; see host input'}:id==='stage0-run'?{status:'not-built',repository:stdlib.repository,commit:stdlib.commit}:{repository:stdlib.repository,commit:stdlib.commit},
           runtime:{repository:runtime.repository,commit:runtime.commit},llvm:{repository:llvm.repository,commit:llvm.commit},
           ...(ast.astInstallation?{ast:{repository:ast.sourceRepository??ast.repository,commit:ast.commit}}:{})},
-        configuration:{platform,phase:id,compilerRuntime:hostObjects||['stage1-initial','stage1-std'].includes(id)?'host':'target'}}};
+        configuration:{platform,phase:id,compilerRuntime:transitional?'host':'target'}}};
   }
   const repos={};
   for(const [id,row]of Object.entries({h1,compiler2:compiler,compiler3:compiler,std0:stdlib,stdBootstrap:stdlib,std1:stdlib}))
@@ -291,7 +294,7 @@ export function createBootstrapTargets(input) {
     {id:'stage0',depends:nativeTargets.map(s=>s.id),
       ...(h1.product?{reuse:{commit:h1.commit,configuration:h1.configuration,source:h1.buildResult},copies:[{from:h1.product,to:compilerName}]}:
         {commands:[stageArg('h1',repo('h1'),llvm.install,'${output}')]} )},
-    composed('stage0-run',['stage0'],out('stage0')+'/'+compilerName,null,true),
+    composed('stage0-run',['stage0'],out('stage0')+'/'+compilerName,null,input.stdLocalModeApi!==true),
     {id:'std-bootstrap',depends:['stage0-run'],commands:[stageArg('std',repo('std0'),out('stage0-run'),'${output}',null,'host')]},
     composed('stage1-initial',['std-bootstrap'],out('stage0')+'/'+compilerName,out('std-bootstrap')),
     composed('stage1-std',['stage1-initial'],out('stage0')+'/'+compilerName,'${build}/std',false,
