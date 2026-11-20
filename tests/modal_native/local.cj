@@ -32,12 +32,13 @@ func invokeCaptured(f: (() -> Int64) @local?): Int64 {
 }
 
 func captureParameter(c: Cell @local?): Int64 {
-    beforeCapture = getAllocatedLocalObjectSize()
     return invokeCaptured({ => c.read() })
 }
 
 func capturedValue(n: Int64): Int64 {
     let c = Cell(n) @local!
+    // Closure conversion may place the environment in the callee prologue.
+    beforeCapture = getAllocatedLocalObjectSize()
     return captureParameter(c)
 }
 
