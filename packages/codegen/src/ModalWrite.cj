@@ -1,9 +1,13 @@
 package cjcj::codegen
 
 import std.collection.ArrayList
-import cjcj::chir.{Attribute, CHIRMode, CustomType, GetElementByName, GetElementRef, LocalVar, Value}
+import cjcj::chir.{Attribute, CHIRMode, CustomType, GetElementByName, GetElementRef, LocalVar, Type, Value}
 
 public enum ModalWriteKind { | ORDINARY | MAYBE_LOCAL | DEMODE }
+
+func RegionWriteKind(ty: Type): ModalWriteKind {
+    return if (ty.IsLocalRegion()) { ModalWriteKind.MAYBE_LOCAL } else { ModalWriteKind.ORDINARY }
+}
 
 func ClassifyAddressWrite(ir: IRBuilder2, address: Value): ModalWriteKind {
     let local = (address as LocalVar) ?? return ModalWriteKind.ORDINARY

@@ -198,7 +198,7 @@ class LocalModeAnalysis {
         }
         if (left.resolvedMode == ASTMode.HALF && right.resolvedMode != ASTMode.NOT &&
             (left.GetTarget().map({ target => target.IsMemberDecl() }) ?? false)) {
-            let fd = if (scopes.isEmpty()) { None } else { scopes[scopes.size - 1].funcDecl }
+            let fd: Option<FuncDecl> = if (scopes.isEmpty()) { None } else { scopes[scopes.size - 1].funcDecl }
             let allowed = fd.map({ f => f.IsFinalizer() || (f.TestAttr(Attribute.CONSTRUCTOR) &&
                 GetReceiverMode(f) == ASTMode.HALF) }) ?? false
             let own = if (let Some(ma) <- (left as MemberAccess)) {

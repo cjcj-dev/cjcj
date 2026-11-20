@@ -767,7 +767,7 @@ private func CPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>, typeArg
     if (resultTy.IsGeneric()) {
         let typeInfoOfResult = irBuilder.CreateTypeInfo(resultTy)
         let resultTySize = irBuilder.GetLayoutSize_32(resultTy)
-        let ret = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfoOfResult, resultTySize]))
+        let ret = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfoOfResult, resultTySize]), isLocal: resultTy.IsLocalRegion())
         let fixedTypeSize = irBuilder.CreateZExtOrTrunc(resultTySize,
             unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }, name: "ptr.read.size")
         let offset = irBuilder.CreateBinary(ExprKind.MUL, fixedTypeSize, indexValue, name: "ptr.read.offset")

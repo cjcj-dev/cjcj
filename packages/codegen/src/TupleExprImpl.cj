@@ -315,9 +315,9 @@ private func GenerateOptionLikeTEnum(irBuilder: IRBuilder2, chirExpr: Expression
     irBuilder.SetInsertPoint(blocks[0])
     if (hasAssociatedValue) {
         let associatedValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(1))
-        irBuilder.CallGCWrite(associatedValue.GetRawValue(), enumValue, castedPayload, GCWriteStrength.STRONG)
+        irBuilder.CallGCWrite(associatedValue.GetRawValue(), enumValue, castedPayload, GCWriteStrength.STRONG, writeKind: RegionWriteKind(enumTy))
     } else {
-        irBuilder.CallGCWrite(unsafe { LLVMConstNull(i8PtrTy) }, enumValue, castedPayload, GCWriteStrength.STRONG)
+        irBuilder.CallGCWrite(unsafe { LLVMConstNull(i8PtrTy) }, enumValue, castedPayload, GCWriteStrength.STRONG, writeKind: RegionWriteKind(enumTy))
     }
     irBuilder.CreateBr(blocks[2])
 
@@ -332,7 +332,7 @@ private func GenerateOptionLikeTEnum(irBuilder: IRBuilder2, chirExpr: Expression
         let associatedValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(1))
         let associatedCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), associatedType)
         let associatedTypeSize = irBuilder.GetLayoutSize32(associatedType, associatedCGType)
-        irBuilder.CallGCWriteGeneric(enumValue, associatedPtr, associatedValue.GetRawValue(), associatedTypeSize)
+        irBuilder.CallGCWriteGeneric(enumValue, associatedPtr, associatedValue.GetRawValue(), associatedTypeSize, writeKind: RegionWriteKind(enumTy))
         let selectorValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0)).GetRawValue()
         let selectorPtr = irBuilder.CreateBitCast(irBuilder.GetPayloadFromObject(enumValue),
             unsafe { LLVMPointerType(i1Ty, 1u32) })
@@ -352,7 +352,7 @@ private func GenerateOptionLikeTEnum(irBuilder: IRBuilder2, chirExpr: Expression
         let associatedValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(1))
         let associatedCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), associatedType)
         let associatedTypeSize = irBuilder.GetLayoutSize32(associatedType, associatedCGType)
-        irBuilder.CallGCWriteGeneric(enumValue, associatedPtr, associatedValue.GetRawValue(), associatedTypeSize)
+        irBuilder.CallGCWriteGeneric(enumValue, associatedPtr, associatedValue.GetRawValue(), associatedTypeSize, writeKind: RegionWriteKind(enumTy))
     }
     irBuilder.CreateBr(blocks[2])
 
@@ -534,7 +534,7 @@ private func GenerateOptionLikeNonRefEnum(irBuilder: IRBuilder2, chirExpr: Expre
         let associatedType = chirExpr.GetOperand(1).GetType() ?? return enumValue
         let associatedCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), associatedType)
         irBuilder.CallGCWriteGeneric(enumValue, associatedPtr, associatedValue.GetRawValue(),
-            irBuilder.GetSize32(associatedType, associatedCGType))
+            irBuilder.GetSize32(associatedType, associatedCGType), writeKind: RegionWriteKind(enumType))
     }
     return enumValue
 }
