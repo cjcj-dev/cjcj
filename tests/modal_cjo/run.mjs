@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const [compiler, output] = process.argv.slice(2);
+const [compiler, output] = argv._.map(String);
+if (![compiler, output].every(p => p && path.isAbsolute(p))) throw Error('usage: zx run.mjs /absolute/bin/cjc /new/output');
 const root = path.resolve(output);
 fs.mkdirSync(root); // Require fresh outputs: a stale CJO must never pass.
 const enabled = ['--experimental', '--enable-local-mode', '--output-type=cjo'];
