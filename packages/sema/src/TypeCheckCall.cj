@@ -1349,10 +1349,13 @@ private func PermitsModalCall(typeManager: TypeManager, fd: FuncDecl, call: Call
             !receiver.IsSubMode(GetReceiverMode(fd))) { return false }
     } else if (IsInstanceMember(fd)) {
         var actual: Option<ASTMode> = Some(receiver)
+        var receiverTy = fd.outerDecl.flatMap({ d => d.GetTy() })
         if ((let Some(ma) <- (base as MemberAccess)) && (let Some(obj) <- ma.baseExpr)) {
             actual = CallSiteMode(obj, receiver, HashSet<Decl>())
+            receiverTy = obj.GetTy()
         }
-        if ((let Some(m) <- actual) && !m.IsSubMode(GetReceiverMode(fd))) { return false }
+        if ((let Some(m) <- actual) && !m.IsSubMode(GetReceiverMode(fd)) &&
+            !(receiverTy.map({ t => typeManager.IsModalCopyType(t) }) ?? false)) { return false }
     }
     for (i in 0..call.args.size) {
         if (let Some(value) <- call.args[i].expr) {

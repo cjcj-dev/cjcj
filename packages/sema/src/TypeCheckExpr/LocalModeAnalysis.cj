@@ -354,7 +354,8 @@ class LocalModeAnalysis {
                 }
             } else if (!scopes.isEmpty() && (let Some(owner) <- scopes[scopes.size - 1].funcDecl)) {
                 let actual = GetReceiverMode(owner)
-                if (!actual.IsSubMode(mode) || (mode == ASTMode.FULL && ExclaveOwner().isNone())) {
+                if (!(owner.outerDecl.map({ d => CopyNode(d) }) ?? false) &&
+                    (!actual.IsSubMode(mode) || (mode == ASTMode.FULL && ExclaveOwner().isNone()))) {
                     DiagMismatchedTypesWithFoundTy(diag, call, "receiver" + mode.Suffix(), "this" + actual.Suffix())
                 }
             }
