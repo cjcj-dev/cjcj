@@ -166,7 +166,7 @@ public func SetStructTypeBody(structType: LLVMTypeRef, body: ArrayList<LLVMTypeR
         return
     }
     if (body.isEmpty()) {
-        unsafe { LLVMStructSetBody(structType, CPointer<LLVMTypeRef>(), 0u32, if (packed) { 1 } else { 0 }) }
+        unsafe { LLVMSelfhostSetStructBodyForCJ(structType, CPointer<LLVMTypeRef>(), 0u32, if (packed) { 1 } else { 0 }) }
         return
     }
     try (bodyPtr = LibC.malloc<LLVMTypeRef>(count: body.size).asResource()) {
@@ -175,7 +175,7 @@ public func SetStructTypeBody(structType: LLVMTypeRef, body: ArrayList<LLVMTypeR
             unsafe { (bodyPtr.value + idx).write(body[idx]) }
             idx++
         }
-        unsafe { LLVMStructSetBody(structType, bodyPtr.value, UInt32(body.size), if (packed) { 1 } else { 0 }) }
+        unsafe { LLVMSelfhostSetStructBodyForCJ(structType, bodyPtr.value, UInt32(body.size), if (packed) { 1 } else { 0 }) }
     }
 }
 

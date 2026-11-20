@@ -3,6 +3,7 @@ package cjcj::codegen
 import std.collection.*
 import cjcj::basic.Linkage
 import cjcj::chir.Attribute
+import cjcj::chir.ModalInfo
 import cjcj::chir.CHIRBuilder
 import cjcj::chir.CustomType
 import cjcj::chir.EnumType
@@ -331,6 +332,10 @@ public open class CGType {
     public func GetOrCreateTypeInfo(): LLVMValueRef {
         if (chirType.IsThis() || chirType.IsRef()) {
             throw IllegalArgumentException("typeinfo is not valid for " + chirType.ToString())
+        }
+        if (chirType.IsModal()) {
+            let dataTy = cgCtx.GetCHIRBuilder().WithModal(chirType, ModalInfo())
+            return CGType.GetOrCreate(cgMod, dataTy).GetOrCreateTypeInfo()
         }
         if (let Some(existingInfo) <- typeInfo) {
             return existingInfo

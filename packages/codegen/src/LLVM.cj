@@ -199,7 +199,7 @@ foreign {
     func LLVMGetTypeByName2(context: LLVMContextRef, name: CString): LLVMTypeRef
     func LLVMStructCreateNamed(context: LLVMContextRef, name: CString): LLVMTypeRef
     func LLVMGetStructName(structTy: LLVMTypeRef): CString
-    func LLVMStructSetBody(structTy: LLVMTypeRef, elementTypes: CPointer<LLVMTypeRef>, elementCount: UInt32,
+    func LLVMSelfhostSetStructBodyForCJ(structTy: LLVMTypeRef, elementTypes: CPointer<LLVMTypeRef>, elementCount: UInt32,
         packed: Int32): Unit
     func LLVMIsLiteralStruct(structTy: LLVMTypeRef): Int32
     func LLVMIsOpaqueStruct(structTy: LLVMTypeRef): Int32

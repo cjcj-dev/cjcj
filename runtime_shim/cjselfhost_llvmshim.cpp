@@ -67,6 +67,8 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/Function.h"
@@ -630,6 +632,22 @@ extern "C" LLVMValueRef LLVMSelfhostBasicBlockGetFirstInsertionPoint(LLVMBasicBl
         return nullptr;
     }
     return wrap(&*insertPoint);
+}
+
+// Named Cangjie layouts may be refined after recursive C function fields are known.
+// N's CJ setter preserves the packing bit; establish it at the first definition.
+extern "C" void LLVMSelfhostSetStructBodyForCJ(LLVMTypeRef type, LLVMTypeRef *elements,
+    unsigned count, int packed)
+{
+    auto *layout = llvm::cast<llvm::StructType>(llvm::unwrap(type));
+    llvm::ArrayRef<llvm::Type *> fields(llvm::unwrap(elements), count);
+    if (layout->isOpaque()) {
+        layout->setBody(fields, packed != 0);
+    } else {
+        if (layout->isPacked() != (packed != 0))
+            llvm::report_fatal_error("inconsistent packing for Cangjie struct layout");
+        layout->setBodyForCJ(fields);
+    }
 }
 
 // The region stub identifies the owner by its caller frame. LLVM 15's
