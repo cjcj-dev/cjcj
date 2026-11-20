@@ -31,7 +31,8 @@ class LocalModeAnalysis {
             ResolveValue(node)
             if (let Some(body) <- (node as FuncBody)) {
                 if ((let Some(block) <- body.body) && (let Some(ft) <- Signature(body))) {
-                    Check(block, ft.retMode)
+                    if ((let Some(last) <- block.GetLastExprOrDecl()) && (let Some(expr) <- (last as Expr)) &&
+                        expr.astKind != ASTKind.RETURN_EXPR && !ft.retTy.IsUnit()) { CheckReturn(expr, ft.retMode) }
                 }
                 scopes.remove(at: scopes.size - 1)
             }
@@ -67,7 +68,7 @@ class LocalModeAnalysis {
     }
 
     private func BindSlots(body: FuncBody): Unit {
-        let ft = Signature(body) ?? return
+        let ft = Signature(body) ?? return;
         if (body.paramLists.isEmpty()) { return }
         if (HasMode(ft) && (body.generic.isSome() || ft.HasGeneric())) {
             DiagMismatchedTypesWithFoundTy(diag, body, "a monomorphic local-mode signature", ft.String())
@@ -87,17 +88,54 @@ class LocalModeAnalysis {
     private func Check(value: Node, expected: ASTMode): Unit {
         let mode = value.resolvedMode
         if (mode.IsSubMode(expected)) { return }
-        let ty = value.GetTy() ?? return
+        let ty = value.GetTy() ?? return;
         if (ty.kind == TypeKind.TYPE_INT64) { return } // admitted Copyable slot
         DiagMismatchedTypesWithFoundTy(diag, value, ty.String() + expected.Suffix(), ty.String() + mode.Suffix())
     }
 
+    private func External(value: Expr): Bool {
+        if (let Some(paren) <- (value as ParenExpr)) {
+            return if (let Some(inner) <- paren.expr) { External(inner) } else { false }
+        }
+        if ((let Some(ref) <- (value as RefExpr)) && (let Some(target) <- ref.GetTarget()) &&
+            (let Some(param) <- (target as FuncParam))) {
+            if (scopes.isEmpty()) { return false }
+            if (let Some(owner) <- owners.get(param)) { return refEq(owner, scopes[scopes.size - 1]) }
+        }
+        return false
+    }
+
+    private func CheckReturn(value: Expr, expected: ASTMode): Unit {
+        Check(value, expected)
+        if (expected != ASTMode.NOT && value.resolvedMode != ASTMode.NOT &&
+            value.TyKind() != TypeKind.TYPE_INT64 && !External(value)) {
+            DiagMismatchedTypesWithFoundTy(diag, value, "an external local return value", "an internal local value")
+        }
+    }
+
+    private func CheckStore(left: Expr, right: Expr): Unit {
+        Check(right, left.resolvedMode)
+        if (left.TyKind() == TypeKind.TYPE_INT64 || left.resolvedMode == ASTMode.NOT) { return }
+        if (let Some(paren) <- (left as ParenExpr)) {
+            if (let Some(inner) <- paren.expr) { CheckStore(inner, right) }
+            return
+        }
+        if (left.resolvedMode == ASTMode.FULL && External(left) != External(right)) {
+            DiagMismatchedTypesWithFoundTy(diag, right, "the region of the destination", "a different region")
+        }
+        if ((let Some(target) <- left.GetTarget()) && (let Some(owner) <- owners.get(target)) &&
+            !scopes.isEmpty() && !refEq(owner, scopes[scopes.size - 1])) {
+            // TypeCheckModal.cpp:1166-1174: a captured non-copy HALF variable only accepts NOT.
+            Check(right, ASTMode.NOT)
+        }
+    }
+
     private func ResolveRef(ref: RefExpr): Unit {
-        let decl = ref.GetTarget() ?? return
+        let decl = ref.GetTarget() ?? return;
         ref.resolvedMode = decl.resolvedMode
         if (decl.resolvedMode == ASTMode.NOT || scopes.isEmpty() ||
             decl.TyKind() == TypeKind.TYPE_INT64) { return }
-        let owner = owners.get(decl) ?? return
+        let owner = owners.get(decl) ?? return;
         let body = scopes[scopes.size - 1]
         if (refEq(body, owner)) { return }
         // LambdaExpr.cpp:633-694. FULL is never capturable; HALF requires a HALF
@@ -110,7 +148,7 @@ class LocalModeAnalysis {
     }
 
     private func ResolveCall(call: CallExpr): Unit {
-        let base = call.baseFunc ?? return
+        let base = call.baseFunc ?? return;
         var sig = Signature(base)
         if (sig.isNone() && (let Some(fd) <- call.resolvedFunction)) { sig = Signature(fd) }
         if (sig.isNone()) {
@@ -133,7 +171,12 @@ class LocalModeAnalysis {
 
     private func CheckArgument(ft: FuncTy, i: Int64, arg: FuncArg): Unit {
         if (let Some(value) <- arg.expr) {
-            Check(value, if (i < ft.paramTys.size) { ft.ParamMode(i) } else { ASTMode.NOT })
+            let mode = if (i < ft.paramTys.size) { ft.ParamMode(i) } else { ASTMode.NOT }
+            Check(value, mode)
+            if (mode == ASTMode.FULL && value.resolvedMode == ASTMode.FULL &&
+                value.TyKind() != TypeKind.TYPE_INT64 && External(value)) {
+                DiagMismatchedTypesWithFoundTy(diag, value, "an internal local argument", "an external local value")
+            }
         }
     }
 
@@ -159,17 +202,20 @@ class LocalModeAnalysis {
                 if (decl.typeNode.isNone() && !scopes.isEmpty() && decl.astKind == ASTKind.VAR_DECL &&
                     !decl.IsMemberDecl() && !decl.TestAttr(Attribute.GLOBAL)) {
                     decl.resolvedMode = initExpr.resolvedMode
+                    if (decl.resolvedMode == ASTMode.FULL && decl.TyKind() != TypeKind.TYPE_INT64 && External(initExpr)) {
+                        DiagMismatchedTypesWithFoundTy(diag, initExpr, "an internal local initializer", "an external local value")
+                    }
                 } else {
                     Check(initExpr, ASTMode.NOT)
                 }
             }
         } else if (let Some(assign) <- (node as AssignExpr)) {
             if ((let Some(left) <- assign.leftValue) && (let Some(right) <- assign.rightExpr)) {
-                Check(right, left.resolvedMode)
+                CheckStore(left, right)
             }
         } else if (let Some(ret) <- (node as ReturnExpr)) {
             if (!scopes.isEmpty() && (let Some(ft) <- Signature(scopes[scopes.size - 1])) &&
-                (let Some(value) <- ret.expr)) { Check(value, ft.retMode) }
+                (let Some(value) <- ret.expr)) { CheckReturn(value, ft.retMode) }
         } else if (let Some(lambda) <- (node as LambdaExpr)) {
             if (let Some(body) <- lambda.funcBody) { lambda.resolvedMode = body.resolvedMode }
         }

@@ -9,12 +9,13 @@ import std.unittest.testmacro.*
 
 @Test
 public class LocalCaptureSourceTest {
-    private func CheckSource(t: String, slot: ASTMode, data: CHIRMode, box: CHIRMode): Unit {
+    private func CheckSource(plain: String, slot: ASTMode, data: CHIRMode, box: CHIRMode): Unit {
         // Only the source type varies. In particular 'cell' and 'incoming' carry no suffix.
+        let t = plain + slot.Suffix()
         let code = "package capture_source\npublic class Holder {}\n" +
-            "public func probe(seed: " + t + ", replacement: " + t + "): " + t + " {\n" +
+            "public func probe(seed: " + t + ", replacement: " + plain + "): " + t + " {\n" +
             "let identity: (" + t + ") -> " + t + " = { incoming => incoming }\n" +
-            "var cell = identity(seed)\n{ => cell = replacement }()\nreturn cell\n}\n"
+            "var cell = identity(seed)\n{ => cell = replacement }()\nidentity(cell)\nreturn seed\n}\n"
         let result = CompileSource(code, stage: CompileStage.MANGLING, localMode: true)
         @Assert(result.ok)
         var inferred = 0
@@ -46,7 +47,7 @@ public class LocalCaptureSourceTest {
         @Expect(inferred, 1)
         @Expect(variables, 1)
         @Expect(reads >= 2, true)
-        @Expect(calls, 1)
+        @Expect(calls, 2)
         @Assert(result.instance.PerformCHIRCompilation())
         @Assert(result.diag.GetErrorCount(), 0u64)
         var boxes = 0
@@ -77,9 +78,9 @@ public class LocalCaptureSourceTest {
         @Expect(boxes, 1)
     }
 
-    @TestCase func nonCopyable(): Unit { CheckSource("Holder @local?", ASTMode.HALF, CHIRMode.MAYBE, CHIRMode.MAYBE) }
+    @TestCase func nonCopyable(): Unit { CheckSource("Holder", ASTMode.HALF, CHIRMode.MAYBE, CHIRMode.MAYBE) }
     @TestCase func ordinary(): Unit { CheckSource("Holder", ASTMode.NOT, CHIRMode.NONE, CHIRMode.NONE) }
-    @TestCase func copyable(): Unit { CheckSource("Int64 @local?", ASTMode.HALF, CHIRMode.MAYBE, CHIRMode.NONE) }
+    @TestCase func copyable(): Unit { CheckSource("Int64", ASTMode.HALF, CHIRMode.MAYBE, CHIRMode.NONE) }
 
     private func Reject(body: String, line: Int64): Unit {
         let result = CompileSource("package bad_capture\npublic class Holder {}\n" + body,
@@ -97,11 +98,19 @@ public class LocalCaptureSourceTest {
     }
 
     @TestCase func fullCannotBeCaptured(): Unit {
-        Reject("public func probe(v: Holder @local!): Unit {\nvar x = v\n{ => x = v }()\n}", 5)
+        Reject("public func probe(v: Holder @local!, ordinary: Holder): Unit {\nvar x = ordinary\n{ => x = v }()\n}", 5)
     }
 
     @TestCase func localCannotEscapeInOrdinaryReturn(): Unit {
         Reject("public func probe(v: Holder @local?): Holder { v }", 3)
+    }
+
+    @TestCase func capturedHalfRejectsLocalWrite(): Unit {
+        Reject("public func probe(v: Holder @local?): Unit {\nvar x = v\n{ => x = v }()\n}", 5)
+    }
+
+    @TestCase func internalHalfCannotEscape(): Unit {
+        Reject("public func probe(v: Holder @local?): Holder @local? {\nvar x = v\nreturn x\n}", 5)
     }
 
     @TestCase func genericStaysClosed(): Unit {
