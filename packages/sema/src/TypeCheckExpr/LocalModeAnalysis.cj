@@ -3,7 +3,7 @@ package cjcj::sema.TypeCheckExpr
 import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cjcj::sema.DiagMismatchedTypesWithFoundTy
+import cjcj::sema.{DiagMismatchedTypesWithFoundTy, TypeManager}
 
 // Resolve modes after overload and lambda selection, before AST rewrites lose lexical owners.
 class LocalModeAnalysis {
@@ -13,7 +13,9 @@ class LocalModeAnalysis {
     private let declaredIn = HashMap<Decl, Node>()
     private let parents = ArrayList<Node>()
 
-    init(diag: BasicDiagnosticEngine) { this.diag = diag }
+    private let typeManager: TypeManager
+
+    init(diag: BasicDiagnosticEngine, typeManager: TypeManager) { this.diag = diag; this.typeManager = typeManager }
 
     func Resolve(pkg: Package): Unit {
         Walker(pkg, localVisits: true, visitPre: { node: Node =>
@@ -46,16 +48,7 @@ class LocalModeAnalysis {
         return ty as FuncTy
     }
 
-    private func CopyType(ty: Ty): Bool {
-        if (ty.IsPrimitive() || ty.IsNothing() || ty.IsPointer() || ty.IsCString() || ty.kind == TypeKind.TYPE_VARRAY) {
-            return true
-        }
-        if (ty.IsTuple()) {
-            for (element in ty.typeArgs) { if (!CopyType(element)) { return false } }
-            return true
-        }
-        return false
-    }
+    private func CopyType(ty: Ty): Bool { return typeManager.IsModalCopyType(ty) }
 
     private func CopyNode(node: Node): Bool { return node.GetTy().map({ ty => CopyType(ty) }) ?? false }
 
@@ -161,7 +154,57 @@ class LocalModeAnalysis {
         DiagMismatchedTypesWithFoundTy(diag, value, ty.String() + expected.Suffix(), ty.String() + mode.Suffix())
     }
 
+    // The result of a conditional never comes from its condition, selector, or finally block.
+    private func ResultBranches(value: Expr): ArrayList<Expr> {
+        let out = ArrayList<Expr>()
+        if (let Some(paren) <- (value as ParenExpr)) {
+            if (let Some(inner) <- paren.expr) { out.add(inner) }
+        } else if (let Some(block) <- (value as Block)) {
+            if ((let Some(last) <- block.GetLastExprOrDecl()) && (let Some(e) <- (last as Expr))) { out.add(e) }
+        } else if (let Some(ie) <- (value as IfExpr)) {
+            if (let Some(b) <- ie.thenBody) { out.add(b) }
+            if (let Some(b) <- ie.elseBody) { out.add(b) }
+        } else if (let Some(me) <- (value as MatchExpr)) {
+            for (c in me.matchCases) { if (let Some(b) <- c.exprOrDecls) { out.add(b) } }
+            for (c in me.matchCaseOthers) { if (let Some(b) <- c.exprOrDecls) { out.add(b) } }
+        } else if (let Some(te) <- (value as TryExpr)) {
+            if (let Some(b) <- te.tryBlock) { out.add(b) }
+            for (b in te.catchBlocks) { out.add(b) }
+        }
+        return out
+    }
+
+    private func MergeBranchModes(value: Expr): Unit {
+        if (value.TyKind() == TypeKind.TYPE_UNIT || CopyNode(value)) { return }
+        var result: Option<ASTMode> = None
+        for (branch in ResultBranches(value)) {
+            if (branch.GetTy().map({ t => t.IsNothing() }) ?? false) { continue }
+            if ((let Some(prior) <- result) && prior != branch.resolvedMode) {
+                result = Some(ASTMode.HALF)
+            } else { result = Some(branch.resolvedMode) }
+        }
+        value.resolvedMode = result ?? ASTMode.NOT
+    }
+
+    private func IsBranchChild(parent: Node, child: Node): Bool {
+        if (let Some(c) <- (parent as MatchCase)) { return c.exprOrDecls.map({ b => refEq(b, child) }) ?? false }
+        if (let Some(c) <- (parent as MatchCaseOther)) { return c.exprOrDecls.map({ b => refEq(b, child) }) ?? false }
+        if (let Some(e) <- (parent as Expr)) {
+            for (result in ResultBranches(e)) { if (refEq(result, child)) { return true } }
+        }
+        return false
+    }
+
     private func External(value: Expr): Bool {
+        // Entering an exclave ends this frame's region. Permitted operands now live in
+        // the caller's region. Return validation handles values leaving that region.
+        if (ExclaveOwner().isSome()) { return false }
+        for (branch in ResultBranches(value)) { if (External(branch)) { return true } }
+        if (let Some(index) <- (value as SubscriptExpr)) {
+            if (index.isTupleAccess || (index.baseExpr.map({ e => e.TyKind() == TypeKind.TYPE_VARRAY }) ?? false)) {
+                return index.baseExpr.map({ b => External(b) }) ?? false
+            }
+        }
         if (let Some(paren) <- (value as ParenExpr)) {
             return if (let Some(inner) <- paren.expr) { External(inner) } else { false }
         }
@@ -182,6 +225,13 @@ class LocalModeAnalysis {
     }
 
     private func CheckReturn(value: Expr, expected: ASTMode): Unit {
+        let parts = ResultBranches(value)
+        if (!parts.isEmpty()) {
+            for (part in parts) {
+                if (!(part.GetTy().map({ t => t.IsNothing() }) ?? false)) { CheckReturn(part, expected) }
+            }
+            return
+        }
         Check(value, expected)
         if (expected != ASTMode.NOT && value.resolvedMode != ASTMode.NOT &&
             !CopyNode(value) && ExclaveOwner().isNone() && !External(value)) {
@@ -216,6 +266,12 @@ class LocalModeAnalysis {
         }
     }
 
+    private func IsCallTarget(expr: Expr): Bool {
+        if (parents.size < 2) { return false }
+        let call = (parents[parents.size - 2] as CallExpr) ?? return false;
+        return call.baseFunc.map({ base => refEq(base, expr) }) ?? false
+    }
+
     private func ResolveRef(ref: RefExpr): Unit {
         if ((ref.isThis || ref.isSuper) && !scopes.isEmpty()) {
             for (i in 0..scopes.size) {
@@ -228,6 +284,10 @@ class LocalModeAnalysis {
         }
         let decl = ref.GetTarget() ?? return;
         ref.resolvedMode = decl.resolvedMode
+        if (decl is FuncDecl && IsInstanceMember(decl) && !IsCallTarget(ref) && !scopes.isEmpty() &&
+            (let Some(owner) <- scopes[scopes.size - 1].funcDecl) && GetReceiverMode(owner) != ASTMode.NOT) {
+            DiagMismatchedTypesWithFoundTy(diag, ref, "an unbound method or non-local receiver", "bound local receiver")
+        }
         if (decl is VarDecl && IsInstanceMember(decl) && !HasLocalModifier(decl, TokenKind.DEMODE)) {
             for (i in 0..scopes.size) {
                 if (let Some(fd) <- scopes[scopes.size - 1 - i].funcDecl) {
@@ -341,7 +401,7 @@ class LocalModeAnalysis {
             if ((let Some(base) <- ma.baseExpr) && (let Some(target) <- ma.GetTarget()) && base.resolvedMode != ASTMode.NOT) {
                 if (target is VarDecl && IsInstanceMember(target)) {
                     ma.resolvedMode = if (HasLocalModifier(target, TokenKind.DEMODE)) { ASTMode.NOT } else { base.resolvedMode }
-                } else if (!(target is FuncDecl && parents.size >= 2 && parents[parents.size - 2] is CallExpr)) {
+                } else if (!(target is FuncDecl && IsCallTarget(ma))) {
                     Check(base, ASTMode.NOT)
                 }
             }
@@ -351,10 +411,17 @@ class LocalModeAnalysis {
             if (let Some(inner) <- paren.expr) { node.resolvedMode = inner.resolvedMode }
         } else if (let Some(arg) <- (node as FuncArg)) {
             if (let Some(value) <- arg.expr) { arg.resolvedMode = value.resolvedMode }
+        } else if (node is IfExpr || node is MatchExpr || node is TryExpr) {
+            MergeBranchModes((node as Expr).getOrThrow())
         } else if (let Some(block) <- (node as Block)) {
             if ((let Some(last) <- block.GetLastExprOrDecl()) && last.IsExpr() &&
                 block.TyKind() != TypeKind.TYPE_UNIT) { node.resolvedMode = last.resolvedMode }
         } else if (let Some(decl) <- (node as VarDeclAbstract)) {
+            if (!(decl is FuncParam) && !(decl is PropDecl) && (decl.IsMemberDecl() ||
+                decl.TestAttr(Attribute.GLOBAL) || decl.TestAttr(Attribute.STATIC)) &&
+                (let Some(t) <- decl.typeNode) && t.resolvedMode != ASTMode.NOT) {
+                DiagMismatchedTypesWithFoundTy(diag, t, "a non-local stored declaration", t.resolvedMode.Suffix())
+            }
             if ((let Some(p) <- (decl as FuncParam)) && (let Some(defaultValue) <- p.assignment)) {
                 Check(defaultValue, p.resolvedMode)
             }
@@ -367,9 +434,6 @@ class LocalModeAnalysis {
                         DiagMismatchedTypesWithFoundTy(diag, initExpr, "an internal local initializer", "an external local value")
                     }
                 } else {
-                    if ((let Some(t) <- decl.typeNode) && t.resolvedMode != ASTMode.NOT) {
-                        DiagMismatchedTypesWithFoundTy(diag, decl, "a non-local stored declaration", t.resolvedMode.Suffix())
-                    }
                     Check(initExpr, ASTMode.NOT)
                 }
             }
@@ -388,6 +452,7 @@ class LocalModeAnalysis {
         // construction or a store into a global/field. Never infer a region from spelling.
         if (node.resolvedMode == ASTMode.NOT || !(node is Expr) || parents.size < 2) { return }
         let parent = parents[parents.size - 2]
+        if (IsBranchChild(parent, node)) { return }
         if (!(parent is VarDeclAbstract || parent is Block || parent is FuncBody || parent is FuncArg ||
             parent is MemberAccess || parent is ExclaveExpr || parent is CallExpr || parent is ParenExpr || parent is AssignExpr || parent is ReturnExpr)) {
             Check(node, ASTMode.NOT)

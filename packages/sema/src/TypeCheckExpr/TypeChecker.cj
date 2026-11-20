@@ -1253,7 +1253,7 @@ extend TypeChecker {
         PostTypeCheck(activeContexts)
         if ((let Some(instance) <- impl.ci) && instance.globalOptions.IsLocalModeAnalysis() &&
             (let Some(diag) <- impl.diag) && diag.GetErrorCount() == 0u64) {
-            for (pkg in pkgs) { LocalModeAnalysis(diag).Resolve(pkg) }
+            for (pkg in pkgs) { LocalModeAnalysis(diag, impl.typeManager).Resolve(pkg) }
         }
     }
 

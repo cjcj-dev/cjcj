@@ -80,6 +80,10 @@ public class SetMemRegion {
                             owners[outer.nodeId] = outer
                         }
                         needed = lambda.GetFuncType().getOrThrow().IsLocalRegion()
+                    } else if (expr is RawArrayAllocateBase || expr is Box) {
+                        // This frontend can lower constructors directly to allocation/box instructions.
+                        // There is no Apply left to establish the caller's region in that case.
+                        needed = expr.GetResultType().getOrThrow().StripAllRefs().IsLocalRegion()
                     } else if (expr is Allocate || expr is TryAllocate || expr is Tuple) {
                         let result = expr.GetResult().getOrThrow()
                         let ty = result.GetType().getOrThrow().StripAllRefs()

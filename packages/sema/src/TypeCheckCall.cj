@@ -1337,7 +1337,7 @@ private func ReceiverAtCall(call: CallExpr, ctx: Option<ASTContext>): ASTMode {
     return ASTMode.NOT
 }
 
-private func PermitsModalCall(fd: FuncDecl, call: CallExpr, receiver: ASTMode): Bool {
+private func PermitsModalCall(typeManager: TypeManager, fd: FuncDecl, call: CallExpr, receiver: ASTMode): Bool {
     let base = call.baseFunc ?? return true;
     if (fd.TestAttr(Attribute.CONSTRUCTOR) && !fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
         if ((let Some(m) <- call.modal) && m.local != GetReceiverMode(fd)) { return false }
@@ -1354,7 +1354,7 @@ private func PermitsModalCall(fd: FuncDecl, call: CallExpr, receiver: ASTMode): 
     }
     for (i in 0..call.args.size) {
         if (let Some(value) <- call.args[i].expr) {
-            if (value.GetTy().map({ ty => ty.IsPrimitive() || ty.IsNothing() || ty.IsPointer() || ty.IsCString() }) ?? false) {
+            if (value.GetTy().map({ ty => typeManager.IsModalCopyType(ty) }) ?? false) {
                 continue
             }
             let slot = LocalParameterMode(fd, ModeArgumentIndex(fd, call, i))
@@ -1398,7 +1398,7 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
     if (differs) {
         let receiver = ReceiverAtCall(ce, ctx)
         for (i in 0..candidates.size) {
-            if (targetMark[i]) { targetMark[i] = PermitsModalCall(candidates[i].fd, ce, receiver) }
+            if (targetMark[i]) { targetMark[i] = PermitsModalCall(typeManager, candidates[i].fd, ce, receiver) }
         }
     }
     var idx: Int64 = 0

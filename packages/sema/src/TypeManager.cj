@@ -3424,6 +3424,30 @@ public class TypeManager {
         return ty
     }
 
+    public func IsCopyInterface(ty: Ty): Bool {
+        if (let Some(it) <- (ty as InterfaceTy)) {
+            if (let Some(d) <- it.declPtr) {
+                return d.fullPackageName == "std.core" && d.identifier.Val() == "Copyable"
+            }
+        }
+        return false
+    }
+
+    public func IsModalCopyType(ty: Ty): Bool {
+        if (Ty.IsMetCType(ty) || ty.IsPrimitive() || ty.IsNothing()) { return true }
+        if (ty.IsTuple() || ty.kind == TypeKind.TYPE_VARRAY) {
+            for (arg in ty.typeArgs) { if (!IsModalCopyType(arg)) { return false } }
+            return true
+        }
+        if (let Some(g) <- (ty as GenericsTy)) {
+            if (!g.isUpperBoundLegal) { return false }
+            for (upper in GetAllUpperBounds(g).values) { if (IsCopyInterface(upper)) { return true } }
+        } else if (ty.IsStruct()) {
+            for (upper in GetAllSuperTys(ty).values) { if (IsCopyInterface(upper)) { return true } }
+        }
+        return false
+    }
+
     private func GetAllUpperBounds(genTy: GenericsTy): TySet {
         let out = TySet()
         let worklist = ArrayList<Ty>()
