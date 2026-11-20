@@ -1655,6 +1655,18 @@ extend ParserImpl {
         try (cs = ChainScope(this, list)) {
             list.begin = lastToken.Begin()
             list.leftParenPos = lastToken.Begin()
+            if (!ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_GETTER_BODY) &&
+                !ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY) &&
+                Seeing(TokenKind.THIS) && PeekLocalMode(1).isSome()) {
+                Next()
+                list.receiverModal = ParseLocalModeSuffix()
+                if (!Skip(TokenKind.COMMA) && !Seeing(TokenKind.RPAREN)) {
+                    DiagExpectedRightDelimiter("(", list.leftParenPos)
+                    list.end = lastToken.End()
+                    list.EnableAttr(Attribute.IS_BROKEN)
+                    return list
+                }
+            }
             let namedParameter = Box<Option<FuncParam>>(None)
             let memberParameter = Box<Option<FuncParam>>(None)
             ParseZeroOrMoreSepTrailing(

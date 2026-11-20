@@ -4,6 +4,12 @@ import std.collection.*
 import cjcj::ast.{ASTModalInfo, ASTMode}
 import cjcj::ast.INVALID_IDENTIFIER
 
+@When[env == "ohos"]
+private func SupportsLocalModeSyntax(): Bool { return false }
+
+@When[env != "ohos"]
+private func SupportsLocalModeSyntax(): Bool { return true }
+
 extend ParserImpl {
     public func ParseType(): Type {
         let ty = ParsePrefixType()
@@ -16,7 +22,7 @@ extend ParserImpl {
                 ty.isBroken = true
             }
         }
-        ty.modal = ParseTypeModal()
+        ty.modal = ParseLocalModeSuffix()
         if (let Some(modal) <- ty.modal) {
             ty.end = modal.end
         }
@@ -27,31 +33,40 @@ extend ParserImpl {
         return first.End() == second.Begin() || (lexer.HasTokenInput() && first.Begin() == second.Begin())
     }
 
-    private func ParseTypeModal(): Option<ASTModalInfo> {
-        if (!Seeing(TokenKind.AT)) {
+    // The '@' is either the current token or the first token after a receiver.
+    internal func PeekLocalMode(atOffset: Int64): Option<ASTMode> {
+        if (!SupportsLocalModeSyntax() || (atOffset == 0 && !Seeing(TokenKind.AT))) {
             return None
         }
-        let ahead = lexer.LookAheadSkipNL(2)
-        if (ahead.size < 2 || !ModalTokensAdjacent(ahead[0], ahead[1])) {
+        let ahead = lexer.LookAheadSkipNL(atOffset + 2)
+        if (ahead.size < atOffset + 2 || (atOffset == 1 && ahead[0].kind != TokenKind.AT)) {
             return None
         }
-        let first = ahead[0]
-        let second = ahead[1]
-        let local = if (first.kind == TokenKind.BITNOT &&
+        let first = ahead[atOffset]
+        let second = ahead[atOffset + 1]
+        if (!ModalTokensAdjacent(first, second)) {
+            return None
+        }
+        if (first.kind == TokenKind.BITNOT &&
             second.kind == TokenKind.IDENTIFIER && second.Value() == "local") {
-            ASTMode.NOT
-        } else if (first.kind == TokenKind.IDENTIFIER && first.Value() == "local") {
-            match (second.kind) {
-                case TokenKind.NOT | TokenKind.NOTEQ => ASTMode.FULL
-                case TokenKind.QUEST => ASTMode.HALF
-                case _ => return None
-            }
-        } else {
-            return None
+            return Some(ASTMode.NOT)
         }
+        if (first.kind == TokenKind.IDENTIFIER && first.Value() == "local") {
+            return match (second.kind) {
+                case TokenKind.NOT | TokenKind.NOTEQ => Some(ASTMode.FULL)
+                case TokenKind.QUEST => Some(ASTMode.HALF)
+                case _ => None
+            }
+        }
+        return None
+    }
+
+    internal func ParseLocalModeSuffix(): Option<ASTModalInfo> {
+        let local = PeekLocalMode(0) ?? return None
         let atPos = Peek().Begin()
         Next() // @
         SkipBlank(TokenKind.NL)
+        let localPos = Peek().Begin()
         Next() // '~' or 'local'; the second mode token is adjacent
         let suffix = Peek()
         // With no separating space the lexer gives `!=`. Keep its trailing `=`
@@ -63,7 +78,7 @@ extend ParserImpl {
         } else {
             Next()
         }
-        let modal = ASTModalInfo(local, atPos, first.Begin(), lastToken.End())
+        let modal = ASTModalInfo(local, atPos, localPos, lastToken.End())
         // Keep local mode fail closed at the parser until Sema, persistence and
         // native lowering can all preserve the modal and its region semantics.
         ParseDiagnoseRefactor(DiagKindRefactor.parse_local_mode_disabled, MakeRange(atPos, modal.end)).Emit()

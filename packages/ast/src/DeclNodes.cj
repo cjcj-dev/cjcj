@@ -621,6 +621,7 @@ public class TypeAliasDecl <: Decl {
 
 public class FuncParamList <: Node {
     public var leftParenPos: Position = INVALID_POSITION
+    public var receiverModal: Option<ASTModalInfo> = None
     public let params: ArrayList<FuncParam> = ArrayList<FuncParam>()
     public var rightParenPos: Position = INVALID_POSITION
     public var variadicArgIndex: UInt64 = 0

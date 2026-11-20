@@ -1885,6 +1885,7 @@ public class ASTCloner {
         if (let Some(src) <- (source as FuncParamList)) {
             if (let Some(dst) <- (target as FuncParamList)) {
                 dst.leftParenPos = src.leftParenPos
+                dst.receiverModal = src.receiverModal
                 for (param in src.params) { if (let Some(cloned) <- (CloneNode(param, visitFunc) as FuncParam)) { dst.params.add(cloned) } }
                 dst.rightParenPos = src.rightParenPos
                 dst.variadicArgIndex = src.variadicArgIndex
@@ -2080,6 +2081,11 @@ public class ASTCloner {
     }
 
     private static func copyType(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
+        if (let Some(src) <- (source as Type)) {
+            if (let Some(dst) <- (target as Type)) {
+                dst.modal = src.modal
+            }
+        }
         if (let Some(src) <- (source as RefType)) {
             if (let Some(dst) <- (target as RefType)) {
                 dst.ref = cloneReference(src.ref)

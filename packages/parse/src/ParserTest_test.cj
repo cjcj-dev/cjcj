@@ -81,6 +81,7 @@ class ParameterListRecoveryTest {
 
 @Test
 class ParseTypePortTest {
+    @When[env != "ohos"]
     @TestCase
     func modalTypeSuffixes(): Unit {
         for ((source, mode) in [("Int64 @local!", ASTMode.FULL), ("Int64 @local?", ASTMode.HALF),
@@ -95,6 +96,7 @@ class ParseTypePortTest {
         }
     }
 
+    @When[env != "ohos"]
     @TestCase
     func localBangDoesNotEatAssignment(): Unit {
         let diag = DiagnosticEngine()
@@ -121,6 +123,7 @@ class ParseTypePortTest {
         }
     }
 
+    @When[env != "ohos"]
     @TestCase
     func localModalCannotBeTypeArgument(): Unit {
         let (ty, diag) = parseTypeNode("Array<Int64 @local?>")
