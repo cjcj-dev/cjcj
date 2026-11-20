@@ -60,6 +60,11 @@ export async function verifyNativeRelease(options, env = process.env) {
   await command(['npx', '--yes', 'zx@8', path.join(root, 'ci/smoke/run_smoke.mjs'),
     path.join(sdk, 'bin/cjc' + target.spec.exeSuffix), path.join(work, 'smoke')],
   {env: {...installedEnv, CJCJ_OFFICIAL_SDK_HOME: path.join(sdk, '.host')}});
+  // The installed compiler passes an oversized final link to ld.lld through a
+  // response file on Windows (!2161); this runs again from the relocated archive.
+  if (target.spec.os === 'windows')
+    await command(['npx', '--yes', 'zx@8', path.join(root, 'tests/upstream_compiler_1120/linker-response.mjs'),
+      path.join(sdk, 'bin/cjc' + target.spec.exeSuffix), path.join(work, 'linker-response')], {env: installedEnv});
   // Compiler smoke is not a lint/LSP macro consumer. Preserve this missing
   // business gate after the independent installed consumers, rather than
   // preventing them from running or promoting a copied installation to PASS.

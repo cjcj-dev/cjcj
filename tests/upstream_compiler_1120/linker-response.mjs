@@ -10,7 +10,7 @@ if (!compiler || !work || ![compiler, work].every(p => path.isAbsolute(p))) {
 }
 
 const windows = process.platform === 'win32';
-const source = path.join(import.meta.dirname, 'local_type_control.cj');
+const source = path.join(import.meta.dirname, 'linker_response_sample.cj');
 const count = 6100;
 const flags = Array(count).fill('-L.').join(' ');
 // The public compiler receives one argument below the Windows process limit;

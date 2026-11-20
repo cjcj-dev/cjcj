@@ -135,7 +135,8 @@ test('component provenance, final std, and Python inputs are fail-closed in the 
   assert.equal(compose.if, undefined, 'dry-run cannot skip installation consumption');
   const checks = await fs.readFile(path.join(root, 'ci/release/verify_native_release.mjs'), 'utf8');
   for (const gate of ['assertNativeReleaseInputs(options)', 'assertSdkCompilerRuntimeAbi({sdk, target})',
-    'selectInstalledColourSdk(sdk,', 'scripts/verify_packaged_cjdb.mjs', 'ci/smoke/run_smoke.mjs', 'readInstalledStdxInputs({sdk,platform:target.spec.llvmPlatform,requireFull:true})'])
+    'selectInstalledColourSdk(sdk,', 'scripts/verify_packaged_cjdb.mjs', 'ci/smoke/run_smoke.mjs', 'readInstalledStdxInputs({sdk,platform:target.spec.llvmPlatform,requireFull:true})',
+    "if (target.spec.os === 'windows')", 'tests/upstream_compiler_1120/linker-response.mjs'])
     assert.ok(checks.includes(gate), gate);
   const stdx = await fs.readFile(path.join(root, 'build/lib/installed-stdx-inputs.mjs'), 'utf8');
   for (const gate of ['STDX_BUILD_INPUTS', "fail('FULL_CONFIGURATION"])
