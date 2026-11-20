@@ -17,15 +17,15 @@ export async function packageInstall({sdk,target,version,officialSdkRoot,archive
  assertNoVerifierReportArtifacts([sdk]);assertSdkCompilerRuntimeAbi({sdk,target});
  await assertSdkPathParity(sdk,{officialRoot:officialSdkRoot,target:target.spec.key});
  const work=path.join(path.dirname(archive),'package-test');
- const consumption=packageConsumption(target);
+ const consumption=packageConsumption(target),lspMacro=target.spec.key==='windows-x64'&&consumption.status==='EXECUTED';
  if(consumption.status==='EXECUTED'){
-  await verifyInstall({sdk,work:work+'/installed',platform:target.spec.llvmPlatform,finalStd:true,precompiledStdx:true});
+  await verifyInstall({sdk,work:work+'/installed',platform:target.spec.llvmPlatform,finalStd:true,precompiledStdx:true,lspMacro});
  }else await atomicJson(path.join(work,'cross-consumption.json'),consumption);
  const inputs=await installedInputs(sdk,target.spec.llvmPlatform);
  await writeInstalledReleaseManifest({stage:sdk,platform:target.spec.llvmPlatform,...inputs});
  await atomicJson(path.join(sdk,'BUILD-MANIFEST.json'),{version,target:target.spec.key,consumption,...inputs});
  const test=consumption.status==='EXECUTED'?{commands:[{argv:[process.execPath,fileURLToPath(new URL('../../bootstrap/sdk-verify-install.mjs',import.meta.url)),
-  '--sdk','${install}','--work','${work}/relocated','--platform',target.spec.llvmPlatform,'--final-std','--precompiled-stdx']}]}:{commands:[],consumption};
+  '--sdk','${install}','--work','${work}/relocated','--platform',target.spec.llvmPlatform,'--final-std','--precompiled-stdx',...(lspMacro?['--lsp-macro']:[])]}]}:{commands:[],consumption};
  const archived=await archiveInstall({install:sdk,archive,format:target.spec.archiveFormat,test,vars:{work},records:[]});
  return {...archived,consumption};
 }

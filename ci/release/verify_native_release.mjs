@@ -10,6 +10,7 @@ import {parseArgs} from 'node:util';
 import {assertNativeReleaseInputs} from './native-release-inputs.mjs';
 import {readJson, inventory, command} from '../bootstrap/sdk-flow.mjs';
 import {selectInstalledColourSdk, colourEnvironment} from '../prepare-colour-sdk.mjs';
+import {consumeInstalledLspMacro} from './installed-lsp-macro.mjs';
 import {consumeWindowsProfiler} from './windows-profiler.mjs';
 import {crossStdArguments} from './cross-std-arguments.mjs';
 import {verifyCrossRuntime} from './cross-runtime.mjs';
@@ -50,7 +51,7 @@ async function consumeWindowsLint(sdk,work,env) {
 
 export async function verifyNativeRelease(options, env = process.env) {
   const {sdk, platform, version, sourceSha, runtimeRef, releaseKey = '', std, crossRoot, work} = options;
-  const {target, release, toolApplicability} = await assertNativeReleaseInputs(options);
+  const {target, release, toolApplicability} = await assertNativeReleaseInputs(options,env);
   if (platform==='windows-x64') {
     const pair=nativePair(env),stage=await readJson(path.join(sdk,'STAGE-INPUTS.json'));
     if(!pair || stage.selection?.targetComponents?.llvm?.commit!==pair.llvm
@@ -95,12 +96,11 @@ export async function verifyNativeRelease(options, env = process.env) {
     await command([process.execPath, path.join(root, 'tests/upstream_compiler_1120/linker-response.mjs'),
       path.join(sdk, 'bin/cjc' + target.spec.exeSuffix), path.join(work, 'linker-response')], {env: installedEnv});
   if(target.spec.os==='windows'){
+    await consumeInstalledLspMacro({sdk,work,platform:target.spec.llvmPlatform,env:installedEnv});
     await consumeWindowsLint(sdk,work,installedEnv);
     await consumeWindowsProfiler(sdk,work,installedEnv);
   }
-  // Compiler smoke is not a lint/LSP macro consumer. Preserve this missing
-  // business gate after the independent installed consumers, rather than
-  // preventing them from running or promoting a copied installation to PASS.
+  // Semantic success does not excuse mismatched producer or installation facts.
   const pending=Object.entries(toolApplicability).filter(([,row])=>row.applicability?.status==='NOT_CONSUMED'||(platform==='windows-x64'&&!row.ready)).map(([name])=>name);
   if(pending.length)throw new Error('NATIVE_RELEASE_TOOL_CONSUMPTION_NOT_RUN '+pending.join(','));
   console.log(`NATIVE_RELEASE_CONSUMED platform=${platform} version=${version} source=${sourceSha}`);

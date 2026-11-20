@@ -2,6 +2,7 @@
 // Native targets own compilation and installation. This file only orders them,
 // copies explicitly selected outputs, tests that installation, and archives it.
 import fs from 'node:fs/promises';
+import {zipCommand,checkArchiveFormat} from './sdk-archive.mjs';
 import {fstatSync} from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -321,12 +322,11 @@ export async function archiveInstall({install, archive, format = 'tar.gz', test,
   const result={install,archive,pending,readOnlySource,status:'WIP',commands:[]};
   try {
   if (format === 'tar.gz') await command(['tar', '-czf', pending, '-C', path.dirname(install), path.basename(install)], {records});
-  else if (format === 'zip') await command(process.platform==='win32'
-    ? ['tar','-a','-cf',pending,path.basename(install)]
-    : ['zip','-qyr',pending,path.basename(install)], {cwd:path.dirname(install),records});
+  else if (format === 'zip') await command(zipCommand('create',pending,path.basename(install)), {cwd:path.dirname(install),records});
+  await checkArchiveFormat(pending,format);
   const extracted = pending+'.unpacked'; await fs.mkdir(extracted);
   if (format === 'tar.gz') await command(['tar', '-xzf', pending, '-C', extracted], {records});
-  else await command(process.platform==='win32'?['tar','-xf',pending,'-C',extracted]:['unzip','-q',pending,'-d',extracted],{records});
+  else await command(zipCommand('extract',pending,extracted),{records});
   // Exercise relocation with the old private installation path unavailable.
   // Keep the original bytes and restore them even when the consumer rejects.
   // Read-only producer inputs cannot be renamed. Such callers isolate the

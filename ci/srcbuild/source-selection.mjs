@@ -5,6 +5,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {makeRepos,REPO_NAMES} from '../../build/lib/config.mjs';
+export const windowsToolsCommit='fb66583a50e30ff20cd04c7d0c71dcf6acad5beb';
+export function windowsToolsSource(env) {
+  const repo=env.WINDOWS_TOOLS_REPOSITORY;
+  if(!repo&&env.GITHUB_ACTIONS!=='true')return {url:'https://github.com/cjcj-dev/cjcj-tools.git',tag:windowsToolsCommit};
+  if(!/^[\w.-]+\/[\w.-]+$/.test(repo||'')||repo.split('/').some(s=>s==='.'||s==='..'))throw Error('WINDOWS_TOOLS_READ_REPOSITORY_REQUIRED');
+  return {url:new URL(repo,env.GITHUB_SERVER_URL+'/').href,tag:windowsToolsCommit};
+}
 export function workflowSourceSelection(env=process.env) {
   const overrides=JSON.parse(env.CJCJ_SOURCE_SELECTION||'{}');
   if(!overrides||Array.isArray(overrides)||typeof overrides!=='object'
@@ -17,7 +24,7 @@ export function workflowSourceSelection(env=process.env) {
   // Only the native Windows SDK selects this paired producer. Propagate it
   // through the ordinary fetch options and their persisted workspace record.
   if(env.CJCJ_SRCBUILD_TARGET==='windows-x64' && env.CJCJ_NATIVE_RUNTIME_ARTIFACT) {
-    const pair={url:'https://github.com/cjcj-dev/cjcj-tools.git',tag:'55ac194ac5f9bfe8e30d14e42c2f2ec273ac574f'};
+    const pair=windowsToolsSource(env);
     if(overrides.tools && Object.entries(overrides.tools).some(([k,v])=>pair[k]!==v))
       throw Error('WINDOWS_TOOLS_SOURCE_PAIR_CHANGED');
     overrides.tools=pair;

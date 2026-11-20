@@ -130,7 +130,14 @@ node --test ci/release/bootstrap_entries.test.mjs \
 
 The source workflow requires `native_inputs_artifact` and its original
 `native_inputs_run_id`. The artifact contains complete N/R/AST native install
-roots and the two paired tools modules exported with
+roots. On Windows the job checks out the exact workflow SHA for both the H1
+seed and the next compiler stages; Node runs the job-installed zx CLI.
+Native Windows validation requires a private workflow repository with the selected cjcj commit,
+repository variable WINDOWS_TOOLS_REPOSITORY (owner/name) containing the paired tools commit,
+and a contents-read WINDOWS_TOOLS_READ_TOKEN for that repository. Neither a pin nor this
+workflow supplies those objects or grants that access.
+Do not put adapter sources or a tools.privateRoot in the Windows artifact.
+The Darwin adapter currently uses the two paired modules exported with
 `node ci/bootstrap/deploy-native-tools.mjs TOOLS_REPO COMMIT EMPTY_DESTINATION`.
 Its `locations.json` records `platform`, `installations` (each has relative
 `install`, original `buildResult`, and `configuration`) and

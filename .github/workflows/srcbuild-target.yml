@@ -2,6 +2,9 @@ name: One source target / verified SDK phases
 
 on:
   workflow_call:
+    secrets:
+      WINDOWS_TOOLS_READ_TOKEN:
+        required: false
     inputs:
       native_runtime_artifact:
         description: Existing native-runtime-install artifact prefix
@@ -244,6 +247,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     env: &source-environment
+      WINDOWS_TOOLS_REPOSITORY: ${{ vars.WINDOWS_TOOLS_REPOSITORY }}
       CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
       CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
@@ -2163,11 +2167,21 @@ jobs:
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     env: *source-environment
     steps:
+      - name: Require private Windows source job
+        shell: bash
+        env:
+          PRIVATE: ${{ github.event.repository.private }}
+        run: test "$PRIVATE" = true
       - *checkout-cjcj
       - *actions-setup-node-v7-1-0
       - uses: ./.github/actions/native-windows-tools
         with:
           native-compiler: 'true'
+      - name: Install the Windows bootstrap zx CLI for Node
+        shell: bash
+        run: |
+          npm install --prefix "$RUNNER_TEMP/source-zx" --no-package-lock --no-save zx@8
+          node --input-type=module -e 'import fs from "node:fs"; import path from "node:path"; const root=path.join(process.env.RUNNER_TEMP,"source-zx","node_modules","zx"); const cli=fs.realpathSync(path.join(root,JSON.parse(fs.readFileSync(path.join(root,"package.json"))).bin.zx)); fs.appendFileSync(process.env.GITHUB_ENV,"CJCJ_ZX_CLI="+cli+"\n")'
       - *receive-selected-native-inputs-before-choosing-the-host
       - name: Receive optional completed N and AST installation
         if: inputs.native_build_inputs_artifact != ''
@@ -2185,6 +2199,14 @@ jobs:
       - *install-build-dependencies
       - *start-sccache
       - *generate-sdk-version
+      - name: Checkout paired tools in the ordinary fetch workspace
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.WINDOWS_TOOLS_REPOSITORY }}
+          ref: ${{ env.TOOLS_REF }}
+          token: ${{ secrets.WINDOWS_TOOLS_READ_TOKEN }}
+          path: .srcbuild/workspace/cjcj-tools
+          persist-credentials: false
       - *download-pinned-source
       - *verify-source-revisions
       - *receive-fixed-native-runtime-installation

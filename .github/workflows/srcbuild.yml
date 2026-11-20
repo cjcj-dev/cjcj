@@ -2,6 +2,9 @@ name: Self-hosted source SDK and final std
 
 on:
   workflow_call:
+    secrets:
+      WINDOWS_TOOLS_READ_TOKEN:
+        required: false
     outputs:
       std_artifact:
         description: Native final std name for a single runnable source target
@@ -270,6 +273,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     uses: ./.github/workflows/srcbuild-target.yml
+    secrets:
+      WINDOWS_TOOLS_READ_TOKEN: ${{ secrets.WINDOWS_TOOLS_READ_TOKEN }}
     with:
       native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
       native_build_inputs_run_id: ${{ inputs.native_build_inputs_run_id }}

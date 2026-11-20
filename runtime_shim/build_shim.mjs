@@ -107,8 +107,8 @@ await $({nothrow: true})`set -o pipefail; nm -C ${shimObject} | grep -cE ' T (LL
 // Macro runtime layout. The compiler resolves its runtime relative to its binary,
 // so the build-tree binary needs a sibling runtime symlink. Installed SDKs already
 // have that layout and need no special handling.
-if (process.env.CANGJIE_HOME && await isDirectory(`${process.env.CANGJIE_HOME}/runtime`)) {
+if (process.env.CANGJIE_HOME && await isDirectory(`${norm(process.env.CANGJIE_HOME)}/runtime`)) {
   await fs.mkdir(`${repo}/target/release`, {recursive: true});
-  await $`ln -sfn ${process.env.CANGJIE_HOME}/runtime ${repo}/target/release/runtime`;
-  console.log(`linked runtime layout: ${repo}/target/release/runtime -> ${process.env.CANGJIE_HOME}/runtime`);
+  await $`ln -sfn ${norm(process.env.CANGJIE_HOME)}/runtime ${repo}/target/release/runtime`;
+  console.log(`linked runtime layout: ${repo}/target/release/runtime -> ${norm(process.env.CANGJIE_HOME)}/runtime`);
 }

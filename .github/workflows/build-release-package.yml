@@ -87,6 +87,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 180
     env:
+      WINDOWS_TOOLS_REPOSITORY: ${{ vars.WINDOWS_TOOLS_REPOSITORY }}
       CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
       CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
       CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
@@ -146,12 +147,14 @@ jobs:
         if: inputs.validation_run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          PRIVATE: ${{ github.event.repository.private }}
           SOURCE_RUN_ID: ${{ inputs.validation_run_id }}
         shell: pwsh
         run: |
+          if ($env:PRIVATE -ne 'true') { throw 'private validation repository required' }
           if ($env:SOURCE_RUN_ID -notmatch '^[1-9][0-9]*$') { throw 'invalid producer run id' }
           $run = Invoke-RestMethod "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID" -Headers @{Authorization="Bearer $env:GH_TOKEN"}
-          if ($run.head_sha -ne $env:GITHUB_SHA -or $run.head_repository.full_name -ne $env:GITHUB_REPOSITORY -or $run.conclusion -ne 'success') { throw 'producer commit, repository or conclusion differs' }
+          if ($run.path -ne '.github/workflows/srcbuild.yml' -or $run.head_sha -ne $env:GITHUB_SHA -or $run.head_repository.full_name -ne $env:GITHUB_REPOSITORY -or $run.conclusion -ne 'success') { throw 'producer commit, repository or conclusion differs' }
 
       - name: Download complete native SDK
         uses: actions/download-artifact@v8

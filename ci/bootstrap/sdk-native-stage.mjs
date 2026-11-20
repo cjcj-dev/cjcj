@@ -1,7 +1,9 @@
 #!/usr/bin/env zx
 // R stdlib/build.py owns its CMake graph; cjpm owns the compiler workspace.
 import fs from 'node:fs/promises';
-import {npxZx} from './zx-cli.mjs';
+import {shimCommand} from './zx-cli.mjs';
+import {withWindowsCompilerLinks} from './windows-compiler-links.mjs';
+import {withSeedOptimization} from '../release/trimpath.mjs';
 import path from 'node:path';
 import {selectBuildResources} from '../build-resources.mjs';
 import {fileURLToPath} from 'node:url';
@@ -50,6 +52,12 @@ export async function prepareRuntimeInputs({runtime, link, native, buildType = '
     if (!equal(await inventory(pending), expected)) throw new Error('STD_RUNTIME_INPUT_CHANGED_DURING_COPY');
   }, signal);
   console.log('STD_RUNTIME_INPUT_PUBLISHED '+link);
+}
+function windowsCompilerEnvironment(env,shim,install) {
+  const mingw=env.CJCJ_WINDOWS_TOOLCHAIN||env.MINGW_PATH;
+  if(!mingw||!path.isAbsolute(mingw))throw Error('WINDOWS_NATIVE_COMPILER_TOOLCHAIN');
+  return {...env, MINGW_PATH:mingw, CC:path.join(mingw,'bin/clang.exe').replaceAll('\\','/'),
+    CXX:path.join(mingw,'bin/clang++.exe').replaceAll('\\','/'), CJCJ_LLVM_SHIM_O:path.join(install,shim.object.path)};
 }
 export async function nativeStage(options, {signal} = {}) {
   signal?.throwIfAborted();
@@ -134,7 +142,25 @@ export async function nativeStage(options, {signal} = {}) {
       note:'native target/install '+commit});
     } finally { await atomicJson(output+'.commands.json',records); }
   } else if(kind==='h1') {
-    if(native.os!=='linux') {
+    if(native.os==='win32') {
+      if(!host)throw Error('H1_HOST_REQUIRED');
+      const shim=await compilerNativeShim({install:options['shim-install'],nativeInstall:sdk,compilerCommit:commit});
+      const henv=windowsCompilerEnvironment(cleanSdkEnvironment(host,platform,env),shim,options['shim-install']||sdk);
+      const manifest=path.join(source,'cjpm.toml'),before=await fs.readFile(manifest);
+      const script=path.join(source,'runtime_shim/build_shim.mjs');
+      try {
+        await command(await shimCommand(script,henv,options.zx),{cwd:source,env:henv,records});
+        await fs.writeFile(manifest,withSeedOptimization(before.toString()));
+        await prepareTrimpath(source);
+        const sourceChanges=await withWindowsCompilerLinks(source,sdk,henv.MINGW_PATH,()=>
+          command([path.join(host,'tools/bin/cjpm.exe'),'build','-j',jobs],{cwd:source,env:henv,records}));
+        const product=path.join(output,'bin/cjcj-stage1.exe');
+        await fs.mkdir(path.dirname(product),{recursive:true});
+        await fs.copyFile(await resolveProductBinary(path.join(source,'target/release/bin'),'h1',{windows:true}),product);
+        await atomicJson(path.join(output,'bin/build-inputs.json'),{producer:'sdk-native-stage:windows-h1',
+          host,native:sdk,nativeShim:shim,source:commit,sourceRoot:source,sourceChanges,visibleOptionsOnly:optionVisibility,sha256:await fileDigest(product)});
+      } finally {await fs.writeFile(manifest,before);await atomicJson(output+'.commands.json',records);}
+    } else if(native.os!=='linux') {
       // Keep the existing native producer for platforms without the ELF --wrap adapter.
       if(!host||!options['private-tools'])throw new Error('H1_HOST_AND_NATIVE_ADAPTER_REQUIRED');
       await command([process.execPath,path.join(options['private-tools'],'ts/src/sharedbuild/cjcj-stage1.mjs')],{
@@ -220,16 +246,17 @@ export async function nativeStage(options, {signal} = {}) {
     const shimInstall=options['shim-install']||sdk;
     const shim=await compilerNativeShim({install:options['shim-install'],nativeInstall:sdk,compilerCommit:commit});
     env.CJCJ_LLVM_SHIM_O=path.join(shimInstall,shim.object.path);
+    if(native.os==='win32')Object.assign(env,windowsCompilerEnvironment(env,shim,shimInstall));
     const shimScript=path.join(source,'runtime_shim/build_shim.mjs');
-    await command(!options.zx && native.os==='win32' ? await npxZx(shimScript,env) :
-      [options.zx||'zx',shimScript],{cwd:source,env,records});
+    await command(await shimCommand(shimScript,env,options.zx),{cwd:source,env,records});
     try {
       await prepareTrimpath(source);
       // A completed user installation need not contain the bootstrap .host
       // tree. The existing explicit host option selects the package manager
       // and its execution libraries; the selected SDK still supplies cjc/std.
       const packageManagerSdk=host??path.join(sdk,'.host');
-      await command([path.join(packageManagerSdk,'tools/bin/cjpm'+native.exe),'build',...(options['target-dir']?['--target-dir',target]:[]),'-j',jobs],{cwd:source,env:cleanSdkEnvironment(sdk,platform,env,packageManagerSdk),records});
+      const build=()=>command([path.join(packageManagerSdk,'tools/bin/cjpm'+native.exe),'build',...(options['target-dir']?['--target-dir',target]:[]),'-j',jobs],{cwd:source,env:cleanSdkEnvironment(sdk,platform,env,packageManagerSdk),records});
+      if(native.os==='win32')await withWindowsCompilerLinks(source,sdk,env.MINGW_PATH,build);else await build();
     } finally { await fs.writeFile(path.join(source,'cjpm.toml'), before); }
     const product=await resolveProductBinary(path.join(target,'release/bin'),options.phase||'stage2',{windows:native.os==='win32'});
     await assembleDirectory(output, async destination => {

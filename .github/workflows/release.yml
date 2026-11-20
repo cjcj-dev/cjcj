@@ -170,6 +170,8 @@ jobs:
     name: phase 3 · windows-x64 / source SDK and final std
     uses: ./.github/workflows/srcbuild.yml
     needs: package-p2-linux-aarch64
+    secrets:
+      WINDOWS_TOOLS_READ_TOKEN: ${{ secrets.WINDOWS_TOOLS_READ_TOKEN }}
     with:
       cangjie_ref: ${{ inputs.version }}
       native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}

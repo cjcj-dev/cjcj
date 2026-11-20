@@ -40,8 +40,17 @@ export async function configureGhaInputs(env=process.env) {
   const existing=new Map(Object.values(config.repos).map(repo=>[repo.url,config.repoPath(repo.name)]));
   // The workflow checkout has no required .git suffix in its remote URL.
   const origin=windows?(await capture('git',['-C',sources.compiler,'remote','get-url','origin'])).stdout.trim():'';
-  if(windows)existing.set(origin.replace(/(?:\.git)?$/,'.git'),sources.compiler);
+  if(windows){
+    if(locations.tools?.privateRoot!==undefined)throw Error('WINDOWS_H1_ARTIFACT_SOURCE');
+    if(!env.CJCJ_ZX_CLI||!path.isAbsolute(env.CJCJ_ZX_CLI)||!(await fs.stat(env.CJCJ_ZX_CLI)).isFile())throw Error('WINDOWS_BOOTSTRAP_ZX_CLI');
+    const head=(await capture('git',['-C',sources.compiler,'rev-parse','HEAD'])).stdout.trim();
+    if(!/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'')||head!==env.GITHUB_SHA)throw Error('WINDOWS_BOOTSTRAP_JOB_CHECKOUT');
+    // H builds the seed from the same fixed source and macro ABI as C2/C3.
+    selection.h1={repository:origin,commit:head};
+    sources.h1=sources.compiler;
+  }
   for(const [name,{repository:url,commit}] of Object.entries({...selection,...stdDependencies})) {
+    if(windows&&name==='h1')continue;
     const source=path.join(workspace,'native-sources',name);
     await fs.mkdir(path.dirname(source),{recursive:true});
     if(await fs.stat(source).catch(error=>{if(error.code==='ENOENT')return null;throw error;})) {
@@ -85,9 +94,9 @@ export async function configureGhaInputs(env=process.env) {
   if (pair && (path.resolve(selectedHost.install) !== path.resolve(env.CJCJ_BOOTSTRAP_BASE)
     || !selectedHost.archive || path.resolve(selectedHost.archive) !== path.resolve(env.CJCJ_BOOTSTRAP_BASE_ARCHIVE || '')))
     throw new Error('GHA_NATIVE_SELECTED_HOST_CHANGED');
-  const tools={...locations.tools,
+  const tools={...(windows?{}:locations.tools),
     ...(locations.tools?.privateRoot===undefined?{}:{privateRoot:member(locations.tools.privateRoot)}),
-    cc:env.CC||'clang',cxx:env.CXX||'clang++',launcher:env.CMAKE_CXX_COMPILER_LAUNCHER||'sccache',zx:'zx'};
+    cc:env.CC||'clang',cxx:env.CXX||'clang++',launcher:env.CMAKE_CXX_COMPILER_LAUNCHER||'sccache',zx:windows?env.CJCJ_ZX_CLI:'zx'};
   if(env.GITHUB_ENV)await fs.appendFile(env.GITHUB_ENV,'CJCJ_BOOTSTRAP_WORK='+path.join(workspace,'native-bootstrap')+'\n');
   return prepareNativeInputs({platform,sources,installations,tools,sourceSelection:selection,
     stdDependencies:Object.fromEntries(Object.entries(stdDependencies).map(([name,row])=>[name,{...row,root:sources[name]}])),

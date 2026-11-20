@@ -8,6 +8,7 @@ import {readJson, fileDigest} from '../bootstrap/sdk-flow.mjs';
 import {getBuildTarget} from '../../build/lib/build-target.mjs';
 import {getReleasePlatform} from '../../build/lib/targets.mjs';
 import {sourceOwnedTools} from '../../build/lib/release-component-provenance.mjs';
+import {windowsToolsSource} from '../srcbuild/source-selection.mjs';
 import {sourceToolPayloads} from './source-tool-payloads.mjs';
 import {retainedToolPath, toolName} from '../../build/srcbuild/tool-layout.mjs';
 import {installedStageOutput} from '../srcbuild/lib/installed-stage-output.mjs';
@@ -19,7 +20,7 @@ export function releaseSelection(platform, releaseKey = '') {
     throw new Error('NATIVE_RELEASE_PLATFORM');
   return {target, release, tools: ['cjpm', ...sourceOwnedTools(target.spec.os === 'windows')]};
 }
-export async function assertNativeReleaseInputs({sdk, platform, releaseKey = '', version, sourceSha, runtimeRef}) {
+export async function assertNativeReleaseInputs({sdk, platform, releaseKey = '', version, sourceSha, runtimeRef},env=process.env) {
   const selection = releaseSelection(platform, releaseKey), {target, tools} = selection;
   if (!/^[a-f0-9]{40}$/.test(sourceSha || '') || !/^[a-f0-9]{40}$/.test(runtimeRef || ''))
     throw new Error('NATIVE_RELEASE_FIXED_SOURCE_REQUIRED');
@@ -29,6 +30,7 @@ export async function assertNativeReleaseInputs({sdk, platform, releaseKey = '',
     throw new Error('NATIVE_RELEASE_SOURCE_MISMATCH');
   const facts = await readJson(path.join(sdk, 'BUILD-MANIFEST.json'));
   if (facts.target !== platform || facts.version !== version) throw new Error('NATIVE_RELEASE_PACKAGE_IDENTITY');
+  const expectedTools=platform==='windows-x64'?windowsToolsSource(env):null;
   const toolInputs = await readJson(path.join(sdk, 'TOOLS-INPUTS.json'));
   for (const tool of tools) {
     const name = tool + target.spec.exeSuffix, publicPath = 'tools/bin/' + name;
@@ -49,6 +51,7 @@ export async function assertNativeReleaseInputs({sdk, platform, releaseKey = '',
     const source = produced.producer?.source, build = produced.producer?.build;
     const rows = facts.components?.filter(row => row.component === tool) ?? [];
     if (source?.status !== 'resolved' || !source.repository || !/^[a-f0-9]{40}$/.test(source.commit || '')
+        || expectedTools&&(source.repository!==expectedTools.url||source.commit!==expectedTools.tag)
         || rows.length !== 1 || !isDeepStrictEqual(rows[0].source, source))
       throw new Error(`NATIVE_RELEASE_TOOL_SOURCE ${tool}`);
     if (build?.rc !== 0 || build.platform !== target.spec.llvmPlatform

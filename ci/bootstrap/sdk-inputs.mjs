@@ -91,7 +91,7 @@ export async function validateSourceInputs(input) {
     // normal bootstrap and historical C2 retain their H1 compatibility check.
     if(name==='compiler'||name==='h1'&&input.stage2?.mode!=='ordinary-cjpm') {
       const {stdout}=await execute('git',['-C',row.repository,'show',row.commit+':packages/macro/src/InvokeUtil.cj']);
-      if(stdout!==expectedMacro)throw new Error('NATIVE_MACRO_SOURCE '+name);
+      if((process.platform==='win32'?stdout.replaceAll('\r\n','\n'):stdout)!==(process.platform==='win32'?expectedMacro.replaceAll('\r\n','\n'):expectedMacro))throw new Error('NATIVE_MACRO_SOURCE '+name);
     }
   }
   if(input.stage2) {
@@ -247,6 +247,14 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
         ||commands[1].argv.includes('-DCJCJ_LEGACY_HOST_RUNTIME')===hostRuntimeSupportsConfigV1
         ||commands[2].argv?.[0]!==path.join(host.install,'tools/bin/cjpm')||commands[2].argv?.[1]!=='build')
         throw new Error('H1_REUSE_PRODUCER_MISMATCH');
+    } else if(native.os==='win32') {
+      const shim=await compilerNativeShim({install:rows.compiler.shimInstall,nativeInstall:rows.llvm.install,compilerCommit:h1Commit});
+      if(facts.producer!=='sdk-native-stage:windows-h1'||!isDeepStrictEqual(facts.nativeShim,shim)
+        ||!path.isAbsolute(facts.sourceRoot||'')||!Array.isArray(commands)||commands.length!==2
+        ||commands.some(row=>row.cwd!==facts.sourceRoot||row.rc!==0||row.signal||row.error)
+        ||commands[0].argv?.at(-1)!==path.join(facts.sourceRoot,'runtime_shim/build_shim.mjs')
+        ||commands[1].argv?.[0]!==path.join(host.install,'tools/bin/cjpm.exe')||commands[1].argv[1]!=='build')
+        throw Error('H1_REUSE_PRODUCER_MISMATCH');
     } else if(!tools.privateRoot||!Array.isArray(commands)||commands.length!==1
       ||commands[0].rc!==0||commands[0].signal||commands[0].cwd!==rows.h1.repository
       ||commands[0].argv?.[1]!==path.join(path.resolve(tools.privateRoot),'ts/src/sharedbuild/cjcj-stage1.mjs'))
@@ -255,7 +263,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   }
   // Only the unchanged non-Linux producer still consumes private tools.
   // Linux preparation and H1 reuse must not require retired private scripts.
-  if(native.os!=='linux'&&!installations.stage2) {
+  if(native.os==='darwin'&&!installations.stage2) {
     if(!tools.privateRoot)throw Error('NATIVE_H1_PRIVATE_PRODUCER_REQUIRED');
     tools.privateRoot=path.resolve(tools.privateRoot);
     for(const rel of ['cjcj-stage1.mjs','stage1-transform.mjs'])
