@@ -22,6 +22,13 @@ func exercise(n: Int64): Int64 {
     return v
 }
 
+func invokeCaptured(f: (() -> Int64) @local?): Int64 { return f() }
+
+func capturedValue(n: Int64): Int64 {
+    let c = Cell(n) @local!
+    return invokeCaptured({ => c.read() })
+}
+
 main(): Int64 {
     let before = getAllocatedLocalObjectSize()
     let answer = exercise(73)
@@ -30,5 +37,6 @@ main(): Int64 {
     if (answer != 73) { return 21 }
     if (activeBytes <= before) { return 22 }
     if (after != before) { return 23 }
+    if (capturedValue(37) != 37 || getAllocatedLocalObjectSize() != after) { return 24 }
     return 0
 }

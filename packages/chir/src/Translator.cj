@@ -10249,6 +10249,7 @@ public class Translator {
         if (!target.TestAttr(AstAttribute.STATIC) && target.outerDecl.isSome()) {
             var base: Option<AstExpr> = Some(member)
             var targetBaseAstTy: Option<AstTy> = None
+            var targetBaseMode = ModalInfo()
             let path = ArrayList<String>()
             var readOnly = false
             while (base.isSome()) {
@@ -10267,6 +10268,7 @@ public class Translator {
                         targetBaseAstTy = Some(RequireAstTy((maTarget.outerDecl ??
                             throw IllegalStateException("faithful AST2CHIR member target has no outer declaration"))))
                         CJC_ASSERT(targetBaseAstTy.getOrThrow().IsStruct() || targetBaseAstTy.getOrThrow().IsClass())
+                        targetBaseMode = ASTModal2CHIRModal(ma.baseExpr.getOrThrow().resolvedMode)
                         base = ma.baseExpr
                         continue
                     }
@@ -10360,6 +10362,11 @@ public class Translator {
                 baseValGenericTy.GetInstMap(instMap, builder)
             }
             var targetBaseTy = chirTy.TranslateType(targetBaseAstTy.getOrThrow())
+            if (opts.IsLocalModeAnalysis()) {
+                // An unqualified member uses the implicit receiver; an explicit projection uses its base.
+                let mode = if (base.isNone()) { strippedBaseValueTy.GetModalInfo() } else { targetBaseMode }
+                targetBaseTy = builder.WithModal(targetBaseTy, mode)
+            }
             if (targetBaseTy.GetRefDims() > baseValRefDims) {
                 baseValRefDims = targetBaseTy.GetRefDims()
             }

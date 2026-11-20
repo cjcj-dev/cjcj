@@ -462,6 +462,20 @@ public func GenerateGenericBaseClassMangleName(paramNum: Int64): String {
     return MANGLE_CLOSURE_GENERIC_PREFIX + "${paramNum}" + MANGLE_WILDCARD_PREFIX
 }
 
+public func GenerateGenericBaseClassMangleName(funcTy: FuncType): String {
+    let params = funcTy.GetParamTypes()
+    var name = GenerateGenericBaseClassMangleName(params.size)
+    for (i in 0..params.size) {
+        let ty = params[i].StripAllRefs()
+        if (ty.IsModal()) {
+            name += i.toString() + (if (ty.GetModalInfo().local == CHIRMode.MUST) { "L_" } else { "l_" })
+        }
+    }
+    let ret = funcTy.GetReturnType().StripAllRefs()
+    if (ret.IsModal()) { name += (if (ret.GetModalInfo().local == CHIRMode.MUST) { "rL_" } else { "rl_" }) }
+    return name
+}
+
 public func GenerateInstantiatedBaseClassMangleName(funcType: FuncType): String {
     return MANGLE_CLOSURE_INSTANTIATE_PREFIX + MangleType(funcType)
 }
