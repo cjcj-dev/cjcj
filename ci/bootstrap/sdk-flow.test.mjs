@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {retainedToolPath,toolName} from '../../build/srcbuild/tool-layout.mjs';
 import {buildFlow, targetOrder, copyOutputs, privateRoot, fileDigest} from './sdk-flow.mjs';
 
 const parent = process.env.SDK_FLOW_TEST_ROOT || (process.env.RELEASE_EVIDENCE_TEST_ROOT && path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT,'sdk-flow'));
@@ -372,8 +373,8 @@ fs.writeFileSync(out+'.c','#include <stdio.h>\\nint main(void){puts("hello from 
   'third_party/flatbuffers/bin/flatc','stdx/'+tuple+'/fixture',
   ...['llc','llvm-as','llvm-dis','opt'].map(name=>'third_party/llvm/bin/'+name),
   ...['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'].flatMap(name=>{
-    const privateDir={LSPServer:'lsp',cjlint:'cjlint',cjhead:'cjhead'}[name];
-    return ['tools/bin/'+name,'tools/bin/'+name+'.entry','.target-tools/tools/'+(privateDir?privateDir+'/':'')+'bin/'+name];
+    const to='tools/bin/'+name;
+    return [to,to+'.entry',retainedToolPath({name,to,producer:toolName(name)})];
   }),
   'tools/config/cangjie-format.toml','tools/config/cangjie-repo.toml','tools/dtsparser/analysis.js','tools/bin/node'])await put(output+'/'+rel,'finite native artifact');
  const runtimeRoot=path.join(workspace,'cangjie_runtime','runtime');
