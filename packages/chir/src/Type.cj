@@ -1490,13 +1490,10 @@ public open class CustomType <: Type {
             return (this, false)
         }
         let customTypeDef = GetCustomTypeDef()
-        let instMap = HashMap<Int64, (GenericType, Type)>()
-        GetInstMap(instMap, builder)
-        let currentIdx = path[0]
-        let member = customTypeDef.GetAllInstanceVars()[Int64(currentIdx)]
+        let currentIdx = Int64(path[0])
+        let member = customTypeDef.GetAllInstanceVars()[currentIdx]
         let isReadOnly = member.TestAttr(Attribute.READONLY)
-        let memberTy = builder.WithModal(ReplaceRawGenericArgType(member.ty, instMap, builder),
-            if (member.TestAttr(Attribute.DEMODE)) { ModalInfo() } else { modal })
+        let memberTy = GetInstantiatedMemberTys(builder)[currentIdx]
         if (path.size > 1) {
             var pureMemberTy = memberTy
             while (pureMemberTy.IsRef()) {
@@ -1534,8 +1531,8 @@ public open class CustomType <: Type {
         }
         let result = ArrayList<Type>()
         for (member in def.GetDirectInstanceVars()) {
-            result.add(builder.WithModal(ReplaceRawGenericArgType(member.ty, replaceTable, builder),
-                if (member.TestAttr(Attribute.DEMODE)) { ModalInfo() } else { modal }))
+            let ty = ReplaceRawGenericArgType(member.ty, replaceTable, builder)
+            result.add(if (IsModal() && !member.TestAttr(Attribute.DEMODE)) { builder.WithModal(ty, modal) } else { ty })
         }
         return result
     }
@@ -1544,7 +1541,7 @@ public open class CustomType <: Type {
         let out = ArrayList<Type>()
         if (let Some(classTy) <- (this as ClassType)) {
             if (let Some(superTy) <- classTy.GetSuperClassTy(builder: builder)) {
-                let superView = (builder.WithModal(superTy, modal) as ClassType).getOrThrow()
+                let superView = if (IsModal()) { (builder.WithModal(superTy, modal) as ClassType).getOrThrow() } else { superTy }
                 for (fieldTy in superView.GetInstantiatedMemberTys(builder)) {
                     out.add(fieldTy)
                 }

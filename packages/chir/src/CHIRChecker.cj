@@ -961,6 +961,12 @@ public class CHIRChecker {
 
     private func CheckTerminator(expr: Expression, topLevelFunc: Function): Unit {
         let actionMap = HashMap<ExprKind, () -> Unit>([
+            (ExprKind.EXCLAVE, { =>
+                ShouldNotHaveResult(expr, topLevelFunc)
+                OperandNumIsEqual(0, expr, topLevelFunc)
+                if (expr.GetNumOfBlockGroups() == 1) { CheckBlockGroup(expr.GetBlockGroup(0), topLevelFunc) }
+                else { ErrorInExpr(topLevelFunc, expr, "exclave must own one body") }
+            }),
             (ExprKind.GOTO, { =>
                 CheckGoTo((expr as GoTo).getOrThrow(), topLevelFunc) }),
             (ExprKind.EXIT, { =>
@@ -1478,8 +1484,16 @@ public class CHIRChecker {
         }
     }
 
+    private func CheckRegionBoundary(expr: Expression, topLevelFunc: Function): Unit {
+        if (!OperandNumIsEqual(0, expr, topLevelFunc)) { return }
+        let result = expr.GetResult().getOrThrow()
+        if (!result.GetType().getOrThrow().IsUnit()) { TypeCheckError(expr, result, "Unit", topLevelFunc) }
+    }
+
     private func CheckOtherExpression(expr: Expression, topLevelFunc: Function): Unit {
         let actionMap = HashMap<ExprKind, () -> Unit>([
+            (ExprKind.START_REGION, { => CheckRegionBoundary(expr, topLevelFunc) }),
+            (ExprKind.END_REGION, { => CheckRegionBoundary(expr, topLevelFunc) }),
             (ExprKind.CONSTANT, { =>
                 CheckConstant((expr as Constant).getOrThrow(), topLevelFunc) }),
             (ExprKind.DEBUGEXPR, { =>

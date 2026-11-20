@@ -376,13 +376,13 @@ public func ReplaceThisTypeToConcreteType(ty: Type, concreteType: Type, builder:
     return CreateNewTypeWithArgs(ty, newArgs, builder)
 }
 
-private func GetMemberVarByName(def: CustomTypeDef, varName: String): MemberVarInfo {
+private func GetMemberVarIndex(def: CustomTypeDef, varName: String): Int64 {
     let vars = def.GetAllInstanceVars()
     var idx = vars.size
     while (idx > 0) {
         idx--
         if (vars[idx].name == varName) {
-            return vars[idx]
+            return idx
         }
     }
     CJC_ABORT()
@@ -401,13 +401,9 @@ public func GetInstMemberTypeByNameCheckingReadOnly(rootType: CustomType, names:
         return (rootType, false)
     }
     let customTypeDef = rootType.GetCustomTypeDef()
-    let instMap = HashMap<Int64, (GenericType, Type)>()
-    rootType.GetInstMap(instMap, builder)
-    let currentName = names[0]
-    let member = GetMemberVarByName(customTypeDef, currentName)
-    let isReadOnly = member.TestAttr(Attribute.READONLY)
-    let memberTy = builder.WithModal(ReplaceRawGenericArgType(member.ty, instMap, builder),
-        if (member.TestAttr(Attribute.DEMODE)) { ModalInfo() } else { rootType.modal })
+    let idx = GetMemberVarIndex(customTypeDef, names[0])
+    let isReadOnly = customTypeDef.GetAllInstanceVars()[idx].TestAttr(Attribute.READONLY)
+    let memberTy = rootType.GetInstantiatedMemberTys(builder)[idx]
     if (names.size > 1) {
         let pureMemberTy = memberTy.StripAllRefs()
         if (pureMemberTy.IsNominal()) {
