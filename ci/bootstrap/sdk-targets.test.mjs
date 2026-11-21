@@ -1,5 +1,21 @@
 import test from'node:test';import assert from'node:assert/strict';import {createBootstrapTargets,validateBootstrapTargets,FIXED_INPUTS,BOOTSTRAP_PHASES}from'./sdk-targets.mjs';import {targetOrder}from'./sdk-flow.mjs';import {PLATFORMS}from'./sdk-io.mjs';import{readHostToolchainPin}from'../host-toolchain-pin.mjs';
 import {bootstrap} from './bootstrap.mjs';
+test('the H1 install CLI rejects a conflicting cross setting before opening producer inputs', {skip:process.platform!=='linux'}, async t=>{
+ const fs=await import('node:fs/promises'),path=await import('node:path'),os=await import('node:os');
+ const {spawnSync}=await import('node:child_process'),{fileURLToPath}=await import('node:url');
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'h1-install-config-'));
+ t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const input=path.join(root,'descriptor.json'),install=path.join(root,'sdk'),work=path.join(root,'work');
+ const entry=fileURLToPath(new URL('./sdk-build.mjs',import.meta.url));
+ const {hostPlatform}=await import('../host-toolchain-pin.mjs');
+ for(const platform of [undefined,hostPlatform()]){
+  await fs.writeFile(input,JSON.stringify({layout:'h1-frontend',platform,cross:true,work,install}));
+  const result=spawnSync(process.execPath,[entry,'--install-inputs',input,'--no-package','--dry-run'],{encoding:'utf8'});
+  assert.equal(result.status,1,result.stderr);
+  assert.match(result.stderr,/^Error: INSTALL_CROSS_PLATFORM_CONFLICT$/m);
+  assert.deepEqual(await fs.readdir(root),['descriptor.json']);
+ }
+});
 function inputs(platform){const row=(commit,name)=>({commit,tree:'a'.repeat(40),repository:'/fixture/'+name+'.git',install:'/fixture/'+name,configuration:{fixture:true},buildResult:'/fixture/'+name+'/result.json',sourceRoot:'/fixture/'+name+'-producer'});const runtime=row(FIXED_INPUTS.runtime,'R');return{platform,work:'/fixture/work',install:'/fixture/install',host:{version:readHostToolchainPin(platform).replace(/^nightly-/, ''),install:'/fixture/H'},llvm:row(FIXED_INPUTS.llvm,'N'),runtime,ast:row(FIXED_INPUTS.compiler,'AST'),h1:{...row(FIXED_INPUTS.h1,'H1'),product:'/fixture/H1/compiler'},compiler:row('b'.repeat(40),'C'),stdlib:{...runtime,install:'/fixture/std',buildResult:'/fixture/std/result.json',sourceRoot:'/fixture/std-producer'},tools:{privateRoot:'/fixture/tools'}};}
 test('std uses the selected native AST archive and headers through build and resume',async t=>{
  const {flag,acceptInstalledStd}=await import('./sdk-std-resume.mjs');

@@ -565,12 +565,15 @@ export async function installProducts(descriptor,{buildOnly=false,dryRun=false,p
     :input.test??{commands:[identity,{argv:[process.execPath,fileURLToPath(new URL('./sdk-hello.mjs',import.meta.url)),
       '--sdk','${install}','--work','${work}/hello','--platform',platform,'--compiler-only',
       '--source',fileURLToPath(new URL('../smoke/01_hello.cj',import.meta.url)),'--expected','hello from cjcj']}]};
+  const installTest=input.cross?undefined:test;
+  const hasChecks=installTest?.required?.length || installTest?.commands?.length;
+  const hasConfiguredChecks=input.test?.required?.length || input.test?.commands?.length;
   if(buildOnly||dryRun) {
     const result={status:'NOT_INSTALLED',selection,recipe,reason:dryRun?'DRY_RUN':'BUILD_ONLY'};
     console.log(JSON.stringify(result));return result;
   }
   const records=[],result={status:'WIP',selection,commands:records,fullSdkQualification:'NOT_GRANTED',
-    consumption:input.cross?{status:'NOT_RUN',reason:'HOST_CROSS_EXEC'}:{status:'WIP'}};
+    consumption:hasChecks?{status:'WIP'}:{status:'NOT_RUN',reason:input.cross?'HOST_CROSS_EXEC':'NO_INSTALL_CHECKS'}};
   await fs.mkdir(work,{recursive:true});
   const oldResult=path.join(work,'install-result.json');
   if((await readJson(oldResult).catch(error=>{if(error.code==='ENOENT')return null;throw error;}))?.status==='COMPLETE')
@@ -584,10 +587,11 @@ export async function installProducts(descriptor,{buildOnly=false,dryRun=false,p
         sources:Object.fromEntries(Object.entries(selection.targetComponents).map(([name,row])=>[name,{repository:row.repository,commit:row.commit,producer:row.producer}])),
         configuration:{layout:input.layout??'components',platform},production:input.production};
       await installRecipe({root:install,recipe,platform,build:path.join(work,'entries'),tools:input.tools,records,
-        vars:{work},test:input.cross?undefined:test,consume});
-      if(!input.cross)result.consumption={status:'EXECUTED',...(frontend?{scope:input.test?'h1-frontend':'compiler-identity'}:{})};
+        vars:{work},test:installTest,consume});
+      if(hasChecks)result.consumption={status:'EXECUTED',...(frontend?{
+        scope:hasConfiguredChecks?'compiler-identity-and-configured-checks':'compiler-identity'}:{})};
       if(packageOutput&&input.archive)result.package=await archiveInstall({install,archive:input.archive,format:input.archiveFormat,
-        test:input.cross?undefined:test,vars:{work},records});
+        test:installTest,vars:{work},records});
       result.status='COMPLETE';return result;
     } catch(error) { result.status='FAILED';result.error=error.message;result.rc=error.rc??1;throw error; }
     finally {await atomicJson(path.join(work,'install-result.json'),result);}

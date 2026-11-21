@@ -89,6 +89,13 @@ with the compiler's normal import options. This layout has no target runtime
 or native std libraries and does not qualify native programs, packages, or the
 complete SDK.
 
+The installer derives cross execution from the selected platform and the
+running host. Omit `cross`; an explicit value that disagrees is a configuration
+error. This layout is native Linux only and checks compiler identity before
+publishing. The install result reports `compiler-identity` for that check alone,
+or `compiler-identity-and-configured-checks` when it also ran configured
+`test.required` or `test.commands` checks.
+
 ## Controlled semantic cut and recovery (prepared, NOT_RUN)
 
 This is a design for a later explicitly authorized isolated R source/install,

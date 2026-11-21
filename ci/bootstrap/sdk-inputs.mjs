@@ -459,10 +459,9 @@ export async function prepareSourceBuildInputs(config, env=process.env, startSta
 // A completed H1 can be installed for front-end consumers without claiming
 // that N has a debugger or that R and target std have been built. Use the
 // original producer's H execution and N library; do not accept an SDK overlay.
-async function prepareH1FrontendInstall(descriptor) {
-  const {platform=hostPlatform(),host:hostInput,sources,installations}=descriptor;
+async function prepareH1FrontendInstall(descriptor,platform) {
+  const {host:hostInput,sources,installations}=descriptor;
   const native=sdkPlatform(platform);
-  if(platform!==hostPlatform()||native.os!=='linux')throw Error('INSTALL_H1_FRONTEND_PLATFORM');
   if(!sources?.h1||!hostInput?.install||!installations?.llvm?.install||!installations.h1
     ||!descriptor.stdCoreInterface||descriptor.selection||descriptor.production||descriptor.archive)
     throw Error('INSTALL_H1_FRONTEND_INPUTS');
@@ -491,14 +490,26 @@ async function prepareH1FrontendInstall(descriptor) {
     compilerExecution:{role:'separate',stage:'h1-frontend',platform,compiler,runtime:host,
       llvm:{...llvm,commit:shim.llvm.commit,library}},
     targetComponents:{compiler},frontendStdCore:{file:core,sha256:await fileDigest(core)}};
-  return {...descriptor,platform,work:await privateRoot(descriptor.work),install:await privateRoot(descriptor.install),selection};
+  return {work:await privateRoot(descriptor.work),install:await privateRoot(descriptor.install),selection};
 }
 
 // Installation of existing native products uses the same inputs and recipe,
 // without constructing the bootstrap graph or requiring private stage1 tools.
 export async function prepareInstallInputs(descriptor) {
-  if(descriptor.layout==='h1-frontend')return prepareH1FrontendInstall(descriptor);
-  const selection=installationSelection(descriptor.selection);
+  const frontend=descriptor.layout==='h1-frontend';
+  const selection=frontend?undefined:installationSelection(descriptor.selection);
+  const host=hostPlatform(),{platform:frontendPlatform=host}=descriptor;
+  const platform=frontend?frontendPlatform:selection.platform;
+  // Cross installations execute on their native runner. A descriptor cannot
+  // override the relationship between the selected target and this process.
+  const cross=platform!==host;
+  if(frontend&&(cross||sdkPlatform(platform).os!=='linux'))throw Error('INSTALL_H1_FRONTEND_PLATFORM');
+  if(Object.hasOwn(descriptor,'cross')&&descriptor.cross!==cross)throw Error('INSTALL_CROSS_PLATFORM_CONFLICT');
+  const prepared=frontend?await prepareH1FrontendInstall(descriptor,platform):await prepareComponentInstall(descriptor,selection);
+  return {...descriptor,...prepared,platform,cross};
+}
+
+async function prepareComponentInstall(descriptor,selection) {
   const {platform,targetComponents:target,compilerExecution:execution}=selection,native=sdkPlatform(platform);
   const work=await privateRoot(descriptor.work),install=await privateRoot(descriptor.install);
   // An optional backend is a normal CMake component install, independent of
@@ -589,9 +600,7 @@ export async function prepareInstallInputs(descriptor) {
   ];
   for(const file of required)if(!(await fs.stat(file)).isFile())throw Error('INSTALL_INPUT_FILE '+file);
   console.log('INSTALL_COMPILER_EXECUTION_FROM_PRODUCER '+JSON.stringify({compiler:target.compiler.product,dependencyRoot,platform:executionPlatform}));
-  // Cross installation is allowed, execution belongs to its native runner.
-  const cross=platform!==hostPlatform();
-  return {...descriptor,work,install,platform,selection,cross};
+  return {work,install,selection};
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { await prepareNativeInputs(await readJson(process.argv[2] || process.env.CJCJ_NATIVE_INPUTS)); }
