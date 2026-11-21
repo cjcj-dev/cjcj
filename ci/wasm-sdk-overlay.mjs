@@ -35,16 +35,38 @@ export function hostExe(name, platform = process.platform) {
   return platform === 'win32' ? `${name}.exe` : name;
 }
 
+// The executable suffix of the SDK being overlaid, read from the SDK itself rather than from the
+// host running this script: a Windows SDK may be assembled on Linux and the reverse.
+export function sdkExeSuffix(sdk) {
+  const plain = fs.existsSync(path.join(sdk, 'libexec/compiler/cjcj-stage1'));
+  const exe = fs.existsSync(path.join(sdk, 'libexec/compiler/cjcj-stage1.exe'));
+  if (plain === exe) throw new Error(`cannot tell the host of SDK ${sdk}: need exactly one of libexec/compiler/cjcj-stage1[.exe]`);
+  return exe ? '.exe' : '';
+}
+
+// An input tool directory (e.g. --llvm-bin) holds `name` or `name.exe`; prefer the SDK's suffix.
+export function inputTool(dir, name, suffix) {
+  const order = suffix ? [name + suffix, name] : [name, name + '.exe'];
+  for (const file of order.map(n => path.join(dir ?? '', n))) if (fs.existsSync(file)) return file;
+  return path.join(dir ?? '', name + suffix);
+}
+
 // One line: digest over the identities of the compiler, the code generation and link tools,
 // the runtime archive and the std archives of this SDK. A different managed ABI generation
 // therefore uses a different incremental cache namespace. Build cache key, not a handshake.
+//
+// Only the host-independent target half is hashed (runtime archive, std archives and std module
+// interfaces, all produced by this SDK's compiler and code generator), so the same target half
+// carried into SDKs for different hosts yields the same id. Host executables are not hashed.
 export function toolchainIdentity(sdk) {
-  const parts = ['libexec/compiler/' + hostExe('cjcj-stage1'),
-    ...['opt', 'llc', 'wasm-ld'].map(tool => `${NATIVE_LLVM_BIN}/${hostExe(tool)}`),
-    'runtime/lib/' + WASM_TARGET_DIR + '/libcangjie-runtime.a',
-    ...fs.readdirSync(path.join(sdk, STD_LIB_DIR)).filter(name => name.endsWith('.a')).sort().map(name => `${STD_LIB_DIR}/${name}`)];
+  const moduleDir = path.join(sdk, STD_MODULE_DIR);
+  const modules = fs.existsSync(moduleDir)
+    ? fs.readdirSync(moduleDir).filter(name => name.endsWith('.cjo')).sort().map(name => `${STD_MODULE_DIR}/${name}`) : [];
+  const parts = ['runtime/lib/' + WASM_TARGET_DIR + '/libcangjie-runtime.a',
+    ...fs.readdirSync(path.join(sdk, STD_LIB_DIR)).filter(name => name.endsWith('.a')).sort().map(name => `${STD_LIB_DIR}/${name}`),
+    ...modules];
   const lines = parts.map(rel => `${rel}=${sha256File(path.join(sdk, rel))}\n`).join('');
-  return 'cjw1-' + crypto.createHash('sha256').update(lines).digest('hex').slice(0, 32);
+  return 'cjw2-' + crypto.createHash('sha256').update(lines).digest('hex').slice(0, 32);
 }
 
 // SDK manifests (top-level *.json / *.jsonl) pin files by sha256 as {"path": p, "sha256": h} or {"<p>": {"sha256": h}}.
@@ -121,14 +143,14 @@ function checkCopyPaths(baseSdk, dest, cjpm) {
 }
 
 // wasm-ld gets its own SDK entry: the llc entry with only the target line changed.
-export function wasmLdEntry(llcEntryText) {
-  const from = `${NATIVE_LLVM_BIN}/llc`;
+export function wasmLdEntry(llcEntryText, exe = '') {
+  const from = `${NATIVE_LLVM_BIN}/llc${exe}`;
   const lines = llcEntryText.split('\n');
   const hits = lines.filter(line => line === from).length;
   if (!lines[0].startsWith('cjcj-sdk-entry-') || hits !== 1) {
     throw new Error(`unexpected llc SDK entry (need one '${from}' line in a cjcj-sdk-entry file)`);
   }
-  return lines.map(line => (line === from ? `${NATIVE_LLVM_BIN}/wasm-ld` : line)).join('\n');
+  return lines.map(line => (line === from ? `${NATIVE_LLVM_BIN}/wasm-ld${exe}` : line)).join('\n');
 }
 
 export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, stdArchives = [], stdModules = [],
@@ -137,11 +159,12 @@ export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, std
   if (baseSdk) baseSdk = path.resolve(baseSdk);
   const target = dest && path.resolve(dest);
   checkCopyPaths(baseSdk, target, cjpm);
-  for (const tool of [...REPLACED_LLVM_TOOLS, 'lld']) requireFile(path.join(llvmBin ?? '', tool), `llvm input ${tool}`);
-  for (const tool of REPLACED_LLVM_TOOLS) requireFile(path.join(baseSdk, NATIVE_LLVM_BIN, tool), `base SDK ${NATIVE_LLVM_BIN}/${tool}`);
-  requireFile(path.join(baseSdk, LLVM_ENTRY_BIN, 'llc'), `base SDK ${LLVM_ENTRY_BIN}/llc launcher`);
+  const exe = sdkExeSuffix(baseSdk);
+  for (const tool of [...REPLACED_LLVM_TOOLS, 'lld']) requireFile(inputTool(llvmBin, tool, exe), `llvm input ${tool}${exe}`);
+  for (const tool of REPLACED_LLVM_TOOLS) requireFile(path.join(baseSdk, NATIVE_LLVM_BIN, tool + exe), `base SDK ${NATIVE_LLVM_BIN}/${tool}${exe}`);
+  requireFile(path.join(baseSdk, LLVM_ENTRY_BIN, 'llc' + exe), `base SDK ${LLVM_ENTRY_BIN}/llc${exe} launcher`);
   requireFile(path.join(baseSdk, LLVM_ENTRY_BIN, 'llc.entry'), `base SDK ${LLVM_ENTRY_BIN}/llc.entry`);
-  requireFile(path.join(baseSdk, 'libexec/compiler', hostExe('cjcj-stage1')), 'base SDK libexec/compiler/cjcj-stage1');
+  requireFile(path.join(baseSdk, 'libexec/compiler', 'cjcj-stage1' + exe), `base SDK libexec/compiler/cjcj-stage1${exe}`);
   requireFile(cjc, 'compiler input');
   requireFile(runtimeArchive, 'wasm runtime archive');
   const prebuilt = stdArchives.length > 0 || stdModules.length > 0;
@@ -153,7 +176,7 @@ export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, std
     throw new Error('prebuilt std requires both --std-archive and --std-module');
   }
   const stdBuild = prebuilt ? undefined : wasmStdInputs(sourceOptions);
-  if (stdBuild) requireFile(path.join(baseSdk, 'bin', hostExe('cjc')), 'base SDK bin/cjc launcher');
+  if (stdBuild) requireFile(path.join(baseSdk, 'bin', 'cjc' + exe), `base SDK bin/cjc${exe} launcher`);
   requireFile(RUNNER_SOURCE, 'node:wasi runner source');
   for (const file of stdArchives) requireFile(file, 'std archive');
   for (const file of stdModules) requireFile(file, 'std module');
@@ -164,10 +187,10 @@ export function overlayWasmSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, std
   }
   if (cjpm !== undefined) {
     requireFile(cjpm, 'cjpm input');
-    requireFile(path.join(baseSdk, '.target-tools/tools/bin/cjpm'), 'base SDK .target-tools/tools/bin/cjpm');
+    requireFile(path.join(baseSdk, '.target-tools/tools/bin/cjpm' + exe), `base SDK .target-tools/tools/bin/cjpm${exe}`);
   }
-  const entry = wasmLdEntry(fs.readFileSync(path.join(baseSdk, LLVM_ENTRY_BIN, 'llc.entry'), 'utf8'));
-  const config = {baseSdk, dest: target, llvmBin, cjc, runtimeArchive, stdArchives, stdModules, sysrootTarball, cjpm, pin, entry, stdBuild};
+  const entry = wasmLdEntry(fs.readFileSync(path.join(baseSdk, LLVM_ENTRY_BIN, 'llc.entry'), 'utf8'), exe);
+  const config = {baseSdk, dest: target, llvmBin, cjc, runtimeArchive, stdArchives, stdModules, sysrootTarball, cjpm, pin, entry, stdBuild, exe};
   fs.mkdirSync(path.dirname(target), {recursive: true});
   if (prebuilt) return {...populateSdk(config), dest};
 
@@ -205,17 +228,17 @@ function clearInheritedWasmStd(sdk) {
 }
 
 function populateSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, stdArchives, stdModules, sysrootTarball, cjpm,
-  pin, entry, stdBuild, stdWork}) {
+  pin, entry, stdBuild, stdWork, exe = ''}) {
   const copy = spawnSync('cp', ['-a', baseSdk, dest], {encoding: 'utf8'});
   if (copy.status !== 0) throw new Error(`cp -a ${baseSdk} ${dest} failed: ${copy.stderr}`);
   const put = (from, to) => { fs.mkdirSync(path.dirname(to), {recursive: true}); fs.rmSync(to, {force: true}); fs.copyFileSync(from, to); fs.chmodSync(to, fs.statSync(from).mode); };
   const outputs = {};
   const record = rel => { outputs[rel] = sha256File(path.join(dest, rel)); };
-  for (const tool of REPLACED_LLVM_TOOLS) { put(path.join(llvmBin, tool), path.join(dest, NATIVE_LLVM_BIN, tool)); record(`${NATIVE_LLVM_BIN}/${tool}`); }
-  put(path.join(llvmBin, 'lld'), path.join(dest, NATIVE_LLVM_BIN, 'wasm-ld')); record(`${NATIVE_LLVM_BIN}/wasm-ld`);
-  put(path.join(dest, LLVM_ENTRY_BIN, 'llc'), path.join(dest, LLVM_ENTRY_BIN, 'wasm-ld'));
+  for (const tool of REPLACED_LLVM_TOOLS) { put(inputTool(llvmBin, tool, exe), path.join(dest, NATIVE_LLVM_BIN, tool + exe)); record(`${NATIVE_LLVM_BIN}/${tool}${exe}`); }
+  put(inputTool(llvmBin, 'lld', exe), path.join(dest, NATIVE_LLVM_BIN, 'wasm-ld' + exe)); record(`${NATIVE_LLVM_BIN}/wasm-ld${exe}`);
+  put(path.join(dest, LLVM_ENTRY_BIN, 'llc' + exe), path.join(dest, LLVM_ENTRY_BIN, 'wasm-ld' + exe));
   fs.writeFileSync(path.join(dest, LLVM_ENTRY_BIN, 'wasm-ld.entry'), entry); record(`${LLVM_ENTRY_BIN}/wasm-ld.entry`);
-  put(cjc, path.join(dest, 'libexec/compiler/cjcj-stage1')); record('libexec/compiler/cjcj-stage1');
+  put(cjc, path.join(dest, 'libexec/compiler/cjcj-stage1' + exe)); record(`libexec/compiler/cjcj-stage1${exe}`);
   put(runtimeArchive, path.join(dest, 'runtime/lib/wasi_wasm32_cjnative/libcangjie-runtime.a')); record('runtime/lib/wasi_wasm32_cjnative/libcangjie-runtime.a');
   if (cjpm !== undefined) { put(cjpm, path.join(dest, '.target-tools/tools/bin/cjpm')); record('.target-tools/tools/bin/cjpm'); }
   const sysroot = installWasiSysroot({sdk: dest, tarball: sysrootTarball, pin});
@@ -230,7 +253,7 @@ function populateSdk({baseSdk, dest, llvmBin, cjc, runtimeArchive, stdArchives, 
   put(RUNNER_SOURCE, path.join(dest, RUNNER)); record(RUNNER);
   fs.writeFileSync(path.join(dest, TOOLCHAIN_ID), toolchainIdentity(dest) + '\n'); record(TOOLCHAIN_ID);
   const inputs = {baseSdk: path.resolve(baseSdk), sysrootTarball: {path: path.resolve(sysrootTarball), sha256: sysroot.sha256}};
-  for (const [name, file] of Object.entries({cjc, runtimeArchive, lld: path.join(llvmBin, 'lld'), ...(cjpm ? {cjpm} : {})})) {
+  for (const [name, file] of Object.entries({cjc, runtimeArchive, lld: inputTool(llvmBin, 'lld', exe), ...(cjpm ? {cjpm} : {})})) {
     inputs[name] = {path: path.resolve(file), sha256: sha256File(file)};
   }
   inputs.std = stdBuild

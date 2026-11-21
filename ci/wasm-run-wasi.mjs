@@ -12,6 +12,7 @@
 // by the module's own linear-memory stack rather than by V8's default native stack.
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {Worker, isMainThread, parentPort, workerData} from 'node:worker_threads';
 
@@ -20,6 +21,16 @@ const MIN_NODE_MAJOR = 20;
 // large; the module is always run with fast API calls disabled.
 const NODE_FLAG = '--no-turbo-fast-api-calls';
 const script = fileURLToPath(import.meta.url);
+
+// Node selection: CJ_WASM_NODE if set; else the SDK's own Node next to this installed script
+// (<sdk>/tools/wasm/run_wasi.mjs -> <sdk>/tools/bin/node[.exe]); else `node` from PATH.
+export function selectNode(env = process.env, scriptPath = script, platform = process.platform) {
+  if (env.CJ_WASM_NODE) return {node: env.CJ_WASM_NODE, source: 'CJ_WASM_NODE'};
+  const sdkNode = path.join(path.dirname(scriptPath), '..', 'bin', platform === 'win32' ? 'node.exe' : 'node');
+  if (fs.existsSync(sdkNode)) return {node: sdkNode, source: 'sdk'};
+  return {node: 'node', source: 'PATH'};
+}
+const sameFile = (a, b) => { try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return false; } };
 
 async function runModule({wasmPath, moduleArgs, env}) {
   const {WASI} = await import('node:wasi');
@@ -33,9 +44,11 @@ if (!isMainThread) {
   parentPort.postMessage(await runModule(workerData));
 } else {
   const args = process.argv.slice(2);
-  const wanted = process.env.CJ_WASM_NODE;
-  if (!process.execArgv.includes(NODE_FLAG) || (wanted && wanted !== process.execPath && !process.env.CJ_WASM_RUNNER_CHILD)) {
-    const node = wanted || process.execPath;
+  const selected = selectNode();
+  // PATH fallback keeps the launching Node when it already carries the flag (it came from PATH or the user).
+  const elsewhere = selected.source !== 'PATH' && !sameFile(selected.node, process.execPath);
+  if (!process.env.CJ_WASM_RUNNER_CHILD && (!process.execArgv.includes(NODE_FLAG) || elsewhere)) {
+    const node = selected.node;
     const r = spawnSync(node, [NODE_FLAG, script, ...args], {stdio: 'inherit', env: {...process.env, CJ_WASM_RUNNER_CHILD: '1'}});
     if (r.error) { console.error(`run_wasi: cannot start ${node}: ${r.error.message}`); process.exit(127); }
     process.exit(r.status ?? 128 + 9);
