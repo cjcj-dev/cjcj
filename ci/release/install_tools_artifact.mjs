@@ -10,6 +10,7 @@ import path from 'node:path';
 import {parseArgs} from 'node:util';
 import {privateRoot} from '../bootstrap/sdk-flow.mjs';
 import {toolName,retainedToolPath,cjlintPublicConfigPath} from '../../build/srcbuild/tool-layout.mjs';
+import {requireCjlintRuntimePair} from './cjlint-runtime-pair.mjs';
 import {preserveStock} from '../../build/lib/stock-backup.mjs';
 import {
   readToolsPin, artifactSourceBinary,
@@ -50,6 +51,7 @@ const provenance = await verifyComponentProvenance({
 const sdkRoot=await privateRoot(values.sdk);
 const lintConfig=[];
 if(values.tool==='cjlint') {
+  await requireCjlintRuntimePair(artifactRoot);
   await fs.mkdir(sdkRoot,{recursive:true});
   // The verified artifact already transports the private source configuration.
   // Preflight the corresponding public paths before replacing any stock entry.

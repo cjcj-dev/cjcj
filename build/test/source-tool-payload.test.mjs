@@ -35,6 +35,15 @@ function writeFile(file, contents) {
   fs.writeFileSync(file, contents);
 }
 
+const lintRoot = '.target-tools/tools/cjlint/';
+const lintLib = lintRoot + 'lib/libcangjie-runtime.so';
+const lintAlias = lintRoot + 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so';
+function lintRuntime(sdk) {
+  writeFile(path.join(sdk,lintLib),'selected private runtime');
+  fs.mkdirSync(path.dirname(path.join(sdk,lintAlias)),{recursive:true});
+  fs.symlinkSync('../../../lib/libcangjie-runtime.so',path.join(sdk,lintAlias));
+}
+
 // Transport fixture source facts are explicit. A separate arm uses an older source.
 // These records do not claim a native tool build or semantic qualification.
 function producerFacts(sdk,tool,binary,platform='linux-x64',source=null) {
@@ -43,6 +52,7 @@ function producerFacts(sdk,tool,binary,platform='linux-x64',source=null) {
   const file=path.join(sdk,'TOOLS-INPUTS.json'),suffix=platform==='windows-x64'?'.exe':'';
   const inputs=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{files:{}};
   const sha256=digest(fs.readFileSync(binary)),payloads={};
+  if(tool==='cjlint' && platform==='linux-x64')lintRuntime(sdk);
   let entry;
   if(['cjlint','LSPServer','cjhead'].includes(tool)) {
     const producer=tool==='LSPServer'?'lsp':tool,retained='.target-tools/tools/'+producer+'/bin/'+tool+suffix;
@@ -357,11 +367,44 @@ for(const tool of ['LSPServer','cjhead','cjlint'])test('retained '+tool+' artifa
   run(install,['--tool',tool,'--platform','linux-x64','--artifact',artifact,'--sdk',release]);
   assert.match(fs.readFileSync(path.join(release,prefix,'bin',tool),'utf8'),/^controlled retained body/);
   assert.equal(fs.readFileSync(path.join(release,'tools/bin/'+tool+'.entry'),'utf8'),recipe.toString());
+  if(tool==='cjlint') {
+    for(const dir of [artifact,release])for(const rel of [lintLib,lintAlias]) {
+      assert.ok(fs.lstatSync(path.join(dir,rel)).isFile(),rel);
+      assert.equal(fs.readFileSync(path.join(dir,rel),'utf8'),'selected private runtime');
+    }
+    assert.ok(fs.lstatSync(path.join(sdk,lintAlias)).isSymbolicLink());
+  }
   assert.equal(fs.existsSync(path.join(release,'tools/stock',tool)),false,'fresh install has no stock predecessor');
   const launcher=fs.readFileSync(path.join(release,'tools/bin',tool));
   run(install,['--tool',tool,'--platform','linux-x64','--artifact',artifact,'--sdk',release]);
   assert.deepEqual(fs.readFileSync(path.join(release,'tools/stock',tool)),launcher,'existing entry is still preserved');
   assert.match(fs.readFileSync(path.join(release,prefix,'bin',tool),'utf8'),/^controlled retained body/);
+ } finally {fs.rmSync(work,{recursive:true,force:true});}
+});
+
+test('cjlint stages only the recorded pair from either normal SDK representation',()=>{
+ const work=fs.mkdtempSync(path.join(os.tmpdir(),'lint-runtime-')),sdk=path.join(work,'sdk'),artifact=path.join(work,'artifact');
+ const binary=path.join(sdk,'tools/bin/cjlint'),alias=path.join(sdk,lintAlias),lib=path.join(sdk,lintLib);
+ try {
+  writeExecutable(binary,'controlled lint body');
+  writeFile(path.join(sdk,lintRoot,'config/cjlint_rule_list.json'),'{}');
+  producerFacts(sdk,'cjlint',binary);
+  const args=['--tool','cjlint','--platform','linux-x64','--binary',binary,'--sdk',sdk,'--outdir',artifact];
+  fs.unlinkSync(alias);
+  fs.copyFileSync(lib,alias);
+  run(prepare,args);
+  assert.deepEqual(fs.readFileSync(path.join(artifact,lintAlias)),fs.readFileSync(lib));
+  fs.writeFileSync(alias,'different regular file');
+  assert.throws(()=>run(prepare,args),/SOURCE_TOOL_ARTIFACT_PAYLOAD/);
+  fs.unlinkSync(alias);
+  fs.symlinkSync('./other-runtime.so',alias);
+  assert.throws(()=>run(prepare,args),/CJLINT_RUNTIME_ALIAS/);
+  fs.unlinkSync(alias);
+  fs.symlinkSync('../../../lib/libcangjie-runtime.so',alias);
+  const record=path.join(sdk,'TOOLS-INPUTS.json'),facts=JSON.parse(fs.readFileSync(record));
+  delete facts.files['tools/bin/cjlint'].producer.install.payloads[lintLib];
+  writeFile(record,JSON.stringify(facts));
+  assert.throws(()=>run(prepare,args),/CJLINT_RUNTIME_PAIR/);
  } finally {fs.rmSync(work,{recursive:true,force:true});}
 });
 

@@ -17,6 +17,7 @@ import {
   writeComponentProvenance,
 } from '../../build/lib/release-component-provenance.mjs';
 import {stampBinaryLineage} from '../../build/lib/toolchain-identity.mjs';
+import {cjlintRuntimeInput, runtimeAlias} from './cjlint-runtime-pair.mjs';
 import {sourceToolPayloads} from './source-tool-payloads.mjs';
 
 const {values} = parseArgs({
@@ -63,8 +64,10 @@ const actualBinary=await artifactSourceBinary(path.resolve(values.binary),source
 if(await fileDigest(actualBinary)!==row.sha256||producer.install.artifact?.sha256!==row.sha256)throw Error('SOURCE_TOOL_ARTIFACT_BYTES '+values.tool);
 // Do not stamp a currently selected source onto changed runtime payloads.
 // These are the producer's ordinary install facts, not a second selector.
+const aliasInput = values.tool === 'cjlint' ? await cjlintRuntimeInput(sourceSdk, producer.install.payloads) : null;
+const payloadInput = rel => safePayloadPath(sourceSdk, aliasInput && rel === runtimeAlias ? aliasInput : rel);
 for(const [rel,payload]of Object.entries(producer.install.payloads??{})) {
-  const input=await safePayloadPath(sourceSdk,rel);
+  const input=await payloadInput(rel);
   if(await fileDigest(input)!==payload.sha256)throw Error('SOURCE_TOOL_ARTIFACT_PAYLOAD '+rel);
 }
 await fs.rm(destination, {recursive: true, force: true});
@@ -90,7 +93,7 @@ for (const relative of sourceToolPayloads(values.tool, values.platform)) {
     const members=Object.keys(producer.install.payloads??{}).filter(rel=>rel.startsWith(relative+'/'));
     if(!members.length)throw Error('SOURCE_TOOL_ARTIFACT_CONFIG '+values.tool);
     for(const member of members) {
-      const input=await safePayloadPath(sourceSdk,member),output=await safePayloadPath(destination,member);
+      const input=await payloadInput(member),output=await safePayloadPath(destination,member);
       if(await fileDigest(input)!==producer.install.payloads[member].sha256)throw Error('SOURCE_TOOL_ARTIFACT_PAYLOAD '+member);
       await fs.mkdir(path.dirname(output),{recursive:true});await fs.copyFile(input,output);
     }
