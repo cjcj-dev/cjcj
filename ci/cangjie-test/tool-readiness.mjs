@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import {fileDigest,readJson,relative} from '../bootstrap/sdk-flow.mjs';
 import {sdkPlatform,entryPlatformName} from '../bootstrap/sdk-platform.mjs';
-import {TOOL_NAMES,TOOL_PUBLIC_NAMES,TOOL_DIRECTORIES,nativeToolLibraries,toolName,retainedToolPath,privateToolPayload,toolExecutionLibraries} from '../../build/srcbuild/tool-layout.mjs';
+import {TOOL_NAMES,TOOL_PUBLIC_NAMES,TOOL_DIRECTORIES,nativeToolLibraries,toolName,retainedToolPath,privateToolPayload,toolExecutionLibraries,cjlintPublicConfigPath} from '../../build/srcbuild/tool-layout.mjs';
 import {compilerExecutionPath} from '../../build/lib/runtime-split.mjs';
 // Every selected tool is now a Cangjie producer. LSP's analysis/runtime
 // selection remains distinct from its compiler execution dependencies.
@@ -170,6 +170,8 @@ export async function toolReadiness(root) {
       for(const [rel,payload]of Object.entries(payloads)) {
         if(inputs.payloadFiles?.[rel]?.sha256!==payload.sha256||!inputs.payloadFiles[rel].producers?.includes(name))throw Error('payload producer differs: '+rel);
         await bytes(sdk,rel,payload.sha256);
+        const publicConfig=name==='cjlint'?cjlintPublicConfigPath(rel):undefined;
+        if(publicConfig)await bytes(sdk,publicConfig,payload.sha256);
       }
       if(name==='hle') {
         const deps=await readJson(path.join(sdk,'tools/dtsparser/DEPENDENCIES.json'));

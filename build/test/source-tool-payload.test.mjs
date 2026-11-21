@@ -290,6 +290,7 @@ for(const [platform,suffix,libraries]of [
   assert.ok(results.binary.startsWith('controlled '+platform+' '+tool+' bytes\n'));
   assert.deepEqual({repo:results.repo,other:results.other},{repo:'keep cjpm repository\n',other:'keep other configuration\n'});
   if(tool==='cjfmt')assert.equal(results.format,'target format\n');
+  if(tool==='cjlint')assert.equal(fs.readFileSync(path.join(release,'tools/config/cjlint_rule_list.json'),'utf8'),'target lint config');
   if(['LSPServer','cjhead'].includes(tool))assert.equal(fs.readFileSync(path.join(release,'.target-tools/tools/'+(tool==='LSPServer'?'lsp':tool)+'/lib/libcangjie-runtime.so'),'utf8'),'target application runtime');
   if(tool==='hle')assert.equal(fs.readFileSync(path.join(release,'tools/dtsparser/analysis.js'),'utf8'),'target parser\n');
   if(tool==='cjprof')for(const prefix of ['tools/config/static','.target-tools/tools/config/static']) {
@@ -337,6 +338,7 @@ for(const tool of ['LSPServer','cjhead','cjlint'])test('retained '+tool+' artifa
  try {
   writeExecutable(binary,'controlled retained body\n');
   writeFile(path.join(sdk,prefix,'lib/libcangjie-runtime.so'),'controlled selected runtime');
+  if(tool==='cjlint')writeFile(path.join(sdk,prefix,'config/cjlint_rule_list.json'),'controlled selected lint configuration');
   producerFacts(sdk,tool,binary);
   const args=['--tool',tool,'--platform','linux-x64','--binary',binary,'--sdk',sdk,'--outdir',artifact];
   run(prepare,args);

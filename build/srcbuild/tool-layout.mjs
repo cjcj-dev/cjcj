@@ -149,6 +149,14 @@ export async function nativeToolBuildPayloads(config,name) {
 // host libraries and selected analysis modules beside its retained body; they
 // must not replace the containing SDK's target runtime or modules.
 const lintRetain='.target-tools/tools/cjlint/';
+// -c <sdk>/tools uses the public config directory. Only publish runtime JSON;
+// keep the standalone install's layout and its producer record unchanged.
+export function cjlintPublicConfigPath(relative) {
+  const prefix=lintRetain+'config/';
+  if(relative.startsWith(prefix)&&relative.endsWith('.json'))
+    return 'tools/config/'+relative.slice(prefix.length);
+}
+
 async function lintTree(directory,relative,rows) {
   for(const entry of (await fs.readdir(directory,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {
     const file=path.join(directory,entry.name),rel=relative+'/'+entry.name;
