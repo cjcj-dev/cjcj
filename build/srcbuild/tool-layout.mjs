@@ -170,7 +170,14 @@ async function lintTree(directory,relative,rows) {
 }
 async function lintAnalysisPayloads(sdk,rows) {
   await lintTree(path.join(sdk,'modules'),'modules',rows);
-  await lintTree(path.join(sdk,lintFlatbuffers),lintFlatbuffers,rows);
+  // The producer requires this tree for its std.ast. Enumerate it when it
+  // exists; build/install record comparison rejects dropping a recorded tree.
+  const flatbuffers=path.join(sdk,lintFlatbuffers);
+  const present=await fs.stat(flatbuffers).catch(error=>{
+    if(error.code!=='ENOENT')throw error;
+  });
+  if(!present)return;
+  await lintTree(flatbuffers,lintFlatbuffers,rows);
   if(!rows.some(row=>row.to===lintRetain+lintFlatbuffers+'/flatbuffers.cjo'))
     throw Error('CJLINT_ANALYSIS_FLATBUFFERS_MISSING '+sdk);
 }
