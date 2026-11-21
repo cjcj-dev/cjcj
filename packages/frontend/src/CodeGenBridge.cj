@@ -650,6 +650,7 @@ private class ToCHIR {
             if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_LOAD)) {
                 RedundantLoadElimination().RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer,
                     threadNum: Int64(options.GetJobs()))
+                DumpCHIRToFile("RedundantLoadElimination")
             }
             // Upstream CHIR.cpp RedundantGetOrThrowElimination runs at CHIR O2 and above (cangjie_compiler
             // !2344); the historical opt-in flag still enables it at lower levels.
@@ -667,6 +668,7 @@ private class ToCHIR {
             if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_FUTURE)) {
                 RedundantFutureRemoval(builder, currentPackage, isDebug: options.chirDebugOptimizer).RunOnPackage(
                     threadNum: Int64(options.GetJobs()))
+                DumpCHIRToFile("RedundantFutureOpt")
             }
             if (options.IsCHIROptimizationLevelOverO2() && !options.interpFullBchir) {
                 GetRefToArrayElem.RunOnPackage(currentPackage, builder,
