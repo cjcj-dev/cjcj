@@ -149,6 +149,7 @@ export async function nativeToolBuildPayloads(config,name) {
 // host libraries and selected analysis modules beside its retained body; they
 // must not replace the containing SDK's target runtime or modules.
 const lintRetain='.target-tools/tools/cjlint/';
+const lintFlatbuffers='third_party/flatbuffers/modules';
 // -c <sdk>/tools uses the public config directory. Only publish runtime JSON;
 // keep the standalone install's layout and its producer record unchanged.
 export function cjlintPublicConfigPath(relative) {
@@ -167,9 +168,16 @@ async function lintTree(directory,relative,rows) {
     }else throw Error('CJLINT_PAYLOAD_TYPE '+file);
   }
 }
+async function lintAnalysisPayloads(sdk,rows) {
+  await lintTree(path.join(sdk,'modules'),'modules',rows);
+  await lintTree(path.join(sdk,lintFlatbuffers),lintFlatbuffers,rows);
+  if(!rows.some(row=>row.to===lintRetain+lintFlatbuffers+'/flatbuffers.cjo'))
+    throw Error('CJLINT_ANALYSIS_FLATBUFFERS_MISSING '+sdk);
+}
 async function lintInstalledPayloads(prefix) {
   const rows=[];
-  for(const name of ['config','modules','lib','runtime'])await lintTree(path.join(prefix,name),name,rows);
+  for(const name of ['config','lib','runtime'])await lintTree(path.join(prefix,name),name,rows);
+  await lintAnalysisPayloads(prefix,rows);
   if(rows.some(r=>/lib(?:cjlint|cangjie-lsp)\./.test(r.to)))throw Error('CJLINT_RETIRED_LIBRARY');
   return rows;
 }
@@ -178,7 +186,7 @@ async function lintBuildPayloads(config) {
   if(facts.language!=='Cangjie'||!facts.analysis?.sdk)throw Error('CJLINT_ANALYSIS_INPUT_REQUIRED');
   const rows=[];
   await lintTree(path.join(toolSourceRoot(config,'cjlint'),'packages/cjlint/config'),'config',rows);
-  await lintTree(path.join(facts.analysis.sdk,'modules'),'modules',rows);
+  await lintAnalysisPayloads(facts.analysis.sdk,rows);
   const env={...process.env,LD_LIBRARY_PATH:[path.join(facts.host.sdk,'runtime/lib/linux_x86_64_cjnative'),path.join(facts.host.sdk,'lib/linux_x86_64_cjnative'),path.dirname(facts.frontend.llvmLibrary)].join(path.delimiter)};
   delete env.LD_PRELOAD;delete env.LD_AUDIT;
   const {stdout}=await execute('ldd',[facts.executable],{env});
