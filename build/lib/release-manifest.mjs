@@ -284,7 +284,7 @@ function assertToolStamps(tools, sourceByComponent) {
 // already there; only the reconciliation was missing.
 //
 // Producer paths are install-relative and survive archive relocation.
-function provenanceArtifacts(text) {
+export function provenanceArtifacts(text) {
   const marker = text.indexOf('ARTIFACT-SHA256:');
   if (marker < 0) return null;
   const artifacts = new Map();
@@ -332,7 +332,7 @@ async function stagedStdFiles(stage) {
   return files.sort();
 }
 
-export async function reconcileStdArtifacts(stage, stdText, {checkArtifact, exclude=[]} = {}) {
+export async function reconcileStdArtifacts(stage, stdText, {checkArtifact, exclude=[], otherStdFiles=new Set()} = {}) {
   const artifacts = provenanceArtifacts(stdText);
   if (artifacts === null) throw new Error('std PROVENANCE.txt has no ARTIFACT-SHA256 block');
   if (artifacts.size === 0) throw new Error('std PROVENANCE.txt ARTIFACT-SHA256 block is empty');
@@ -352,7 +352,7 @@ export async function reconcileStdArtifacts(stage, stdText, {checkArtifact, excl
   if(!checked.size)throw Error('no packaged std artifact matched PROVENANCE.txt');
   for (const file of await stagedStdFiles(stage)) {
     const rel=packagedPath(stage,file);
-    if (!checked.has(rel)) throw new Error('STD_ARTIFACT_UNRECORDED '+rel);
+    if (!checked.has(rel) && !otherStdFiles.has(rel)) throw new Error('STD_ARTIFACT_UNRECORDED '+rel);
   }
   return {verified:checked.size, provenance_entries:artifacts.size};
 }

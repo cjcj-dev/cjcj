@@ -1,7 +1,7 @@
 #!/usr/bin/env zx
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {archiveInstall,atomicJson} from '../../bootstrap/sdk-flow.mjs';
+import {archiveInstall,atomicJson,command} from '../../bootstrap/sdk-flow.mjs';
 import {verifyInstall} from '../../bootstrap/sdk-verify-install.mjs';
 import {assertSdkCompilerRuntimeAbi} from '../../../build/lib/runtime-split.mjs';
 import {assertSdkPathParity} from '../../../build/lib/sdk-path-parity.mjs';
@@ -13,7 +13,7 @@ export function packageConsumption(target){
  if(target?.spec?.crossCompile===true)return {status:'NOT_RUN',reason:'HOST_CROSS_EXEC',platform};
  return {status:'EXECUTED',platform};
 }
-export async function packageInstall({sdk,target,version,officialSdkRoot,archive}){
+export async function packageInstall({sdk,target,version,officialSdkRoot,archive,android=false}){
  assertNoVerifierReportArtifacts([sdk]);assertSdkCompilerRuntimeAbi({sdk,target});
  await assertSdkPathParity(sdk,{officialRoot:officialSdkRoot,target:target.spec.key});
  const work=path.join(path.dirname(archive),'package-test');
@@ -26,6 +26,12 @@ export async function packageInstall({sdk,target,version,officialSdkRoot,archive
  await atomicJson(path.join(sdk,'BUILD-MANIFEST.json'),{version,target:target.spec.key,consumption,...inputs});
  const test=consumption.status==='EXECUTED'?{commands:[{argv:[process.execPath,fileURLToPath(new URL('../../bootstrap/sdk-verify-install.mjs',import.meta.url)),
   '--sdk','${install}','--work','${work}/relocated','--platform',target.spec.llvmPlatform,'--final-std','--precompiled-stdx']}]}:{commands:[],consumption};
+ if(android) {
+  if(target.spec.key!=='linux-x64'||consumption.status!=='EXECUTED')throw Error('ANDROID_PACKAGE_HOST');
+  const link=fileURLToPath(new URL('../steps/link-android-hello.mjs',import.meta.url));
+  await command([process.execPath,link,sdk,path.join(work,'android-installed')]);
+  test.commands.push({argv:[process.execPath,link,'${install}','${work}/android-relocated']});
+ }
  const archived=await archiveInstall({install:sdk,archive,format:target.spec.archiveFormat,test,vars:{work},records:[]});
  return {...archived,consumption};
 }

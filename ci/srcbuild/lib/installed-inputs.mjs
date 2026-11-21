@@ -11,6 +11,7 @@ import {runtimeInputsForArtifact,RUNTIME_INPUTS} from '../../../build/lib/runtim
 import {embeddedStamp} from '../../../build/lib/toolchain-identity.mjs';
 import {readInstalledStdxInputs} from '../../../build/lib/installed-stdx-inputs.mjs';
 import {STDX_BUILD_INPUTS} from '../../../build/srcbuild/stdx-build-inputs.mjs';
+import {readAndroidInputs} from './android-sdk.mjs';
 import {reconcileStdArtifacts} from '../../../build/lib/release-manifest.mjs';
 import {readInstalledNativeAst} from '../../bootstrap/installed-native-ast.mjs';
 import {readWindowsPythonInstallation} from '../../bootstrap/native-python-install.mjs';
@@ -179,12 +180,14 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
     }
     rows.push({component:'runtime',...runtime,artifacts:products,...(results.length?{results}:{})});
   }else rows.push({component:'runtime',source:source(stage?.sources?.runtime),build:{status:'unresolved',reason:'original runtime inputs missing'}});
+  const android=await readAndroidInputs(sdk,source(stage?.sources?.runtime),checkArtifact);
+  if(android)rows.push(...android.components);
   const stdProvenance=path.join(sdk,'PROVENANCE.txt');
   try{
     const text=await fs.readFile(stdProvenance,'utf8'),commit=text.match(/^STD_SOURCE_COMMIT\s*=\s*([0-9a-f]{40})$/m)?.[1];
     if(stage?.sources?.std?.commit&&stage.sources.std.commit!==commit)throw new Error('INSTALLED_STD_SOURCE');
     rows.push({component:'std',source:source({...stage?.sources?.std,commit}),
-      artifact:await artifact(sdk,'PROVENANCE.txt',undefined,checkArtifact),build:{provenance:text,...await reconcileStdArtifacts(sdk,text,{checkArtifact,exclude:stage?.selection&&stage.configuration?.layout!=='native-output'?stdInstallationExcludes(platform):[]})}});
+      artifact:await artifact(sdk,'PROVENANCE.txt',undefined,checkArtifact),build:{provenance:text,...await reconcileStdArtifacts(sdk,text,{checkArtifact,otherStdFiles:android?.stdFiles,exclude:stage?.selection&&stage.configuration?.layout!=='native-output'?stdInstallationExcludes(platform):[]})}});
   }catch(e){if(e.code!=='ENOENT'||e.path!==stdProvenance)throw e;rows.push({component:'std',source:unresolved('original std provenance missing')});}
   const llvmCheck=await optional(path.join(sdk,'share/cjcj/build-inputs/native-llvm.json'));
   // Component installs carry N's normal BUILD-INPUTS verbatim. A bootstrap

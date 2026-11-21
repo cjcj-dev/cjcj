@@ -36,5 +36,5 @@ await produceFinalCompiler({binary:final.product,outdir:path.join(config.softwar
  runId:github?process.env.GITHUB_RUN_ID:`local:${os.hostname()}:${crypto.randomUUID()}`,runAttempt:github?process.env.GITHUB_RUN_ATTEMPT:'1',
  std:targets.stages.find(s=>s.id==='stage3-std').output||path.join(targets.work,'targets/stage3-std'),lineage:compilerFacts});
 await packageInstall({sdk:path.join(config.softwareDir,'cangjie'),target:config.target,version:config.cangjieVersion,
- officialSdkRoot:config.officialSdkRoot,archive});
+ officialSdkRoot:config.officialSdkRoot,archive,android:process.env.CJCJ_PACKAGE_ANDROID==='1'});
 await packageStdx(config);
