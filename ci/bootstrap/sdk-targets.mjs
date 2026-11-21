@@ -1,5 +1,6 @@
 // The eight public bootstrap phases are an ordinary target dependency table.
 import path from 'node:path';
+import {javaInteropFiles} from './sdk-java-interop.mjs';
 import fs from 'node:fs/promises';
 import {visibleOptionsOnly} from './compiler-option-visibility.mjs';
 import {relative} from './sdk-flow.mjs';
@@ -76,7 +77,7 @@ export function backendArtifactPath(backend,rel) {
   return backend.installed?path.join(backend.installed,'.native-tools/third_party/llvm',rel):path.join(backend.install,rel);
 }
 
-export function installationRecipe(selection,{compiler:product,std,bootstrap=false,hostObjects=false,final=false,nativeChecks,tools,layout}={}) {
+export function installationRecipe(selection,{compiler:product,std,bootstrap=false,hostObjects=false,final=false,nativeChecks,tools,layout,javaInterop}={}) {
   const {platform,bootstrapHost:host,compilerExecution:execution,targetComponents:target}=selection;
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
   const nLib=['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+tuple,'lib/'+tuple,'tools/lib'];
@@ -191,6 +192,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     {from:path.join(llvm.install,relative(llvm.windowsToolchain.original.path)),to:relative(llvm.windowsToolchain.original.path),owner:'native toolchain input'},
     ...llvm.windowsToolchain.installedFiles.filter(row=>row.path.startsWith('bin/')).map(row=>({from:path.join(llvm.install,relative(row.path)),to:relative(row.path),owner:'native toolchain runtime'})));
   if(!hostObjects&&(runtime.component||runtime.buildResult))copies.push({from:runtime.component?path.join(runtime.install,'NATIVE-INPUTS.json'):runtime.buildResult,to:'share/cjcj/build-inputs/native-runtime.json',owner:'R original build'});
+  if(javaInterop)copies.push(...javaInteropFiles.map(to=>({from:path.join(javaInterop.install,to),to,owner:'Java interop'})));
   if(runtime.gateStatus&&!runtime.sourceRoot)throw Error('INSTALL_RUNTIME_SOURCE_REQUIRED');
   return {copies,...(!hostObjects&&native.os==='linux'&&runtime.sourceRoot?{
     runtimeLanguageInputs:{runtime:path.join(runtime.sourceRoot,'runtime'),gateStatus:runtime.gateStatus}}:{}),entries:[

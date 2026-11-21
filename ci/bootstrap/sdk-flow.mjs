@@ -557,7 +557,7 @@ export async function installProducts(descriptor,{buildOnly=false,dryRun=false,p
   const {prepareInstallInputs}=await import('./sdk-inputs.mjs');
   const {installationRecipe}=await import('./sdk-targets.mjs');
   const input=await prepareInstallInputs(await descriptor),{work,install,platform,selection}=input;
-  const recipe=installationRecipe(selection,{layout:input.layout});
+  const recipe=installationRecipe(selection,{layout:input.layout,javaInterop:input.javaInterop});
   const test=input.test??{commands:[{argv:[process.execPath,fileURLToPath(new URL('./compiler_identity.mjs',import.meta.url)),'${install}']},
     {argv:[process.execPath,fileURLToPath(new URL('./sdk-hello.mjs',import.meta.url)),
     '--sdk','${install}','--work','${work}/hello','--platform',platform,'--compiler-only',
@@ -578,6 +578,10 @@ export async function installProducts(descriptor,{buildOnly=false,dryRun=false,p
         compilerCommit:selection.targetComponents.compiler.commit,runtimeCommit:selection.targetComponents.runtime.commit,selection,
         sources:Object.fromEntries(Object.entries(selection.targetComponents).map(([name,row])=>[name,{repository:row.repository,commit:row.commit,producer:row.producer}])),
         configuration:{layout:input.layout??'components',platform},production:input.production};
+      if(input.javaInterop) {
+        const {install:_producerInstall,...facts}=input.javaInterop;
+        recipe.metadata.javaInterop=facts;
+      }
       await installRecipe({root:install,recipe,platform,build:path.join(work,'entries'),tools:input.tools,records,
         vars:{work},test:input.cross?undefined:test,consume});
       if(!input.cross)result.consumption={status:'EXECUTED'};

@@ -8,6 +8,7 @@ import {fileDigest,readJson,relative} from '../../bootstrap/sdk-flow.mjs';
 import {stdInstallationExcludes,runtimeLibraryLinks,nativeTargetLibraryExcludes} from '../../bootstrap/sdk-targets.mjs';
 import {gcUnitStatusRelative} from '../../../build/srcbuild/gc-unit-gate.mjs';
 import {sdkPlatform} from '../../bootstrap/sdk-platform.mjs';
+import {javaInteropFiles} from '../../bootstrap/sdk-java-interop.mjs';
 import {runtimeInputsForArtifact,RUNTIME_INPUTS} from '../../../build/lib/runtime-source-inputs.mjs';
 import {embeddedStamp} from '../../../build/lib/toolchain-identity.mjs';
 import {readInstalledStdxInputs} from '../../../build/lib/installed-stdx-inputs.mjs';
@@ -160,6 +161,11 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
       build:{...compiler,configuration:stage.configuration},
       entry:await artifact(sdk,'bin/cjcj-stage1'+native.exe,stage.compilerEntrySha256,checkArtifact)});
   }else rows.push({component:'compiler',source:unresolved('STAGE-INPUTS compiler missing')});
+  if(stage?.javaInterop) {
+    const {compilerSha256,runtimeCommit}=stage.javaInterop;
+    rows.push({component:'java-interop',source:source(stage.javaInterop),build:{platform,compilerSha256,runtimeCommit},
+      artifacts:await Promise.all(javaInteropFiles.map(rel=>artifact(sdk,rel,undefined,checkArtifact)))});
+  }
   const runtime=await optional(path.join(sdk,RUNTIME_INPUTS));
   if(runtime){
     if(!Array.isArray(runtime.artifacts)||!['runtime/lib/'+native.tuple+'/libcangjie-runtime'+native.shared,

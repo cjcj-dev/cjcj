@@ -14,6 +14,7 @@ import {randomUUID} from 'node:crypto';
 import {atomicJson, readJson, privateRoot, fileDigest} from './sdk-flow.mjs';
 import {FIXED_INPUTS,backendArtifactPath} from './sdk-targets.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
+import {javaInteropInput} from './sdk-java-interop.mjs';
 import {stage2Input} from './sdk-stage2-input.mjs';
 import {receiveNativeRuntime} from './native-runtime-input.mjs';
 import {languageSourceInputs} from '../../build/srcbuild/installed-language-source.mjs';
@@ -443,7 +444,7 @@ export async function prepareInstallInputs(descriptor) {
       backend.artifacts.push({path:rel,sha256});
     }
   }
-  let dependencyRoot;
+  let dependencyRoot,compilerSha256;
   const executionPlatform=platform;
   if(descriptor.layout==='native-output') {
     // build.py installs the compiler and its linked inputs into one native
@@ -453,7 +454,8 @@ export async function prepareInstallInputs(descriptor) {
     dependencyRoot=target.compiler.install;
   } else {
     const facts=await readJson(path.join(target.compiler.install,'compiler-inputs.json'));
-    if(facts.commit!==target.compiler.commit||await fileDigest(target.compiler.product)!==facts.compilerSha256)
+    compilerSha256=await fileDigest(target.compiler.product);
+    if(facts.commit!==target.compiler.commit||compilerSha256!==facts.compilerSha256)
       throw Error('INSTALL_COMPILER_PRODUCT');
     dependencyRoot=path.join(target.compiler.install,'.compiler-exec');
     if(await fileDigest(path.join(dependencyRoot,'lib',native.tuple,'libcangjie-std-core.a'))!==facts.stdCoreSha256)
@@ -480,7 +482,9 @@ export async function prepareInstallInputs(descriptor) {
   console.log('INSTALL_COMPILER_EXECUTION_FROM_PRODUCER '+JSON.stringify({compiler:target.compiler.product,dependencyRoot,platform:executionPlatform}));
   // Cross installation is allowed, execution belongs to its native runner.
   const cross=platform!==hostPlatform();
-  return {...descriptor,work,install,platform,selection,cross};
+  if(descriptor.javaInterop!==undefined)compilerSha256??=await fileDigest(target.compiler.product);
+  const javaInterop=await javaInteropInput(descriptor.javaInterop,{platform,cross,compilerSha256,runtimeCommit:target.runtime.commit});
+  return {...descriptor,work,install,platform,selection,cross,javaInterop};
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { await prepareNativeInputs(await readJson(process.argv[2] || process.env.CJCJ_NATIVE_INPUTS)); }
