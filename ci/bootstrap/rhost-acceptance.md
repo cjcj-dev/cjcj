@@ -83,9 +83,11 @@ used a separately installed compiler shim. `installations.h1` has the same
 fields as above. The producer's source determines whether there must be a
 matching flatc command, schema, and generated interface in that installation.
 The existing installer copies H1 and its selected execution libraries and
-publishes `bin/cjc` and `bin/cjc-frontend`. Supply compatible modules explicitly
-at compile time. This layout contains no target std or runtime and does not
-qualify native programs, packages, or the complete SDK.
+publishes `bin/cjc` and `bin/cjc-frontend`. Set `stdCoreInterface` to the
+compatible `std.core.cjo` to install for the front end. Supply other interfaces
+with the compiler's normal import options. This layout has no target runtime
+or native std libraries and does not qualify native programs, packages, or the
+complete SDK.
 
 ## Controlled semantic cut and recovery (prepared, NOT_RUN)
 

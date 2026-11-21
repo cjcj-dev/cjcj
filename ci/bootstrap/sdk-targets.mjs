@@ -77,13 +77,14 @@ export function backendArtifactPath(backend,rel) {
 }
 
 function h1FrontendRecipe(selection) {
-  const {platform,compilerExecution:{compiler,runtime,llvm}}=selection;
+  const {platform,compilerExecution:{compiler,runtime,llvm},frontendStdCore}=selection;
   const {tuple,shared,llvmDirectory}=sdkPlatform(platform);
   const productRoot=path.dirname(path.dirname(compiler.product));
   const runtimeDir='runtime/lib/'+tuple, execution='.compiler-exec/';
   const libraries=[execution+runtimeDir,execution+'third_party/llvm/'+llvmDirectory];
   return {copies:[
     {from:compiler.product,to:'bin/cjcj-stage1',owner:'H1 compiler'},
+    {from:frontendStdCore.file,to:'modules/'+tuple+'/std/std.core.cjo',owner:'selected front-end std.core'},
     ...['libcangjie-runtime','libboundscheck'].map(name=>({
       from:path.join(runtime.install,runtimeDir,name+shared),to:execution+runtimeDir+'/'+name+shared,owner:'H execution runtime'})),
     {from:path.join(llvm.install,llvm.library.file),to:execution+llvm.library.file,owner:'N execution library'},

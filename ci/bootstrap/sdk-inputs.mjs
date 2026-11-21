@@ -464,7 +464,7 @@ async function prepareH1FrontendInstall(descriptor) {
   const native=sdkPlatform(platform);
   if(platform!==hostPlatform()||native.os!=='linux')throw Error('INSTALL_H1_FRONTEND_PLATFORM');
   if(!sources?.h1||!hostInput?.install||!installations?.llvm?.install||!installations.h1
-    ||descriptor.selection||descriptor.production||descriptor.archive)
+    ||!descriptor.stdCoreInterface||descriptor.selection||descriptor.production||descriptor.archive)
     throw Error('INSTALL_H1_FRONTEND_INPUTS');
   const h1={...await gitInput(sources.h1,descriptor.h1Commit),
     ...(installations.shim?{shimInstall:await privateRoot(installations.shim.install)}:{})};
@@ -481,13 +481,16 @@ async function prepareH1FrontendInstall(descriptor) {
   const relative=path.posix.join('third_party/llvm',native.llvmDirectory,native.llvmLibrary);
   if(library?.file!==relative||library.sha256!==await fileDigest(path.join(llvm.install,relative)))
     throw Error('INSTALL_H1_FRONTEND_LLVM');
-  // H1 has no target runtime or std. Keep their execution inputs explicitly
-  // under the host role in the existing installation metadata.
+  // The public compiler resolves std.core within modules/<tuple>. Admit a
+  // separately selected front-end module, without treating it as a std build.
+  const core=await fs.realpath(descriptor.stdCoreInterface);
+  const coreStat=await fs.stat(core);
+  if(!coreStat.isFile()||!coreStat.size)throw Error('INSTALL_H1_FRONTEND_STD_CORE');
   const compiler={...h1,...product,platform,sourceRepository:await runtimeSourceRepository(h1.repository)};
   const selection={platform,hostPlatform:platform,bootstrapHost:host,
     compilerExecution:{role:'separate',stage:'h1-frontend',platform,compiler,runtime:host,
       llvm:{...llvm,commit:shim.llvm.commit,library}},
-    targetComponents:{compiler}};
+    targetComponents:{compiler},frontendStdCore:{file:core,sha256:await fileDigest(core)}};
   return {...descriptor,platform,work:await privateRoot(descriptor.work),install:await privateRoot(descriptor.install),selection};
 }
 
