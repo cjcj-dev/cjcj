@@ -558,10 +558,13 @@ export async function installProducts(descriptor,{buildOnly=false,dryRun=false,p
   const {installationRecipe}=await import('./sdk-targets.mjs');
   const input=await prepareInstallInputs(await descriptor),{work,install,platform,selection}=input;
   const recipe=installationRecipe(selection,{layout:input.layout});
-  const test=input.test??{commands:[{argv:[process.execPath,fileURLToPath(new URL('./compiler_identity.mjs',import.meta.url)),'${install}']},
-    {argv:[process.execPath,fileURLToPath(new URL('./sdk-hello.mjs',import.meta.url)),
-    '--sdk','${install}','--work','${work}/hello','--platform',platform,'--compiler-only',
-    '--source',fileURLToPath(new URL('../smoke/01_hello.cj',import.meta.url)),'--expected','hello from cjcj']}]};
+  const frontend=input.layout==='h1-frontend';
+  const identity={argv:[process.execPath,fileURLToPath(new URL('./compiler_identity.mjs',import.meta.url)),'${install}',
+    ...(frontend?['--expected-producer-sha256',selection.targetComponents.compiler.configuration.sha256]:[])]};
+  const test=frontend?{...input.test,commands:[identity,...(input.test?.commands??[])]}
+    :input.test??{commands:[identity,{argv:[process.execPath,fileURLToPath(new URL('./sdk-hello.mjs',import.meta.url)),
+      '--sdk','${install}','--work','${work}/hello','--platform',platform,'--compiler-only',
+      '--source',fileURLToPath(new URL('../smoke/01_hello.cj',import.meta.url)),'--expected','hello from cjcj']}]};
   if(buildOnly||dryRun) {
     const result={status:'NOT_INSTALLED',selection,recipe,reason:dryRun?'DRY_RUN':'BUILD_ONLY'};
     console.log(JSON.stringify(result));return result;
@@ -575,12 +578,14 @@ export async function installProducts(descriptor,{buildOnly=false,dryRun=false,p
   return supervisionWork.run(work,async()=>{
     try {
       recipe.metadata={platform,phase:selection.compilerExecution.stage,compilerFile:'libexec/compiler/cjcj-stage1'+sdkExe(platform),
-        compilerCommit:selection.targetComponents.compiler.commit,runtimeCommit:selection.targetComponents.runtime.commit,selection,
+        compilerCommit:selection.targetComponents.compiler.commit,
+        ...(frontend?{compilerRole:'transitional-ordinary-compiler',macroSdk:'UNSUPPORTED'}
+          :{runtimeCommit:selection.targetComponents.runtime.commit}),selection,
         sources:Object.fromEntries(Object.entries(selection.targetComponents).map(([name,row])=>[name,{repository:row.repository,commit:row.commit,producer:row.producer}])),
         configuration:{layout:input.layout??'components',platform},production:input.production};
       await installRecipe({root:install,recipe,platform,build:path.join(work,'entries'),tools:input.tools,records,
         vars:{work},test:input.cross?undefined:test,consume});
-      if(!input.cross)result.consumption={status:'EXECUTED'};
+      if(!input.cross)result.consumption={status:'EXECUTED',...(frontend?{scope:input.test?'h1-frontend':'compiler-identity'}:{})};
       if(packageOutput&&input.archive)result.package=await archiveInstall({install,archive:input.archive,format:input.archiveFormat,
         test:input.cross?undefined:test,vars:{work},records});
       result.status='COMPLETE';return result;

@@ -5,7 +5,7 @@ import {visibleOptionsOnly} from './compiler-option-visibility.mjs';
 import {relative} from './sdk-flow.mjs';
 import {isDeepStrictEqual} from 'node:util';
 import {fileURLToPath} from 'node:url';
-import {sdkPlatform} from './sdk-platform.mjs';
+import {sdkPlatform,stdxChirMembers} from './sdk-platform.mjs';
 import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
 import {stdBuildType,selectedStdAst} from './sdk-std-resume.mjs';
 export const BOOTSTRAP_PHASES=Object.freeze(['stage0','stage0-run','std-bootstrap','stage1-initial','stage1-std','stage2','stage3-std','stage3']);
@@ -76,7 +76,26 @@ export function backendArtifactPath(backend,rel) {
   return backend.installed?path.join(backend.installed,'.native-tools/third_party/llvm',rel):path.join(backend.install,rel);
 }
 
+function h1FrontendRecipe(selection) {
+  const {platform,compilerExecution:{compiler,runtime,llvm}}=selection;
+  const {tuple,shared,llvmDirectory}=sdkPlatform(platform);
+  const productRoot=path.dirname(path.dirname(compiler.product));
+  const runtimeDir='runtime/lib/'+tuple, execution='.compiler-exec/';
+  const libraries=[execution+runtimeDir,execution+'third_party/llvm/'+llvmDirectory];
+  return {copies:[
+    {from:compiler.product,to:'bin/cjcj-stage1',owner:'H1 compiler'},
+    ...['libcangjie-runtime','libboundscheck'].map(name=>({
+      from:path.join(runtime.install,runtimeDir,name+shared),to:execution+runtimeDir+'/'+name+shared,owner:'H execution runtime'})),
+    {from:path.join(llvm.install,llvm.library.file),to:execution+llvm.library.file,owner:'N execution library'},
+    ...(compiler.chirInterface?stdxChirMembers.map(member=>({from:path.join(productRoot,member),to:member,owner:'H1 compiler interface'})):[]),
+  ],entries:[{directory:'bin',retain:'libexec/compiler',names:['cjcj-stage1'],libraries}],
+  links:{'bin/cjc':'cjcj-stage1','bin/cjc-frontend':'cjcj-stage1',
+    'libexec/compiler/cjc':'cjcj-stage1','libexec/compiler/cjc-frontend':'cjcj-stage1',
+    'libexec/runtime':'../.compiler-exec/runtime'}};
+}
+
 export function installationRecipe(selection,{compiler:product,std,bootstrap=false,hostObjects=false,final=false,nativeChecks,tools,layout}={}) {
+  if(layout==='h1-frontend')return h1FrontendRecipe(selection);
   const {platform,bootstrapHost:host,compilerExecution:execution,targetComponents:target}=selection;
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
   const nLib=['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+tuple,'lib/'+tuple,'tools/lib'];
@@ -295,7 +314,9 @@ export function createBootstrapTargets(input) {
   }));
   const stages=[...nativeTargets,
     {id:'stage0',depends:nativeTargets.map(s=>s.id),
-      ...(h1.product?{reuse:{commit:h1.commit,configuration:h1.configuration,source:h1.buildResult},copies:[{from:h1.product,to:compilerName}]}:
+      ...(h1.product?{reuse:{commit:h1.commit,configuration:h1.configuration,source:h1.buildResult},copies:[{from:h1.product,to:compilerName},
+        ...(h1.chirInterface?stdxChirMembers.map(member=>({
+          from:path.join(path.dirname(path.dirname(h1.product)),member),to:member,owner:'H1 compiler interface'})):[])]}:
         {commands:[stageArg('h1',repo('h1'),llvm.install,'${output}')]} )},
     composed('stage0-run',['stage0'],out('stage0')+'/'+compilerName,null,input.stdLocalModeApi!==true),
     {id:'std-bootstrap',depends:['stage0-run'],commands:[stageArg('std',repo('std0'),out('stage0-run'),'${output}',null,'host')]},
