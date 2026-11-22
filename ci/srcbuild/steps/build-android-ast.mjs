@@ -11,7 +11,9 @@ const {CANGJIE_WORKSPACE:workspace, CJCJ_BOOTSTRAP_WORK:bootstrap} = process.env
 const stage = JSON.parse(await fs.readFile(path.join(bootstrap, 'sdk-stage2/STAGE-INPUTS.json')));
 const pins = readSourcePins();
 const root = path.join(workspace, 'android-ast');
-const [source=path.join(root, 'src'), llvm=path.join(root, 'llvm'), build=path.join(root, 'build')] = process.argv.slice(2);
+const source = process.env.CJCJ_ANDROID_AST_SOURCE || path.join(root, 'src');
+const llvm = process.env.CJCJ_ANDROID_AST_LLVM_SOURCE || path.join(root, 'llvm');
+const build = process.env.CJCJ_ANDROID_AST_BUILD || path.join(root, 'build');
 const install = path.join(workspace, 'software/android-ast-support');
 const ast = stage.sources.ast ?? {repository:pins.source.COMPILER_SRC_URL, commit:pins.source.COMPILER_REF};
 const deps = [[source,ast.repository,ast.commit], [llvm,stage.sources.llvm.repository,stage.sources.llvm.commit],
@@ -19,7 +21,7 @@ const deps = [[source,ast.repository,ast.commit], [llvm,stage.sources.llvm.repos
   [path.join(source,'third_party/flatbuffers'),pins.llvm.FLATBUFFERS_URL,pins.llvm.FLATBUFFERS_SHA]];
 // CI prepares private source trees. Managed builds supply the already prepared
 // AST/LLVM paths and pinned dependency copies, because upstream patches both dependencies.
-if (process.argv.length === 2 && process.env.GITHUB_ACTIONS === 'true') {
+if (!process.env.CJCJ_ANDROID_AST_SOURCE && process.env.GITHUB_ACTIONS === 'true') {
   for (const [dir,url,commit] of deps) await checkoutExactSource(url, dir, commit);
 }
 for (const [dir,,commit] of deps.slice(0,2)) {
