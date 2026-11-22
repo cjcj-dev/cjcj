@@ -1363,19 +1363,33 @@ public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Op
             return None
         }
     }
+    // An if/match/try yields one of its branches; a branch that cannot complete normally (type
+    // Nothing) contributes no value. Differing branch modes join to HALF, as in
+    // LocalModeAnalysis.MergeBranchModes (std.fs file_info.cj:245 `let pathStr = if ...`,
+    // std.ast parse_node.cj:695 `let macroNode = match ...`, ffi.cj:206 `try { ... } finally`).
+    let branches = ArrayList<Expr>()
     if (let Some(ie) <- (expr as IfExpr)) {
-        // `if (c) { a } else { b }` yields one of its branches; a branch that cannot complete
-        // normally (type Nothing) contributes no value. Differing branch modes join to HALF, as in
-        // LocalModeAnalysis.MergeBranchModes (std.fs file_info.cj:245 `let pathStr = if (...) {...}`).
-        let thenBody = ie.thenBody ?? return None;
-        let elseBody = ie.elseBody ?? return None;
+        branches.add(ie.thenBody ?? return None)
+        branches.add(ie.elseBody ?? return None)
+    } else if (let Some(me) <- (expr as MatchExpr)) {
+        for (c in me.matchCases) { branches.add(c.exprOrDecls ?? return None) }
+        for (c in me.matchCaseOthers) { branches.add(c.exprOrDecls ?? return None) }
+    } else if (let Some(te) <- (expr as TryExpr)) {
+        branches.add(te.tryBlock ?? return None)
+        for (c in te.catchBlocks) { branches.add(c) }
+    }
+    if (!branches.isEmpty()) {
         var joined: Option<ASTMode> = None
-        for (branch in [(thenBody as Expr).getOrThrow(), elseBody]) {
+        for (branch in branches) {
             if ((let Some(bt) <- branch.GetTy()) && bt.IsNothing()) { continue }
             let m = CallSiteMode(branch, receiver, seen) ?? return None;
             joined = if (let Some(j) <- joined) { if (j == m) { j } else { ASTMode.HALF } } else { m }
         }
         return joined
+    }
+    // `x as T` is a view of x itself (socket_util.cj:77 `(socketAddress as IPSocketAddress) ?? return`).
+    if (let Some(ae) <- (expr as AsExpr)) {
+        if (let Some(inner) <- ae.leftExpr) { return CallSiteMode(inner, receiver, seen) }
     }
     if (expr is LitConstExpr || expr.resolvedMode != ASTMode.NOT) { return expr.resolvedMode }
     return None
