@@ -6509,6 +6509,13 @@ extend TypeChecker {
                     Check(ctx, patternExpectedTy, patternExpr)
                 }), refInferer: Some({ refExpr: RefExpr => InferRefExpr(ctx, refExpr) }), diag: impl.diag)
             isWellTyped = patternOk && isWellTyped
+            // Bind the loop variables before the body is checked, so calls in the body see the mode of
+            // the iterated value (an element of a `@local!` collection is `@local!`).
+            if (patternOk && (let Some(inExpression) <- forInExpr.inExpression)) {
+                let receiver = GetCurFuncBody(ctx, inExpression.scopeName).flatMap({ b => b.funcDecl })
+                    .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+                BindPatternMode(pattern, BindingResultMode(impl.typeManager, inExpression, receiver) ?? ASTMode.NOT)
+            }
         } else {
             isWellTyped = false
         }

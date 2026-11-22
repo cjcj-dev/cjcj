@@ -1314,6 +1314,10 @@ public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Op
         if (let Some(fd) <- call.resolvedFunction) {
             if (fd.TestAttr(Attribute.CONSTRUCTOR)) { return GetReceiverMode(fd) }
             if ((let Some(t) <- fd.GetTy()) && (let Some(ft) <- (t as FuncTy))) { return ft.retMode }
+        } else if ((let Some(callee) <- call.baseFunc) && (let Some(t) <- callee.GetTy()) &&
+            (let Some(ft) <- (t as FuncTy))) {
+            // A call through a function-typed value has the result mode of that function type.
+            return ft.retMode
         }
         return None
     }
