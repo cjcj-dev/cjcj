@@ -24,4 +24,8 @@ check setter_local_param 0 ""
 check setter_match_add 0 ""
 check neg_forin_plain_only 1 "mismatched types|no matching function"
 check neg_setter_plain_only 1 "mismatched types|no matching function"
+check none_return_local 0 ""
+check forin_tuple_local 0 ""
+check neg_none_call_plain 1 "mismatched types|no matching function"
+check neg_forin_tuple_plain 1 "mismatched types|no matching function"
 exit $fail
