@@ -9,6 +9,7 @@ import {installedStageOutput} from '../lib/installed-stage-output.mjs';
 import {verifyStdBuildInputs} from '../../bootstrap/stdlib-build.mjs';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
 import {probeRequirement} from '../../release/platform-matrix.mjs';
+import {assertAndroidRuntimePair} from '../lib/android-runtime-pair.mjs';
 import {buildAndroidRuntime} from '../lib/android-runtime.mjs';
 
 $.stdio = 'inherit';
@@ -22,7 +23,8 @@ if (process.platform !== 'linux' || process.arch !== 'x64') {
 const workspace = path.resolve(required('CANGJIE_WORKSPACE'));
 if (workspace === path.parse(workspace).root) throw new Error('workspace must not be a filesystem root');
 const version = required('CJCJ_STAGE3_CANGJIE_VERSION');
-const expectedRef = required('CJCJ_NATIVE_RUNTIME_REF');
+const hostRef = required('CJCJ_NATIVE_RUNTIME_REF');
+const expectedRef = process.env.CJCJ_ANDROID_RUNTIME_REF || hostRef;
 const probe = probeRequirement('android-ndk');
 if (!probe.present) throw new Error(probe.detail);
 const ndk = path.resolve(probe.detail.slice(probe.detail.indexOf('=') + 1));
@@ -36,7 +38,8 @@ const tuple = 'linux_android_aarch64_cjnative';
 const finalStd = path.join(workspace, 'software', 'final-std-android-aarch64');
 const runtimeInstall = path.join(runtime, 'output', 'common', 'linux_android_release_aarch64');
 const runtimeRef = (await $({stdio: 'pipe'})`git -C ${repository} rev-parse HEAD`).stdout.trim();
-if (runtimeRef !== expectedRef || runtimeRef !== originalCompiler.lineage.runtimeCommit) throw new Error(`runtime source mismatch: ${runtimeRef} != ${expectedRef}`);
+assertAndroidRuntimePair(hostRef, expectedRef, originalCompiler.lineage);
+if (runtimeRef !== expectedRef) throw new Error(`runtime source mismatch: ${runtimeRef} != ${expectedRef}`);
 const stageEnv = {...process.env, CANGJIE_HOME: sdk, CANGJIE_VERSION: version,
   PATH: [path.join(sdk, 'bin'), path.join(sdk, 'tools', 'bin'), path.join(toolchain, 'bin'), process.env.PATH].join(path.delimiter)};
 const assertCompiler = async () => {
@@ -44,7 +47,7 @@ const assertCompiler = async () => {
   await assertBootstrapCompiler({sdk, command, producer: originalCompiler.product, producerSha256: originalCompiler.lineage.compilerSha256});
 };
 await assertCompiler();
-await buildAndroidRuntime({workspace, ndk, version, runtimeRef, env: stageEnv});
+await buildAndroidRuntime({workspace, ndk, version, runtimeRef, recordRepository: runtimeRef !== hostRef, env: stageEnv});
 await assertCompiler();
 await verifyStdBuildInputs(sdk);
 await fs.rm(finalStd, {recursive: true, force: true});
@@ -52,7 +55,7 @@ await $({cwd: stdlib, env: stageEnv})`python3 build.py clean`;
 await $({cwd: stdlib, env: stageEnv})`python3 build.py build -t release -j ${crossBuildJobs(stageEnv, 'std')} --target android-aarch64 --target-lib=${path.join(runtime, 'output')} --target-lib=${path.join(runtimeInstall, 'runtime', 'lib', tuple)} --target-lib=${path.join(runtimeInstall, 'lib', tuple)} --target-toolchain ${path.join(toolchain, 'bin')} --target-sysroot ${path.join(toolchain, 'sysroot')}`;
 await $({cwd: stdlib, env: stageEnv})`python3 build.py install --prefix ${finalStd}`;
 await assertCompiler();
-await writeStdProvenance({sourceDir: stdlib, installPrefix: finalStd,
+await writeStdProvenance({sourceDir: stdlib, sourceRoot: repository, sourceRevision: runtimeRef, installPrefix: finalStd,
   compiler: originalCompiler.product, note: `Android API 23 final std; runtime ${runtimeRef}`});
 // Keep runtime separate from std so package consumers cannot confuse their provenance.
 const runtimeArtifact = path.join(finalStd, 'cross-runtime');

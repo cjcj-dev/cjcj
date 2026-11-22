@@ -180,7 +180,7 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
     }
     rows.push({component:'runtime',...runtime,artifacts:products,...(results.length?{results}:{})});
   }else rows.push({component:'runtime',source:source(stage?.sources?.runtime),build:{status:'unresolved',reason:'original runtime inputs missing'}});
-  const android=await readAndroidInputs(sdk,source(stage?.sources?.runtime),checkArtifact);
+  const android=await readAndroidInputs(sdk,source(stage?.sources?.runtime),checkArtifact,stage);
   if(android)rows.push(...android.components);
   const stdProvenance=path.join(sdk,'PROVENANCE.txt');
   try{

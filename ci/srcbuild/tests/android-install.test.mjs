@@ -40,8 +40,8 @@ test('Android install replaces only its tuple and keeps host and target provenan
     await put(runtime, 'runtime/lib/' + tuple + '/' + rel, elf);
   await put(runtime, 'lib/' + tuple + '/cjstart.o', 'entry');
   await writeCrossRuntimeManifest({root:runtime, tuple, runtimeRef:ref});
-  const install = () => spawnSync(process.execPath, [fileURLToPath(new URL('../steps/install-android.mjs', import.meta.url))],
-    {encoding:'utf8', env:{...process.env, CANGJIE_WORKSPACE:workspace, CJCJ_NATIVE_RUNTIME_REF:ref, CJCJ_SRCBUILD_TARGET:'linux-x64'}});
+  const install = (extra = {}) => spawnSync(process.execPath, [fileURLToPath(new URL('../steps/install-android.mjs', import.meta.url))],
+    {encoding:'utf8', env:{...process.env, CANGJIE_WORKSPACE:workspace, CJCJ_NATIVE_RUNTIME_REF:ref, CJCJ_SRCBUILD_TARGET:'linux-x64', ...extra}});
   const first = install();
   assert.equal(first.status, 0, first.stderr);
   assert.equal(await fs.readFile(path.join(sdk,'modules/host/std/std.core.cjo'),'utf8'), 'host std');
@@ -58,4 +58,23 @@ test('Android install replaces only its tuple and keeps host and target provenan
   assert.equal(await fs.readFile(path.join(sdk,core),'utf8'), 'target module');
   await put(sdk, 'modules/host/std/unrecorded.cjo', 'extra');
   await assert.rejects(reconcile, /STD_ARTIFACT_UNRECORDED modules\/host/);
+
+  const hostRef = '9991cf4f4c9cb3465bb5aec28a5590f6c529be4e', targetRef = '20995aae195f134ecc2c94bb6a90239c31b673f4';
+  const hostSource = {...source, commit:hostRef};
+  const stage = {phase:'stage3', runtimeCommit:hostRef, compilerCommit:'ea6d3b5fc73b5e4cc2926535005a46a92109b2b9',
+    sources:{runtime:hostSource, std:hostSource, llvm:{commit:'f2a8e33d2dbb6797d65813cd20f529d9567843a1'}}};
+  const stageText = JSON.stringify(stage);
+  await put(sdk, 'STAGE-INPUTS.json', stageText);
+  await put(std, core, 'target module');
+  await put(std, 'PROVENANCE.txt', 'STD_SOURCE_COMMIT = ' + targetRef + '\nARTIFACT-SHA256:\n' + files.join('\n') + '\n');
+  await writeCrossRuntimeManifest({root:runtime, tuple, runtimeRef:targetRef, sourceRepository:'target-source'});
+  const splitEnv = {CJCJ_NATIVE_RUNTIME_REF:hostRef, CJCJ_ANDROID_RUNTIME_REF:targetRef};
+  const rejected = install({...splitEnv, CJCJ_ANDROID_RUNTIME_REF:'a'.repeat(40)});
+  assert.equal(rejected.status, 1); assert.match(rejected.stderr, /ANDROID_INSTALL_RUNTIME_PAIR/);
+  const split = install(splitEnv);
+  assert.equal(split.status, 0, split.stderr);
+  assert.equal(await fs.readFile(path.join(sdk,'STAGE-INPUTS.json'),'utf8'), stageText);
+  const actual = await readAndroidInputs(sdk,hostSource,undefined,stage);
+  for (const row of actual.components) assert.deepEqual(row.source,{...source, repository:'target-source', commit:targetRef});
+  await assert.rejects(readAndroidInputs(sdk, hostSource, undefined, {...stage,compilerCommit:ref}), /ANDROID_INSTALL_RUNTIME_PAIR/);
 });

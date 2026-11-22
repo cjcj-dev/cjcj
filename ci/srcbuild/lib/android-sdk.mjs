@@ -3,14 +3,23 @@ import path from 'node:path';
 import {fileDigest} from '../../bootstrap/sdk-flow.mjs';
 import {provenanceArtifacts} from '../../../build/lib/release-manifest.mjs';
 
+import {assertAndroidRuntimePair} from './android-runtime-pair.mjs';
+
 export const androidTuple = 'linux_android_aarch64_cjnative';
 export const androidStdRoots = ['modules', 'lib', 'runtime/lib'].map(dir => dir + '/' + androidTuple);
 export const androidStdProvenance = 'PROVENANCE-' + androidTuple + '.txt';
 
-export async function readAndroidInputs(sdk, source, checkArtifact) {
+export async function readAndroidInputs(sdk, hostSource, checkArtifact, stage) {
   let text;
   try { text = await fs.readFile(path.join(sdk, androidStdProvenance), 'utf8'); }
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  const runtime = JSON.parse(await fs.readFile(path.join(sdk, 'CROSS-RUNTIME-' + androidTuple + '.json'), 'utf8'));
+  const split = runtime.runtimeRef !== hostSource?.commit;
+  if (split) {
+    assertAndroidRuntimePair(hostSource?.commit, runtime.runtimeRef, stage);
+    if (typeof runtime.sourceRepository !== 'string' || !runtime.sourceRepository) throw Error('ANDROID_TARGET_REPOSITORY');
+  }
+  const source = split ? {...hostSource, commit:runtime.runtimeRef, repository:runtime.sourceRepository} : hostSource;
   if (source?.status !== 'resolved' || !/^[0-9a-f]{40}$/.test(source.commit) || !text.split('\n').includes('STD_SOURCE_COMMIT = ' + source.commit))
     throw Error('ANDROID_INSTALL_STD_SOURCE');
   const std = provenanceArtifacts(text);
@@ -31,7 +40,6 @@ export async function readAndroidInputs(sdk, source, checkArtifact) {
   }
   for (const rel of [androidStdRoots[0] + '/std/std.core.cjo', androidStdRoots[1] + '/libcangjie-std-core.a',
     androidStdRoots[2] + '/libcangjie-std-core.so']) if (!stdFiles.has(rel)) throw Error('ANDROID_STD_REQUIRED ' + rel);
-  const runtime = JSON.parse(await fs.readFile(path.join(sdk, 'CROSS-RUNTIME-' + androidTuple + '.json'), 'utf8'));
   if (runtime.schema !== 1 || runtime.tuple !== androidTuple || runtime.runtimeRef !== source.commit) throw Error('ANDROID_INSTALL_RUNTIME_PAIR');
   const runtimeFiles = new Map();
   for (const row of runtime.files) {
