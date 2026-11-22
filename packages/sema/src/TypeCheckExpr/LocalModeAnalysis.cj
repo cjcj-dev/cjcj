@@ -151,8 +151,16 @@ class LocalModeAnalysis {
         let mode = value.resolvedMode
         if (mode.IsSubMode(expected)) { return }
         let ty = value.GetTy() ?? return;
-        if (CopyType(ty)) { return }
+        if (CopyType(ty) || IsNullaryEnumValue(value)) { return }
         DiagMismatchedTypesWithFoundTy(diag, value, ty.String() + expected.Suffix(), ty.String() + mode.Suffix())
+    }
+
+    // A nullary enum constructor such as `Option<T>.None` holds no reference, so it fits every slot.
+    private func IsNullaryEnumValue(value: Node): Bool {
+        if (!(value is RefExpr || value is MemberAccess)) { return false }
+        let expr = (value as Expr) ?? return false;
+        let target = expr.GetTarget() ?? return false;
+        return target.TestAttr(Attribute.ENUM_CONSTRUCTOR) && !(target is FuncDecl)
     }
 
     private func MergeBranchModes(value: Expr): Unit {
@@ -576,6 +584,15 @@ class LocalModeAnalysis {
         if ((let Some(me) <- (parent as MatchExpr)) && (me.selector.map({ e => refEq(e, node) }) ?? false)) {
             for (arm in me.matchCases) { for (pat in arm.patterns) { BindProjection(pat, (node as Expr).getOrThrow()) } }
             return
+        }
+        // for-in: elements come from the iterator of the collection, so they take its mode;
+        // the body is a statement whose value is discarded.
+        if (let Some(forIn) <- (parent as ForInExpr)) {
+            if (forIn.inExpression.map({ e => refEq(e, node) }) ?? false) {
+                if (let Some(pat) <- forIn.pattern) { BindProjection(pat, (node as Expr).getOrThrow()) }
+                return
+            }
+            if (forIn.body.map({ b => refEq(b, node) }) ?? false) { return }
         }
         if ((let Some(lp) <- (parent as LetPatternDestructor)) && (lp.initializer.map({ e => refEq(e, node) }) ?? false)) {
             for (pat in lp.patterns) { BindProjection(pat, (node as Expr).getOrThrow()) }
