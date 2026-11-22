@@ -41,7 +41,7 @@ test('Android install replaces only its tuple and keeps host and target provenan
   await put(runtime, 'lib/' + tuple + '/cjstart.o', 'entry');
   await writeCrossRuntimeManifest({root:runtime, tuple, runtimeRef:ref});
   const install = (extra = {}) => spawnSync(process.execPath, [fileURLToPath(new URL('../steps/install-android.mjs', import.meta.url))],
-    {encoding:'utf8', env:{...process.env, CANGJIE_WORKSPACE:workspace, CJCJ_NATIVE_RUNTIME_REF:ref, CJCJ_SRCBUILD_TARGET:'linux-x64', ...extra}});
+    {encoding:'utf8', env:{...process.env, CANGJIE_WORKSPACE:workspace, CJCJ_NATIVE_RUNTIME_REF:ref, CJCJ_SRCBUILD_TARGET:'linux-x64', CJCJ_ANDROID_RUNTIME_REF:'', ...extra}});
   const first = install();
   assert.equal(first.status, 0, first.stderr);
   assert.equal(await fs.readFile(path.join(sdk,'modules/host/std/std.core.cjo'),'utf8'), 'host std');
@@ -61,7 +61,7 @@ test('Android install replaces only its tuple and keeps host and target provenan
 
   const hostRef = '9991cf4f4c9cb3465bb5aec28a5590f6c529be4e', targetRef = '20995aae195f134ecc2c94bb6a90239c31b673f4';
   const hostSource = {...source, commit:hostRef};
-  const stage = {phase:'stage3', runtimeCommit:hostRef, compilerCommit:'ea6d3b5fc73b5e4cc2926535005a46a92109b2b9',
+  const stage = {phase:'stage3', compilerSha256:'5190316791e889c882684361d79a8fc70f7a1f9d606316b3cde032bf0c5f6fc1', runtimeCommit:hostRef, compilerCommit:'ea6d3b5fc73b5e4cc2926535005a46a92109b2b9',
     sources:{runtime:hostSource, std:hostSource, llvm:{commit:'f2a8e33d2dbb6797d65813cd20f529d9567843a1'}}};
   const stageText = JSON.stringify(stage);
   await put(sdk, 'STAGE-INPUTS.json', stageText);
