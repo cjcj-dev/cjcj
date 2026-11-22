@@ -4298,8 +4298,9 @@ public class IRBuilder2 <: Resource {
         return CreateIntrinsicCallNoInvoke(GET_FIELD_OFFSET_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), fixedArgs)
     }
 
-    public func CallGCWriteStruct(baseObject: LLVMValueRef, dest: LLVMValueRef, source: LLVMValueRef,
+    public func CallGCWriteStruct(baseObject: LLVMValueRef, dest: LLVMValueRef, rawSource: LLVMValueRef,
         size: LLVMValueRef, aggTypeName: String): LLVMValueRef {
+        let source = MaterializeAggSource(rawSource)
         let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
         let destPtrTy = unsafe { LLVMPointerType(i8Type, 1u32) }
         let sourceRawTy = unsafe { LLVMTypeOf(source) }
@@ -4325,6 +4326,17 @@ public class IRBuilder2 <: Resource {
         return call
     }
 
+    // `llvm.cj.gcwrite.struct` copies `size` bytes from a source address. A first-class aggregate
+    // (e.g. the SSA String of a local string literal, CreateLocalStringLiteral) has no address,
+    // so it is spilled to an entry slot first; an addrspacecast of the value itself is invalid IR.
+    private func MaterializeAggSource(source: LLVMValueRef): LLVMValueRef {
+        let ty = unsafe { LLVMTypeOf(source) }
+        if (ty.isNull() || unsafe { LLVMGetTypeKind(ty) } == LLVM_POINTER_TYPE_KIND) { return source }
+        let slot = CreateEntryAlloca(ty, name: "gcwrite.agg.spill")
+        CreateStore(source, slot)
+        return slot
+    }
+
     public func CallGCWriteAgg(structType: LLVMTypeRef, args: ArrayList<LLVMValueRef>): LLVMValueRef {
         CJC_ASSERT(args.size == 4)
         let sizeValue = args[3]
@@ -4337,6 +4349,7 @@ public class IRBuilder2 <: Resource {
         CheckNoWriteBarrierRec()
         let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
         let destPtrTy = unsafe { LLVMPointerType(i8Type, 1u32) }
+        args[2] = MaterializeAggSource(args[2])
         let sourceRawTy = unsafe { LLVMTypeOf(args[2]) }
         let sourceAddrSpace = if (!sourceRawTy.isNull() && unsafe { LLVMGetTypeKind(sourceRawTy) } == 12) {
             unsafe { LLVMGetPointerAddressSpace(sourceRawTy) }

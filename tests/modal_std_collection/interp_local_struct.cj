@@ -15,7 +15,8 @@ struct P <: ToString {
 class Opener {
     let n: Int64
     public exclave init(this @local!, path: String @local!) {
-        let p: P @local! = P("ab") @local!
+        let raw: String @local! = "ab"
+        let p: P @local! = P(raw) @local!
         if (path.size > 0) {
             throw Exception("parent '${p}' for ${path} missing")
         }
@@ -27,7 +28,8 @@ main(): Int64 {
     let plain = P("cd")
     if ("${plain}" != "cd") { return 4 }
     try {
-        let o = Opener("x") @local!
+        let x: String @local! = "x"
+        let o = Opener(x) @local!
         return if (o.n == 1) { 1 } else { 2 }
     } catch (e: Exception) {
         return if (e.message == "parent 'ab' for x missing") { 0 } else { 3 }
