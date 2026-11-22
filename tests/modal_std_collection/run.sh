@@ -5,6 +5,7 @@
 # @local! property (also when matched, as in hash_map.cj:529) select the @local! overload; the same
 # values still cannot reach non-local slots. A value bound by `opt ?? throw` keeps plain properties
 # (arg_opt.cj:676) and exclave HashMap.mapValues with a concrete key lowers (hash_map.cj:1686).
+# The plain and the exclave std.core acquireArrayRawData<Byte> lower side by side in one package (file.cj:770).
 set -u
 cjc=$1; out=$2; here=$(cd "$(dirname "$0")" && pwd); mkdir "$out" || exit 2
 fail=0
@@ -32,4 +33,5 @@ check neg_forin_tuple_plain 1 "mismatched types|no matching function"
 check coalesce_enum_prop 0 ""
 check exclave_map_values_add 0 ""
 check interp_local_struct 0 ""
+check exclave_raw_data_imported 0 ""
 exit $fail
