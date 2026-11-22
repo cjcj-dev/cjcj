@@ -59,6 +59,12 @@ try {
   for (const dir of ['lib', 'runtime/lib']) {
     await fs.cp(path.join(runtimeInstall, dir, tuple), path.join(sdk, dir, tuple), {recursive:true});
   }
+  const targetAst = path.join('lib', tuple, 'libcangjie-ast-support.a');
+  const archive = path.join(workspace, 'software/android-ast-support', targetAst);
+  const headers = (await $({stdio:'pipe'})`${path.join(toolchain,'bin/llvm-readelf')} -h ${archive}`).stdout;
+  const machines = [...headers.matchAll(/^\s*Machine:\s*(.+)$/gm)].map(match => match[1].trim());
+  if (!machines.length || machines.some(name => name !== 'AArch64')) throw Error('ANDROID_AST_ARCHITECTURE');
+  await fs.copyFile(archive, path.join(sdk, targetAst));
   await assertCompiler();
   await verifyStdBuildInputs(sdk);
   await fs.rm(finalStd, {recursive: true, force: true});
@@ -80,7 +86,7 @@ try {
 const runtimeArtifact = path.join(finalStd, 'cross-runtime');
 await fs.cp(runtimeInstall, runtimeArtifact, {recursive: true});
 
-for (const relative of [`runtime/lib/${tuple}/libcangjie-std-core.so`, `lib/${tuple}/libcangjie-std-core.a`, `modules/${tuple}/std/std.core.cjo`]) {
+for (const relative of [`runtime/lib/${tuple}/libcangjie-std-core.so`, `lib/${tuple}/libcangjie-std-core.a`, `modules/${tuple}/std/std.core.cjo`, `modules/${tuple}/std/std.ast.cjo`, `lib/${tuple}/libcangjie-std-ast.a`, `runtime/lib/${tuple}/libcangjie-std-ast.so`]) {
   await fs.access(path.join(finalStd, relative));
 }
 await $`file ${path.join(runtimeArtifact, 'runtime', 'lib', tuple, 'libcangjie-runtime.so')} ${path.join(finalStd, 'runtime', 'lib', tuple, 'libcangjie-std-core.so')}`;

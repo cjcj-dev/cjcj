@@ -1540,6 +1540,11 @@ jobs:
         with:
           requirement: android-ndk
 
+      - name: Build and install Android AST support
+        env:
+          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
+        run: npx --yes zx@8 ci/srcbuild/steps/build-android-ast.mjs
+
       - name: Build Android runtime and final std with stage2 cjc
         if: matrix.target == 'linux-x64' && inputs.build_android
         env:
