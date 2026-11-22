@@ -44,6 +44,7 @@ async function runSrcbuildHostResolver({
   runtimePinVersion = '1.2.0-alpha.fixture',
   staleToolchain = 'nightly-stale',
   readerOnly = false,
+  aliasEntry = false,
 }) {
   const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'srcbuild-host-pin-'));
   try {
@@ -52,7 +53,13 @@ async function runSrcbuildHostResolver({
     await fs.copyFile(path.join(root,'ci/host-toolchain-pin.mjs'),fixtureScript);
     const file=path.join(fixture,'ci/host_sdk_pin.env');await fs.writeFile(file,pin);
     await fs.writeFile(path.join(fixture,'ci/runtime_pin.env'),`RUNTIME_VERSION=${runtimePinVersion}\n`);
-    return spawnSync(process.execPath,[fixtureScript,'--file',file],{encoding:'utf8',
+    let entry = fixtureScript;
+    if (aliasEntry) {
+      const alias = path.join(fixture, 'aliased ci');
+      await fs.symlink(path.dirname(fixtureScript), alias, process.platform === 'win32' ? 'junction' : 'dir');
+      entry = path.join(alias, path.basename(fixtureScript));
+    }
+    return spawnSync(process.execPath,[entry,'--file',file],{encoding:'utf8',
       env:{...process.env,RUNTIME_VERSION:runtimeVersion,CJCJ_TOOLCHAIN:staleToolchain}});
 
   } finally {
@@ -104,7 +111,8 @@ test('ordinary and release host nightly literals use the host pins', async () =>
       }
     }
     if (/nightly-\d+\.\d+\.\d+-alpha\.\d+/.test(text)) {
-      offenders.push(path.relative(root, file));
+      // Use repository-relative spelling so the child TAP diagnostics match the controls.
+      offenders.push(path.relative(root, file).split(path.sep).join('/'));
     }
   }
   assert.deepEqual(offenders, []);
@@ -301,6 +309,28 @@ test('srcbuild pin reader rejects duplicate CJCJ_TOOLCHAIN keys', async () => {
   assert.equal(result.stdout, '');
 });
 
+test('srcbuild pin reader executes through an aliased entry directory', async t => {
+  await t.test('prints the exact pin', async () => {
+    const result = await runSrcbuildHostResolver({
+      pin: 'CJCJ_TOOLCHAIN=nightly-good\n',
+      aliasEntry: true,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), 'nightly-good', 'aliased CLI must print the selected pin');
+  });
+  await t.test('rejects duplicate pins', async () => {
+    const result = await runSrcbuildHostResolver({
+      pin: 'CJCJ_TOOLCHAIN=one\nCJCJ_TOOLCHAIN=two\n',
+      aliasEntry: true,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 1, 'aliased CLI must fail on a duplicate pin');
+    assert.match(result.stderr, /CJCJ_TOOLCHAIN is duplicated/);
+    assert.equal(result.stdout, '');
+  });
+});
+
 test('every workflow host consumer loads ci/source_pin.env after checkout', async () => {
   const expectedLoads = new Map([
     ['build-cjpm.yml', 1],
@@ -445,7 +475,7 @@ const independentHostVersions = Object.freeze({
 for (const [platform, version] of Object.entries(independentHostVersions)) {
   test(`AST independent expected and real CLI producer agree for execution host ${platform}`, async () => {
     // The expectation comes from fixed declarations, independently of the CLI.
-    const declared = Object.fromEntries((await fs.readFile(pinPath, 'utf8')).split('\n')
+    const declared = Object.fromEntries((await fs.readFile(pinPath, 'utf8')).split(/\r?\n/)
       .filter(line => line.includes('=')).map(line => line.split('=')));
     const expected = declared['CJCJ_TOOLCHAIN_' + platform.toUpperCase()] || declared.CJCJ_TOOLCHAIN;
     assert.equal(expected, 'nightly-' + version);
@@ -575,14 +605,16 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
         try {
           await fs.mkdir(path.join(work, 'ci'));
           // Load pins also executes the real runtime reader and its source-selection imports.
-          for (const input of ['host_sdk_pin.env', 'source_pin.env', 'llvm_pin.env', 'runtime_pin.env',
-            'host-toolchain-pin.mjs', 'load_runtime_pin.mjs', 'native-llvm-inputs.mjs', 'runtime-pin.mjs',
-            'build-resources.mjs', 'bootstrap/native-source-selection.mjs', 'bootstrap/sdk-command-lifetime.mjs',
-            'bootstrap/sdk-flow.mjs', 'bootstrap/sdk-install-entries.mjs', 'bootstrap/sdk-io.mjs',
-            'bootstrap/sdk-platform.mjs', 'bootstrap/sdk-source.mjs', 'bootstrap/sdk-std-resume.mjs',
-            'bootstrap/sdk-targets.mjs']) {
-            await fs.mkdir(path.dirname(path.join(work, 'ci', input)), {recursive: true});
-            await fs.copyFile(path.join(root, 'ci', input), path.join(work, 'ci', input));
+          for (const input of ['ci/host_sdk_pin.env', 'ci/source_pin.env', 'ci/llvm_pin.env', 'ci/runtime_pin.env',
+            'ci/host-toolchain-pin.mjs', 'ci/load_runtime_pin.mjs', 'ci/native-llvm-inputs.mjs', 'ci/runtime-pin.mjs',
+            'ci/build-resources.mjs', 'ci/bootstrap/native-source-selection.mjs', 'ci/bootstrap/sdk-command-lifetime.mjs',
+            'ci/bootstrap/sdk-flow.mjs', 'ci/bootstrap/sdk-install-entries.mjs', 'ci/bootstrap/sdk-io.mjs',
+            'ci/bootstrap/sdk-platform.mjs', 'ci/bootstrap/sdk-source.mjs', 'ci/bootstrap/sdk-std-resume.mjs',
+            'ci/bootstrap/sdk-targets.mjs', 'ci/bootstrap/compiler-option-visibility.mjs',
+            'build/srcbuild/tool-layout.mjs']) {
+            const destination = path.join(work, input);
+            await fs.mkdir(path.dirname(destination), {recursive: true});
+            await fs.copyFile(path.join(root, input), destination);
           }
           if (arm === 'bad-pin') {
             const pin = path.join(work, 'ci/host_sdk_pin.env');
@@ -602,6 +634,11 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
             assert.ok(independentHostVersions[platform]);
             console.log(`ASSERT_GITHUB_EXECUTION_HOST ${file}:${job}:${name} actual=${loaded.CJCJ_TOOLCHAIN}`);
             assert.equal(loaded.CJCJ_TOOLCHAIN, 'nightly-' + independentHostVersions[platform]);
+            if (file === 'objc-darwin-e2e.yml') {
+              assert.match(loaded.CJCJ_NATIVE_LLVM_REF ?? '', /^[a-f0-9]{40}$/, 'Load pins must export the LLVM ref');
+              assert.match(loaded.CJCJ_NATIVE_RUNTIME_REF ?? '', /^[a-f0-9]{40}$/, 'Load pins must export the runtime ref');
+              assert.match(result.stdout, /^\[runtime\] selected ref=/m);
+            }
           } else {
             assert.equal(result.status, 1, result.stderr);
             assert.doesNotMatch(result.stdout, /HOST_LOADER_COMPLETED/);

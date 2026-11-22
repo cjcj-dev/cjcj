@@ -1,5 +1,4 @@
-import {readFileSync} from 'node:fs';
-import path from 'node:path';
+import {readFileSync, realpathSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 
 const platforms = Object.freeze({
@@ -51,7 +50,18 @@ export function requireMatchingBaseSdkToolchain({hostToolchain, baseSdkToolchain
   return base;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+function isCommandEntry() {
+  if (!process.argv[1]) return false;
+  // Node resolves the module URL through symlinks but keeps the invocation path in argv.
+  try {
+    return realpathSync.native(process.argv[1]) === realpathSync.native(fileURLToPath(import.meta.url));
+  } catch (error) {
+    if (['ENOENT', 'ENOTDIR'].includes(error.code)) return false;
+    throw error;
+  }
+}
+
+if (isCommandEntry()) {
   const args = process.argv.slice(2);
   const value = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
   const pin = readHostToolchainPin(value('--platform') || hostPlatform(), value('--file'));
