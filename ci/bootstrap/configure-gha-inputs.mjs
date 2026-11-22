@@ -15,6 +15,7 @@ import {nativePair} from './native-runtime-input.mjs';
 import {hostPlatform, readHostToolchainPin} from '../host-toolchain-pin.mjs';
 import {nativeInstallationLocations} from './native-installation-locations.mjs';
 import {buildConfig} from '../../build/lib/config.mjs';
+import {checkoutSourceRepository} from './checkout-source.mjs';
 import {nativeSourceSelection} from './native-source-selection.mjs';
 import {stdDependencySources} from './stdlib-build.mjs';
 export {NATIVE_REPOSITORIES} from './native-source-selection.mjs';
@@ -40,9 +41,11 @@ export async function configureGhaInputs(env=process.env) {
     await fs.mkdir(path.dirname(source),{recursive:true});
     if(await fs.stat(source).catch(error=>{if(error.code==='ENOENT')return null;throw error;})) {
       const head=await capture('git',['-C',source,'rev-parse','HEAD']);
-      const origin=await capture('git',['-C',source,'config','--get','remote.origin.url']);
+      const repository=name==='runtime' && env.CJCJ_PINNED_RUNTIME_GIT_DIR!==undefined
+        ? await checkoutSourceRepository(name,source,commit,env)
+        : (await capture('git',['-C',source,'config','--get','remote.origin.url'])).stdout.trim();
       const dirty=await capture('git',['-C',source,'status','--porcelain']);
-      if(head.stdout.trim()!==commit||origin.stdout.trim()!==url||dirty.stdout.trim())throw new Error('GHA_NATIVE_SOURCE_REUSE_CHANGED '+name);
+      if(head.stdout.trim()!==commit||repository!==url||dirty.stdout.trim())throw new Error('GHA_NATIVE_SOURCE_REUSE_CHANGED '+name);
     } else {
       await command(['git','clone','--no-checkout','--filter=blob:none',url,source]);
       await command(['git','-C',source,'fetch','--depth=1','origin',commit]);

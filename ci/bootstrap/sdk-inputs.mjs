@@ -20,9 +20,10 @@ import {receiveNativeRuntime} from './native-runtime-input.mjs';
 import {languageSourceInputs} from '../../build/srcbuild/installed-language-source.mjs';
 import {hostPlatform, readHostToolchainPin, hostToolchainFromCjcVersion} from '../host-toolchain-pin.mjs';
 import {runtimeSourceRepository} from '../../build/lib/runtime-source-inputs.mjs';
+import {checkoutSourceRepository} from './checkout-source.mjs';
 import {readInstalledNativeAst} from './installed-native-ast.mjs';
 import {installPath as mingwInstallPath} from '../../build/toolchain/mingw.mjs';
-import {installationSelection,resolveSources} from './native-source-selection.mjs';
+import {installationSelection,resolveSources,bootstrapH1Commit} from './native-source-selection.mjs';
 import {stdBuildType,flag} from './sdk-std-resume.mjs';
 import {nativePair} from '../runtime-pin.mjs';
 import {stdDependencyInputs} from './stdlib-build.mjs';
@@ -68,9 +69,32 @@ export async function installedFinalStd(supplied, input) {
     'lib/'+native.tuple+'/libcangjie-std-core.a']);
   return {install, commands};
 }
+// Check source compatibility before opening installations, and again when a
+// saved build graph is consumed. Ordinary CJPM has no H1 execution node.
+async function validateSourceTrees(input, env) {
+  if (input.runtime.sourceRepository !== undefined &&
+      await checkoutSourceRepository('runtime',input.runtime.repository,input.runtime.commit,env) !== input.runtime.sourceRepository)
+    throw Error('NATIVE_SOURCE_SELECTION runtime');
+  const expectedMacro=await fs.readFile(new URL('../../packages/macro/src/InvokeUtil.cj',import.meta.url),'utf8');
+  for(const [name,row] of Object.entries({llvm:input.llvm,runtime:input.runtime,stdlib:input.stdlib??input.runtime,ast:input.ast,h1:input.h1,compiler:input.compiler})) {
+    const actual=await gitInput(row.repository,row.commit);
+    if(actual.tree!==row.tree)throw new Error('NATIVE_SOURCE_TREE '+name);
+    // An ordinary CJPM producer has no H1 parent or H1 execution node. Its
+    // installed compiler still must satisfy the current macro source contract;
+    // normal bootstrap and historical C2 retain their H1 compatibility check.
+    if(name==='compiler'||name==='h1'&&input.stage2?.mode!=='ordinary-cjpm') {
+      const {stdout}=await execute('git',['-C',row.repository,'show',row.commit+':packages/macro/src/InvokeUtil.cj']);
+      if(stdout!==expectedMacro)throw new Error('NATIVE_MACRO_SOURCE '+name);
+    }
+  }
+}
 // Validate the actual selected source objects, including an explicit inputs file.
 // The compiler's macro consumer must be this paired source, not an older C tree.
 export async function validateSourceInputs(input) {
+  await validateSourceTrees(input,process.env);
+  await validateInstalledInputs(input);
+}
+async function validateInstalledInputs(input) {
   if(input.compiler.shimInstall)await compilerNativeShim({install:input.compiler.shimInstall,
     nativeInstall:input.llvm.install,compilerCommit:input.compiler.commit});
   if(input.stdDependencies&&!isDeepStrictEqual(await stdDependencyInputs(input.stdDependencies),input.stdDependencies))throw Error('STD_DEPENDENCY_INPUT_CHANGED');
@@ -84,18 +108,6 @@ export async function validateSourceInputs(input) {
     sourceRepository:input.runtime.sourceRepository??await runtimeSourceRepository(input.runtime.repository),configuration:input.runtime.configuration,
     platform:input.platform,llvmCommit:input.llvm.commit,runtimeCommit:input.runtime.commit,
     hostVersion:input.host.version,work:input.work});
-  const expectedMacro=await fs.readFile(new URL('../../packages/macro/src/InvokeUtil.cj',import.meta.url),'utf8');
-  for(const [name,row] of Object.entries({llvm:input.llvm,runtime:input.runtime,stdlib:input.stdlib??input.runtime,ast:input.ast,h1:input.h1,compiler:input.compiler})) {
-    const actual=await gitInput(row.repository,row.commit);
-    if(actual.tree!==row.tree)throw new Error('NATIVE_SOURCE_TREE '+name);
-    // An ordinary CJPM producer has no H1 parent or H1 execution node. Its
-    // installed compiler still must satisfy the current macro source contract;
-    // normal bootstrap and historical C2 retain their H1 compatibility check.
-    if(name==='compiler'||name==='h1'&&input.stage2?.mode!=='ordinary-cjpm') {
-      const {stdout}=await execute('git',['-C',row.repository,'show',row.commit+':packages/macro/src/InvokeUtil.cj']);
-      if(stdout!==expectedMacro)throw new Error('NATIVE_MACRO_SOURCE '+name);
-    }
-  }
   if(input.stage2) {
     const actual = await stage2Input(input.stage2,input);
     if(!isDeepStrictEqual(actual,input.stage2))throw new Error('C2_REUSE_INPUT_CHANGED');
@@ -115,15 +127,15 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   // The local checkout is a transport location; repository is the source identity.
   const compilerDefault=(await execute('git',['-C',sources.compiler,'rev-parse','HEAD'])).stdout.trim();
   const commits={compiler:descriptor.compilerCommit??compilerDefault,
-    runtime:descriptor.runtimeCommit??FIXED_INPUTS.runtime,llvm:descriptor.llvmCommit??FIXED_INPUTS.llvm,
-    ast:descriptor.astCommit??FIXED_INPUTS.compiler,h1:descriptor.h1Commit??FIXED_INPUTS.h1};
+    runtime:descriptor.runtimeCommit??descriptor.sourceSelection?.runtime?.commit??FIXED_INPUTS.runtime,llvm:descriptor.llvmCommit??FIXED_INPUTS.llvm,
+    ast:descriptor.astCommit??FIXED_INPUTS.compiler,h1:bootstrapH1Commit(env,descriptor.h1Commit??descriptor.sourceSelection?.h1?.commit)};
   const separateStd=descriptor.stdlibCommit!==undefined||sources.stdlib!==undefined||descriptor.sourceSelection?.stdlib!==undefined;
   if(separateStd) {
     if(!sources.stdlib||!(descriptor.stdlibCommit??descriptor.sourceSelection?.stdlib?.commit))throw Error('NATIVE_STDLIB_SOURCE_REQUIRED');
     commits.stdlib=descriptor.stdlibCommit??descriptor.sourceSelection.stdlib.commit;
   }
   const defaults={};
-  for(const [name,commit]of Object.entries(commits))defaults[name]={repository:await runtimeSourceRepository(sources[name]),commit};
+  for(const [name,commit]of Object.entries(commits))defaults[name]={repository:await checkoutSourceRepository(name,sources[name],commit,env),commit};
   const sourceSelection=resolveSources(defaults,descriptor.sourceSelection);
   const rows={},verifications={};
   for(const [name,row]of Object.entries(sourceSelection)) {
@@ -133,6 +145,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     rows[name]={...await gitInput(sources[name],row.commit),sourceRepository:row.repository};
   }
   const {compiler:{commit:compilerCommit},runtime:{commit:runtimeCommit},llvm:{commit:llvmCommit},ast:{commit:astCommit},h1:{commit:h1Commit}}=rows;
+  await validateSourceTrees({...rows,stage2:installations.stage2},env);
   const stdlib=rows.stdlib;
   // An imported normal producer carries its actual bootstrap host selection.
   // It need not relabel that existing SDK with today's bootstrap default pin.
@@ -150,11 +163,11 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     if (hostToolchainFromCjcVersion(observed.stdout) !== 'nightly-'+version) throw new Error('NATIVE_COMPONENT_ACTUAL_HOST');
   }
   const shapes = {
+    runtime:['runtime/lib/'+native.tuple+'/libcangjie-runtime'+native.shared,
+      'runtime/lib/'+native.tuple+'/libboundscheck'+native.shared, 'lib/'+native.tuple+'/libcangjie-runtime.a'],
     llvm:['third_party/llvm/bin/llc'+native.exe, 'third_party/llvm/bin/llvm-as'+native.exe,
       'third_party/llvm/bin/llvm-dis'+native.exe, 'third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,
       'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o', 'tools/bin/cjdb'+native.exe],
-    runtime:['runtime/lib/'+native.tuple+'/libcangjie-runtime'+native.shared,
-      'runtime/lib/'+native.tuple+'/libboundscheck'+native.shared, 'lib/'+native.tuple+'/libcangjie-runtime.a'],
     ast:['libcangjie-ast-support.a', 'schema/StdAstFormat.fbs', 'include/flatbuffers/StdAstFormat_generated.h',
       'third_party/flatbuffers/bin/flatc'+native.exe],
   };
@@ -279,7 +292,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       llvm:component(rows.llvm),ast:component(rows.ast)}};
   if(installations.stage2)inputs.stage2=await stage2Input(installations.stage2,inputs);
   if(descriptor.reuseFinalStd)inputs.reuseFinalStd=await installedFinalStd(descriptor.reuseFinalStd,inputs);
-  await validateSourceInputs(inputs);
+  await validateInstalledInputs(inputs);
   const file = path.join(work, 'sdk-inputs.json');
   await atomicJson(file, inputs);
   if (env.GITHUB_ENV) await fs.appendFile(env.GITHUB_ENV, 'CJCJ_SDK_INPUTS='+file+'\n');

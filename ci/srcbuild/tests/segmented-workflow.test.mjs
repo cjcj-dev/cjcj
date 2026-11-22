@@ -34,11 +34,19 @@ test('each bootstrap phase has a distinct standard-runner job and verified prede
 
 test('native packaging, Android, MinGW and Windows std occupy distinct jobs', () => {
   for (const name of ['srcbuild', 'source-android', 'source-mingw', 'source-windows']) assert.ok(jobs.has(name), name);
-  assert.match(jobs.get('srcbuild'), /needs: \[plan, source-stage3, source-windows\]/);
+  assert.match(jobs.get('srcbuild'), /needs: \[plan, source-stage3, source-windows, source-android\]/);
   // The Linux package job consumes the Windows std artifact, so the producer
   // must front it; building the archive without those bytes is not a package.
   assert.match(jobs.get('srcbuild'), /download-artifact[\s\S]*name: final-std-windows-x64/);
   assert.match(jobs.get('srcbuild'), /install-windows-ffi\.mjs/);
+  const host = jobs.get('srcbuild');
+  const download = host.indexOf('name: final-std-android-aarch64');
+  const install = host.indexOf('run: node ci/srcbuild/steps/install-android.mjs');
+  assert.ok(download >= 0 && install > download && host.indexOf('ci/srcbuild/steps/package-install.mjs') > install);
+  for (const step of ['Download Android final std and runtime from this run', 'Install Android target libraries in the host SDK',
+    'Install Android NDK for installed and relocated consumers']) {
+    assert.ok(host.includes(step + "\n        if: matrix.target == 'linux-x64' && inputs.build_android"));
+  }
   assert.match(jobs.get('source-android'), /needs: \[plan, source-stage3\]/);
   assert.match(jobs.get('source-mingw'), /needs: plan/);
   assert.match(jobs.get('source-windows'), /needs: \[plan, source-stage3, source-mingw\]/);

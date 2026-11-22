@@ -53,12 +53,12 @@ async function assertCrossElf(file, tuple) {
     throw new Error(`cross runtime is not an ELF64 for ${tuple}: ${file}`);
   }
 }
-export async function writeCrossRuntimeManifest({root, tuple, runtimeRef}) {
+export async function writeCrossRuntimeManifest({root, tuple, runtimeRef, sourceRepository}) {
   assertTuple(tuple);
   if (!/^[0-9a-f]{40}$/.test(runtimeRef)) throw new Error('cross runtime requires exact source SHA');
   await assertRuntimeLibraries(root, tuple);
   await fs.access(path.join(root, 'lib', tuple, 'cjstart.o'));
-  const record = {schema: 1, tuple, runtimeRef, files: await inventory(root, tuple)};
+  const record = {schema: 1, tuple, runtimeRef, ...(sourceRepository && {sourceRepository}), files: await inventory(root, tuple)};
   await fs.writeFile(path.join(root, manifestName), `${JSON.stringify(record, null, 2)}\n`);
   return record;
 }

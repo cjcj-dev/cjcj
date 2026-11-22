@@ -1135,8 +1135,8 @@ jobs:
     # the Windows final-std job, so the package job consumes that artifact
     # instead of retaining H leftovers. Splitting the std producer out of this
     # job is why it is a predecessor again rather than an optional copy.
-    needs: [plan, source-stage3, source-windows]
-    if: always() && needs.plan.result == 'success' && needs.source-stage3.result == 'success' && (needs.source-windows.result == 'success' || needs.source-windows.result == 'skipped')
+    needs: [plan, source-stage3, source-windows, source-android]
+    if: always() && needs.plan.result == 'success' && needs.source-stage3.result == 'success' && (needs.source-windows.result == 'success' || needs.source-windows.result == 'skipped') && (needs.source-android.result == 'success' || (needs.source-android.result == 'skipped' && !(inputs.build_android && contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64'))))
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -1386,6 +1386,23 @@ jobs:
         if: matrix.target == 'linux-x64'
         run: node ci/srcbuild/steps/install-windows-ffi.mjs
 
+      - name: Download Android final std and runtime from this run
+        if: matrix.target == 'linux-x64' && inputs.build_android
+        uses: actions/download-artifact@v8
+        with:
+          name: final-std-android-aarch64
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-android-aarch64
+
+      - name: Install Android target libraries in the host SDK
+        if: matrix.target == 'linux-x64' && inputs.build_android
+        run: node ci/srcbuild/steps/install-android.mjs
+
+      - name: Install Android NDK for installed and relocated consumers
+        if: matrix.target == 'linux-x64' && inputs.build_android
+        uses: ./.github/actions/setup-release-sdk
+        with:
+          requirement: android-ndk
+
       - name: Verify installed SDK
         env:
           CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
@@ -1410,6 +1427,7 @@ jobs:
 
       - name: Test and archive installed SDK
         env:
+          CJCJ_PACKAGE_ANDROID: ${{ matrix.target == 'linux-x64' && inputs.build_android && '1' || '' }}
           SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
         run: npx --yes zx@8 ci/srcbuild/steps/package-install.mjs
 
@@ -1545,6 +1563,11 @@ jobs:
         uses: ./.github/actions/setup-release-sdk
         with:
           requirement: android-ndk
+
+      - name: Build and install Android AST support
+        env:
+          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
+        run: npx --yes zx@8 ci/srcbuild/steps/build-android-ast.mjs
 
       - name: Build Android runtime and final std with stage2 cjc
         if: matrix.target == 'linux-x64' && inputs.build_android

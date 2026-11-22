@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import {writeCrossRuntimeManifest} from '../../release/cross-runtime.mjs';
 
 // The source cell and the standalone runner build use the same runtime entry.
-export async function buildAndroidRuntime({workspace, ndk, version, runtimeRef, env = process.env}) {
+export async function buildAndroidRuntime({workspace, ndk, version, runtimeRef, recordRepository = false, env = process.env}) {
   env = {...env, CANGJIE_BUILD_JOBS: String(crossBuildJobs(env))};
   const repository = path.join(workspace, 'cangjie_runtime');
   const runtime = path.join(repository, 'runtime');
@@ -18,6 +18,9 @@ export async function buildAndroidRuntime({workspace, ndk, version, runtimeRef, 
   // Stage the Android dependency from this invocation's build output.
   await fs.copyFile(path.join(runtime, 'CMakebuild', 'runtime-staging', 'lib', 'aarch64_Release', 'libboundscheck.so'),
     path.join(root, 'runtime', 'lib', 'linux_android_aarch64_cjnative', 'libboundscheck.so'));
-  await writeCrossRuntimeManifest({root, tuple: 'linux_android_aarch64_cjnative', runtimeRef});
+  const sourceRepository = recordRepository
+    ? (await $({stdio:'pipe'})`git -C ${repository} rev-parse --path-format=absolute --git-common-dir`).stdout.trim()
+    : undefined;
+  await writeCrossRuntimeManifest({root, tuple: 'linux_android_aarch64_cjnative', runtimeRef, sourceRepository});
   return root;
 }
