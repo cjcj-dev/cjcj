@@ -1,12 +1,9 @@
 import fs from 'node:fs/promises';
-import {readSourcePins} from './native-llvm-inputs.mjs';
+import {nativeLlvmInputs,readSourcePins} from './native-llvm-inputs.mjs';
 import {readHostToolchainPin} from './host-toolchain-pin.mjs';
 import {nativeSourceSelection} from './bootstrap/native-source-selection.mjs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-
-import {nativeLlvmInputs} from './native-llvm-inputs.mjs';
-import {readHostToolchainPin} from './host-toolchain-pin.mjs';
 
 const PIN_FILE = new URL('./runtime_pin.env', import.meta.url);
 
