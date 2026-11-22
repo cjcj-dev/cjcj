@@ -58,7 +58,7 @@ private func StringIntX(archType: ArchType, intTy: IntType): String {
             return "UInt64"
         }
         return intTy.ToString()
-    } else if (archType == ArchType.ARM32) {
+    } else if ((archType == ArchType.ARM32 || archType == ArchType.WASM32)) {
         if (intTy.IsIntNative()) {
             return "Int32"
         } else if (intTy.IsUIntNative()) {

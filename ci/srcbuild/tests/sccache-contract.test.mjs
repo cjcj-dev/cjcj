@@ -45,6 +45,7 @@ const CXX_JOBS = new Map([
   ['srcbuild-target.yml/source-ohos', {component: 'srcbuild-ohos', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['srcbuild-target.yml/source-ios', {component: 'srcbuild-ios', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['srcbuild-target.yml/source-android', {component: 'srcbuild-android', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['srcbuild-target.yml/source-wasm', {component: 'srcbuild-wasm', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['srcbuild-target.yml/source-mingw', {component: 'srcbuild-mingw', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['srcbuild-target.yml/source-windows', {component: 'srcbuild-windows', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['ci.yml/build', {component: 'runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],

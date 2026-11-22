@@ -1546,6 +1546,8 @@ public class CGModule {
             return CreateAppleAArch64CGCFFI()
         } else if (target.arch == ArchType.AARCH64 && target.os == OSType.IOS) {
             return CreateAppleAArch64CGCFFI()
+        } else if (target.arch == ArchType.WASM32) {
+            return Wasm32CJNativeCGCFFI(this)
         } else if (target.arch == ArchType.ARM32) {
             return LinuxOhosArm32CJNativeCGCFFI(this)
         }
@@ -1569,6 +1571,10 @@ public class CGModule {
         if (target.arch == ArchType.ARM32) {
             return "e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64"
         }
+        if (target.IsWasm()) {
+            // WebAssemblyTargetMachine.cpp computeDataLayout (wasm32, ELF-style mangling).
+            return "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20"
+        }
         if (target.IsMinGW()) {
             return "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
         }
@@ -1587,6 +1593,9 @@ public class CGModule {
         }
         if (target.arch == ArchType.ARM32) {
             return "armv7a-linux-gnu"
+        }
+        if (target.IsWasm()) {
+            return "wasm32-unknown-wasi"
         }
         let defaultTriple = LLVMGetDefaultTargetTripleString()
         if (!defaultTriple.isEmpty()) {

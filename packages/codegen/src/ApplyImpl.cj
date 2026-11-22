@@ -22,8 +22,10 @@ public func EmitCallLikeExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         let apply = CHIRApplyWrapper(applyExpr)
         irBuilder.SetCHIRExpr(apply)
         irBuilder.EmitLocation(apply)
-        return GenerateApply(irBuilder, applyExpr.GetCallee(), applyExpr.GetArgs(),
+        let callee = applyExpr.GetCallee()
+        let result = GenerateApply(irBuilder, callee, applyExpr.GetArgs(),
             thisType: applyExpr.GetThisType(), instTypeArgs: applyExpr.GetInstantiatedTypeArgs())
+        return result
     }
     if (let Some(tryApplyExpr) <- (chirExpr as TryApply)) {
         let apply = CHIRApplyWrapper(tryApplyExpr)

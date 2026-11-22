@@ -72,8 +72,8 @@ public enum PathType { | FILE | DIRECTORY }
 public enum DiagFormat { | JSON | NO_COLOR | DEFAULT }
 public enum MockMode { | ON | OFF | RUNTIME_ERROR | DEFAULT }
 public enum BackendType { | CJNATIVE | UNKNOWN }
-public enum ArchType { | X86_64 | AARCH64 | ARM64 | ARM32 | UNKNOWN }
-public enum OSType { | WINDOWS | LINUX | DARWIN | IOS | UNKNOWN }
+public enum ArchType { | X86_64 | AARCH64 | ARM64 | ARM32 | WASM32 | UNKNOWN }
+public enum OSType { | WINDOWS | LINUX | DARWIN | IOS | WASI | UNKNOWN }
 public enum Vendor { | PC | APPLE | UNKNOWN }
 public enum EnvironmentType { | OHOS | GNU | ANDROID | SIMULATOR | NOT_AVAILABLE }
 public enum OptimizationLevel { | O0 | O1 | O2 | O3 | Os | Oz }
@@ -388,6 +388,7 @@ public func ArchTypeIndex(value: ArchType): Int64 {
         case ArchType.ARM64 => 2
         case ArchType.ARM32 => 3
         case ArchType.UNKNOWN => 4
+        case ArchType.WASM32 => 5
     }
 }
 extend ArchType <: Equatable<ArchType> {
@@ -402,6 +403,7 @@ public func OSTypeIndex(value: OSType): Int64 {
         case OSType.DARWIN => 2
         case OSType.IOS => 3
         case OSType.UNKNOWN => 4
+        case OSType.WASI => 5
     }
 }
 extend OSType <: Equatable<OSType> {

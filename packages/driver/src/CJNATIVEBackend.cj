@@ -1,6 +1,7 @@
 package cjcj::driver
 
 import std.collection.*
+import std.process.executeWithOutput
 import cjcj::utils.CJC_ASSERT_WITH_MSG
 
 public class CJNATIVEBackend <: Backend {
@@ -12,6 +13,10 @@ public class CJNATIVEBackend <: Backend {
     }
 
     protected override func GenerateToolChain(): Bool {
+        if (driverOptions.target.os == OSType.WASI) {
+            TC = Wasm_CJNATIVE(driver, driverOptions, backendCmds)
+            return true
+        }
         if (driverOptions.target.os == OSType.LINUX) {
             if (driverOptions.target.env == EnvironmentType.OHOS) {
                 TC = Ohos_CJNATIVE(driver, driverOptions, backendCmds)

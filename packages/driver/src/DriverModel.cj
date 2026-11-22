@@ -39,6 +39,7 @@ public enum ToolID {
     | LLVM_AR
     | OBJCOPY
     | LLVM_OBJCOPY
+    | WASM_LD
     | DSYMUTIL
     | CODESIGN
     | STRIP

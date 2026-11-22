@@ -142,6 +142,7 @@ jobs:
       runtime_ref: ${{ inputs.runtime_ref }}
       targets: linux-x64
       build_android: true
+      build_wasm: true
       build_ohos: true
 
   source-p2-linux-aarch64:
@@ -413,6 +414,66 @@ jobs:
       runtime_ref: ${{ inputs.runtime_ref }}
     secrets: inherit
 
+  package-linux-x64-wasm:
+    name: linux-x64-wasm / Build release package
+    needs: [package-p1-linux-x64, source-p1-linux-x64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
+      runner: ubuntu-24.04
+      platform: linux-x64
+      llvm_platform: linux_x86_64
+      sdk_runtime_dir: linux_x86_64_cjnative
+      release_key: linux-x64-wasm
+      std_artifact: final-std-linux-x64
+      cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  package-darwin-arm64-wasm:
+    name: darwin-arm64-wasm / Build release package
+    needs: [package-p4-darwin-arm64, source-p1-linux-x64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
+      runner: macos-15
+      platform: darwin-arm64
+      llvm_platform: darwin_aarch64
+      sdk_runtime_dir: darwin_aarch64_cjnative
+      release_key: darwin-arm64-wasm
+      std_artifact: final-std-darwin-arm64
+      cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  package-win32-x64-wasm:
+    name: win32-x64-wasm / Build release package
+    needs: [package-p3-windows-x64, source-p1-linux-x64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
+      runner: windows-2025
+      platform: windows-x64
+      llvm_platform: windows_x86_64
+      sdk_runtime_dir: windows_x86_64_cjnative
+      release_key: win32-x64-wasm
+      std_artifact: final-std-native-windows-x64
+      cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
   package-linux-x64-ohos:
     name: linux-x64-ohos / Build release package
     needs: [package-p1-linux-x64, source-p1-linux-x64]
@@ -499,7 +560,7 @@ jobs:
 
   publish:
     name: Publish release
-    needs: [source-p1-linux-x64, source-p2-linux-aarch64, source-p3-windows-x64, source-p4-darwin-arm64, source-p5-darwin-x64, package-p1-linux-x64, package-p2-linux-aarch64, package-p3-windows-x64, package-p4-darwin-arm64, package-p5-darwin-x64, package-linux-x64-android, package-darwin-arm64-android, package-win32-x64-android, package-linux-x64-ohos, package-darwin-arm64-ohos, package-win32-x64-ohos, package-darwin-arm64-ios]
+    needs: [source-p1-linux-x64, source-p2-linux-aarch64, source-p3-windows-x64, source-p4-darwin-arm64, source-p5-darwin-x64, package-p1-linux-x64, package-p2-linux-aarch64, package-p3-windows-x64, package-p4-darwin-arm64, package-p5-darwin-x64, package-linux-x64-android, package-darwin-arm64-android, package-win32-x64-android, package-linux-x64-wasm, package-darwin-arm64-wasm, package-win32-x64-wasm, package-linux-x64-ohos, package-darwin-arm64-ohos, package-win32-x64-ohos, package-darwin-arm64-ios]
     if: >-
       ${{
         always() &&
@@ -509,6 +570,9 @@ jobs:
         needs.package-linux-x64-android.result == 'success' &&
         needs.package-darwin-arm64-android.result == 'success' &&
         needs.package-win32-x64-android.result == 'success' &&
+        needs.package-linux-x64-wasm.result == 'success' &&
+        needs.package-darwin-arm64-wasm.result == 'success' &&
+        needs.package-win32-x64-wasm.result == 'success' &&
         needs.package-linux-x64-ohos.result == 'success' &&
         needs.package-darwin-arm64-ohos.result == 'success' &&
         needs.package-win32-x64-ohos.result == 'success' &&

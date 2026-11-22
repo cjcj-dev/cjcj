@@ -34,7 +34,7 @@ public class CGPrimitiveType <: CGType {
                 let archType = cgCtx.GetCompileOptions().target.GetArchType()
                 if (archType == ArchType.X86_64 || archType == ArchType.AARCH64) {
                     generated = unsafe { LLVMInt64TypeInContext(context) }
-                } else if (archType == ArchType.ARM32) {
+                } else if ((archType == ArchType.ARM32 || archType == ArchType.WASM32)) {
                     generated = unsafe { LLVMInt32TypeInContext(context) }
                 } else {
                     CJC_ASSERT_WITH_MSG(false, "Unsupported ArchType.")

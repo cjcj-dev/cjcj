@@ -110,7 +110,7 @@ test('release cross packages depend on their native phase and cross producer wit
   }
   assert.ok(release.jobs.plan.steps.some(step => step.run === 'node ci/srcbuild/target-matrix.mjs --targets all --require-ready'));
   assert.equal(release.jobs['source-p1-linux-x64'].needs, 'plan');
-  for (const family of ['android', 'ohos', 'ios']) {
+  for (const family of ['android', 'wasm', 'ohos', 'ios']) {
     for (const target of new Set(declaredKeys.flatMap(key => Object.entries(releasePlatformReadiness(key).crossStd)
       .filter(([tuple]) => tuple.startsWith(family === 'ios' ? 'ios_' : `linux_${family}_`)).map(([, producer]) => producer)))) {
       const producer = sources.find(job => job.with?.targets === target);

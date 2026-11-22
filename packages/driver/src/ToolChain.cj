@@ -281,7 +281,7 @@ public open class ToolChain {
         return None
     }
 
-    private func LibCangjieFormat(pkg: String, extension: String): Option<String> {
+    protected func LibCangjieFormat(pkg: String, extension: String): Option<String> {
         if (let Some(base) <- LibCangjieBaseFormat(pkg)) {
             return "lib" + base + extension
         }
@@ -445,6 +445,7 @@ public open class ToolChain {
             case ArchType.AARCH64 => "lib64"
             case ArchType.ARM64 => "lib64"
             case ArchType.ARM32 => "lib"
+            case ArchType.WASM32 => "lib"
             case ArchType.UNKNOWN => ""
         }
     }

@@ -67,7 +67,39 @@ function machoDylib(bytes) {
   }
   return {cpu, platforms, installNames};
 }
+
+// WASI Preview 1 ships static archives only; every member must be a wasm32 object
+// (binary magic \0asm, version 1), never an ELF/Mach-O host object.
+const wasmTuples = Object.freeze(['wasi_wasm32_cjnative']);
+export function assertWasmArchive(bytes, file) {
+  if (bytes.length < 8 || bytes.subarray(0, 8).toString('latin1') !== '!<arch>\n') {
+    throw new Error(`cross runtime is not an ar archive: ${file}`);
+  }
+  let offset = 8, objects = 0;
+  while (offset + 60 <= bytes.length) {
+    const name = bytes.subarray(offset, offset + 16).toString('latin1').trim();
+    const size = Number.parseInt(bytes.subarray(offset + 48, offset + 58).toString('latin1').trim(), 10);
+    if (!Number.isSafeInteger(size) || size < 0 || offset + 60 + size > bytes.length) throw new Error(`corrupt ar member in ${file}`);
+    const body = bytes.subarray(offset + 60, offset + 60 + size);
+    // Skip the symbol table and the GNU long-name table.
+    if (name !== '/' && name !== '//' && !name.startsWith('/SYM64/') && name !== '__.SYMDEF') {
+      if (body.length < 8 || body.readUInt32LE(0) !== 0x6d736100 || body.readUInt32LE(4) !== 1) {
+        throw new Error(`cross runtime member ${name} is not a wasm32 object: ${file}`);
+      }
+      objects++;
+    }
+    offset += 60 + size + (size & 1);
+  }
+  if (!objects) throw new Error(`cross runtime archive has no wasm32 objects: ${file}`);
+  return objects;
+}
+const needsStartObject = tuple => !wasmTuples.includes(tuple);
 async function assertRuntimeLibraries(root, tuple) {
+  if (wasmTuples.includes(tuple)) {
+    const file = path.join(root, 'runtime', 'lib', tuple, 'libcangjie-runtime.a');
+    assertWasmArchive(await fs.readFile(file), file);
+    return;
+  }
   if (Object.hasOwn(machines, tuple)) {
     for (const name of ['libcangjie-runtime.so', 'libboundscheck.so']) {
       await assertCrossElf(path.join(root, 'runtime', 'lib', tuple, name), tuple);
@@ -90,7 +122,7 @@ async function assertRuntimeLibraries(root, tuple) {
   }
 }
 function assertTuple(tuple) {
-  if (!Object.hasOwn(machines, tuple) && !Object.hasOwn(iosTargets, tuple)) throw new Error(`unsupported cross runtime tuple: ${tuple}`);
+  if (!Object.hasOwn(machines, tuple) && !Object.hasOwn(iosTargets, tuple) && !wasmTuples.includes(tuple)) throw new Error(`unsupported cross runtime tuple: ${tuple}`);
 }
 async function assertCrossElf(file, tuple) {
   const bytes = await fs.readFile(file);
@@ -103,7 +135,7 @@ export async function writeCrossRuntimeManifest({root, tuple, runtimeRef, source
   assertTuple(tuple);
   if (!/^[0-9a-f]{40}$/.test(runtimeRef)) throw new Error('cross runtime requires exact source SHA');
   await assertRuntimeLibraries(root, tuple);
-  await fs.access(path.join(root, 'lib', tuple, 'cjstart.o'));
+  if (needsStartObject(tuple)) await fs.access(path.join(root, 'lib', tuple, 'cjstart.o'));
   const record = {schema: 1, tuple, runtimeRef, ...(sourceRepository && {sourceRepository}), files: await inventory(root, tuple)};
   await fs.writeFile(path.join(root, manifestName), `${JSON.stringify(record, null, 2)}\n`);
   return record;
@@ -117,7 +149,7 @@ export async function verifyCrossRuntime({root, tuple, runtimeRef}) {
   const files = await inventory(root, tuple);
   if (JSON.stringify(files) !== JSON.stringify(record.files)) throw new Error('cross runtime inventory/hash mismatch');
   await assertRuntimeLibraries(root, tuple);
-  await fs.access(path.join(root, 'lib', tuple, 'cjstart.o'));
+  if (needsStartObject(tuple)) await fs.access(path.join(root, 'lib', tuple, 'cjstart.o'));
   return record;
 }
 export async function installCrossRuntime({root, stage, tuple, runtimeRef}) {

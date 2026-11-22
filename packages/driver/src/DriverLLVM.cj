@@ -29,8 +29,8 @@ foreign {
     func strlen(str: CString): UIntNative
 }
 
-public func ExtractBitcodePackageNameFromLLVM(bcPath: String): (Bool, String, DiagKindRefactor, String) {
-    let (openSuccess, openMessage, sourceName) = ReadBitcodeSourceFileName(bcPath)
+func ReadBitcodeInputInfo(bcPath: String): (Bool, String, DiagKindRefactor, String) {
+    let (openSuccess, openMessage, sourceName) = ReadBitcodeModuleInfo(bcPath)
     if (!openSuccess) {
         return (false, "", DiagKindRefactor.bc_file_open_failed, openMessage)
     }
@@ -43,7 +43,7 @@ public func ExtractBitcodePackageNameFromLLVM(bcPath: String): (Bool, String, Di
     return (false, "", DiagKindRefactor.bc_invalid_package_name, "")
 }
 
-private func ReadBitcodeSourceFileName(bcPath: String): (Bool, String, Option<String>) {
+private func ReadBitcodeModuleInfo(bcPath: String): (Bool, String, Option<String>) {
     var sourceName: Option<String> = None
     try (pathCString = unsafe { LibC.mallocCString(bcPath) }.asResource()) {
         try (memBufPtr = LibC.malloc<DriverLLVMMemoryBufferRef>().asResource(),

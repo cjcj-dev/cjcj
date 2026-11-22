@@ -228,6 +228,7 @@ jobs:
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
       native_host_version: ${{ inputs.native_host_version }}
       build_android: ${{ matrix.build_android || false }}
+      build_wasm: ${{ matrix.build_wasm || false }}
       build_ohos: ${{ matrix.build_ohos || false }}
       build_ios: ${{ matrix.build_ios || false }}
       build_type: ${{ inputs.build_type }}

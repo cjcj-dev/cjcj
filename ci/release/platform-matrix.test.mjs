@@ -188,8 +188,8 @@ test('phased release declares every host package behind its complete source admi
 test('plan excludes incomplete native producers from runnable source and package matrices', () => {
   const plan = planMatrix('all');
   assert.deepEqual(plan.source.map(row => row.target).sort(), ['linux-x64']);
-  assert.deepEqual(plan.package.map(row => row.release_key), ['linux-x64', 'linux-x64-android', 'linux-x64-ohos']);
-  assert.deepEqual(plan.blocked.map(row => row.release_key), ['linux-arm64', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'darwin-arm64-ios', 'darwin-arm64-ohos', 'ohos-arm64', 'win32-x64', 'win32-x64-android', 'win32-x64-ohos']);
+  assert.deepEqual(plan.package.map(row => row.release_key), ['linux-x64', 'linux-x64-android', 'linux-x64-wasm', 'linux-x64-ohos']);
+  assert.deepEqual(plan.blocked.map(row => row.release_key), ['linux-arm64', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'darwin-arm64-ios', 'darwin-arm64-wasm', 'darwin-arm64-ohos', 'ohos-arm64', 'win32-x64', 'win32-x64-android', 'win32-x64-wasm', 'win32-x64-ohos']);
   assert.deepEqual(plan.excluded.map(row => row.release_key), ['win32-x64-ohos-arm32']);
   assert.equal(plan.windowsSide, false);
   for (const row of plan.blocked) {

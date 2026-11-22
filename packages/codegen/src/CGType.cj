@@ -609,7 +609,7 @@ public open class CGType {
     }
 
     public static func GetIntNativeCGType(cgMod: CGModule): CGType {
-        if (cgMod.GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
+        if (cgMod.GetCGContext().GetCompileOptions().target.Is32BitPointer()) {
             return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetInt32Ty())
         }
         return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetInt64Ty())
