@@ -12,6 +12,7 @@
 //
 // CI:   node ci/srcbuild/steps/build-wasm-final-std.mjs            (environment below)
 // Host: node ci/srcbuild/steps/build-wasm-final-std.mjs --sdk S --stdlib-source D ...
+import {execFileSync} from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,6 +38,13 @@ function walk(root, relative = '') {
   return out;
 }
 
+export function indexArchives(llvmAr, dirs) {
+  if (!llvmAr) throw new Error('wasm final std requires llvm-ar to index the archives it ships');
+  for (const dir of dirs) {
+    for (const name of fs.readdirSync(dir).filter(n => n.endsWith('.a')).sort()) execFileSync(llvmAr, ['s', path.join(dir, name)], {stdio: 'inherit'});
+  }
+}
+
 export async function produceWasmFinalStd({sdk, stdlibSource, boundscheckSource, pcre2Source, clang, llvmAr, finalStd, work,
   runtimeRef, fallbackOpt = false}) {
   if (!/^[0-9a-f]{40}$/.test(runtimeRef ?? '')) throw new Error('wasm final std requires the exact cangjie_runtime source SHA');
@@ -44,7 +52,12 @@ export async function produceWasmFinalStd({sdk, stdlibSource, boundscheckSource,
     path.join(sdk, TOOLCHAIN_ID), path.join(sdk, RUNNER)]) {
     if (!fs.statSync(required, {throwIfNoEntry: false})?.isFile()) throw new Error(`wasm SDK input missing: ${required}`);
   }
+  // wasm-ld only resolves archive members through the archive symbol table. An archive written by an
+  // llvm-ar that did not index it (a CMake build with the SDK's llvm-ar) links nothing, so the producer
+  // indexes the runtime archive before the std build and every shipped archive after it.
+  indexArchives(llvmAr, [path.join(sdk, 'runtime', 'lib', TUPLE)]);
   const inventory = buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Source, clang, llvmAr, work, fallbackOpt});
+  indexArchives(llvmAr, [path.join(sdk, 'lib', TUPLE)]);
   fs.rmSync(finalStd, {recursive: true, force: true});
   const copy = rel => fs.cpSync(path.join(sdk, rel), path.join(finalStd, rel), {recursive: true});
   for (const rel of [`lib/${TUPLE}`, `modules/${TUPLE}`, SYSROOT_DIR, path.dirname(RUNNER)]) copy(rel);
