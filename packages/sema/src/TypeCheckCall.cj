@@ -1363,6 +1363,20 @@ public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Op
             return None
         }
     }
+    if (let Some(ie) <- (expr as IfExpr)) {
+        // `if (c) { a } else { b }` yields one of its branches; a branch that cannot complete
+        // normally (type Nothing) contributes no value. Differing branch modes join to HALF, as in
+        // LocalModeAnalysis.MergeBranchModes (std.fs file_info.cj:245 `let pathStr = if (...) {...}`).
+        let thenBody = ie.thenBody ?? return None;
+        let elseBody = ie.elseBody ?? return None;
+        var joined: Option<ASTMode> = None
+        for (branch in [(thenBody as Expr).getOrThrow(), elseBody]) {
+            if ((let Some(bt) <- branch.GetTy()) && bt.IsNothing()) { continue }
+            let m = CallSiteMode(branch, receiver, seen) ?? return None;
+            joined = if (let Some(j) <- joined) { if (j == m) { j } else { ASTMode.HALF } } else { m }
+        }
+        return joined
+    }
     if (expr is LitConstExpr || expr.resolvedMode != ASTMode.NOT) { return expr.resolvedMode }
     return None
 }

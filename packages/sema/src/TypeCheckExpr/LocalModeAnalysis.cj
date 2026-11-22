@@ -443,6 +443,15 @@ class LocalModeAnalysis {
 
     private func CheckValue(arg: FuncArg, mode: ASTMode): Unit {
         if (let Some(value) <- arg.expr) {
+            // A plain string literal has no region of its own; in a local parameter slot it is
+            // built in the slot's mode, as for `let s: String @local! = "..."` (std.fs utils.cj:81
+            // `Path(".") @local!`).
+            if ((let Some(lit) <- (value as LitConstExpr)) && lit.siExpr.isNone() && mode != ASTMode.NOT &&
+                lit.resolvedMode == ASTMode.NOT && lit.expectedLocalMode.isNone()) {
+                lit.expectedLocalMode = Some(mode)
+                lit.resolvedMode = mode
+                arg.resolvedMode = mode
+            }
             Check(value, mode)
             if (mode == ASTMode.FULL && value.resolvedMode == ASTMode.FULL &&
                 !CopyNode(value) && ExclaveOwner().isNone() && External(value)) {
