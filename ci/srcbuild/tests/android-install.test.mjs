@@ -59,7 +59,7 @@ test('Android install replaces only its tuple and keeps host and target provenan
   await put(sdk, 'modules/host/std/unrecorded.cjo', 'extra');
   await assert.rejects(reconcile, /STD_ARTIFACT_UNRECORDED modules\/host/);
 
-  const hostRef = '9991cf4f4c9cb3465bb5aec28a5590f6c529be4e', targetRef = '20995aae195f134ecc2c94bb6a90239c31b673f4';
+  const hostRef = '9991cf4f4c9cb3465bb5aec28a5590f6c529be4e', targetRef = '5afcbc85cca1569db8c80b4fea6ed0f19da0b758';
   const hostSource = {...source, commit:hostRef};
   const stage = {phase:'stage3', compilerSha256:'5190316791e889c882684361d79a8fc70f7a1f9d606316b3cde032bf0c5f6fc1', runtimeCommit:hostRef, compilerCommit:'ea6d3b5fc73b5e4cc2926535005a46a92109b2b9',
     sources:{runtime:hostSource, std:hostSource, llvm:{commit:'f2a8e33d2dbb6797d65813cd20f529d9567843a1'}}};
@@ -71,6 +71,9 @@ test('Android install replaces only its tuple and keeps host and target provenan
   const splitEnv = {CJCJ_NATIVE_RUNTIME_REF:hostRef, CJCJ_ANDROID_RUNTIME_REF:targetRef};
   const rejected = install({...splitEnv, CJCJ_ANDROID_RUNTIME_REF:'a'.repeat(40)});
   assert.equal(rejected.status, 1); assert.match(rejected.stderr, /ANDROID_INSTALL_RUNTIME_PAIR/);
+  // The previous target has the PCRE2 fix but lacks four dynamic exports.
+  const previous = install({...splitEnv, CJCJ_ANDROID_RUNTIME_REF:'20995aae195f134ecc2c94bb6a90239c31b673f4'});
+  assert.equal(previous.status, 1); assert.match(previous.stderr, /ANDROID_INSTALL_RUNTIME_PAIR/);
   const split = install(splitEnv);
   assert.equal(split.status, 0, split.stderr);
   assert.equal(await fs.readFile(path.join(sdk,'STAGE-INPUTS.json'),'utf8'), stageText);
