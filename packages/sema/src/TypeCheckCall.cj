@@ -1336,6 +1336,11 @@ public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Op
         if (let Some(pd) <- (target as PropDecl)) { return PropertyMode(pd) }
         if (let Some(vd) <- (target as VarDeclAbstract)) {
             if (IsInstanceMember(vd) && !HasLocalModifier(vd, TokenKind.DEMODE)) { return receiver }
+            // A setter value without a written modal has the property mode bound by the collector.
+            if ((let Some(fp) <- (vd as FuncParam)) && fp.isPropSetterValue && fp.resolvedMode != ASTMode.NOT &&
+                (fp.typeNode.map({ t => t.modal.isNone() }) ?? true)) {
+                return fp.resolvedMode
+            }
             if (let Some(t) <- vd.typeNode) { return t.modal.map({ m => m.local }) ?? t.resolvedMode }
             if (let Some(initValue) <- vd.initializer) {
                 if (seen.contains(vd)) { return None }

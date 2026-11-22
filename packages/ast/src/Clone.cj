@@ -1874,6 +1874,7 @@ public class ASTCloner {
                 dst.desugarDecl = if (let Some(decl) <- src.desugarDecl) { CloneNode(decl, visitFunc) as FuncDecl } else { None }
                 dst.isNamedParam = src.isNamedParam
                 dst.hasLetOrVar = src.hasLetOrVar
+                dst.isPropSetterValue = src.isPropSetterValue
             }
         }
         if (let Some(src) <- (source as EnumDecl)) {

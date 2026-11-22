@@ -668,11 +668,14 @@ public class Collector {
         }
         accessor.propDecl = propDecl
         // The setter parameter carries the property value, so it has the property mode unless its
-        // type states a modal. Type checking later gives it a clone of the property type without one.
+        // type states a modal. Type checking gives it a clone of the property type without one, so
+        // mark the parameter and let CallSiteMode read the mode from it.
         if (accessor.isSetter && (let Some(body) <- accessor.funcBody) && !body.paramLists.isEmpty() &&
             !body.paramLists[0].params.isEmpty() &&
             (body.paramLists[0].params[0].typeNode.map({ t => t.modal.isNone() }) ?? true)) {
-            body.paramLists[0].params[0].resolvedMode = PropertyMode(propDecl)
+            let value = body.paramLists[0].params[0]
+            value.resolvedMode = PropertyMode(propDecl)
+            value.isPropSetterValue = true
         }
         if (let Some(outer) <- propDecl.outerDecl) {
             accessor.outerDecl = outer
