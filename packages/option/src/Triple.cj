@@ -48,6 +48,7 @@ public class TripleInfo {
             case ArchType.AARCH64 => "aarch64"
             case ArchType.ARM64 => "arm64"
             case ArchType.ARM32 => "arm"
+            case ArchType.WASM32 => "wasm32"
             case ArchType.UNKNOWN => "unknown"
         }
     }
@@ -58,6 +59,7 @@ public class TripleInfo {
             case OSType.LINUX => "linux"
             case OSType.DARWIN => "darwin"
             case OSType.IOS => "ios"
+            case OSType.WASI => "wasi"
             case OSType.UNKNOWN => "unknown"
         }
     }
@@ -86,6 +88,9 @@ public class TripleInfo {
     }
 
     public func ToTripleString(): String {
+        // WASI has neither a vendor nor an environment component; LLVM spells it
+        // wasm32-unknown-wasi (WASI preview1 core modules).
+        if (os == OSType.WASI) { return ArchToString() + "-unknown-wasi" }
         if (vendor == Vendor.APPLE) {
             var triple = ArchToString() + "-" + VendorToString() + "-" + OSToString()
             if (os == OSType.IOS) { triple += apiLevel }
@@ -120,6 +125,9 @@ public class TripleInfo {
     public func IsMinGW(): Bool { return os == OSType.WINDOWS && env == EnvironmentType.GNU }
     public func IsMacOS(): Bool { return vendor == Vendor.APPLE && (os == OSType.DARWIN || os == OSType.IOS) }
     public func IsArm32(): Bool { return arch == ArchType.ARM32 }
+    public func IsWasm(): Bool { return arch == ArchType.WASM32 }
+    // Targets whose data pointers (and IntNative/UIntNative) are 32 bits wide.
+    public func Is32BitPointer(): Bool { return arch == ArchType.ARM32 || arch == ArchType.WASM32 }
     public func GetArchType(): ArchType { return arch }
     public func Equal(other: TripleInfo): Bool {
         return arch == other.arch && vendor == other.vendor && os == other.os && env == other.env
@@ -152,6 +160,7 @@ public func GetSharedLibraryExtension(osType: OSType): String {
         case OSType.DARWIN => ".dylib"
         case OSType.IOS => ".dylib"
         case OSType.LINUX => ".so"
+        case OSType.WASI => ".a"
         case OSType.UNKNOWN => ".so"
     }
 }

@@ -10,7 +10,10 @@ public class SipHash {
     private static let k1_: UInt64 = 0x12345678u64
 
     public static func GetHashValue(data: String): UInt64 {
-        let bytes = data.toArray()
+        return GetHashValue(data.toArray())
+    }
+
+    public static func GetHashValue(bytes: Array<UInt8>): UInt64 {
         var hash = 0u64
         try (dataPointer = LibC.malloc<UInt8>(count: bytes.size).asResource()) {
             var idx: Int64 = 0

@@ -50,6 +50,7 @@ public func GetDylibSuffix(os: OSType): String {
         case OSType.DARWIN => ".dylib"
         case OSType.IOS => ".dylib"
         case OSType.LINUX => ".so"
+        case OSType.WASI => ".a"
         case OSType.UNKNOWN => ".so"
     }
 }

@@ -588,13 +588,24 @@ public class Tool {
 
     @When[os != "Windows"]
     public func BuildEnvironmentVector(): Array<String> {
+        let variables = GetProcessEnvironment()
         let environment = ArrayList<String>()
+        for ((key, value) in variables) { environment.add(key + "=" + value) }
+        return environment.toArray()
+    }
+
+    @When[os == "Windows"]
+    func GetProcessEnvironment(): HashMap<String, String> { environmentVars }
+
+    @When[os != "Windows"]
+    func GetProcessEnvironment(): HashMap<String, String> {
+        let environment = HashMap<String, String>()
         if (!ldLibraryPath.isEmpty()) {
             let inherited = environmentVars.get(DYNAMIC_LIBRARY_PATH_ENV) ?? ""
             let value = if (inherited.isEmpty()) { ldLibraryPath } else { ldLibraryPath + ":" + inherited }
-            environment.add(DYNAMIC_LIBRARY_PATH_ENV + "=" + value)
+            environment[DYNAMIC_LIBRARY_PATH_ENV] = value
         } else if (let Some(value) <- environmentVars.get(DYNAMIC_LIBRARY_PATH_ENV)) {
-            environment.add(DYNAMIC_LIBRARY_PATH_ENV + "=" + value)
+            environment[DYNAMIC_LIBRARY_PATH_ENV] = value
         }
         for ((key, value) in environmentVars) {
             if (IsBlockedEnvironmentVariable(key)) {
@@ -603,9 +614,9 @@ public class Tool {
             if (key == DYNAMIC_LIBRARY_PATH_ENV) {
                 continue
             }
-            environment.add(key + "=" + value)
+            environment[key] = value
         }
-        return environment.toArray()
+        return environment
     }
 
 }

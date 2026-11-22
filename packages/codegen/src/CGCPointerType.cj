@@ -29,7 +29,9 @@ public class CGCPointerType <: CGType {
     }
 
     protected override func CalculateSizeAndAlign(): Unit {
-        size = 8
-        align = 8
+        // A C pointer occupies one target pointer slot (4 bytes on wasm32/ARM32).
+        let ptrSize: Int64 = if (cgMod.GetCGContext().GetCompileOptions().target.Is32BitPointer()) { 4 } else { 8 }
+        size = ptrSize
+        align = ptrSize
     }
 }

@@ -229,6 +229,9 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
             SetSymbolLinkageType(cgModule)
             cgModule.EraseUselessGVAndFunctions()
         }
+        if (options.target.IsWasm()) {
+            EmitWasmRoots(cgModules, cgPkgContext.GetLocalizedSymbols())
+        }
         if (options.NeedDumpIRToScreen()) {
             for (cgModule in cgModules) {
                 DumpIR(cgModule.GetLLVMModule().getOrThrow(), "")
@@ -730,7 +733,7 @@ private func EmitRuntimeConfigInit(cgMod: CGModule, moduleHandle: LLVMModuleHand
     }
 
     let entryPtrType = unsafe { LLVMPointerType(entryType, 0u32) }
-    let sizeType = if (options.target.arch == ArchType.ARM32) {
+    let sizeType = if (options.target.Is32BitPointer()) {
         unsafe { LLVMInt32TypeInContext(llvmContext) }
     } else {
         unsafe { LLVMInt64TypeInContext(llvmContext) }
@@ -1846,7 +1849,7 @@ private func HasStaticGIPartialOrder(partialOrder: HashMap<UIntNative, HashSet<U
     return partialOrder[smallerKey].contains(bigger.toUIntNative())
 }
 
-private func ConstLLVMArray(elementType: LLVMTypeRef, values: ArrayList<LLVMValueRef>): LLVMValueRef {
+internal func ConstLLVMArray(elementType: LLVMTypeRef, values: ArrayList<LLVMValueRef>): LLVMValueRef {
     if (values.isEmpty()) {
         return unsafe { LLVMConstArray(elementType, CPointer<LLVMValueRef>(), 0u32) }
     }

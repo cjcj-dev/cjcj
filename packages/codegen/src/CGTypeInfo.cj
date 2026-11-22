@@ -1150,7 +1150,7 @@ private func TypeTemplateInheritedClassNumValue(cgMod: CGModule, customTy: Custo
 
 private func GetIntNativeRuntimeType(cgMod: CGModule): Type {
     let context = cgMod.GetCGContext().GetCHIRBuilder().context
-    return if (cgMod.GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
+    return if (cgMod.GetCGContext().GetCompileOptions().target.Is32BitPointer()) {
         context.GetInt32Ty()
     } else {
         context.GetInt64Ty()
@@ -1615,7 +1615,7 @@ private func GenMTableOfTypeInfo(cgMod: CGModule, chirTy: Type, i8PtrType: LLVMT
         return (unsafe { LLVMConstNull(i8PtrType) }, inheritedClassNum)
     }
     let extendInterfaces = cgMod.GetExtensionDefInterfaces(chirTy)
-    if (cgMod.GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32 ||
+    if (cgMod.GetCGContext().GetCompileOptions().target.Is32BitPointer() ||
         extendInterfaces.size >= MTABLE_INLINE_BITS_LIMIT) {
         return (unsafe { LLVMConstNull(i8PtrType) }, inheritedClassNum)
     }

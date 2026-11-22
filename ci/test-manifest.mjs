@@ -191,6 +191,8 @@ export const GATING = Object.freeze([
   'build/test/source-build-parity.test.mjs',
   'build/test/source-tool-payload.test.mjs',
   'ci/host-toolchain-pin.test.mjs',
+  'ci/wasi-toolchain.test.mjs',
+  'ci/wasm-sdk-overlay.test.mjs',
   'ci/bootstrap/prepare_cpp_headers.test.mjs',
   'ci/release/bootstrap_entries.test.mjs',
   'ci/release/bootstrap_host_sdk.test.mjs',

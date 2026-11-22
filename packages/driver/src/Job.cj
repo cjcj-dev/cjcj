@@ -8,7 +8,7 @@ import cjcj::utils.{ConcurrencyBudget, ProfileRecorder, Semaphore}
 // Failures are reported through Errorln with the failed tool's command string, as the C++ driver does
 // with Errorf; the numeric task id only keys the checklist.
 private func CheckExecuteResult(checklist: TreeMap<Int64, ToolFuture>, tools: HashMap<Int64, Tool>,
-    returnIfAnyToolFinished!: Bool = false, succeeded!: ArrayList<Int64> = ArrayList<Int64>()): Bool {
+    job: Job, returnIfAnyToolFinished!: Bool = false, succeeded!: ArrayList<Int64> = ArrayList<Int64>()): Bool {
     var success = true
     while (!checklist.isEmpty()) {
         let totalTasks = checklist.size
@@ -19,7 +19,8 @@ private func CheckExecuteResult(checklist: TreeMap<Int64, ToolFuture>, tools: Ha
                 if (!ConcurrencyBudget.Get().IsEnabled()) {
                     Semaphore.Get().Release()
                 }
-                let commandString = tools.get(command)?.GetCommandString() ?? "backend task ${command}"
+                let tool = tools[command]
+                let commandString = tool.GetCommandString()
                 Errorln("${commandString}: command failed with exit code ${future.exitCode} (use -V to see invocation)")
                 finishedCommands.add(command)
                 success = false
@@ -99,7 +100,7 @@ public class Job {
                             break
                         }
                         if (next == pending.size) {
-                            success = CheckExecuteResult(childWorkers, runningTools, returnIfAnyToolFinished: true,
+                            success = CheckExecuteResult(childWorkers, runningTools, this, returnIfAnyToolFinished: true,
                                 succeeded: succeeded)
                             continue
                         }
@@ -112,7 +113,7 @@ public class Job {
                                 success = false
                                 break
                             }
-                            success = CheckExecuteResult(childWorkers, runningTools, returnIfAnyToolFinished: true,
+                            success = CheckExecuteResult(childWorkers, runningTools, this, returnIfAnyToolFinished: true,
                                 succeeded: succeeded)
                             continue
                         }
@@ -136,7 +137,7 @@ public class Job {
                 } finally {
                     // On every exit, including a spawn error or exception, join all children before
                     // temporary-file cleanup and return every acquired token exactly once.
-                    success = CheckExecuteResult(childWorkers, runningTools) && success
+                    success = CheckExecuteResult(childWorkers, runningTools, this) && success
                 }
                 if (!success) {
                     return false

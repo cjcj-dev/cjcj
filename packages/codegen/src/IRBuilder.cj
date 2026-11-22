@@ -45,8 +45,8 @@ private let THROW_EXCEPTION_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "ThrowE
 private let THROW_EXCEPTION_INTRINSIC_NAME: String = "llvm.cj.throw.exception"
 private let GET_EXCEPTION_WRAPPER_INTRINSIC_NAME: String = "llvm.cj.get.exception.wrapper"
 private let POST_THROW_EXCEPTION_INTRINSIC_NAME: String = "llvm.cj.post.throw.exception"
-private let MALLOC_ARRAY_INTRINSIC_NAME: String = "llvm.cj.malloc.array"
-private let MALLOC_ARRAY_GENERIC_INTRINSIC_NAME: String = "llvm.cj.malloc.array.generic"
+internal let MALLOC_ARRAY_INTRINSIC_NAME: String = "llvm.cj.malloc.array"
+internal let MALLOC_ARRAY_GENERIC_INTRINSIC_NAME: String = "llvm.cj.malloc.array.generic"
 private let ARRAY_COPY_REF_INTRINSIC_NAME: String = "llvm.cj.array.copy.ref"
 private let ARRAY_COPY_STRUCT_INTRINSIC_NAME: String = "llvm.cj.array.copy.struct"
 private let ARRAY_COPY_GENERIC_INTRINSIC_NAME: String = "llvm.cj.array.copy.generic"
@@ -59,7 +59,7 @@ private let GCREAD_GENERIC_INTRINSIC_NAME: String = "llvm.cj.gcread.generic"
 private let GCWRITE_GENERIC_INTRINSIC_NAME: String = "llvm.cj.gcwrite.generic"
 private let GCWRITE_GENERIC_PAYLOAD_INTRINSIC_NAME: String = "llvm.cj.gcwrite.generic.payload"
 private let GCREAD_GENERIC_PAYLOAD_INTRINSIC_NAME: String = "llvm.cj.gcread.generic.payload"
-private let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
+internal let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
 private let CJ_MEMSET_INTRINSIC_NAME: String = "llvm.cj.memset"
 private let GCWRITE_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.ref"
 private let GCREAD_WEAK_REF_INTRINSIC_NAME: String = "llvm.cj.gcread.weakref"
@@ -854,11 +854,11 @@ public class IRBuilder2 <: Resource {
     }
 
     public func GetPtrSize(): UInt64 {
-        return if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) { 4u64 } else { 8u64 }
+        return if (GetCGContext().GetCompileOptions().target.Is32BitPointer()) { 4u64 } else { 8u64 }
     }
 
     public func GetSizetLLVMType(): LLVMTypeRef {
-        return if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
+        return if (GetCGContext().GetCompileOptions().target.Is32BitPointer()) {
             unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }
         } else {
             unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
@@ -867,7 +867,7 @@ public class IRBuilder2 <: Resource {
 
     public func GetTypeKindFromType(ty: Type): TypeKind {
         var typeKind = ty.GetTypeKind()
-        let isArm32 = GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32
+        let isArm32 = GetCGContext().GetCompileOptions().target.Is32BitPointer()
         if (typeKind == TypeKind.TYPE_UINT_NATIVE) {
             typeKind = if (isArm32) { TypeKind.TYPE_UINT32 } else { TypeKind.TYPE_UINT64 }
         } else if (typeKind == TypeKind.TYPE_INT_NATIVE) {
@@ -877,7 +877,12 @@ public class IRBuilder2 <: Resource {
     }
 
     public func GetPayloadOffset(): UInt64 {
-        return if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
+        let target = GetCGContext().GetCompileOptions().target
+        // wasm32 objects carry one 4-byte TypeInfo* header slot, the same single slot that
+        // GetPayloadFromObject skips; byte-offset paths must agree with that typed path.
+        return if (target.IsWasm()) {
+            GetPtrSize()
+        } else if (target.Is32BitPointer()) {
             GetPtrSize() + 4u64
         } else {
             RuntimeLayout.ObjectHeaderSize
@@ -938,7 +943,7 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
-    private func CreateAllocaAtCurrentPoint(valueType: LLVMTypeRef, name: String): LLVMValueRef {
+    internal func CreateAllocaAtCurrentPoint(valueType: LLVMTypeRef, name: String): LLVMValueRef {
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildAlloca(builder.raw, valueType, nameCString.value) }
@@ -3238,7 +3243,8 @@ public class IRBuilder2 <: Resource {
         }
         let callInst = CreateIntrinsicCallNoInvoke(SET_LOCATION_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(),
             ArrayList<LLVMValueRef>())
-        if (!callInst.isNull() && GetCGContext().GetCompileOptions().target.arch != ArchType.ARM32) {
+        if (!callInst.isNull() && !GetCGContext().GetCompileOptions().target.IsArm32() &&
+            !GetCGContext().GetCompileOptions().target.IsWasm()) {
             unsafe { LLVMSelfhostSetAnyRegCallingConv(callInst) }
         }
         return callInst
@@ -4596,7 +4602,7 @@ public class IRBuilder2 <: Resource {
         // C++: CJNativeIRBuilder.cpp:1976-1983 GetPayloadFromObject; peel the AS1 GEP base with
         // SafepointIRVerifier.cpp:991-1003 uncolorIfGCPtr before deriving the payload address.
         let objectSlot = CreateBitCast(objectValue, objectSlotType, name: "obj.payload.slot")
-        let headerSlots = if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
+        let headerSlots = if (GetCGContext().GetCompileOptions().target.Is32BitPointer()) {
             1u64
         } else {
             CJC_ASSERT(RuntimeLayout.ObjectHeaderSize % GetPtrSize() == 0u64)
@@ -4723,7 +4729,7 @@ public class IRBuilder2 <: Resource {
             [associatedValueTypeTI, sizeOfAssociatedValueType]))
         let typeInfo = CreateTypeInfo(enumType)
         let associatedValOffset = CallIntrinsicGetFieldOffset(ArrayList<LLVMValueRef>(
-            [typeInfo, GetInt64(1), GetInt32(8)]))
+            [typeInfo, GetInt64(1), GetInt32(Int64(GetPayloadOffset()))]))
         let associatedValPtr = CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) },
             enumValueWithTI, ArrayList<LLVMValueRef>([associatedValOffset]))
         CallGCReadGeneric(nonRefResult, enumValueWithTI, associatedValPtr, sizeOfAssociatedValueType)
@@ -6360,7 +6366,7 @@ public class IRBuilder2 <: Resource {
 
     // Mirrors CodeGen/CJNative/CJNativeIRBuilder.cpp:1876-1879 IRBuilder2::GetSize_Native.
     public func GetSize_Native(chirTy: Type): LLVMValueRef {
-        return if (GetCGContext().GetCompileOptions().target.arch == ArchType.ARM32) {
+        return if (GetCGContext().GetCompileOptions().target.Is32BitPointer()) {
             GetSize_32(chirTy)
         } else {
             GetSize_64(chirTy)
