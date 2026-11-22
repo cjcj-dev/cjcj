@@ -1120,6 +1120,7 @@ public class FaithfulAST2CHIR {
             return false
         }
         CacheTopLevelDeclToGlobalSymbolTable()
+        AliasDuplicateInstantiatedDecls()
         TranslateNominalDecls(node)
         gc(heavy: true)
         TranslateInitOfGlobalVars(initOrder)
@@ -1235,6 +1236,7 @@ public class FaithfulAST2CHIR {
 
     private func CollectImportedDecls(node: AstPackage): Unit {
         let mangledNameSet = HashSet<String>()
+        let keptByMangledName = HashMap<String, AstDecl>()
         for (decl in node.genericInstantiatedDecls) {
             if (let Some(genericDecl) <- decl.genericDecl) {
                 if (let Some(curFile) <- genericDecl.curFile) {
@@ -1254,9 +1256,16 @@ public class FaithfulAST2CHIR {
             }
             if (decl.astKind != ASTKind.EXTEND_DECL) {
                 if (mangledNameSet.contains(decl.mangledName)) {
+                    // Instantiations of distinct generic overloads that share one mangled name (e.g. the plain and
+                    // the exclave `@local?` acquireArrayRawData<Byte>) are one symbol; the call sites still refer to
+                    // their own instantiated decl, so it must resolve to the kept decl's CHIR value.
+                    if (let Some(kept) <- keptByMangledName.get(decl.mangledName)) {
+                        if (kept != decl) { duplicateInstantiatedDecls.add((decl, kept)) }
+                    }
                     continue
                 }
                 mangledNameSet.add(decl.mangledName)
+                keptByMangledName[decl.mangledName] = decl
             }
             CollectDecls(decl, instantiated: true)
         }
@@ -1577,6 +1586,20 @@ public class FaithfulAST2CHIR {
     }
 
     private let pendingDefaultArgs = ArrayList<(Parameter, AstFuncDecl)>()
+
+    // (skipped instantiated decl, kept instantiated decl with the same mangled name), see CollectImportedDecls.
+    private let duplicateInstantiatedDecls = ArrayList<(AstDecl, AstDecl)>()
+
+    private func AliasDuplicateInstantiatedDecls(): Unit {
+        for ((dup, kept) in duplicateInstantiatedDecls) {
+            if (globalCache.TryGet(dup).isSome()) {
+                continue
+            }
+            if (let Some(value) <- globalCache.TryGet(kept)) {
+                globalCache.Set(dup, value)
+            }
+        }
+    }
 
     private func CacheTopLevelDeclToGlobalSymbolTable(): Unit {
         CacheCustomTypeDefToGlobalSymbolTable()
