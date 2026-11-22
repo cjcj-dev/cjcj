@@ -50,6 +50,7 @@ test('all native platform configurations preserve eight phases and C3',()=>{
   assert.deepEqual(c.stages.find(s=>s.id==='nativeN').reuse.targets,platform.startsWith('windows_')?['lldb','all','install']:['lldb','cjdb','lldb-boundscheck','lldb-cangjie-lsp','lldb-cangjie-frontend','all','install']);
   assert.ok(c.stages.find(s=>s.id==='stage3').commands.some(cmd=>cmd.argv.includes('compiler3')||cmd.argv.includes('${repo.compiler3}')));
   assert.ok(c.stages.find(s=>s.id==='stage2-target-sdk').metadata.compilerFile.startsWith('libexec/compiler/'));
+  assert.deepEqual(c.stages.filter(s=>s.buildJavaInterop).map(s=>s.id),platform==='linux_x86_64'?['stage3']:[]);
   assert.equal(c.stages.find(s=>s.id==='stage3').output,'${install}');
  }
 });

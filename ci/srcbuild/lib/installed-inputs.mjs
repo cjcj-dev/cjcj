@@ -162,8 +162,8 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
       entry:await artifact(sdk,'bin/cjcj-stage1'+native.exe,stage.compilerEntrySha256,checkArtifact)});
   }else rows.push({component:'compiler',source:unresolved('STAGE-INPUTS compiler missing')});
   if(stage?.javaInterop) {
-    const {compilerSha256,runtimeCommit}=stage.javaInterop;
-    rows.push({component:'java-interop',source:source(stage.javaInterop),build:{platform,compilerSha256,runtimeCommit},
+    const {compilerSha256,runtimeCommit,jdkVersion,inputSha256}=stage.javaInterop;
+    rows.push({component:'java-interop',source:source(stage.javaInterop),build:{platform,compilerSha256,runtimeCommit,...(jdkVersion?{jdkVersion,inputSha256}:{})},
       artifacts:await Promise.all(javaInteropFiles.map(rel=>artifact(sdk,rel,undefined,checkArtifact)))});
   }
   const runtime=await optional(path.join(sdk,RUNTIME_INPUTS));

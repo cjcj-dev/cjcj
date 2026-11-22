@@ -6,8 +6,8 @@ import {command} from './sdk-flow.mjs';
 
 // The JVM assertion needs a Cangjie-generated Java class, both Java runtime
 // modules and the packaged loader jar; a compiler-only probe misses that edge.
-export async function verifyInstalledJava(sdk,work) {
-  const {home}=await selectJdk();
+export async function verifyInstalledJava(sdk,work,jdkHome) {
+  const {home}=await selectJdk(jdkHome);
   await fs.mkdir(work,{recursive:true});
   const cwd=await fs.mkdtemp(path.join(work,'java-'));
   await fs.mkdir(path.join(cwd,'src'));await fs.mkdir(path.join(cwd,'generated'));

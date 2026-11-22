@@ -340,7 +340,7 @@ async function dispatch(config, command, args) {
     }
     await installProducts(production.installInputs,{packageOutput:false,consume:async pending=>{
       const installed=Object.freeze({...production,producerSdk:null,consumerSdk:pending,
-        stdxHostSdk:!config.target.spec.crossCompile?pending:undefined});
+        stdxHostSdk:config.target.spec.key==='linux-x64'?pending:undefined});
       await stdx.run(installed);
       await tools.run(installed);
       if(!config.target.spec.crossCompile)await verifyInstall({sdk:pending,

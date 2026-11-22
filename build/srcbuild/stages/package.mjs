@@ -88,7 +88,7 @@ async function packageMainSdk(config) {
   const cangjieDir=compilerOutput;
   organizeSdkTree(config,cangjieDir);
   return (await packageInstall({sdk:cangjieDir,target:config.target,version:config.cangjieVersion,
-    officialSdkRoot:config.officialSdkRoot,archive:sdkArchive(config)})).archive;
+    officialSdkRoot:config.officialSdkRoot,javaHome:config.toolsJniHome,archive:sdkArchive(config)})).archive;
 }
 
 export async function packageStdx(config) {
