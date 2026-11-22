@@ -271,10 +271,14 @@ public class DiagnosticEngineImpl {
             return
         }
         if (diagnostic.diagSeverity == DiagSeverity.DS_WARNING) {
+            // A manually constructed warning has no table entry to supply its group.
+            if (diagnostic.warnGroup == WarnGroup.NONE) {
+                diagnostic.warnGroup = WarnGroup.UNGROUPED
+            }
             if (disableWarning || isWarningSuppressed(diagnostic.warnGroup) || IsSupressedUnusedMain(diagnostic)) {
                 return
             }
-            if (diagnostic.warnGroup != WarnGroup.UNGROUPED && diagnostic.warnGroup != WarnGroup.NONE) {
+            if (diagnostic.warnGroup != WarnGroup.UNGROUPED) {
                 let warnGroupName = warnGroupDescrs[WarnGroupIndex(diagnostic.warnGroup)]
                 let msg = "this warning can be suppressed by setting the compiler option `-Woff " + warnGroupName + "`"
                 diagnostic.subDiags.add(SubDiagnostic(msg))
