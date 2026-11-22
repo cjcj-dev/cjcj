@@ -125,7 +125,7 @@ export function pcre2Objects({pcre2Source, clang, sysroot, work, run}) {
   return {ok: true, objects, include: work};
 }
 
-export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Source, clang, llvmAr, work, only}) {
+export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Source, clang, llvmAr, work, only, fallbackOpt = false}) {
   const stdRoot = path.join(stdlibSource, 'libs', 'std');
   const {pkgs, order} = packageGraph(stdRoot);
   const libDir = path.join(sdk, 'lib', WASM_TARGET_DIR);
@@ -173,10 +173,19 @@ export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Sou
       const args = [target, '-O2', '--no-sub-pkg', '-p', pkg.dir, '--output-type=staticlib', `--output=${out}`,
         `--import-path=${path.join(sdk, 'modules', WASM_TARGET_DIR)}`, '-Woff', 'all'];
       if (name === 'std') args.splice(2, 1); // the aggregate root package only re-exports
-      const r = run(cjc, args, {cwd: pw, env});
+      const errors = out => (out.match(/error[^\n]*(\n[^\n]*){0,3}/g) || [out]).slice(0, 4).join(' | ').slice(0, 900);
+      let r = run(cjc, args, {cwd: pw, env});
+      rec.opt = 'O2';
+      if ((!r.ok || !fs.existsSync(out)) && fallbackOpt) {
+        // Record the -O2 rejection verbatim, then build the package at the compiler's default
+        // level so dependants can still be measured. Such a package is never reported as -O2.
+        rec.o2Error = errors(r.out);
+        r = run(cjc, args.filter(a => a !== '-O2'), {cwd: pw, env});
+        rec.opt = 'default';
+      }
       if (!r.ok || !fs.existsSync(out) || !fs.existsSync(out + '.cjo')) {
         rec.status = 'CJC_FAILED';
-        rec.reason = (r.out.match(/error[^\n]*(\n[^\n]*){0,3}/g) || [r.out]).slice(0, 4).join(' | ').slice(0, 900);
+        rec.reason = errors(r.out);
         failed.add(name);
         continue;
       }
@@ -202,6 +211,7 @@ export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Sou
         const ar = run(llvmAr, ['rs', out, ...objects], {cwd: pw});
         if (!ar.ok) { rec.status = 'AR_FAILED'; rec.reason = ar.out.slice(0, 400); failed.add(name); continue; }
       }
+      if (rec.opt !== 'O2') rec.status = 'BUILT_DEFAULT_OPT';
       if (rec.native.some(n => !n.ok)) rec.status = 'BUILT_NATIVE_PARTIAL';
       fs.copyFileSync(out, path.join(libDir, rec.archive));
       fs.copyFileSync(out + '.cjo', path.join(modDir, rec.cjo));
@@ -245,10 +255,10 @@ function main(argv) {
   }
   const result = buildWasmStdFull({sdk: path.resolve(opt.sdk), stdlibSource: path.resolve(opt['stdlib-source']),
     boundscheckSource: opt['boundscheck-source'], pcre2Source: path.resolve(opt['pcre2-source']), clang: opt.clang,
-    llvmAr: opt['llvm-ar'], work: path.resolve(opt.work), only: opt.only?.split(',')});
+    llvmAr: opt['llvm-ar'], work: path.resolve(opt.work), only: opt.only?.split(','), fallbackOpt: opt['fallback-opt'] === 'default'});
   fs.writeFileSync(opt.report, JSON.stringify(result, null, 2) + '\n');
   const bad = result.results.filter(r => !['BUILT', 'HOST_ONLY', 'BUILT_CORE_DEFAULT_OPT'].includes(r.status));
-  for (const r of result.results) console.log(`${r.status.padEnd(22)} ${r.name.padEnd(30)} cjo=${r.cjoBytes ?? '-'} a=${r.archiveBytes ?? '-'} ${r.reason ? r.reason.slice(0, 160) : ''}`);
+  for (const r of result.results) console.log(`${r.status.padEnd(22)} ${r.name.padEnd(30)} opt=${r.opt ?? '-'} cjo=${r.cjoBytes ?? '-'} a=${r.archiveBytes ?? '-'} native=${r.native.filter(n => n.ok).length}/${r.native.length} ${r.reason ? r.reason.slice(0, 200) : ''}${r.o2Error ? ' O2:' + r.o2Error.slice(0, 160) : ''}`);
   return bad.length ? 1 : 0;
 }
 
