@@ -339,7 +339,8 @@ async function dispatch(config, command, args) {
       console.log(JSON.stringify({status:'NOT_INSTALLED',reason:'BUILD_ONLY',sources:production.sources}));return;
     }
     await installProducts(production.installInputs,{packageOutput:false,consume:async pending=>{
-      const installed=Object.freeze({...production,producerSdk:null,consumerSdk:pending});
+      const installed=Object.freeze({...production,producerSdk:null,consumerSdk:pending,
+        stdxHostSdk:!config.target.spec.crossCompile?pending:undefined});
       await stdx.run(installed);
       await tools.run(installed);
       if(!config.target.spec.crossCompile)await verifyInstall({sdk:pending,
