@@ -14,7 +14,7 @@ try {
   const cjo = path.join(work, 'warnfixture.cjo');
   const compile = (options = []) => {
     const result = spawnSync(compiler, [source, '--experimental', '--output-type=chir',
-      '--diagnostic-format=noColor', '--output-dir', work, '-o', work + '/', ...options],
+      '--diagnostic-format=noColor', '-o', work + '/', ...options],
     {cwd: work, encoding: 'utf8'});
     if (result.error) throw result.error;
     console.log(JSON.stringify({options, status: result.status, signal: result.signal, stderr: result.stderr}));
