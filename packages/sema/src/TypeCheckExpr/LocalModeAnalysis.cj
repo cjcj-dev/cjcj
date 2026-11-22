@@ -180,6 +180,8 @@ class LocalModeAnalysis {
     // receiver can read either region; one external arm cannot justify an escape.
     private func RegionOrigins(value: Expr): UInt8 {
         if (value.GetTy().map({ t => t.IsNothing() }) ?? false) { return 0u8 }
+        // A nullary enum value (e.g. `None`) holds no reference, so it lives in no region.
+        if (IsNullaryEnumValue(value)) { return 0u8 }
         if (ExclaveOwner().isSome()) { return 1u8 }
         let branches = ResultBranches(value)
         if (!branches.isEmpty()) {
@@ -396,6 +398,13 @@ class LocalModeAnalysis {
             }
         }
         if (ctor || enumCtor) { call.resolvedMode = createdMode }
+        // `a.p = v` lowers to a setter call whose value argument takes the property mode
+        // (Types.cj ReadModes), also when the lowered callee still carries the PropDecl.
+        if (let Some(pd) <- SetterProperty(call, base, decl)) {
+            call.resolvedMode = ASTMode.NOT
+            for (arg in call.args) { CheckValue(arg, PropertyMode(pd)) }
+            return
+        }
         var sig = Signature(base)
         if (sig.isNone() && (let Some(fd) <- call.resolvedFunction)) { sig = Signature(fd) }
         if (sig.isNone()) {
@@ -416,9 +425,24 @@ class LocalModeAnalysis {
         }
     }
 
+    private func SetterProperty(call: CallExpr, base: Expr, decl: Option<FuncDecl>): Option<PropDecl> {
+        if (call.args.size != 1) { return None }
+        if (let Some(fd) <- decl) {
+            return if (fd.isSetter) { fd.propDecl } else { None }
+        }
+        let target = base.GetTarget() ?? return None;
+        let pd = (target as PropDecl) ?? return None;
+        // A call through a function-typed property is not a setter.
+        if (pd.GetTy().map({ t => t is FuncTy }) ?? true) { return None }
+        return Some(pd)
+    }
+
     private func CheckArgument(ft: FuncTy, i: Int64, arg: FuncArg): Unit {
+        CheckValue(arg, if (i < ft.paramTys.size) { ft.ParamMode(i) } else { ASTMode.NOT })
+    }
+
+    private func CheckValue(arg: FuncArg, mode: ASTMode): Unit {
         if (let Some(value) <- arg.expr) {
-            let mode = if (i < ft.paramTys.size) { ft.ParamMode(i) } else { ASTMode.NOT }
             Check(value, mode)
             if (mode == ASTMode.FULL && value.resolvedMode == ASTMode.FULL &&
                 !CopyNode(value) && ExclaveOwner().isNone() && External(value)) {
