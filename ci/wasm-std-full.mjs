@@ -153,12 +153,20 @@ export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Sou
     const pw = path.join(work, name);
     fs.rmSync(pw, {recursive: true, force: true});
     if (name === 'std.core') {
-      try {
-        const inputs = wasmStdInputs({stdlibSource, boundscheckSource, clang, llvmAr});
-        const {archive, module} = buildWasmStdCore(sdk, pw, inputs, {cjcArgs: ['-O2']});
-        fs.copyFileSync(archive, path.join(libDir, rec.archive));
-        fs.copyFileSync(module, path.join(modDir, rec.cjo));
-      } catch (e) { rec.status = 'CJC_FAILED'; rec.reason = String(e.message).slice(0, 600); failed.add(name); continue; }
+      // std.core is attempted at -O2 first. The SDK compiler's prelude (--no-prelude) package
+      // entry emitter can fail at -O2; then fall back to the default level the r5 overlay used and
+      // record it, so the inventory never claims an -O2 std.core that was not built.
+      const inputs = wasmStdInputs({stdlibSource, boundscheckSource, clang, llvmAr});
+      let built;
+      for (const [level, cjcArgs] of [['O2', ['-O2']], ['default', []]]) {
+        fs.rmSync(pw, {recursive: true, force: true});
+        try { built = buildWasmStdCore(sdk, pw, inputs, {cjcArgs}); rec.opt = level; break; }
+        catch (e) { rec.attempts = [...(rec.attempts || []), {level, error: String(e.message).slice(0, 300)}]; }
+      }
+      if (!built) { rec.status = 'CJC_FAILED'; rec.reason = JSON.stringify(rec.attempts); failed.add(name); continue; }
+      if (rec.opt !== 'O2') rec.status = 'BUILT_CORE_DEFAULT_OPT';
+      fs.copyFileSync(built.archive, path.join(libDir, rec.archive));
+      fs.copyFileSync(built.module, path.join(modDir, rec.cjo));
     } else {
       fs.mkdirSync(pw, {recursive: true});
       const out = path.join(pw, name);
@@ -239,7 +247,7 @@ function main(argv) {
     boundscheckSource: opt['boundscheck-source'], pcre2Source: path.resolve(opt['pcre2-source']), clang: opt.clang,
     llvmAr: opt['llvm-ar'], work: path.resolve(opt.work), only: opt.only?.split(',')});
   fs.writeFileSync(opt.report, JSON.stringify(result, null, 2) + '\n');
-  const bad = result.results.filter(r => !['BUILT', 'HOST_ONLY'].includes(r.status));
+  const bad = result.results.filter(r => !['BUILT', 'HOST_ONLY', 'BUILT_CORE_DEFAULT_OPT'].includes(r.status));
   for (const r of result.results) console.log(`${r.status.padEnd(22)} ${r.name.padEnd(30)} cjo=${r.cjoBytes ?? '-'} a=${r.archiveBytes ?? '-'} ${r.reason ? r.reason.slice(0, 160) : ''}`);
   return bad.length ? 1 : 0;
 }
