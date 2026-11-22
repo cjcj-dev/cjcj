@@ -979,6 +979,17 @@ public func IsCurrentReceiver(value: Value, firstParam: Value): Bool {
     if (refEq(value, firstParam)) {
         return true
     }
+    // A delegated `this(...)` passes the receiver through CastValueIfNeeded; for an exclave struct
+    // constructor (`this @local!`) the parameter type differs from the plain RefTy, so the receiver
+    // arrives as a CLASS_STATIC_CAST of the parameter (Translator.TranslateStructOrClassCtorCall).
+    if (let Some(castLocal) <- value.AsLocalVar()) {
+        if (let Some(castExpr) <- castLocal.GetExpr()) {
+            if (castExpr.GetExprKind() == ExprKind.CLASS_STATIC_CAST &&
+                IsCurrentReceiver(castExpr.GetOperand(0), firstParam)) {
+                return true
+            }
+        }
+    }
     let param = (firstParam as Parameter) ?? return false
     let fn = param.GetOwnerFunc() ?? return false
     if (!ConstructorReturnsReceiver(fn) || fn.GetParam(0).nodeId != param.nodeId) {
