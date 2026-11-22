@@ -626,6 +626,9 @@ class LocalModeAnalysis {
             if (index.baseExpr.map({ b => refEq(b, node) }) ?? false) { return }
             if (index.desugarExpr.map({ e => refEq(e, node) }) ?? false) { return }
         }
+        // An interpolated value is only read through `toString(this @local?)` or
+        // `append(_: String @local?)`, both of which admit every mode (DesugarStrPartExpr).
+        if (parent is InterpolationExpr) { return }
         if (!(parent is VarDeclAbstract || parent is Block || parent is FuncBody || parent is FuncArg ||
             parent is MemberAccess || parent is ExclaveExpr || parent is CallExpr || parent is ParenExpr || parent is AssignExpr || parent is ReturnExpr)) {
             Check(node, ASTMode.NOT)

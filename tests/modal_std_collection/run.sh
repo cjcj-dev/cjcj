@@ -31,4 +31,5 @@ check neg_none_call_plain 1 "mismatched types|no matching function"
 check neg_forin_tuple_plain 1 "mismatched types|no matching function"
 check coalesce_enum_prop 0 ""
 check exclave_map_values_add 0 ""
+check interp_local_struct 0 ""
 exit $fail

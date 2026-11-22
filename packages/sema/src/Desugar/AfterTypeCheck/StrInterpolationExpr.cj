@@ -103,17 +103,51 @@ private func EstimateStringLength(siExpr: StrInterpolationExpr): Int64 {
     return size
 }
 
-private func MatchAppendFuncByParamTy(candidates: ArrayList<Decl>, paramTy: Ty): Option<Decl> {
+// A Copyable argument carries no region, so it matches the plain overload. Otherwise a
+// local argument takes the first overload whose parameter mode admits it (e.g.
+// `append(str: String @local?)`); the receiver `$tmp` is a plain local builder.
+// Upstream: StrInterpolationExpr.cpp MatchAppendFuncByParamTy.
+private func MatchAppendFuncByParamTy(typeManager: TypeManager, candidates: ArrayList<Decl>, paramTy: Ty,
+    argMode: ASTMode): Option<Decl> {
+    let mode = if (typeManager.IsModalCopyType(paramTy)) { ASTMode.NOT } else { argMode }
     for (candidate in candidates) {
         if (let Some(candidateTy) <- candidate.GetTy()) {
             if (let Some(funcTy) <- (candidateTy as FuncTy)) {
-                if (funcTy.paramTys.size == 1 && refEq(funcTy.paramTys[0], paramTy)) {
+                if (funcTy.paramTys.size == 1 && refEq(funcTy.paramTys[0], paramTy) &&
+                    mode.IsSubMode(funcTy.ParamMode(0)) && !ReceiverIsLocal(candidate)) {
                     return candidate
                 }
             }
         }
     }
     return None
+}
+
+private func ReceiverIsLocal(decl: Decl): Bool {
+    if (let Some(fd) <- (decl as FuncDecl)) { return GetReceiverMode(fd) == ASTMode.FULL }
+    return false
+}
+
+// toString has the two signatures `() -> String` and `(this @local?) -> String @local!`.
+// A non-local object takes the plain one; a local object takes the one whose receiver
+// mode admits it. Upstream: StrInterpolationExpr.cpp FilterToStringImpl.
+private func FilterToStringImpl(candidates: ArrayList<Decl>, objMode: ASTMode): ArrayList<Decl> {
+    let out = ArrayList<Decl>()
+    for (candidate in candidates) {
+        let thisMode = if (let Some(fd) <- (candidate as FuncDecl)) { GetReceiverMode(fd) } else { ASTMode.NOT }
+        let modeMatch = if (objMode == ASTMode.NOT) { thisMode == ASTMode.NOT } else { objMode.IsSubMode(thisMode) }
+        if (modeMatch) { out.add(candidate) }
+    }
+    return out
+}
+
+private func FuncRetMode(decl: Decl): ASTMode {
+    if (let Some(declTy) <- decl.GetTy()) {
+        if (let Some(funcTy) <- (declTy as FuncTy)) {
+            return funcTy.retMode
+        }
+    }
+    return ASTMode.NOT
 }
 
 private func FuncRetTy(decl: Decl): Option<Ty> {
@@ -199,7 +233,8 @@ private func CreateAppendCall(typeManager: TypeManager, pkg: Package, litConstEx
         let block = interpolation.block.getOrThrow()
         CJC_ASSERT(Ty.IsTyCorrect(block.GetTy()))
         let blockTy = block.GetTy().getOrThrow()
-        appendDecl = MatchAppendFuncByParamTy(appendDecls, blockTy)
+        let blockMode = if (typeManager.IsModalCopyType(blockTy)) { ASTMode.NOT } else { block.resolvedMode }
+        appendDecl = MatchAppendFuncByParamTy(typeManager, appendDecls, blockTy, blockMode)
         if (let Some(_) <- appendDecl) {
             appendArgs.add(CreateFuncArg(block))
             interpolation.block = None
@@ -214,6 +249,10 @@ private func CreateAppendCall(typeManager: TypeManager, pkg: Package, litConstEx
                 found = FieldLookup(typeManager, Some(toStringInterface.getOrThrow()), TO_STRING_NAME,
                     info: LookupInfo(file: partExpr.curFile))
             }
+            if (found.size > 1) {
+                let filtered = FilterToStringImpl(found, blockMode)
+                if (!filtered.isEmpty()) { found = filtered }
+            }
             CJC_ASSERT(found.size == 1)
             let toStringDecl = found[0]
             let toStringFunc = CreateMemberAccess(block, toStringDecl)
@@ -225,7 +264,8 @@ private func CreateAppendCall(typeManager: TypeManager, pkg: Package, litConstEx
                 AsFuncDecl(Some(toStringDecl)), FuncRetTy(toStringDecl), CallKind.CALL_DECLARED_FUNCTION)
             let retTy = FuncRetTy(toStringDecl).getOrThrow()
             toStringCall.SetTy(retTy)
-            appendDecl = MatchAppendFuncByParamTy(appendDecls, retTy)
+            toStringCall.resolvedMode = FuncRetMode(toStringDecl)
+            appendDecl = MatchAppendFuncByParamTy(typeManager, appendDecls, retTy, toStringCall.resolvedMode)
             appendArgs.add(CreateFuncArg(toStringCall))
         }
     } else if (let Some(lit) <- (partExpr as LitConstExpr)) {
@@ -233,7 +273,7 @@ private func CreateAppendCall(typeManager: TypeManager, pkg: Package, litConstEx
             return None
         }
         let litTy = lit.GetTy().getOrThrow()
-        appendDecl = MatchAppendFuncByParamTy(appendDecls, litTy)
+        appendDecl = MatchAppendFuncByParamTy(typeManager, appendDecls, litTy, ASTMode.NOT)
         if (let Some(cloned) <- CloneExpr(lit)) {
             cloned.SetTy(litTy)
             appendArgs.add(CreateFuncArg(cloned))
