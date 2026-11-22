@@ -809,6 +809,12 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
         CJC_ASSERT(!funcName.isEmpty())
         let instParamTys = funcType.GetParamTypes()
         var foundFunc: Option<Function> = None
+        // Pass 1 compares parameter types exactly. Pass 2 runs only when pass 1 finds nothing and ignores
+        // the outermost modal of non-receiver parameters: a call-site type may carry a concrete argument
+        // without the declared `@local!` (e.g. `K @local!` with K = UInt32), while the receiver modal,
+        // which is what distinguishes local-mode overloads, is still compared exactly.
+        for (relaxed in [false, true]) {
+        if (foundFunc.isSome()) { break }
         for (method in methods) {
             if (isStatic != method.TestAttr(Attribute.STATIC)) {
                 continue
@@ -846,7 +852,8 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
                         matched = false
                         break
                     }
-                } else if (!instParamTys[paramIdx].IsGeneric() && !instType.IsEqual(instParamTys[paramIdx])) {
+                } else if (!instParamTys[paramIdx].IsGeneric() && !instType.IsEqual(instParamTys[paramIdx]) &&
+                    !(relaxed && DataTypesMatchIgnoringModal(instType, instParamTys[paramIdx], builder))) {
                     matched = false
                     break
                 }
@@ -868,6 +875,7 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
                 }
                 break
             }
+        }
         }
         let result = foundFunc ?? return None
         if (!checkAbstractMethod && result.TestAttr(Attribute.ABSTRACT)) {
@@ -1319,4 +1327,9 @@ private func IsAutoEnvGenericBase(ty: Type): Bool {
             !customTy.GetGenericArgs().isEmpty()
     }
     return false
+}
+
+private func DataTypesMatchIgnoringModal(declared: Type, actual: Type, builder: CHIRBuilder): Bool {
+    let actualData = actual.GetDataType(builder)
+    return actualData.IsGeneric() || declared.GetDataType(builder).IsEqual(actualData)
 }

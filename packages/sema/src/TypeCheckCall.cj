@@ -1350,6 +1350,19 @@ public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Op
         }
         return target.resolvedMode
     }
+    if (let Some(be) <- (expr as BinaryExpr)) {
+        // `a ?? b` yields the content of `a`, or `b`. A right side that cannot complete normally
+        // (throw/return, type Nothing) contributes no value, so the result has the mode of `a`.
+        if (be.op == TokenKind.COALESCING) {
+            let left = be.leftExpr ?? return None;
+            let leftMode = CallSiteMode(left, receiver, seen)
+            let rightMode = if (let Some(right) <- be.rightExpr) {
+                if ((let Some(rt) <- right.GetTy()) && rt.IsNothing()) { leftMode } else { CallSiteMode(right, receiver, seen) }
+            } else { leftMode }
+            if ((let Some(l) <- leftMode) && (let Some(r) <- rightMode) && l == r) { return l }
+            return None
+        }
+    }
     if (expr is LitConstExpr || expr.resolvedMode != ASTMode.NOT) { return expr.resolvedMode }
     return None
 }
