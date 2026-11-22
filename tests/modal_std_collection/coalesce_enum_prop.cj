@@ -34,5 +34,8 @@ main(): Int64 {
         case RequiredValue => 1
     }
     let other = find(specs, 0) ?? throw Exception("unknown option")
-    if (other.mode == Mode.RequiredValue && first == 0) { 0 } else { 1 }
+    match (other.mode) {
+        case RequiredValue => first
+        case OptionalValue => 1
+    }
 }
