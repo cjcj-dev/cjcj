@@ -2087,7 +2087,13 @@ extend TypeChecker {
             }
             let firstParam = body.paramLists[0].params[0]
             if (firstParam.typeNode.isNone()) {
-                firstParam.typeNode = ASTCloner.Clone(typeNode) as Type
+                let paramType = ASTCloner.Clone(typeNode) as Type
+                // The clone carries no modal. Give it the property mode the collector bound to the setter
+                // value, so the value keeps that mode wherever its type node is read.
+                if ((let Some(t) <- paramType) && t.modal.isNone() && firstParam.resolvedMode != ASTMode.NOT) {
+                    t.resolvedMode = firstParam.resolvedMode
+                }
+                firstParam.typeNode = paramType
             }
             AddUnitType(setter)
         }
