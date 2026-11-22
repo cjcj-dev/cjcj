@@ -132,18 +132,23 @@ export function applyCompilerWindowsPatches(repoDir) {
   }
 }
 
+export async function fetchRepos(config,names) {
+  for (const name of names) {
+    const repo=config.repo(name);
+    const target = path.join(config.workspace, repo.dirName);
+    if (fs.existsSync(target)) {
+      logger.info('Checking existing repo %s at %s', repo.name, target);
+    } else {
+      await shallowClone(repo.url, target, {tag: repo.tag});
+    }
+    await assertSourceIdentity(repo, target);
+  }
+}
+
 export async function run(config) {
   ensureDir(config.workspace);
   await stage('fetch', async () => {
-    for (const repo of Object.values(config.repos)) {
-      const target = path.join(config.workspace, repo.dirName);
-      if (fs.existsSync(target)) {
-        logger.info('Checking existing repo %s at %s', repo.name, target);
-      } else {
-        await shallowClone(repo.url, target, {tag: repo.tag});
-      }
-      await assertSourceIdentity(repo, target);
-    }
+    await fetchRepos(config,Object.keys(config.repos));
     applyCompilerCjdbPatches(config.repoPath('compiler'));
     applyCompilerBoundscheckDependencies(config.repoPath('compiler'));
     applyCompilerSchemaInstall(config.repoPath('compiler'));

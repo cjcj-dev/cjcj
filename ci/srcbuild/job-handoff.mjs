@@ -7,6 +7,7 @@ import {readHleDependencies} from '../bootstrap/hle-input.mjs';
 import {resolveRuntimeSource} from '../runtime-pin.mjs';
 import {createReadStream} from 'node:fs';
 import crypto from 'node:crypto';
+import {stageSdkHandoff} from './stage-sdk-handoff.mjs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 
@@ -64,6 +65,8 @@ async function verifyRuntimeHandoff(environment) {
     }
   }
 }
+const sdkRel='.srcbuild/workspace/software/cangjie';
+const separateSdk=phase==='stage3'&&identity.target==='linux-x64';
 if (mode === 'pack') {
   await fs.mkdir(dir, {recursive: true});
   if (dir === root || roots.some(entry => dir.startsWith(path.join(root, entry) + path.sep))) {
@@ -83,10 +86,11 @@ if (mode === 'pack') {
   // tar preserves modes and links that upload-artifact's zip cannot preserve.
   // A checkout copied by bootstrap may contain Git's credential-bearing config;
   // retain its object identity, never that config or Actions command files.
-  tar(['-cf', archive, '--exclude=.git/config', '--exclude=*/.git/config',
+  const sdkSha256=separateSdk?await stageSdkHandoff('pack',path.join(root,sdkRel),dir):undefined;
+  tar(['-cf', archive,...(separateSdk?['--exclude='+sdkRel]:[]), '--exclude=.git/config', '--exclude=*/.git/config',
     '--exclude=*/cjcj-src-stage0/target', '--exclude=*/cjcj-src-stage1/target',
     '--exclude=*/stage0depot', '-C', root, ...entries]);
-  const record = {...identity, environment, entries, sha256: await hash(archive)};
+  const record = {...identity, environment, entries, sdkSha256, sha256: await hash(archive)};
   await fs.writeFile(manifest, `${JSON.stringify(record, null, 2)}\n`);
   console.log(`BOOTSTRAP_HANDOFF phase=${phase} sha256=${record.sha256}`);
 } else {
@@ -104,7 +108,9 @@ if (mode === 'pack') {
   // The artifact is selected by same-run target/phase name; the identity above
   // also rejects accidental cross-target or stale-run selection before unpack.
   if (phase !== 'mingw') await resolveRuntimeSource(record.environment, null);
+  if(separateSdk&&(!record.sdkSha256||record.sdkSha256!==(await fs.readFile(path.join(dir,'stage3-sdk.tar.sha256'),'utf8')).trim()))throw Error('STAGE_SDK_HANDOFF_HASH');
   tar(['-xf', archive, '-C', root]);
+  if(separateSdk)await stageSdkHandoff('restore',path.join(root,sdkRel),dir);
   if (phase !== 'mingw') { await verifyRuntimeHandoff(record.environment); await verifyHleHandoff(record.environment); await verifyNativeToolHandoff({root,environment:record.environment}); }
   await fs.appendFile(required('GITHUB_ENV'), Object.entries(record.environment)
     .map(([key, value]) => `${key}=${value}\n`).join(''));

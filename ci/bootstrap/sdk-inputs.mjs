@@ -345,8 +345,29 @@ export async function prepareSourceBuildInputs(config, env=process.env, startSta
   return Object.freeze({...config,sources:selected,selection,production,producerSdk:install,
     installInputs:{work:path.join(config.workspace,'build','sdk-install'),
       install:config.consumerSdk??path.join(config.softwareDir,'cangjie'),selection,production,
-      layout:'native-output',tools:{launcher:env.CMAKE_CXX_COMPILER_LAUNCHER,
+      layout:'native-output',buildJavaInterop:platform==='linux_x86_64'&&!config.target.spec.crossCompile,javaJdk:config.toolsJniHome,tools:{launcher:env.CMAKE_CXX_COMPILER_LAUNCHER,
         ...(config.target.spec.needsMingw?{targetToolchain:path.join(mingwInstallPath(config.buildRoot),'bin')}:{})}}});
+}
+
+// A completed component build may resume run-all at SDK installation. Take
+// its original native products, never the previously assembled SDK or Java.
+export async function resumeSourceComponents(config,file) {
+  const {status,selection}=await readJson(path.resolve(file));
+  if(status!=='COMPLETE'||selection?.compilerExecution?.stage!=='stage3'
+    ||selection.platform!==config.target.spec.llvmPlatform||selection.platform!==hostPlatform()
+    ||selection.bootstrapHost.install!==config.officialSdkRoot)throw Error('SOURCE_COMPONENT_RESUME_SELECTION');
+  const {runtime,llvm}=selection.targetComponents;
+  if(runtime.commit!==config.sources.runtime.commit||llvm.commit!==config.sources.llvm.commit
+    ||runtime.configuration.buildType!==config.buildType||runtime.configuration.version!==config.cangjieVersion)
+    throw Error('SOURCE_COMPONENT_RESUME_CONFIGURATION');
+  for(const component of Object.values(selection.targetComponents)) {
+    const actual=await gitInput(component.repository,component.commit);
+    if(component.tree!==actual.tree)throw Error('SOURCE_COMPONENT_RESUME_TREE '+component.repository);
+  }
+  return {...config,installInputs:{work:path.join(config.workspace,'build/sdk-install'),
+    install:config.consumerSdk??path.join(config.softwareDir,'cangjie'),selection,
+    buildJavaInterop:selection.platform==='linux_x86_64',javaJdk:config.toolsJniHome,
+    tools:{launcher:process.env.CMAKE_CXX_COMPILER_LAUNCHER}}};
 }
 
 // Installation of existing native products uses the same inputs and recipe,

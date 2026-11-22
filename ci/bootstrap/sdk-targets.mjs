@@ -258,7 +258,7 @@ export function createBootstrapTargets(input) {
         executionSource||(name==='runtime'?runtime.install:name==='llvm'?llvm.install:std),platform}]))};
     const selection={platform,bootstrapHost:host,compilerExecution:execution,targetComponents:{compiler,std:stdlib,runtime,llvm,ast}};
     const recipe=installationRecipe(selection,{compiler:product,std,hostObjects,final:['stage3','stage2-target-sdk'].includes(id),bootstrap:true,nativeChecks:path.join(work,'native-check')});
-    return {id,depends,commands,output:id===finalStage?'${install}':path.join(work,'sdk-'+id),...recipe,
+    return {id,depends,commands,...(id==='stage3'&&platform==='linux_x86_64'?{buildJavaInterop:true}:{}),output:id===finalStage?'${install}':path.join(work,'sdk-'+id),...recipe,
       copies:[...recipe.copies,...(['stage2','stage3'].includes(id)?[
         {from:'${build}/compiler/share/cjcj',to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
         {from:'${build}/compiler/compiler-inputs.json',to:'compiler-inputs.json',owner:'compiler'}]:[])],

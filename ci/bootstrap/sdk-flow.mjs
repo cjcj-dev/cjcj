@@ -208,6 +208,10 @@ export async function installRecipe({root, recipe, build, tools, platform, test,
         metadata.compilerSha256=await fileDigest(path.join(pending,relative(metadata.compilerFile)));
         metadata.compilerEntrySha256=await fileDigest(path.join(pending,'bin/cjcj-stage1'+(platform?.startsWith('windows_')?'.exe':'')));
       }
+      if(recipe.buildJavaInterop) {
+        const {produceJava}=await import('./build-java-interop.mjs');
+        metadata.javaInterop=await produceJava({sdk:pending,work:vars.work,metadata,records,owners,jdkHome:recipe.javaJdk});
+      }
       await atomicJson(path.join(pending,'STAGE-INPUTS.json'),metadata);
     }
     if (test) await testInstall(pending,test,{...vars,output:pending,install:pending},records);
@@ -558,6 +562,10 @@ export async function installProducts(descriptor,{buildOnly=false,dryRun=false,p
   const {installationRecipe}=await import('./sdk-targets.mjs');
   const input=await prepareInstallInputs(await descriptor),{work,install,platform,selection}=input;
   const recipe=installationRecipe(selection,{layout:input.layout,javaInterop:input.javaInterop});
+  if(input.buildJavaInterop && !input.cross && platform==='linux_x86_64') {
+    if(input.javaInterop)throw Error('JAVA_INTEROP_PRODUCER_CONFLICT');
+    recipe.buildJavaInterop=true;recipe.javaJdk=input.javaJdk;
+  }
   const test=input.test??{commands:[{argv:[process.execPath,fileURLToPath(new URL('./compiler_identity.mjs',import.meta.url)),'${install}']},
     {argv:[process.execPath,fileURLToPath(new URL('./sdk-hello.mjs',import.meta.url)),
     '--sdk','${install}','--work','${work}/hello','--platform',platform,'--compiler-only',

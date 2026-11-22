@@ -22,7 +22,7 @@ import * as stdlib from './srcbuild/stages/stdlib.mjs';
 import * as stdx from './srcbuild/stages/stdx.mjs';
 import * as tools from './srcbuild/stages/tools.mjs';
 import * as verify from './srcbuild/stages/verify.mjs';
-import {prepareSourceBuildInputs} from '../ci/bootstrap/sdk-inputs.mjs';
+import {prepareSourceBuildInputs,resumeSourceComponents} from '../ci/bootstrap/sdk-inputs.mjs';
 import {installProducts} from '../ci/bootstrap/sdk-flow.mjs';
 import {verifyInstall} from '../ci/bootstrap/sdk-verify-install.mjs';
 
@@ -78,7 +78,7 @@ function commandUsage(command) {
     return 'Usage: npx --yes zx@8 build/cli.mjs [global options] fetch [--tag TAG] [--repo-url NAME=URL] [--repo-tag NAME=TAG]';
   }
   if (command === 'run-all') {
-    return 'Usage: npx --yes zx@8 build/cli.mjs [global options] run-all [--skip-system-deps] [--skip-install-libs]';
+    return 'Usage: npx --yes zx@8 build/cli.mjs [global options] run-all [--skip-system-deps] [--skip-install-libs] [--from-native-install RESULT]';
   }
   return `Usage: npx --yes zx@8 build/cli.mjs [global options] ${command}`;
 }
@@ -303,6 +303,9 @@ async function dispatch(config, command, args) {
     return verify.run(config);
   }
   if (command === 'run-all') {
+    const resumeIndex=args.indexOf('--from-native-install');
+    const resume=resumeIndex<0?undefined:args.splice(resumeIndex,2)[1];
+    if(resumeIndex>=0&&(!resume||resume.startsWith('--')||args.includes('--build-only')))throw new ConfigError('run-all --from-native-install requires a completed component install result');
     const valid = new Set(['--skip-system-deps', '--skip-install-libs','--build-only','--dry-run']);
     for (const argument of args) if (!valid.has(argument)) throw new ConfigError(`run-all: unknown option '${argument}'`);
     if(args.includes('--dry-run')||process.env.CANGJIE_BUILD_DRY_RUN==='1') {
@@ -317,11 +320,17 @@ async function dispatch(config, command, args) {
         await staticLibs.install(config.buildRoot, {jobs:config.jobs});
       }
     }
-    await fetchStage.run(config);
-    const production=await prepareSourceBuildInputs(config);
-    await compiler.run(production);
-    await runtime.run(production);
-    await stdlib.run(production);
+    let production;
+    if(resume) {
+      production=await resumeSourceComponents(config,resume);
+      await fetchStage.fetchRepos(config,config.toolsPhase==='install'?['stdx']:['stdx','tools']);
+    } else {
+      await fetchStage.run(config);
+      production=await prepareSourceBuildInputs(config);
+      await compiler.run(production);
+      await runtime.run(production);
+      await stdlib.run(production);
+    }
     if(args.includes('--build-only')) {
       // Native intermediate output supplies the later producers. No public SDK
       // or archive is published, including when these consumers fail.

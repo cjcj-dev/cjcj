@@ -349,3 +349,18 @@ N and the executing host from their original inputs. The optional llc/opt
 backend is separate from N. Package consumes the installed SDK at the selected
 consumer path, including after relocation, independent of checkout or current
 pin defaults. CI registrations and release workflows are unchanged.
+
+Native Linux x64 source SDK installation builds the pinned Java interop target
+from `ci/source_pin.env` with JDK 17 (JAVA_HOME, or the JDK containing javac)
+and the public compiler in the pending SDK. For an offline build set
+`CJCJ_JAVA_INTEROP_SOURCE` to a managed checkout at the pin; an explicitly
+missing checkout is an error. The default fetches the pin in the build workspace.
+The install cache is keyed by actual compiler, runtime, std, JDK and native
+tool inputs; `CJCJ_JAVA_INTEROP_WORK` can locate that private build/cache area
+outside CI handoffs. An incomplete cached install fails before SDK publication.
+
+`run-all --from-native-install /path/to/install-result.json` resumes a completed
+stage3 component build at SDK assembly using its original compiler, runtime,
+LLVM and final std producers. Select the same platform, host, version, build
+type and native pair. The new workspace owns the SDK, Java producer and
+downstream stdx/tools; no previously assembled SDK or Java prefix is needed.
