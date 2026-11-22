@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileDigest, privateRoot, publishPaths} from '../../bootstrap/sdk-flow.mjs';
+import {verifyCompiler} from '../../bootstrap/compiler_identity.mjs';
 import {installCrossRuntime} from '../../release/cross-runtime.mjs';
 import {installedStageOutput} from './installed-stage-output.mjs';
 
@@ -66,6 +67,7 @@ export async function installOhosStage3({parent, software, finalStd, stage2}) {
     await copyHost(parent, pending);
     const {lineage} = await installedStageOutput(pending, 'stage3');
     checkPair(lineage, hostRef, targetRef, targetRef, tuple);
+    await verifyCompiler(pending, compilerHashes.stage3);
     for (const rel of roots) await fs.cp(path.join(finalStd, rel), path.join(pending, rel), {recursive:true});
     await installCrossRuntime({root:path.join(finalStd, 'cross-runtime'), stage:pending, tuple, runtimeRef:targetRef});
     await checkAst(path.join(pending, astFile));

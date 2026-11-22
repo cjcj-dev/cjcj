@@ -33,6 +33,8 @@ export async function buildOhosRuntime({workspace, native, arch, version, runtim
     if (!/--version-script[=,][^\s]*\/ohos_local_export\.map\b/.test(link)) throw Error('wrong OHOS runtime export map');
     await checkExports(root);
   }
-  await writeCrossRuntimeManifest({root, tuple, runtimeRef});
+  const sourceRepository = localExport
+    ? (await $({stdio:'pipe'})`git -C ${repository} remote get-url origin`).stdout.trim() : undefined;
+  await writeCrossRuntimeManifest({root, tuple, runtimeRef, sourceRepository});
   return root;
 }

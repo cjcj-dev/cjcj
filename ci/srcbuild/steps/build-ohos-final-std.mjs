@@ -58,9 +58,9 @@ if (split) {
 const sdk = split ? await fs.mkdtemp(path.join(workspace, '.ohos-stage2-')) : parentSdk;
 try {
   if (split) await copyHost(parentSdk, sdk);
-  const stageEnv = {...process.env, CANGJIE_HOME: sdk, CANGJIE_VERSION: version,
-    PATH: [path.join(sdk, 'bin'), path.join(sdk, 'tools', 'bin'), path.join(toolchain, 'bin'), process.env.PATH].join(path.delimiter)};
-  if (split) Object.assign(stageEnv, cleanSdkEnvironment(sdk, 'linux_x86_64', stageEnv));
+  const env = split ? cleanSdkEnvironment(sdk, 'linux_x86_64') : process.env;
+  const stageEnv = {...env, CANGJIE_HOME: sdk, CANGJIE_VERSION: version,
+    PATH: [path.join(sdk, 'bin'), path.join(sdk, 'tools', 'bin'), path.join(toolchain, 'bin'), env.PATH].join(path.delimiter)};
   const assertCompiler = async () => {
     const command = (await $({env: stageEnv, stdio: 'pipe'})`command -v cjc`).stdout.trim();
     await assertBootstrapCompiler({sdk, command, producer: originalCompiler.product, producerSha256: originalCompiler.lineage.compilerSha256});
@@ -95,6 +95,10 @@ try {
   const runtimeArtifact = path.join(finalStd, 'cross-runtime');
   await fs.cp(runtimeInstall, runtimeArtifact, {recursive: true});
 
+  if (split) {
+    for (const rel of [`modules/${tuple}/std/std.ast.cjo`, `lib/${tuple}/libcangjie-std-ast.a`, `runtime/lib/${tuple}/libcangjie-std-ast.so`])
+      await fs.access(path.join(finalStd, rel));
+  }
   for (const relative of [`runtime/lib/${tuple}/libcangjie-std-core.so`, `lib/${tuple}/libcangjie-std-core.a`, `modules/${tuple}/std/std.core.cjo`]) {
     await fs.access(path.join(finalStd, relative));
   }
