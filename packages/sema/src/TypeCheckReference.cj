@@ -941,6 +941,16 @@ public func FilterAndCheckTargetsOfNameAccess(
     return TypeCheckReferenceCheckForQuestFuncRetType(diag, targets[0], ma, hasTarget)
 }
 
+// Member access on a value receiver, including a generic receiver resolved through its upper bounds.
+public func TypeCheckReferenceFilterPropertyReceivers(tm: TypeManager, ctx: ASTContext, ma: MemberAccess,
+    targets: ArrayList<Decl>): Unit {
+    let candidates = ArrayList<Option<Decl>>()
+    for (candidate in targets) { candidates.add(Some(candidate)) }
+    FilterPropertyReceivers(tm, ctx, ma, ma.baseExpr, candidates)
+    targets.clear()
+    for (candidate in candidates) { targets.add(candidate.getOrThrow()) }
+}
+
 public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -954,11 +964,7 @@ public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
         return None
     }
     let baseExpr = ma.baseExpr.getOrThrow()
-    let candidates = ArrayList<Option<Decl>>()
-    for (candidate in targets) { candidates.add(Some(candidate)) }
-    FilterPropertyReceivers(tm, ctx, ma, ma.baseExpr, candidates)
-    targets.clear()
-    for (candidate in candidates) { targets.add(candidate.getOrThrow()) }
+    TypeCheckReferenceFilterPropertyReceivers(tm, ctx, ma, targets)
     if (!TypeCheckReferenceFilterTargetsInExtend(tm, ma, baseExpr.GetTy(), targets)) {
         DiagMemberAccessNotFound(diag, tm, ma, importManager)
         return None

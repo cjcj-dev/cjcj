@@ -6825,6 +6825,9 @@ extend TypeChecker {
                 idx++
             }
         }
+        if (!isStaticAccess) {
+            TypeCheckReferenceFilterPropertyReceivers(impl.typeManager, ctx, ma, targets)
+        }
         return targets
     }
 

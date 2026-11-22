@@ -2,6 +2,7 @@
 # Usage: run.sh /absolute/cjc /fresh/output-dir
 # Modal property overloads (plain + @local! receiver) inherited from one interface must not be
 # reported as "inherited members have inconsistent decl types"; a property/function clash still must.
+# A generic @local! receiver picks the @local! property through its upper bounds; a plain-only property still rejects it.
 set -u
 cjc=$1; out=$2; here=$(cd "$(dirname "$0")" && pwd); mkdir "$out" || exit 2
 fail=0
@@ -20,4 +21,6 @@ check() { # name expected-rc diag-regex-or-empty
 check inherit_both 0 ""
 check extend_override 0 ""
 check prop_func_clash 1 "inherited members 'length' have inconsistent decl types"
+check generic_local_receiver 0 ""
+check generic_local_receiver_plain_only 1 "error: .*size"
 exit $fail
