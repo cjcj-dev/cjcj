@@ -22,7 +22,9 @@ public interface Seek {
 }
 
 public class Buffer <: Source & Seek {
-    var size: Int64 = 42
+    public demode var size: Int64
+    public init() { size = 42 }
+    public exclave init(this @local!) { size = 42 }
     public func next(): Int64 {
         1
     }
@@ -32,7 +34,7 @@ public class Buffer <: Source & Seek {
 }
 
 // Same shape as std.io readToEnd: the @local! receiver must select `length @local!`.
-func localLength<T>(from: T @local!): Int64 where T <: Source & Seek {
+exclave func localLength<T>(from: T @local!): Int64 where T <: Source & Seek {
     let sum = from.length
     sum
 }
@@ -42,6 +44,7 @@ func plainLength<T>(from: T): Int64 where T <: Source & Seek {
 }
 
 main(): Int64 {
-    let b = Buffer()
-    if (localLength(b) == 7 && plainLength(b) == 42) { 0 } else { 1 }
+    let local = Buffer() @local!
+    let plain = Buffer()
+    if (localLength(local) == 7 && plainLength(plain) == 42) { 0 } else { 1 }
 }

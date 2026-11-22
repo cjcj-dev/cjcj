@@ -22,5 +22,5 @@ check inherit_both 0 ""
 check extend_override 0 ""
 check prop_func_clash 1 "inherited members 'length' have inconsistent decl types"
 check generic_local_receiver 0 ""
-check generic_local_receiver_plain_only 1 "error: .*size"
+check generic_local_receiver_plain_only 1 "'size' is not found for generic type 'T' in its upper bounds"
 exit $fail
