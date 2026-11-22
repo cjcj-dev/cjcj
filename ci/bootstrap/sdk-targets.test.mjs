@@ -1,4 +1,5 @@
 import test from'node:test';import assert from'node:assert/strict';import {createBootstrapTargets,validateBootstrapTargets,FIXED_INPUTS,BOOTSTRAP_PHASES}from'./sdk-targets.mjs';import {targetOrder}from'./sdk-flow.mjs';import {PLATFORMS}from'./sdk-io.mjs';import{readHostToolchainPin}from'../host-toolchain-pin.mjs';
+import path from 'node:path';
 import {bootstrap} from './bootstrap.mjs';
 function inputs(platform){const row=(commit,name)=>({commit,tree:'a'.repeat(40),repository:'/fixture/'+name+'.git',install:'/fixture/'+name,configuration:{fixture:true},buildResult:'/fixture/'+name+'/result.json',sourceRoot:'/fixture/'+name+'-producer'});const runtime=row(FIXED_INPUTS.runtime,'R');return{platform,work:'/fixture/work',install:'/fixture/install',host:{version:readHostToolchainPin(platform).replace(/^nightly-/, ''),install:'/fixture/H'},llvm:row(FIXED_INPUTS.llvm,'N'),runtime,ast:row(FIXED_INPUTS.compiler,'AST'),h1:{...row(FIXED_INPUTS.h1,'H1'),product:'/fixture/H1/compiler'},compiler:row('b'.repeat(40),'C'),stdlib:{...runtime,install:'/fixture/std',buildResult:'/fixture/std/result.json',sourceRoot:'/fixture/std-producer'},tools:{privateRoot:'/fixture/tools'}};}
 test('the public bootstrap graph forwards one option policy to H1 and both compiler stages',()=>{
@@ -464,6 +465,24 @@ test('explicit std policy reaches every native std producer; historical release-
  for(const type of ['Release','minsizerel','',null])assert.throws(()=>createBootstrapTargets({...input,stdBuildType:type}),/STD_BUILD_TYPE/);
 });
 
+test('Windows H1, C2 and C3 use the job CLI and private worktrees of the fixed checkout',()=>{
+ const input=inputs('windows_x86_64');delete input.h1.product;delete input.tools.privateRoot;
+ input.h1={...input.h1,repository:input.compiler.repository,tree:input.compiler.tree,commit:input.compiler.commit};
+ input.h1Commit=input.compiler.commit;input.tools.zx='/fixture/installed zx/cli.js';
+ const graph=createBootstrapTargets(input);
+ for(const [phase,source] of [['stage0','h1'],['stage2','compiler2'],['stage3','compiler3']]){
+  const argv=graph.stages.find(s=>s.id===phase).commands[0].argv;
+  assert.equal(argv[argv.indexOf('--zx')+1],input.tools.zx);
+  assert.ok(!argv.includes('--private-tools'));
+  assert.equal(argv[argv.indexOf('--commit')+1],input.compiler.commit);
+  assert.equal(graph.repos[source].root,input.compiler.repository);
+  assert.equal(graph.repos[source].commit,input.compiler.commit);
+  assert.equal(path.basename(graph.repos[source].checkout),source);
+ }
+ const seed=graph.stages.find(s=>s.id==='stage0').commands[0].argv;
+ assert.equal(seed[seed.indexOf('--host')+1],input.host.install);
+ assert.equal(seed[seed.indexOf('--sdk')+1],input.llvm.install);
+});
 test('Linux fresh H1 command needs no retired private tools',()=>{
  const input=inputs('linux_x86_64');delete input.h1.product;delete input.tools.privateRoot;
  const graph=createBootstrapTargets(input),command=graph.stages.find(s=>s.id==='stage0').commands[0].argv;

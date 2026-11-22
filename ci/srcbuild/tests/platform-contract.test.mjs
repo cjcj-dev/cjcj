@@ -277,11 +277,15 @@ function expandMatrix(name, text, workflow = text) {
 }
 
 // Artifact names one workflow file uploads, with its own matrix fanout expanded.
-function uploadedArtifacts(text) {
+function uploadedArtifacts(text, sourceTuple) {
   const names = [];
   // Matrix values belong to the producing job. A Linux-only cross job must
   // not multiply every native artifact by its own target declaration.
   for (const job of jobs(text).values()) {
+    // A single-target caller cannot run a source job guarded by a different
+    // plan output. Still count every upload in reachable jobs, including duplicates.
+    const only = scalar(job,'if')?.match(/^needs\.plan\.outputs\.llvm_platforms == '([^']+)'$/)?.[1];
+    if(sourceTuple && only && only!==sourceTuple)continue;
     const lines = job.split('\n');
     for (const [index, line] of lines.entries()) {
       if (!line.includes('uses: actions/upload-artifact@')) continue;
@@ -294,11 +298,11 @@ function uploadedArtifacts(text) {
 }
 
 // [artifact, producing workflow] for everything a dispatch entry point uploads.
-async function runArtifacts(entry) {
+async function runArtifacts(entry, sourceTuple) {
   const produced = [];
   for (const name of await invokedWorkflows(entry)) {
     const text = uncommented(await readWorkflow(name));
-    for (const artifact of uploadedArtifacts(text)) produced.push([artifact, name]);
+    for (const artifact of uploadedArtifacts(text, name==='srcbuild-target.yml'?sourceTuple:undefined)) produced.push([artifact, name]);
   }
   return produced;
 }
@@ -496,7 +500,7 @@ test('source-build workflow connects every native runner to its LLVM and std art
     'the source SDK job no longer depends on fixed-llvm');
   for (const edge of [
     'name: fixed-llvm-tools-${{ matrix.llvm_platform }}',
-    'name: final-std-${{ matrix.target }}',
+    'name: ${{ matrix.std_artifact }}',
     'path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-stage2',
   ]) assert.ok(workflow.includes(edge), edge);
 
@@ -553,8 +557,15 @@ test('arm soak produces every artifact its package job downloads, each exactly o
   const gate = loadYaml(consumer).jobs.package.steps.find(step => step.name === 'Validate same-platform final std contract');
   assert.ok(gate, 'package consumer declares its final std gate');
   const resolved = effectiveInputs(consumer, callerInputs);
-  const gateEnv = Object.fromEntries(Object.entries(gate.env).map(([name, value]) => [name, substitute(value, resolved)]));
-  assert.equal(gateEnv.EXPECTED_STD_ARTIFACT, `final-std-${platform}`);
+  const gateEnv = {SELECTED_STD_ARTIFACT:substitute(gate.env.SELECTED_STD_ARTIFACT, resolved)};
+  assert.equal(gate.env.EXPECTED_STD_ARTIFACT,'${{ steps.package-inputs.outputs.std_artifact }}');
+  const keyWork=fsSync.mkdtempSync(path.join(os.tmpdir(),'std-consumer-'));
+  try {
+    const out=path.join(keyWork,'outputs');
+    execFileSync(process.execPath,['ci/release/package-key.mjs'],{cwd:root,env:{...process.env,RELEASE_PLATFORM:platform,GITHUB_ENV:path.join(keyWork,'env'),GITHUB_OUTPUT:out}});
+    gateEnv.EXPECTED_STD_ARTIFACT=fsSync.readFileSync(out,'utf8').trim().slice('std_artifact='.length);
+    assert.equal(gateEnv.EXPECTED_STD_ARTIFACT,`final-std-${platform}`);
+  } finally {fsSync.rmSync(keyWork,{recursive:true,force:true});}
   assert.equal(gateEnv.SELECTED_STD_ARTIFACT, demanded);
   for (const [selected, expected] of [[demanded, 0], [`${demanded}-BROKEN`, 1]]) {
     const checked = spawnSync('bash', ['-eu', '-o', 'pipefail', '-c', gate.run], {
@@ -577,7 +588,10 @@ test('arm soak produces every artifact its package job downloads, each exactly o
   const sourceWorkflow = await readWorkflow('srcbuild-target.yml');
   assert.ok(sourceWorkflow.includes('REQUESTED_REF: ${{ inputs.cangjie_ref }}'));
   assert.ok(sourceWorkflow.includes('--cangjie-version \"$REQUESTED_REF\" print-version'));
-  const produced = (await runArtifacts('arm-soak.yml')).map(([name, owner]) =>
+  assert.equal(mapping(block(sourceCall, /^\s*with:\s*$/)).get('targets'),'${{ needs.matrix-plan.outputs.targets }}');
+  assert.equal(plan.targets,platform);
+  const tuple=plan.llvm_platform;assert.equal(tuple,sourceBuildCells().find(cell=>cell.target===platform).llvm_platform);
+  const produced = (await runArtifacts('arm-soak.yml',tuple)).map(([name, owner]) =>
     [name.replaceAll('${{ steps.version.outputs.value }}', producerVersion), owner]);
   const producersOf = artifact => produced.filter(([name]) => name === artifact).map(([, source]) => source);
 
@@ -595,7 +609,7 @@ test('arm soak produces every artifact its package job downloads, each exactly o
   for (const [name, job] of soakJobs) {
     const called = scalar(job, 'uses')?.match(/^\.\/\.github\/workflows\/([\w.-]+\.yml)$/);
     if (!called) continue;
-    const uploads = (await runArtifacts(called[1])).map(([artifact]) => artifact);
+    const uploads = (await runArtifacts(called[1],tuple)).map(([artifact]) => artifact);
     if (uploads.includes(demanded)) producerJobs.push(name);
   }
   assert.equal(producerJobs.length, 1, `jobs producing ${demanded}: ${producerJobs}`);
@@ -715,12 +729,13 @@ function sdkWithToolsLibOnly(workspace) {
 
 test('source build keeps the pinned plain host runtime across both bootstrap halves', async () => {
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
-  const provision = workflow.indexOf('- name: Provision uncoloured host SDK');
-  const bootstrap0 = workflow.indexOf('- name: Bootstrap stage0 compiler');
-  const bootstrap1 = workflow.indexOf('- name: Bootstrap stage1 compiler');
-  const stdxStep = workflow.indexOf('- name: Build stdx from source');
-  assert.ok(provision >= 0 && bootstrap0 > provision);
-  assert.ok(bootstrap1 > bootstrap0 && stdxStep > bootstrap1);
+  const jobs=loadYaml(workflow).jobs,stage0=jobs['source-stage0'].steps.map(s=>s.name);
+  const provision=stage0.indexOf('Provision uncoloured host SDK'),bootstrap0=stage0.indexOf('Bootstrap stage0 compiler');
+  assert.ok(provision>=0 && bootstrap0>provision);
+  const chain=['source-stage0','source-stage1-initial-std','source-stage1-std','source-stage1-compiler','source-stage3','srcbuild'];
+  for(let i=1;i<chain.length;i++)assert.ok(jobs[chain[i]].needs.includes(chain[i-1]));
+  assert.ok(jobs['source-stage1-compiler'].steps.some(s=>s.name==='Bootstrap stage1 compiler'));
+  assert.ok(jobs.srcbuild.steps.some(s=>s.name==='Build stdx from source'));
   assert.ok(!workflow.includes('- name: Build compiler oracle'));
   assert.ok(!workflow.includes('build compiler'));
   for (const contract of [

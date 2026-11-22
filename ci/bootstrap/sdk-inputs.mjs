@@ -76,6 +76,7 @@ async function validateSourceTrees(input, env) {
       await checkoutSourceRepository('runtime',input.runtime.repository,input.runtime.commit,env) !== input.runtime.sourceRepository)
     throw Error('NATIVE_SOURCE_SELECTION runtime');
   const expectedMacro=await fs.readFile(new URL('../../packages/macro/src/InvokeUtil.cj',import.meta.url),'utf8');
+  const workingText=text=>process.platform==='win32'?text.replaceAll('\r\n','\n'):text;
   for(const [name,row] of Object.entries({llvm:input.llvm,runtime:input.runtime,stdlib:input.stdlib??input.runtime,ast:input.ast,h1:input.h1,compiler:input.compiler})) {
     const actual=await gitInput(row.repository,row.commit);
     if(actual.tree!==row.tree)throw new Error('NATIVE_SOURCE_TREE '+name);
@@ -84,7 +85,7 @@ async function validateSourceTrees(input, env) {
     // normal bootstrap and historical C2 retain their H1 compatibility check.
     if(name==='compiler'||name==='h1'&&input.stage2?.mode!=='ordinary-cjpm') {
       const {stdout}=await execute('git',['-C',row.repository,'show',row.commit+':packages/macro/src/InvokeUtil.cj']);
-      if(stdout!==expectedMacro)throw new Error('NATIVE_MACRO_SOURCE '+name);
+      if(workingText(stdout)!==workingText(expectedMacro))throw new Error('NATIVE_MACRO_SOURCE '+name);
     }
   }
 }
@@ -263,15 +264,23 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
         ||commands[1].argv.includes('-DCJCJ_LEGACY_HOST_RUNTIME')===hostRuntimeSupportsConfigV1
         ||commands[2].argv?.[0]!==path.join(host.install,'tools/bin/cjpm')||commands[2].argv?.[1]!=='build')
         throw new Error('H1_REUSE_PRODUCER_MISMATCH');
+    } else if(native.os==='win32') {
+      const shim=await compilerNativeShim({install:rows.compiler.shimInstall,nativeInstall:rows.llvm.install,compilerCommit:h1Commit});
+      if(facts.producer!=='sdk-native-stage:windows-h1'||!isDeepStrictEqual(facts.nativeShim,shim)
+        ||!path.isAbsolute(facts.sourceRoot||'')||!Array.isArray(commands)||commands.length!==2
+        ||commands.some(row=>row.cwd!==facts.sourceRoot||row.rc!==0||row.signal||row.error)
+        ||commands[0].argv?.at(-1)!==path.join(facts.sourceRoot,'runtime_shim/build_shim.mjs')
+        ||commands[1].argv?.[0]!==path.join(host.install,'tools/bin/cjpm.exe')||commands[1].argv[1]!=='build')
+        throw Error('H1_REUSE_PRODUCER_MISMATCH');
     } else if(!tools.privateRoot||!Array.isArray(commands)||commands.length!==1
       ||commands[0].rc!==0||commands[0].signal||commands[0].cwd!==rows.h1.repository
       ||commands[0].argv?.[1]!==path.join(path.resolve(tools.privateRoot),'ts/src/sharedbuild/cjcj-stage1.mjs'))
       throw new Error('H1_REUSE_PRODUCER_MISMATCH');
     rows.h1={...rows.h1,product,configuration:facts,buildResult:path.resolve(reused.buildResult)};
   }
-  // Only the unchanged non-Linux producer still consumes private tools.
+  // Only the Darwin producer still consumes private tools.
   // Linux preparation and H1 reuse must not require retired private scripts.
-  if(native.os!=='linux'&&!installations.stage2) {
+  if(native.os==='darwin'&&!installations.stage2) {
     if(!tools.privateRoot)throw Error('NATIVE_H1_PRIVATE_PRODUCER_REQUIRED');
     tools.privateRoot=path.resolve(tools.privateRoot);
     for(const rel of ['cjcj-stage1.mjs','stage1-transform.mjs'])

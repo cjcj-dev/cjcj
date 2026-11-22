@@ -4,11 +4,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {isMain, cliArgs} from '../entry-common.mjs';
+import {zipCommand,checkArchiveFormat} from '../bootstrap/sdk-archive.mjs';
 import {command, privateRoot, fileDigest, readJson} from '../bootstrap/sdk-flow.mjs';
-import {getTarget} from '../../build/lib/targets.mjs';
+import {getBuildTarget} from '../../build/lib/build-target.mjs';
 import {selectInstalledColourSdk} from '../prepare-colour-sdk.mjs';
 export async function unpackNativeSdk(input, destination, targetKey, env = process.env) {
-  const target = getTarget(targetKey);
+  const target = getBuildTarget(targetKey);
   // Both public build/cli package and srcbuild package-install archive the
   // same installation. Keep their existing names and validate package facts.
   const prefix = 'cangjie-sdk-' + target.spec.sdkName + '-';
@@ -17,10 +18,13 @@ export async function unpackNativeSdk(input, destination, targetKey, env = proce
   const archive = path.join(input, archives[0]);
   const sidecar = (await fs.readFile(archive+'.sha256', 'utf8')).trim();
   if (sidecar !== `${await fileDigest(archive)}  ${archives[0]}`) throw new Error('NATIVE_SDK_ARCHIVE_DIGEST');
+  const format=target.spec.archiveFormat;
+  if(!archive.endsWith('.'+format))throw Error('NATIVE_SDK_ARCHIVE_EXTENSION '+format);
+  await checkArchiveFormat(archive,format);
   destination = await privateRoot(destination);
   // A new extraction never overwrites an earlier consumer or failed attempt.
   await fs.mkdir(destination);
-  await command(['tar', '-xf', archive, '-C', destination]);
+  await command(format==='zip'?zipCommand('extract',archive,destination):['tar','-xzf',archive,'-C',destination]);
   const sdk = path.join(destination, 'cangjie');
   const facts = await readJson(path.join(sdk, 'BUILD-MANIFEST.json'));
   if (facts.target !== target.spec.key || !(facts.consumption?.status === 'EXECUTED'

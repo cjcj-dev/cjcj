@@ -5,6 +5,7 @@ import {createReadStream} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {npxZx} from '../../bootstrap/zx-cli.mjs';
 import {prepareCppHeaders} from '../../bootstrap/prepare_cpp_headers.mjs';
 import {readInstalledNativeShim} from '../../bootstrap/native-shim-inputs.mjs';
 export async function buildCompilerShim({cwd=process.cwd(),env=process.env}={}) {
@@ -32,16 +33,7 @@ export async function buildCompilerShim({cwd=process.cwd(),env=process.env}={}) 
   selected.CANGJIE_CPP_SRC=path.resolve(cpp);
  }
  await fs.mkdir(path.join(cwd,'.srcbuild'),{recursive:true});
- const argv=['--yes','zx@8',path.join(cwd,'runtime_shim/build_shim.mjs')];
- let executable='npx',arguments_=argv;
- if(process.platform==='win32') {
-  const choices=[...(env.npm_execpath?[path.join(path.dirname(env.npm_execpath),'npx-cli.js')]:[]),
-   path.join(path.dirname(process.execPath),'node_modules/npm/bin/npx-cli.js'),
-   path.resolve(path.dirname(process.execPath),'../lib/node_modules/npm/bin/npx-cli.js')];
-  let cli;for(const file of choices)if(await fs.stat(file).catch(()=>null)){cli=file;break;}
-  if(!cli)throw Error('SHIM_BUILD_NPX_CLI_REQUIRED');
-  executable=process.execPath;arguments_=[cli,...argv];
- }
+ const [executable,...arguments_]=await npxZx(path.join(cwd,'runtime_shim/build_shim.mjs'),env);
  const logFile=path.join(cwd,'.srcbuild/shim-build.log');
  const log=await fs.open(logFile,'w');
  let result;

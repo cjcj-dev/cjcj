@@ -2,6 +2,13 @@ name: Self-hosted source SDK and final std
 
 on:
   workflow_call:
+    secrets:
+      WINDOWS_TOOLS_READ_TOKEN:
+        required: false
+    outputs:
+      std_artifact:
+        description: Native final std name for a single runnable source target
+        value: ${{ jobs.plan.outputs.std_artifact }}
     inputs:
       native_runtime_artifact:
         description: Existing native-runtime-install artifact prefix
@@ -240,6 +247,7 @@ jobs:
     name: Select targets
     runs-on: ubuntu-24.04
     outputs:
+      std_artifact: ${{ steps.select.outputs.std_artifact }}
       matrix: ${{ steps.select.outputs.matrix }}
       llvm_platforms: ${{ steps.select.outputs.llvm_platforms }}
       has_runnable: ${{ steps.select.outputs.has_runnable }}
@@ -265,6 +273,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     uses: ./.github/workflows/srcbuild-target.yml
+    secrets:
+      WINDOWS_TOOLS_READ_TOKEN: ${{ github.event.repository.private && matrix.target == 'windows-x64' && secrets.WINDOWS_TOOLS_READ_TOKEN || '' }}
     with:
       native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
       native_build_inputs_run_id: ${{ inputs.native_build_inputs_run_id }}

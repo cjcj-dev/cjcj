@@ -3,6 +3,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
+import {readPeSymbols} from '../lib/pe-symbols.mjs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const execute=promisify(execFile);
@@ -63,7 +64,8 @@ export function toolBuildProduct(config,name) {
 export function nativeToolLibraries(name,os) {
   if(name==='cjlint')return []; // no retired C++ tool library
   if(name==='cjprof')return ['cjprof-cangjie','cjprof-jni'].map(lib=>{
-    const file='lib'+lib+'.so';
+    const windows=os==='windows'||os==='win32';
+    const file=windows?(lib==='cjprof-jni'?lib:'lib'+lib)+'.dll':'lib'+lib+'.so';
     return {build:'packages/cjprof/target/'+file,
       install:'packages/cjprof/dist/lib/'+file,to:'tools/lib/'+file};
   });
@@ -90,6 +92,12 @@ export async function toolPayloads(config,name,installPrefix=toolInstallRoot(con
       }
     }
     await walk(path.join(prefix,'lib'),'lib');
+    if(name==='cjhead' && config.target.spec.os==='windows') {
+      for(const entry of await fs.readdir(path.join(prefix,'bin'),{withFileTypes:true})) {
+        if(entry.isFile() && /\.dll$/i.test(entry.name))rows.push({producer:name,
+          from:path.join(prefix,'bin',entry.name),to:'.target-tools/tools/cjhead/lib/'+entry.name});
+      }
+    }
     if(name==='cjhead')await walk(path.join(prefix,'share'),'share');
     return rows;
   }
@@ -194,6 +202,34 @@ async function lintBuildPayloads(config) {
   const rows=[];
   await lintTree(path.join(toolSourceRoot(config,'cjlint'),'packages/cjlint/config'),'config',rows);
   await lintAnalysisPayloads(facts.analysis.sdk,rows);
+  if(config.target.spec.os==='windows') {
+    // Trace the successful PE's imports through only its selected SDK and LLVM.
+    // System/API-set imports are loader inputs, never package payloads.
+    if(process.platform!=='win32'||config.target.spec.crossCompile)throw Error('CJLINT_NATIVE_WINDOWS_REQUIRED');
+    const sdk=facts.host.sdk,tuple=config.target.spec.runtimeTuple;
+    const roots=[path.join(sdk,'runtime/lib',tuple),path.join(sdk,'lib',tuple),
+      path.join(sdk,'third_party/llvm/bin'),path.join(sdk,'tools/lib'),path.join(sdk,'bin')];
+    const selected=new Set(),queue=[facts.executable];
+    const target={spec:{llvmBinDir:config.target.spec.llvmBinDir || path.join(sdk,'third_party/llvm/bin')}};
+    for(const image of queue)for(const dll of readPeSymbols(image,target,'libraries').split('\n').filter(Boolean)) {
+      const name=dll.toLowerCase();
+      if(path.basename(dll)!==dll||!name.endsWith('.dll'))throw Error('CJLINT_PE_IMPORT '+dll);
+      if(selected.has(name))continue;
+      selected.add(name);
+      let from;
+      for(const candidate of [facts.frontend.llvmLibrary,...roots.map(dir=>path.join(dir,dll))]) {
+        if(path.basename(candidate).toLowerCase()===name && (await fs.stat(candidate).catch(e=>{if(e.code!=='ENOENT')throw e;}))?.isFile()){from=candidate;break;}
+      }
+      if(!from) {
+        if(/^(?:api|ext)-ms-win-/.test(name) || (await fs.stat(path.join(process.env.SystemRoot,'System32',dll)).catch(e=>{if(e.code!=='ENOENT')throw e;}))?.isFile())continue;
+        throw Error('CJLINT_HOST_DEPENDENCY_MISSING '+dll);
+      }
+      queue.push(from);
+      rows.push({producer:'cjlint',from,to:lintRetain+'lib/'+name});
+      if(name==='libcangjie-runtime.dll')rows.push({producer:'cjlint',from,to:lintRetain+'runtime/lib/'+tuple+'/'+name});
+    }
+    return rows;
+  }
   const env={...process.env,LD_LIBRARY_PATH:[path.join(facts.host.sdk,'runtime/lib/linux_x86_64_cjnative'),path.join(facts.host.sdk,'lib/linux_x86_64_cjnative'),path.dirname(facts.frontend.llvmLibrary)].join(path.delimiter)};
   delete env.LD_PRELOAD;delete env.LD_AUDIT;
   const {stdout}=await execute('ldd',[facts.executable],{env});

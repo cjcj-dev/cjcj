@@ -21,8 +21,11 @@ export async function composeNativePackage(env = process.env) {
   const dist = await privateRoot(env.RELEASE_DIST);
   await fs.mkdir(dist, {recursive: true});
   const {sdk} = await unpackNativeSdk(env.NATIVE_SDK_ARTIFACT_DIR, env.NATIVE_SDK_INSTALL_DIR, platform, env);
+  // Resolve the downloaded references in the caller's workspace before the
+  // second verifier runs with the relocated SDK as its working directory.
   const options = {sdk, platform, version, sourceSha: env.CJCJ_RELEASE_SOURCE_SHA, runtimeRef: env.CJCJ_NATIVE_RUNTIME_REF,
-    releaseKey: env.RELEASE_KEY, std: env.FINAL_STD_DIR, crossRoot: env.CROSS_STD_DIR, work: path.join(dist, 'installed-check')};
+    releaseKey: env.RELEASE_KEY, std: path.resolve(env.FINAL_STD_DIR),
+    crossRoot: env.CROSS_STD_DIR ? path.resolve(env.CROSS_STD_DIR) : '', work: path.join(dist, 'installed-check')};
   await verifyNativeRelease(options, env);
   const stem = `cjcj-${version}-${release.archiveKey}`;
   const archive = path.join(dist, stem + '.' + target.spec.archiveFormat);

@@ -8,6 +8,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {assertX64PeImage} from '../../build/lib/pe-symbols.mjs';
 import {parseArgs} from 'node:util';
 import {getTarget} from '../../build/lib/targets.mjs';
 import {privateRoot,fileDigest} from '../bootstrap/sdk-flow.mjs';
@@ -34,7 +35,7 @@ for (const name of ['tool', 'platform', 'binary', 'outdir', 'sdk']) {
 }
 if (!/^[A-Za-z0-9][A-Za-z0-9_.+-]*$/.test(values.tool)) throw new Error(`invalid tool name: ${values.tool}`);
 
-if(values.tool==='cjlint'&&values.platform!=='linux-x64')throw Error('CJLINT_PLATFORM_NOT_SUPPORTED');
+if(values.tool==='cjlint'&&!['linux-x64','windows-x64'].includes(values.platform))throw Error('CJLINT_PLATFORM_NOT_SUPPORTED');
 const windows = values.platform === 'windows-x64';
 const name = values.tool + (windows ? '.exe' : '');
 const destination = await privateRoot(values.outdir);
@@ -61,6 +62,7 @@ const inputBinary=await fs.realpath(values.binary);
 const realSdk=await fs.realpath(sourceSdk);
 if(inputBinary===destination || inputBinary.startsWith(destination+path.sep) || realSdk===destination || realSdk.startsWith(destination+path.sep)) throw new Error('artifact output overlaps its input');
 const actualBinary=await artifactSourceBinary(path.resolve(values.binary),sourceSdk,values.platform);
+if(windows)assertX64PeImage(actualBinary,false);
 if(await fileDigest(actualBinary)!==row.sha256||producer.install.artifact?.sha256!==row.sha256)throw Error('SOURCE_TOOL_ARTIFACT_BYTES '+values.tool);
 // Do not stamp a currently selected source onto changed runtime payloads.
 // These are the producer's ordinary install facts, not a second selector.

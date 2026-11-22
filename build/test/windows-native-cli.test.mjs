@@ -57,9 +57,9 @@ test('public Linux cross CLI preserves the applicable target producer plans', t 
   for(const name of ['cjpm','cjcov','hle','cjtrace-recover'])assert.match(output,new RegExp('build\\.mjs build --tool '+name+' [^\\n]*--target windows-x86_64'));
   assert.match(output,/--target-sysroot/);assert.doesNotMatch(output,/--set-rpath|build\.py/);
 });
-for(const native of [true,false])test('unimplemented Windows analysis set is refused, native='+native,t=>{
+for(const native of [true,false])test('Windows analysis requires its actual native inputs, native='+native,t=>{
  const r=fixture(t).run({native,args:['--tools-phase','build','--tools-build-set','lsp','build','tools']});
- assert.notEqual(r.status,0);assert.match(r.stderr,/Cangjie analysis tools currently support Linux x86-64/);
+ assert.notEqual(r.status,0);assert.match(r.stderr,native?/toolsCompilerLibs is required/:/require native Linux or Windows x86-64/);
 });
 test('public native CLI rejects kkk2 rather than granting a Windows execution slot', t => {
   const r = fixture(t).run({profile: 'kkk2', args: ['print-version']});

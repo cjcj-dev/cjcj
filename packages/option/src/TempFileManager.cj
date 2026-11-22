@@ -2,6 +2,7 @@ package cjcj::option
 
 import std.collection.*
 import std.core.Option as CoreOption
+import std.fs.File
 import std.fs.Directory as FSDirectory
 import std.sync.AtomicUInt8
 import cjcj::utils.{FileUtil, GenerateRandomHexString}
@@ -132,6 +133,27 @@ public class TempFileManager {
             deletedFiles.add(unsafe { LibC.mallocCString(path) })
         }
         return TempFileInfo(fileName: "partial", filePath: path)
+    }
+
+    public func CreateResponseFile(content: String): CoreOption<String> {
+        if (tempDir.isEmpty() || IsDeleted()) { return None }
+        var directory = ""
+        var path = ""
+        try {
+            directory = FSDirectory.createTemp(tempDir).toString()
+            path = FileUtil.JoinPath(directory, "link.rsp")
+            File.writeTo(path, content.toArray())
+            if (!opts.saveTemps) {
+                // Normal driver cleanup runs after Job has joined the linker.
+                deletedFiles.add(unsafe { LibC.mallocCString(directory) })
+                deletedFiles.add(unsafe { LibC.mallocCString(path) })
+            }
+            return Some(path)
+        } catch (e: Exception) {
+            if (!directory.isEmpty()) { let _ = FileUtil.RemoveDirectoryRecursively(directory) }
+            Errorln("Failed to write linker response file: " + path + ": " + e.message)
+            return None
+        }
     }
 
     public func DeleteTempFiles(): Unit {

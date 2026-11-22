@@ -3,6 +3,14 @@ name: Build release package
 on:
   workflow_call:
     inputs:
+      validation_run_id:
+        description: Recheck existing Windows SDK and std from one successful same-commit run, without publishing a package
+        type: string
+        default: ''
+      native_runtime_artifact:
+        description: Runtime producer selected by the source workflow
+        type: string
+        default: ''
       native_llvm_ref:
         required: false
         type: string
@@ -79,6 +87,8 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 180
     env:
+      WINDOWS_TOOLS_REPOSITORY: ${{ vars.WINDOWS_TOOLS_REPOSITORY }}
+      CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
       CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
       CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
       CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
@@ -106,7 +116,22 @@ jobs:
         with:
           node-version: '24.22.1'
 
+      - name: Install the Windows PE table reader
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-llvm
+
+      - name: Select PE inspection tools outside the SDK loader path
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          test -x /mingw64/bin/llvm-readobj.exe
+          echo "CJCJ_NATIVE_LLVM_BIN=$(cygpath -w /mingw64/bin)" >> "$GITHUB_ENV"
+
       - name: Resolve archive identity independently of host toolchain
+        id: package-inputs
         run: node ci/release/package-key.mjs
 
       - name: Load and validate runtime pin
@@ -118,16 +143,31 @@ jobs:
           CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
         run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
+      - name: Check original Windows producer run
+        if: inputs.validation_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIVATE: ${{ github.event.repository.private }}
+          SOURCE_RUN_ID: ${{ inputs.validation_run_id }}
+        shell: pwsh
+        run: |
+          if ($env:PRIVATE -ne 'true') { throw 'private validation repository required' }
+          if ($env:SOURCE_RUN_ID -notmatch '^[1-9][0-9]*$') { throw 'invalid producer run id' }
+          $run = Invoke-RestMethod "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID" -Headers @{Authorization="Bearer $env:GH_TOKEN"}
+          if ($run.path -ne '.github/workflows/srcbuild.yml' -or $run.head_sha -ne $env:GITHUB_SHA -or $run.head_repository.full_name -ne $env:GITHUB_REPOSITORY -or $run.conclusion -ne 'success') { throw 'producer commit, repository or conclusion differs' }
+
       - name: Download complete native SDK
         uses: actions/download-artifact@v8
         with:
           name: cjcj-srcbuild-${{ inputs.platform }}-${{ inputs.version }}
           path: ${{ env.NATIVE_SDK_ARTIFACT_DIR }}
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.validation_run_id || github.run_id }}
 
       - name: Validate same-platform final std contract
         shell: bash
         env:
-          EXPECTED_STD_ARTIFACT: ${{ inputs.platform == 'windows-x64' && inputs.native_llvm_ref != '' && 'final-std-native-windows-x64' || format('final-std-{0}', inputs.platform) }}
+          EXPECTED_STD_ARTIFACT: ${{ steps.package-inputs.outputs.std_artifact }}
           SELECTED_STD_ARTIFACT: ${{ inputs.std_artifact }}
         run: |
           set -euo pipefail
@@ -138,6 +178,8 @@ jobs:
         with:
           name: ${{ inputs.std_artifact }}
           path: ${{ env.FINAL_STD_DIR }}
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.validation_run_id || github.run_id }}
 
       - name: Download cross-tuple comparison inputs
         if: inputs.cross_std_artifacts != '[]' || inputs.cross_std_artifact != ''
@@ -152,6 +194,27 @@ jobs:
       # directory archive -> original path hidden -> all consumers again.
       - name: Consume and rearchive complete native SDK
         run: node ci/release/compose-package.mjs
+
+      - name: Retain installed and relocated Windows consumer evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: consumer-${{ inputs.release_key || inputs.platform }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            dist/**/smoke/*.log
+            dist/**/smoke/*.json
+            dist/**/lsp-macro/**/server.*
+            dist/**/lsp-macro/**/compile.*
+            dist/**/lsp-macro/**/requests.lsp
+            dist/**/cjlint/*.json
+            dist/**/cjprof/*.json
+            dist/**/linker-response/*/*.json
+            dist/**/linker-response/*/*.stdout
+            dist/**/linker-response/*/*.stderr
+            dist/**/linker-response/saved/**/link.rsp
+            dist/*.commands.json
 
       - name: Upload failure diagnostics
         if: failure()
@@ -169,6 +232,7 @@ jobs:
             .release-native/install-${{ github.run_attempt }}/cangjie/BUILD-MANIFEST.json
 
       - name: Upload SDK artifact
+        if: inputs.validation_run_id == ''
         uses: actions/upload-artifact@v7
         with:
           name: pkg-${{ env.PACKAGE_KEY }}

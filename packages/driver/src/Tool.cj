@@ -380,8 +380,9 @@ public class Tool {
     }
 
     @When[os == "Windows"]
-    private func RunImpl(lease: Option<ConcurrencyLease>): ToolFuture {
+    private func RunImpl(lease: Option<ConcurrencyLease>, verbose!: Bool = false): ToolFuture {
         if (toolType == ToolType.INTERNAL_IMPLEMENTED) {
+            if (verbose) { println(FileUtil.Normalize(GetCommandString())) }
             if (let Some(activeLease) <- lease) {
                 return ThreadFuture(ConcurrencyBudget.Get().SpawnWithLease(
                     activeLease, { => InternalImplementedCommandExec() }))
@@ -389,24 +390,13 @@ public class Tool {
             Semaphore.Get().Acquire()
             return ThreadFuture(ConcurrencyBudget.Get().SpawnUnbudgeted({ => InternalImplementedCommandExec() }))
         }
-        let arguments = GetFullArgs()
-        let commandLineBuilder = StringBuilder()
-        var argumentIndex: Int64 = 0
-        while (argumentIndex < arguments.size) {
-            if (argumentIndex != 0) {
-                commandLineBuilder.append(" ")
-            }
-            let argument = arguments[argumentIndex]
-            let needsQuotes = argument.isEmpty() || argument.contains("\t") || argument.contains(" ") ||
-                argument.contains("\"") || argument.contains("&") || argument.contains("'") ||
-                argument.contains("(") || argument.contains(")") || argument.contains("*") ||
-                argument.contains("<") || argument.contains(">") || argument.contains("\\") ||
-                argument.contains("\u{60}") || argument.contains("^") || argument.contains("|") ||
-                argument.contains("\n")
-            commandLineBuilder.append(if (needsQuotes) { FileUtil.GetQuoted(argument) } else { argument })
-            argumentIndex++
+        // Expand the deferred object lists before measuring and serializing.
+        let commandLine = PrepareWindowsToolCommandLine(GetFullArgs())
+        if (verbose) { println(commandLine) }
+        if (TempFileManager.Instance().IsDeleted()) {
+            ReleaseLeaseIfPresent(lease)
+            return ErrorFuture("temporary files were deleted before command execution")
         }
-        let commandLine = commandLineBuilder.toString()
         var processInfo = PROCESS_INFORMATION()
         try (startupInfo = LibC.malloc<STARTUPINFOA>().asResource(),
             processInformation = LibC.malloc<PROCESS_INFORMATION>().asResource(),
@@ -439,7 +429,8 @@ public class Tool {
     }
 
     @When[os != "Windows"]
-    private func RunImpl(lease: Option<ConcurrencyLease>): ToolFuture {
+    private func RunImpl(lease: Option<ConcurrencyLease>, verbose!: Bool = false): ToolFuture {
+        if (verbose) { println(FileUtil.Normalize(GetCommandString())) }
         if (toolType == ToolType.INTERNAL_IMPLEMENTED) {
             if (let Some(activeLease) <- lease) {
                 return ThreadFuture(ConcurrencyBudget.Get().SpawnWithLease(
@@ -494,25 +485,19 @@ public class Tool {
     }
 
     public func Execute(verbose: Bool): ToolFuture {
-        if (verbose) {
-            println(FileUtil.Normalize(GetCommandString()))
-        }
         if (TempFileManager.Instance().IsDeleted()) {
             return ErrorFuture("temporary files were deleted before command execution")
         }
-        return Run()
+        return RunImpl(None, verbose: verbose)
     }
 
     public func ExecuteWithLease(verbose: Bool, lease: ConcurrencyLease): ToolFuture {
         try {
-            if (verbose) {
-                println(FileUtil.Normalize(GetCommandString()))
-            }
             if (TempFileManager.Instance().IsDeleted()) {
                 lease.Release()
                 return ErrorFuture("temporary files were deleted before command execution")
             }
-            return RunWithLease(lease)
+            return RunImpl(Some(lease), verbose: verbose)
         } catch (e: Exception) {
             lease.Release()
             throw e

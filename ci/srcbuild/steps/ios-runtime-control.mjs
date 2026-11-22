@@ -14,10 +14,11 @@ if (argv.action === 'prepare') {
   if (arm !== 'candidate') {
     const source = await fs.readFile(file, 'utf8');
     const needle = arm === 'cut-consumer' ? 'await fs.copyFile(path.join(root, file.path), destination);'
-      : "`${target.runtimeArch}_Release`, 'libboundscheck.dylib'";
+      : 'await fs.copyFile(stagedBounds, installedBounds);';
     assert.equal(source.split(needle).length, 2, 'one product bearing line');
+    // Alter the transferred bytes, keeping the CPU, deployment platform and dylib ID intact.
     const cut = arm === 'cut-consumer' ? 'await fs.writeFile(destination, "cut");'
-      : "`${target.runtimeArch}_Release`, 'libcangjie-runtime.dylib'";
+      : 'await fs.writeFile(installedBounds, Buffer.concat([await fs.readFile(stagedBounds), Buffer.from("cut")]));';
     await fs.writeFile(file, source.replace(needle, cut));
     if (arm === 'restored') restoration = source;
   }

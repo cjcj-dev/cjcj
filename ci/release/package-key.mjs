@@ -1,7 +1,7 @@
 #!/usr/bin/env zx
 import fs from 'node:fs';
 import {nativePair} from '../runtime-pin.mjs';
-import {getReleasePlatform, getTarget, releasePlatformReadiness} from '../../build/lib/targets.mjs';
+import {finalStdArtifact, getReleasePlatform, getTarget, releasePlatformReadiness} from '../../build/lib/targets.mjs';
 const host = process.env.RELEASE_PLATFORM;
 if (!host) throw new Error('RELEASE_PLATFORM is required');
 const key = process.env.RELEASE_KEY;
@@ -16,3 +16,4 @@ if (!readiness.sdkSourceTarget) throw new Error('NATIVE_SDK_PRODUCER_MISSING ' +
 if (!process.env.GITHUB_ENV) throw new Error('GITHUB_ENV is required');
 fs.appendFileSync(process.env.GITHUB_ENV, `PACKAGE_KEY=${archiveKey}\n`);
 console.log(`PACKAGE_KEY=${archiveKey}`);
+if(process.env.GITHUB_OUTPUT)fs.appendFileSync(process.env.GITHUB_OUTPUT, `std_artifact=${finalStdArtifact(host, readiness.sdkSourceTarget)}\n`);

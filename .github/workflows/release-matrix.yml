@@ -212,6 +212,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.source_matrix) }}
     uses: ./.github/workflows/srcbuild.yml
+    secrets:
+      WINDOWS_TOOLS_READ_TOKEN: ${{ github.event.repository.private && matrix.target == 'windows-x64' && secrets.WINDOWS_TOOLS_READ_TOKEN || '' }}
     with:
       cangjie_ref: ${{ inputs.version }}
       native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
@@ -247,7 +249,8 @@ jobs:
     needs: plan
     if: needs.plan.outputs.windows_side == 'true'
     uses: ./.github/workflows/build-cjpm.yml
-    secrets: inherit
+    secrets:
+      GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
 
   windows-runtime:
     name: Build Windows runtime
@@ -261,7 +264,6 @@ jobs:
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
 
   package:
     name: ${{ matrix.release_key }} / package
@@ -275,6 +277,7 @@ jobs:
       matrix: ${{ fromJson(needs.plan.outputs.package_matrix) }}
     uses: ./.github/workflows/build-release-package.yml
     with:
+      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
       native_host_version: ${{ inputs.native_host_version }}
@@ -288,7 +291,6 @@ jobs:
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
 
   # One SHA256SUMS over every selected package. A selected platform without a
   # package fails this job by name; a blocked platform fails its own job above.

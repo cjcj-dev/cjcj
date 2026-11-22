@@ -51,7 +51,7 @@ test('iOS release workflow consumes the same tuple artifacts and requires packag
   const upload = crossJob.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
   assert.equal(upload.with.name, '${{ matrix.artifact }}');
   assert.equal(upload.with.path, '${{ env.CANGJIE_WORKSPACE }}/software/${{ matrix.artifact }}');
-  assert.ok(crossJob.steps.some(step => step.run?.includes('job-handoff.mjs restore stage3')));
+  assert.ok(crossJob.steps.some(step => step.run?.includes('ios-stage2-handoff.mjs restore')));
   const producer = jobs.find(entry => entry.includes('targets: darwin-arm64')) ?? '';
   assert.equal(scalar(producer, 'build_ios'), 'true');
   const publish = jobs.find(entry => entry.startsWith('publish:')) ?? '';

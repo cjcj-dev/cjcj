@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import {load} from '../../vendor/js-yaml/js-yaml.mjs';
 
 // cjcj#73 invariant 3: every job that compiles C or C++ on GitHub Actions goes
 // through sccache, with a cache key bound to the pin and platform, and closes
@@ -11,19 +12,7 @@ import test from 'node:test';
 
 const root = path.resolve(import.meta.dirname, '..', '..', '..');
 const dir = path.join(root, '.github/workflows');
-const uncommented = text => text.split('\n').map(line => line.replace(/(^|\s)#.*$/, '$1')).join('\n');
-
-function jobs(text) {
-  const body = uncommented(text).split('\njobs:\n')[1] || '';
-  const parsed = new Map();
-  let current;
-  for (const line of body.split('\n')) {
-    const header = line.match(/^ {2}([A-Za-z0-9_-]+):\s*$/);
-    if (header) parsed.set(current = header[1], []);
-    else if (current) parsed.get(current).push(line);
-  }
-  return new Map([...parsed].map(([name, lines]) => [name, lines.join('\n')]));
-}
+const jobs = text => new Map(Object.entries(load(text)?.jobs ?? {}));
 
 // The jobs that drive a C/C++ compiler, and the pin their cache key must carry.
 // build-llvm-tools / platform-tuples: llc, opt, flatc, the shim object.
@@ -46,6 +35,7 @@ const CXX_JOBS = new Map([
   ['build-windows-runtime.yml/build-runtime', {component: 'windows-runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['windows-runtime-export-contract.yml/native-contract', {component: 'windows-runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['windows-runtime-link.yml/link', {component: 'windows-runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['srcbuild-target.yml/native-windows-sdk', {component: 'srcbuild-stage0', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['srcbuild-target.yml/source-stage0', {component: 'srcbuild-stage0', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['srcbuild-target.yml/source-stage1-initial-std', {component: 'srcbuild-stage1-initial-std', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['srcbuild-target.yml/source-stage1-std', {component: 'srcbuild-stage1-std', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
@@ -87,8 +77,8 @@ const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|
 // `shellcheck x.sh && gcc -c probe.c`). An exclusion belongs here only once a
 // real false positive forces it.
 const INSTALLS = /\b(apt-get|brew|pacman|pip3?|choco)\b/;
-const compilesIn = step => /^\s*run:/m.test(step)
-  && step.split('\n').some(line => COMPILES.test(line) && !INSTALLS.test(line));
+const compilesIn = step => (step.run||'').split('\n').some(line =>
+  !line.trimStart().startsWith('#') && COMPILES.test(line) && !INSTALLS.test(line));
 
 async function workflows() {
   const loaded = new Map();
@@ -98,7 +88,7 @@ async function workflows() {
   return loaded;
 }
 
-const stepBlocks = job => job.split(/\n {6}- /).slice(1);
+const stepBlocks = job => job.steps ?? [];
 
 test('every C/C++ compile job starts sccache before compiling and reports after, with the pin in the key', async () => {
   const all = await workflows();
@@ -107,8 +97,8 @@ test('every C/C++ compile job starts sccache before compiling and reports after,
     const job = jobs(all.get(file) ?? '').get(jobName);
     assert.ok(job, `${id}: job not found`);
     const steps = stepBlocks(job);
-    const start = steps.findIndex(step => /uses:\s*\.\/\.github\/actions\/sccache\s*$/m.test(step));
-    const report = steps.findIndex(step => /uses:\s*\.\/\.github\/actions\/sccache-report\s*$/m.test(step));
+    const start = steps.findIndex(step => step.uses === './.github/actions/sccache');
+    const report = steps.findIndex(step => step.uses === './.github/actions/sccache-report');
     const firstCompile = steps.findIndex(compilesIn);
     if (id === 'build-ast-support.yml/build') {
       console.log(`AST-SCCACHE-CONTRACT job=${id} start=${start} compile=${firstCompile} report=${report}`);
@@ -119,23 +109,21 @@ test('every C/C++ compile job starts sccache before compiling and reports after,
     assert.ok(start < firstCompile, `${id}: sccache starts at step ${start}, after the first compile at step ${firstCompile}`);
     assert.ok(report > firstCompile, `${id}: sccache reports at step ${report}, before the last compile`);
     for (const index of [start, report]) {
-      assert.equal(steps[index].match(/^\s*component:\s*(.+?)\s*$/m)?.[1], component,
+      assert.equal(steps[index].with.component, component,
         `${id}: step ${index} names component ${component}`);
     }
-    assert.match(steps[start], pin, `${id}: cache key does not carry the pin`);
-    assert.match(steps[report], /^\s*if: always\(\)/m, `${id}: the report must run when the build failed too`);
+    assert.match(steps[start].with.pin, pin, `${id}: cache key does not carry the pin`);
+    assert.match(steps[report].if, /^always\(\)/, `${id}: the report must run when the build failed too`);
     // Enforced on green jobs only: a job that already failed before its first
     // compile must not gain a second, misleading error from the report.
-    assert.match(steps[report], id === 'srcbuild-target.yml/source-mingw'
-      ? /^\s*require-compiles: \$\{\{ job\.status == 'success' && steps\.windows-mingw-cache\.outputs\.cache-hit != 'true' \}\}\s*$/m
-      : /^\s*require-compiles: \$\{\{ job\.status == 'success' \}\}\s*$/m,
+    assert.match(steps[report].with['require-compiles'], id === 'srcbuild-target.yml/source-mingw'
+      ? /^\$\{\{ job\.status == 'success' && steps\.windows-mingw-cache\.outputs\.cache-hit != 'true' \}\}\s*$/m
+      : /^\$\{\{ job\.status == 'success' \}\}\s*$/m,
       `${id}: the report must require compiles exactly when the job is otherwise green`);
     // A launcher only works for a job whose compile steps see it: the start
     // step must not be guarded by a condition the compile steps do not share.
-    const guard = steps[start].match(/^\s*if:\s*(.+)$/m)?.[1];
-    if (guard) {
-      assert.match(steps[firstCompile], /^\s*if:/m, `${id}: sccache start is conditional (${guard}) but the first compile is not`);
-    }
+    const guard=steps[start].if;
+    if(guard)assert.ok(steps[firstCompile].if,`${id}: sccache start is conditional (${guard}) but the first compile is not`);
   }
 });
 

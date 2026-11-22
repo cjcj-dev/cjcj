@@ -5,6 +5,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {makeRepos,REPO_NAMES} from '../../build/lib/config.mjs';
+export const windowsToolsCommit='7ed733230e9997a0bcfa3e1b9822d8a0ce0b7e32';
+export function windowsToolsSource(env) {
+  const repo=env.WINDOWS_TOOLS_REPOSITORY;
+  if(!/^[\w.-]+\/[\w.-]+$/.test(repo||'')||repo.split('/').some(s=>s==='.'||s==='..'))throw Error('WINDOWS_TOOLS_READ_REPOSITORY_REQUIRED');
+  return {url:new URL(repo,env.GITHUB_SERVER_URL+'/').href,tag:windowsToolsCommit};
+}
 export function workflowSourceSelection(env=process.env) {
   const overrides=JSON.parse(env.CJCJ_SOURCE_SELECTION||'{}');
   if(!overrides||Array.isArray(overrides)||typeof overrides!=='object'
@@ -14,6 +20,14 @@ export function workflowSourceSelection(env=process.env) {
   // environment selection alongside the workspace's normal source options.
   if(env.CANGJIE_COMPILER_URL&&env.CANGJIE_COMPILER_SHA&&!overrides.compiler)
     overrides.compiler={url:env.CANGJIE_COMPILER_URL,tag:env.CANGJIE_COMPILER_SHA};
+  // Only the native Windows SDK selects this paired producer. Propagate it
+  // through the ordinary fetch options and their persisted workspace record.
+  if(env.CJCJ_SRCBUILD_TARGET==='windows-x64' && env.CJCJ_NATIVE_RUNTIME_ARTIFACT) {
+    const pair=windowsToolsSource(env);
+    if(overrides.tools && Object.entries(overrides.tools).some(([k,v])=>pair[k]!==v))
+      throw Error('WINDOWS_TOOLS_SOURCE_PAIR_CHANGED');
+    overrides.tools=pair;
+  }
   const repos=makeRepos({overrides,env}),result={};
   for(const name of REPO_NAMES) {
     const {url,tag}=repos[name];

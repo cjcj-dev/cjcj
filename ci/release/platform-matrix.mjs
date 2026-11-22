@@ -27,7 +27,7 @@ import {
   RELEASE_REQUIREMENTS,
   CROSS_STD_BUILDS,
   allReleasePlatforms,
-  allTargets,
+  allTargets, finalStdArtifact,
   getReleasePlatform,
   getTarget,
   hostContract,
@@ -130,7 +130,7 @@ function packageRow(key, readiness, host, cross) {
     platform: readiness.host,
     runner: readiness.runner,
     llvm_platform: host.spec.llvmPlatform,
-    std_artifact: readiness.host==='windows-x64'&&!windows?'final-std-native-windows-x64':stdArtifact(readiness.host),
+    std_artifact: finalStdArtifact(readiness.host, readiness.sourceTarget),
     cross_std_artifacts: JSON.stringify(cross),
     host_std_cross_built: windows ? 'true' : 'false',
   };

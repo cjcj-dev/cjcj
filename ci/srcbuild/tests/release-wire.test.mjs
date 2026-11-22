@@ -46,7 +46,7 @@ test('srcbuild exposes reusable inputs, artifact uploads, and the runtime overri
     'CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}',
     'run: npx --yes zx@8 ci/load_runtime_pin.mjs',
   ]) assert.ok(sourceBuild.includes(contract), contract);
-  assert.match(sourceBuild, /name: final-std-\$\{\{ matrix.target \}\}/);
+  assert.match(sourceBuild, /name: \$\{\{ matrix.std_artifact \}\}/);
   assert.match(sourceBuild, /name: final-std-windows-x64/);
   assert.doesNotMatch(sourceBuild, /final_(std|compiler)_/);
 });
@@ -66,7 +66,7 @@ test('release connects each platform row to its same-platform final std', async 
   for (const platform of platforms) {
     const job = packageJobs.find(entry => entry.with?.platform === platform);
     assert.ok(job, `no package job declares platform: ${platform}`);
-    assert.equal(job.with?.std_artifact, platform==='windows-x64'?'final-std-native-windows-x64':`final-std-${platform}`,
+    assert.equal(job.with?.std_artifact, platform==='windows-x64'?'${{ needs.source-p3-windows-x64.outputs.std_artifact }}':`final-std-${platform}`,
       `the ${platform} package job does not ask for final-std-${platform}`);
   }
   assert.deepEqual(packageJobsOf(release).map(job => job.with?.release_key).sort(),
@@ -81,7 +81,7 @@ test('release cross packages depend on their native phase and cross producer wit
   const cross = packages.filter(job => !nativeKeys.includes(job.with?.release_key));
   const rows = declaredKeys.filter(key => !nativeKeys.includes(key)).map(key => {
     const r = releasePlatformReadiness(key);
-    return {release_key: key, platform: r.host, std_artifact: r.host==='windows-x64'?'final-std-native-windows-x64':`final-std-${r.host}`, cross_std_artifacts: JSON.stringify(crossStdArtifacts(r))};
+    return {release_key: key, platform: r.host, std_artifact: r.host==='windows-x64'?'${{ needs.source-p3-windows-x64.outputs.std_artifact }}':`final-std-${r.host}`, cross_std_artifacts: JSON.stringify(crossStdArtifacts(r))};
   });
   assert.deepEqual(cross.map(job => job.with?.release_key).sort(), rows.map(row => row.release_key).sort(),
     'every non-native package must have an explicit cross contract');
@@ -100,7 +100,7 @@ test('release cross packages depend on their native phase and cross producer wit
       return jobId(producer);
     });
     assert.deepEqual([...job.needs].sort(),
-      [...new Set([jobId(native), ...producerJobs])].sort(), `${key}: native phase and cross producer dependencies`);
+      [...new Set([jobId(native), ...(host==='windows-x64'?['source-p3-windows-x64']:[]), ...producerJobs])].sort(), `${key}: native phase and cross producer dependencies`);
     const tuples = JSON.parse(job.with?.cross_std_artifacts);
     assert.deepEqual(tuples, JSON.parse(row.cross_std_artifacts), `${key}: cross std tuples`);
     const publish = release.jobs.publish;
@@ -134,8 +134,9 @@ test('component provenance, final std, and Python inputs are fail-closed in the 
   assert.equal(compose.run, 'node ci/release/compose-package.mjs');
   assert.equal(compose.if, undefined, 'dry-run cannot skip installation consumption');
   const checks = await fs.readFile(path.join(root, 'ci/release/verify_native_release.mjs'), 'utf8');
-  for (const gate of ['assertNativeReleaseInputs(options)', 'assertSdkCompilerRuntimeAbi({sdk, target})',
-    'selectInstalledColourSdk(sdk,', 'scripts/verify_packaged_cjdb.mjs', 'ci/smoke/run_smoke.mjs', 'readInstalledStdxInputs({sdk,platform:target.spec.llvmPlatform,requireFull:true})'])
+  for (const gate of ['assertNativeReleaseInputs(options,env)', 'consumeInstalledLspMacro({sdk,work,platform:target.spec.llvmPlatform,env:installedEnv})', 'assertSdkCompilerRuntimeAbi({sdk, target})',
+    'selectInstalledColourSdk(sdk,', 'scripts/verify_packaged_cjdb.mjs', 'ci/smoke/run_smoke.mjs', 'readInstalledStdxInputs({sdk,platform:target.spec.llvmPlatform,requireFull:true})',
+    "if (target.spec.os === 'windows')", 'tests/upstream_compiler_1120/linker-response.mjs'])
     assert.ok(checks.includes(gate), gate);
   const stdx = await fs.readFile(path.join(root, 'build/lib/installed-stdx-inputs.mjs'), 'utf8');
   for (const gate of ['STDX_BUILD_INPUTS', "fail('FULL_CONFIGURATION"])
@@ -187,7 +188,10 @@ test('release has one LLVM producer per tuple', async () => {
   assert.ok(!jobsOf(release).some(job => job.with?.platform_set === 'windows-only'));
   const native = loadYaml(await workflow('srcbuild-target.yml'));
   assert.equal(native.jobs['fixed-llvm'].if, "inputs.native_runtime_artifact == ''");
-  assert.equal(native.jobs['native-cjdb'].if, "inputs.native_build_inputs_artifact != ''");
+  assert.equal(native.jobs['native-cjdb'].if, "inputs.native_build_inputs_artifact != '' && needs.plan.outputs.llvm_platforms != 'windows_x86_64'");
+  const install=native.jobs['native-windows-sdk'].steps.find(s=>s.name==='Receive optional completed N and AST installation');
+  assert.equal(install.if,"inputs.native_build_inputs_artifact != ''");
+  assert.equal(install.with['run-id'],'${{ inputs.native_build_inputs_run_id }}');
   assert.ok(native.jobs['native-cjdb'].steps.some(step => step.run?.includes('native-cjdb-job.mjs build')));
   assert.ok(jobsOf(release).some(job => job.uses === './.github/workflows/srcbuild.yml' && job.with?.targets === 'windows-x64'));
   assert.ok(!jobsOf(release).some(job => job.with?.platform_set === 'darwin-windows'));

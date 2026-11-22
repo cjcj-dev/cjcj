@@ -34,7 +34,7 @@ test('each bootstrap phase has a distinct standard-runner job and verified prede
 
 test('native packaging, Android, MinGW and Windows std occupy distinct jobs', () => {
   for (const name of ['srcbuild', 'source-android', 'source-mingw', 'source-windows']) assert.ok(jobs.has(name), name);
-  assert.match(jobs.get('srcbuild'), /needs: \[plan, source-stage3, source-windows, source-android\]/);
+  assert.match(jobs.get('srcbuild'), /needs: \[plan, source-stage3, source-windows, source-android, source-ios\]/);
   // The Linux package job consumes the Windows std artifact, so the producer
   // must front it; building the archive without those bytes is not a package.
   assert.match(jobs.get('srcbuild'), /download-artifact[\s\S]*name: final-std-windows-x64/);

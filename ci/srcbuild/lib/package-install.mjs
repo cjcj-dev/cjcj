@@ -18,10 +18,11 @@ export async function packageInstall({sdk,target,version,officialSdkRoot,archive
  await assertSdkPathParity(sdk,{officialRoot:officialSdkRoot,target:target.spec.key});
  const work=path.join(path.dirname(archive),'package-test');
  const consumption=packageConsumption(target);
+ const lspMacro=target.spec.key==='windows-x64'&&consumption.status==='EXECUTED';
  const java=target.spec.key==='linux-x64';
  const packageRegex=['linux-x64','linux-aarch64'].includes(target.spec.key);
  if(consumption.status==='EXECUTED'){
-  await verifyInstall({sdk,work:work+'/installed',platform:target.spec.llvmPlatform,finalStd:true,precompiledStdx:true,packageRegex,java,javaHome});
+  await verifyInstall({sdk,work:work+'/installed',platform:target.spec.llvmPlatform,finalStd:true,precompiledStdx:true,packageRegex,java,javaHome,lspMacro});
  }else await atomicJson(path.join(work,'cross-consumption.json'),consumption);
  const inputs=await installedInputs(sdk,target.spec.llvmPlatform);
  for(const name of ['runtime','std','llvm-cjdb',...(java?['java-interop']:[])]){
@@ -31,7 +32,7 @@ export async function packageInstall({sdk,target,version,officialSdkRoot,archive
  await writeInstalledReleaseManifest({stage:sdk,platform:target.spec.llvmPlatform,...inputs});
  await atomicJson(path.join(sdk,'BUILD-MANIFEST.json'),{version,target:target.spec.key,consumption,...inputs});
  const test=consumption.status==='EXECUTED'?{commands:[{argv:[process.execPath,fileURLToPath(new URL('../../bootstrap/sdk-verify-install.mjs',import.meta.url)),
-  '--sdk','${install}','--work','${work}/relocated','--platform',target.spec.llvmPlatform,'--final-std','--precompiled-stdx',...(java?['--java',...(javaHome?['--java-home',javaHome]:[])]:[]),...(packageRegex?['--package-regex']:[])]}]}:{commands:[],consumption};
+  '--sdk','${install}','--work','${work}/relocated','--platform',target.spec.llvmPlatform,'--final-std','--precompiled-stdx',...(java?['--java',...(javaHome?['--java-home',javaHome]:[])]:[]),...(packageRegex?['--package-regex']:[]),...(lspMacro?['--lsp-macro']:[])]}]}:{commands:[],consumption};
  if(android) {
   if(target.spec.key!=='linux-x64'||consumption.status!=='EXECUTED')throw Error('ANDROID_PACKAGE_HOST');
   const link=fileURLToPath(new URL('../steps/link-android-hello.mjs',import.meta.url));

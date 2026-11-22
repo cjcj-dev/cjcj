@@ -28,7 +28,7 @@ function plan(t,target,extra={}) {
 }
 test('formal native planner routes five host tuples; declarations are not installed SDK qualification',t=>{
  for(const [target,runner,platform] of [['linux-x64','ubuntu-22.04','linux_x86_64'],['linux-aarch64','ubuntu-24.04-arm','linux_aarch64'],
-  ['darwin-arm64','macos-15','darwin_aarch64'],['darwin-x64','macos-15-intel','darwin_x86_64'],['windows-x64','windows-2022','windows_x86_64']]) {
+  ['darwin-arm64','macos-15','darwin_aarch64'],['darwin-x64','macos-15-intel','darwin_x86_64'],['windows-x64','windows-2025','windows_x86_64']]) {
   const r=plan(t,target);console.log('NATIVE_SOURCE_ROUTE_ASSERTION_REACHED '+target);assert.equal(r.status,0,r.stderr);
   const [row]=JSON.parse(r.output.matrix).include;
   assert.equal(row.target,target);assert.equal(row.runner,runner);assert.equal(row.llvm_platform,platform);assert.equal(row.input_route,'native-installations');
@@ -110,18 +110,73 @@ test('public installation unpack transports original facts and refuses an existi
  assert.equal(again.status,1);assert.match(again.stderr,/EEXIST/);
 });
 
-test('formal Windows release package key needs an explicit pair and its native std contract',t=>{
- const root=fixture(t),wf=workflow('build-release-package.yml');
- const entry=wf.jobs.package.steps.find(s=>s.run?.includes('ci/release/package-key.mjs'));
- const env={...process.env,...selectedEnv(workflow('srcbuild-target.yml')),RELEASE_PLATFORM:'windows-x64',RELEASE_KEY:'win32-x64',GITHUB_ENV:path.join(root,'env')};
- const r=spawnSync('bash',['-e','-c',entry.run],{cwd:repo,env,encoding:'utf8'});
- console.log('NATIVE_WINDOWS_PACKAGE_ENTRY_ASSERTION_REACHED');
- assert.equal(r.status,0,r.stderr);assert.equal(fs.readFileSync(env.GITHUB_ENV,'utf8'),'PACKAGE_KEY=windows-x64\n');
- const std=wf.jobs.package.steps.find(s=>s.name==='Validate same-platform final std contract');
- const rows=selectedEnv(workflow('srcbuild-target.yml'));
- assert.ok(rows.CJCJ_NATIVE_LLVM_REF);assert.match(std.env.EXPECTED_STD_ARTIFACT,/final-std-native-windows-x64/);
- const run=selected=>spawnSync('bash',['-e','-c',std.run],{cwd:repo,encoding:'utf8',env:{...env,EXPECTED_STD_ARTIFACT:'final-std-native-windows-x64',SELECTED_STD_ARTIFACT:selected}});
- assert.equal(run('final-std-native-windows-x64').status,0);assert.equal(run('final-std-windows-x64').status,1);
+test('private Windows checkout receives only its named secret across both matrix calls',()=>{
+ const name='WINDOWS_TOOLS_READ_TOKEN',matrix=workflow('release-matrix.yml'),outer=workflow('srcbuild.yml'),inner=workflow('srcbuild-target.yml');
+ for(const [caller,callee,file] of [[matrix.jobs.source,outer,'srcbuild.yml'],[outer.jobs.srcbuild,inner,'srcbuild-target.yml']]){
+  assert.equal(caller.uses,'./.github/workflows/'+file);
+  assert.deepEqual(caller.secrets,{[name]:"${{ github.event.repository.private && matrix.target == 'windows-x64' && secrets.WINDOWS_TOOLS_READ_TOKEN || '' }}"});
+  assert.deepEqual(callee.on.workflow_call.secrets[name],{required:false});
+ }
+ for(const [key,job] of Object.entries(matrix.jobs)){
+  if(key!=='source'&&job.uses){assert.notEqual(job.secrets,'inherit');assert.ok(!job.secrets?.[name]);}
+ }
+ const uses=inner.jobs['native-windows-sdk'].steps.filter(step=>step.with?.token==='${{ secrets.WINDOWS_TOOLS_READ_TOKEN }}');
+ assert.equal(uses.length,1);assert.match(uses[0].uses,/^actions\/checkout@/);
+ assert.equal(uses[0].with['persist-credentials'],false);
+});
+
+test('Windows source plan, upload and package receive the same native std for pinned and explicit pairs',t=>{
+ const wf=workflow('build-release-package.yml'),job=wf.jobs.package,source=workflow('srcbuild-target.yml');
+ const release=workflow('release.yml'),caller=release.jobs['package-p3-windows-x64'].with;
+ const root=fixture(t),entry=job.steps.find(s=>s.id==='package-inputs');
+ const gate=job.steps.find(s=>s.name==='Validate same-platform final std contract');
+ const native=source.jobs['native-windows-sdk'];
+ assert.equal(native['runs-on'],'${{ matrix.runner }}');
+ assert.equal(native.if,"needs.plan.outputs.llvm_platforms == 'windows_x86_64'");
+ assert.match(source.jobs['source-stage0'].if,/llvm_platforms != 'windows_x86_64'/);
+ const programs=native.steps.map(step=>step.run||'').join('\n');
+ assert.doesNotMatch(programs,/job-handoff|native-cjdb-job\.mjs materialize/);
+ for(const phase of ['stage0','stage1-initial-std','stage1-std','stage1-compiler'])assert.ok(programs.includes('gha_run.sh '+phase));
+ const production=native.steps.filter(step=>step.run);
+ let previous=-1;
+ for(const name of ['Resolve actual source selection','Download pinned source','Verify source revisions','Configure native bootstrap from actual repositories and target installations','Bootstrap stage0 compiler','Bootstrap stage1-initial-std','Bootstrap stage1-std','Bootstrap stage1 compiler','Build stage 3 compiler and final std','Build stdx from source','Build Windows SDK tools with the installed stage3 frontend','Test and archive installed SDK']){
+   const i=production.findIndex(s=>s.name===name);assert.ok(i>previous,name);previous=i;
+ }
+ const archive=native.steps.find(s=>s.name==='Upload complete native Windows SDK');
+ const paths=archive.with.path.trim().split('\n');
+ assert.equal(archive.with['if-no-files-found'],'error');
+ assert.equal(paths.length,2);assert.match(paths[0],/\/software\/cangjie-sdk-windows-x64-.*-cjcj\.zip$/);
+ assert.equal(paths[1],paths[0]+'.sha256');
+ const upload=native.steps.find(s=>s.name==='Upload final source-built std install root');
+ assert.equal(gate.env.EXPECTED_STD_ARTIFACT,'${{ steps.package-inputs.outputs.std_artifact }}');
+ assert.equal(caller.std_artifact,'${{ needs.source-p3-windows-x64.outputs.std_artifact }}');
+ for(const mode of ['default','explicit']){
+  const fields={...inputs,...(mode==='default'?{native_llvm_ref:'',native_runtime_ref:'',native_host_version:''}:{})};
+  const env={...process.env,RELEASE_PLATFORM:caller.platform,RELEASE_KEY:caller.release_key,
+    GITHUB_ENV:path.join(root,mode+'-env'),GITHUB_OUTPUT:path.join(root,mode+'-output')};
+  for(const name of ['native_runtime_artifact','native_llvm_ref','native_runtime_ref','native_host_version']){
+   const key='CJCJ_'+name.toUpperCase();
+   assert.equal(job.env[key],'${{ inputs.'+name+' }}');assert.equal(caller[name],job.env[key]);env[key]=fields[name];
+  }
+  const sourcePlan=plan(t,'windows-x64',Object.fromEntries(Object.entries(env).filter(([k])=>k.startsWith('CJCJ_NATIVE_'))));
+  assert.equal(sourcePlan.status,0,sourcePlan.stderr);
+  const selection=native.steps.find(s=>s.name==='Resolve actual source selection'),selectedFile=path.join(root,mode+'-selected');
+  const invoke=target=>spawnSync('bash',['-eu','-c',selection.run],{cwd:repo,encoding:'utf8',env:{...selectedEnv(source),...env,WINDOWS_TOOLS_REPOSITORY:'private-fixture/tools',GITHUB_SERVER_URL:'https://github.com',CJCJ_SRCBUILD_TARGET:target,GITHUB_ENV:selectedFile}});
+  const win=invoke('windows-x64'),linux=invoke('linux-x64');
+  assert.equal(win.status,0,win.stderr);assert.equal(linux.status,0,linux.stderr);
+  const pin=JSON.parse(win.stdout).TOOLS_REF,other=JSON.parse(linux.stdout).TOOLS_REF;
+  assert.equal(pin,'7ed733230e9997a0bcfa3e1b9822d8a0ce0b7e32');assert.equal(other,'52adc7a2b67f8f1e711b6a50fbd0c83d85558a58');
+  const [cell]=JSON.parse(sourcePlan.output.matrix).include;
+  assert.equal(cell.runner,'windows-2025');
+  const artifact=cell[upload.with.name.match(/^\$\{\{ matrix\.(\w+) \}\}$/)[1]];
+  assert.equal(artifact,'final-std-native-windows-x64');assert.equal(sourcePlan.output.std_artifact,artifact);
+  const r=spawnSync('bash',['-eu','-c',entry.run],{cwd:repo,env,encoding:'utf8'});assert.equal(r.status,0,r.stderr);
+  const expected=fs.readFileSync(env.GITHUB_OUTPUT,'utf8').trim().slice('std_artifact='.length);
+  for(const [selected,rc] of [[artifact,0],['final-std-windows-x64',1]]){
+   const checked=spawnSync('bash',['-eu','-c',gate.run],{env:{...env,EXPECTED_STD_ARTIFACT:expected,SELECTED_STD_ARTIFACT:selected}});
+   console.log('WINDOWS_STD_SELECTION',mode,artifact,selected,checked.status);assert.equal(checked.status,rc);
+  }
+ }
 });
 
 test('transport preserves optional independent shim location without changing native N',async()=>{

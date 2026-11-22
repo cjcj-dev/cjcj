@@ -14,11 +14,20 @@ import {prepareNativeInputs} from './sdk-inputs.mjs';
 import {nativePair} from './native-runtime-input.mjs';
 import {hostPlatform, readHostToolchainPin} from '../host-toolchain-pin.mjs';
 import {nativeInstallationLocations} from './native-installation-locations.mjs';
+import {checkoutExactSource,fetchSource} from '../../build/lib/git.mjs';
 import {buildConfig} from '../../build/lib/config.mjs';
 import {checkoutSourceRepository} from './checkout-source.mjs';
 import {nativeSourceSelection} from './native-source-selection.mjs';
 import {stdDependencySources} from './stdlib-build.mjs';
 export {NATIVE_REPOSITORIES} from './native-source-selection.mjs';
+export async function windowsJobSeed(checkout,locations,env) {
+  if(locations.tools?.privateRoot!==undefined)throw Error('WINDOWS_H1_ARTIFACT_SOURCE');
+  if(!env.CJCJ_ZX_CLI||!path.isAbsolute(env.CJCJ_ZX_CLI)||!(/\.m?js$/i.test(env.CJCJ_ZX_CLI))||!(await fs.stat(env.CJCJ_ZX_CLI)).isFile())throw Error('WINDOWS_BOOTSTRAP_ZX_CLI');
+  const git=async(...args)=>(await capture('git',['-C',checkout,...args])).stdout.trim();
+  const head=await git('rev-parse','HEAD');
+  if(!/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'')||head!==env.GITHUB_SHA)throw Error('WINDOWS_BOOTSTRAP_JOB_CHECKOUT');
+  return {repository:await git('remote','get-url','origin'),commit:head};
+}
 export async function configureGhaInputs(env=process.env) {
   if(!env.CANGJIE_WORKSPACE||!env.GITHUB_WORKSPACE||!env.CJCJ_NATIVE_INPUT_ROOT||!env.CJCJ_BOOTSTRAP_BASE)
     throw new Error('GHA_NATIVE_LOCATIONS_REQUIRED');
@@ -36,7 +45,14 @@ export async function configureGhaInputs(env=process.env) {
   await configureNativeToolInput({root,workspace,platform,envFile:env.GITHUB_ENV});
   const sources={compiler:path.resolve(env.GITHUB_WORKSPACE)};
   const stdDependencies=stdDependencySources();
+  const windows=platform==='windows_x86_64';
+  const existing=new Map(Object.values(config.repos).map(repo=>[repo.url,config.repoPath(repo.name)]));
+  if(windows){
+    selection.h1=await windowsJobSeed(sources.compiler,locations,env);
+    sources.h1=sources.compiler;
+  }
   for(const [name,{repository:url,commit}] of Object.entries({...selection,...stdDependencies})) {
+    if(windows&&name==='h1')continue;
     const source=path.join(workspace,'native-sources',name);
     await fs.mkdir(path.dirname(source),{recursive:true});
     if(await fs.stat(source).catch(error=>{if(error.code==='ENOENT')return null;throw error;})) {
@@ -45,7 +61,21 @@ export async function configureGhaInputs(env=process.env) {
         ? await checkoutSourceRepository(name,source,commit,env)
         : (await capture('git',['-C',source,'config','--get','remote.origin.url'])).stdout.trim();
       const dirty=await capture('git',['-C',source,'status','--porcelain']);
-      if(head.stdout.trim()!==commit||repository!==url||dirty.stdout.trim())throw new Error('GHA_NATIVE_SOURCE_REUSE_CHANGED '+name);
+      const pinnedRuntime=name==='runtime' && env.CJCJ_PINNED_RUNTIME_GIT_DIR!==undefined;
+      const sameRepository=windows&&!pinnedRuntime
+        ? repository.replace(/\.git$/,'')===url.replace(/\.git$/,'')
+        : repository===url;
+      if(head.stdout.trim()!==commit||!sameRepository||dirty.stdout.trim())throw new Error('GHA_NATIVE_SOURCE_REUSE_CHANGED '+name);
+    } else if(windows) {
+      const root=existing.get(url);
+      if(root){
+        const found=await capture('git',['-C',root,'cat-file','-e',commit+'^{commit}']).then(()=>true,()=>false);
+        if(!found)await fetchSource(url,commit,{cwd:root});
+        await command(['git','-C',root,'worktree','add','--detach',source,commit]);
+      }else{
+        await checkoutExactSource(url,source,commit);
+        existing.set(url,source);
+      }
     } else {
       await command(['git','clone','--no-checkout','--filter=blob:none',url,source]);
       await command(['git','-C',source,'fetch','--depth=1','origin',commit]);
@@ -72,9 +102,9 @@ export async function configureGhaInputs(env=process.env) {
   if (pair && (path.resolve(selectedHost.install) !== path.resolve(env.CJCJ_BOOTSTRAP_BASE)
     || !selectedHost.archive || path.resolve(selectedHost.archive) !== path.resolve(env.CJCJ_BOOTSTRAP_BASE_ARCHIVE || '')))
     throw new Error('GHA_NATIVE_SELECTED_HOST_CHANGED');
-  const tools={...locations.tools,
+  const tools={...(windows?{}:locations.tools),
     ...(locations.tools?.privateRoot===undefined?{}:{privateRoot:member(locations.tools.privateRoot)}),
-    cc:env.CC||'clang',cxx:env.CXX||'clang++',launcher:env.CMAKE_CXX_COMPILER_LAUNCHER||'sccache',zx:'zx'};
+    cc:env.CC||'clang',cxx:env.CXX||'clang++',launcher:env.CMAKE_CXX_COMPILER_LAUNCHER||'sccache',zx:windows?env.CJCJ_ZX_CLI:'zx'};
   if(env.GITHUB_ENV)await fs.appendFile(env.GITHUB_ENV,'CJCJ_BOOTSTRAP_WORK='+path.join(workspace,'native-bootstrap')+'\n');
   return prepareNativeInputs({platform,sources,installations,tools,sourceSelection:selection,
     stdDependencies:Object.fromEntries(Object.entries(stdDependencies).map(([name,row])=>[name,{...row,root:sources[name]}])),

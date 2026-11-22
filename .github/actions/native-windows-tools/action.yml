@@ -19,7 +19,7 @@ runs:
         install: >-
           git tar patch make
           mingw-w64-x86_64-clang mingw-w64-x86_64-gcc
-          mingw-w64-x86_64-ninja
+          mingw-w64-x86_64-ninja mingw-w64-x86_64-llvm mingw-w64-x86_64-openssl
     - uses: actions/setup-python@v7.1.0
       with:
         python-version: '3.11'
@@ -27,6 +27,10 @@ runs:
       shell: msys2 {0}
       run: |
         python -m pip install 'cmake>=3.17,<4'
+        test -x /mingw64/bin/llvm-readobj.exe
+        test -d /mingw64/lib
+        echo "CJCJ_NATIVE_LLVM_BIN=$(cygpath -w /mingw64/bin)" >> "$GITHUB_ENV"
+        echo "CJCJ_NATIVE_OPENSSL_LIB=$(cygpath -w /mingw64/lib)" >> "$GITHUB_ENV"
         cygpath -w /mingw64/bin >> "$GITHUB_PATH"
         cygpath -w /usr/bin >> "$GITHUB_PATH"
     - name: Install fixed native MSVCRT compiler and runtimes

@@ -130,7 +130,14 @@ node --test ci/release/bootstrap_entries.test.mjs \
 
 The source workflow requires `native_inputs_artifact` and its original
 `native_inputs_run_id`. The artifact contains complete N/R/AST native install
-roots and the two paired tools modules exported with
+roots. On Windows the job checks out the exact workflow SHA for both the H1
+seed and the next compiler stages; Node runs the job-installed zx CLI.
+Native Windows validation requires a private workflow repository with the selected cjcj commit,
+repository variable WINDOWS_TOOLS_REPOSITORY (owner/name) containing the paired tools commit,
+and a contents-read WINDOWS_TOOLS_READ_TOKEN for that repository. Neither a pin nor this
+workflow supplies those objects or grants that access.
+Do not put adapter sources or a tools.privateRoot in the Windows artifact.
+The Darwin adapter currently uses the two paired modules exported with
 `node ci/bootstrap/deploy-native-tools.mjs TOOLS_REPO COMMIT EMPTY_DESTINATION`.
 Its `locations.json` records `platform`, `installations` (each has relative
 `install`, original `buildResult`, and `configuration`) and
@@ -141,6 +148,20 @@ and writes `CJCJ_SDK_INPUTS` into GITHUB_ENV. The artifact must contain genuine
 native outputs; a source workflow cannot create this input by naming empty paths.
 The eight bootstrap phases then use `sdk-targets.mjs`; native production and full
 SDK qualification remain distinct from configuration-only checks.
+
+For a native Windows tools build the same input root must also contain the
+Lombok JAR used to build cjprof. Set `cjprofLombok` in `locations.json` to
+`{"path":"dependencies/lombok.jar","sha256":"<digest of the supplied JAR>"}`.
+The tools step verifies the relative file against this digest, then invokes the
+normal tools producer with the installed stage3 frontend, shim, LLVM and stdx.
+The selected cjcj-tools commit must itself build and install the Windows tools.
+
+The manual `verify-windows-install.yml` reuses the package job on windows-2025.
+Pass the successful native producer run ID, version, its exact `std_artifact`
+output and native runtime artifact prefix. Leave both source refs empty for the
+pinned pair or provide both full SHAs and the original host version. Both SDK
+and std come from the same repository/run at the verifier commit. This workflow
+uploads consumer diagnostics; it does not publish the SDK.
 
 The same native artifact also carries the independently produced HLE dependency
 package. Extract it under an artifact-owned directory and record

@@ -8,14 +8,14 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {preserveCall, diagnose, runDirect} from '../producer-evidence.mjs';
 
-const cjcj = argv._[0];
+const [cjcj, requestedWork] = globalThis.argv?._ ?? process.argv.slice(2);
 if (!cjcj) {
   console.error('[smoke] usage: run_smoke.mjs <compiler-binary> [workdir]');
   process.exit(1);
 }
 
 const here = import.meta.dirname;
-const work = argv._[1] || await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-smoke-'));
+const work = requestedWork || await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-smoke-'));
 const exeSuffix = process.platform === 'win32' ? '.exe' : '';
 await fs.mkdir(work, {recursive: true});
 try {
@@ -38,6 +38,8 @@ async function saveParent(rc = null) {
   await fs.rename(`${file}.tmp`, file);
 }
 await saveParent();
+const compileCwd = path.join(work, 'compile-cwd');
+await fs.mkdir(compileCwd, {recursive: true});
 if (process.platform === 'win32') process.env.cjStackSize = process.env.cjStackSize || '64MB';
 
 async function runCommand(executable, args, cwd) {
@@ -68,19 +70,10 @@ async function runCommand(executable, args, cwd) {
   } else if (evidence && process.platform !== 'win32') {
     const result = await runDirect(evidence);
     out = {...result, exitCode: result.collector_rc};
-  } else if (process.platform !== 'win32') {
-    out = await $({cwd, nothrow: true, quiet: true})`${executable} ${args}`;
   } else {
-    const line = [`"${executable}"`, ...args.map((arg) => `"${arg}"`)].join(' ');
-    const result = spawnSync('cmd.exe', ['/d', '/s', '/c', `"${line}"`], {
-      cwd,
-      encoding: 'utf8',
-      env: process.env,
-      windowsVerbatimArguments: true,
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    out = {exitCode: result.status ?? 1, stdout: result.stdout || '', stderr: result.stderr || String(result.error || ''), signal: result.signal || null,
-      launcher: {argv0: 'cmd.exe', argv: ['/d', '/s', '/c', `"${line}"`]}};
+    const result = spawnSync(executable, args, {cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
+    out = {exitCode: result.status, signal: result.signal, stdout: result.stdout || '',
+      stderr: result.stderr || String(result.error || ''), launcher: {argv0: executable, argv: args}};
   }
   if (evidence && process.platform === 'win32' && !evidence.record.diagnostic) await evidence.finish(out);
   // Inspect the actual compiler transcript before executing any produced sample.
@@ -289,7 +282,7 @@ for (const [name, wanted] of expect) {
   const runLog = path.join(work, `${name}.run.log`);
   await Promise.all([fs.rm(exe, {force: true}), fs.rm(buildLog, {force: true}), fs.rm(runLog, {force: true})]);
   console.log(`[smoke] sample ${name}`);
-  const built = await runCommand(cjcj, ['--verbose', src, '-o', exe]);
+  const built = await runCommand(cjcj, ['--verbose', src, '-o', exe], compileCwd);
   sampleStates[name].compile = {rc: built.exitCode, signal: built.signal, evidence: built.evidence, state: built.evidenceState};
   await saveParent();
   await fs.writeFile(buildLog, `rc=${built.exitCode} signal=${built.signal ?? 'none'} ms=${built.ms}\n--- stdout ---\n${built.stdout}\n--- stderr ---\n${built.stderr}`);
