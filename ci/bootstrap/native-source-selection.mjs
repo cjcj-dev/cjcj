@@ -41,6 +41,16 @@ export function installationSelection(input) {
     throw Error('INSTALL_EXECUTION_TARGET_CONFLICT');
   return selection;
 }
+// H1 is built by the official host; it is independent of the target compiler,
+// AST and native pair. Both the checkout and the graph use this selection.
+export function bootstrapH1Commit(env, selected) {
+  const configured=env.CJCJ_NATIVE_H1_REF;
+  if (configured !== undefined && selected !== undefined && configured !== selected)
+    throw Error('NATIVE_H1_SOURCE_CONFLICT');
+  const commit=configured ?? selected ?? FIXED_INPUTS.h1;
+  if (typeof commit !== 'string' || !/^[a-f0-9]{40}$/.test(commit)) throw Error('NATIVE_H1_SOURCE_REF');
+  return commit;
+}
 export function nativeSourceSelection(env=process.env,pair,selected={}) {
   const pins=readSourcePins();
   if(!pair){const inputs=nativeLlvmInputs(env);pair={llvm:inputs.CJCJ_NATIVE_LLVM_REF,runtime:inputs.CJCJ_NATIVE_RUNTIME_REF};}
@@ -50,7 +60,7 @@ export function nativeSourceSelection(env=process.env,pair,selected={}) {
     ||Object.keys(selected).some(name=>!Object.hasOwn(NATIVE_REPOSITORIES,name)))throw Error('GHA_NATIVE_SOURCE_SELECTION');
   const selection={};
   for(const [name,repository] of Object.entries(repositories)){
-    const commit=pair?.[name]||FIXED_INPUTS[name==='ast'?'compiler':name],row=selected[name];
+    const row=selected[name],commit=name==='h1'?bootstrapH1Commit(env,row?.commit):pair?.[name]||FIXED_INPUTS[name==='ast'?'compiler':name];
     if(Object.hasOwn(selected,name)&&(!row||typeof row!=='object'||!row.repository||typeof row.repository!=='string'
       ||!/^[a-f0-9]{40}$/.test(row.commit||'')||name!=='ast'&&row.commit!==commit))throw Error('GHA_NATIVE_SOURCE_SELECTION '+name);
     selection[name]=row?{repository:row.repository,commit:row.commit}:{repository,commit};

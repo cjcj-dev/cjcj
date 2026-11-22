@@ -112,7 +112,7 @@ export async function checkNativeInput(request) {
     await verifyInstalledBitcodeReaders({install,platform,work,commit});
   } else throw new Error('NATIVE_INPUT_KIND '+kind);
   await atomicJson(path.join(work,'native-input-result.json'),{kind,install,commit,platform,rc:0,
-    source:{repository:request.repository,commit},configuration:request.configuration,...facts});
+    source:{repository:kind==='runtime'?(request.sourceRepository??request.repository):request.repository,commit},configuration:request.configuration,...facts});
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try{await checkNativeInput(JSON.parse(process.argv[2]));}

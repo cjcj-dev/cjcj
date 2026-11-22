@@ -265,8 +265,8 @@ export function createBootstrapTargets(input) {
         compilerCommit:['stage0-run','stage1-initial','stage1-std'].includes(id)?h1.commit:compiler.commit,stdSource:std,
         sources:{compiler:{repository:['stage0-run','stage1-initial','stage1-std'].includes(id)?h1.repository:compiler.repository,
           commit:['stage0-run','stage1-initial','stage1-std'].includes(id)?h1.commit:compiler.commit},
-          std:hostObjects?{status:'unresolved',reason:'host SDK std; see host input'}:{repository:stdlib.repository,commit:stdlib.commit},
-          runtime:{repository:runtime.repository,commit:runtime.commit},llvm:{repository:llvm.repository,commit:llvm.commit},
+          std:hostObjects?{status:'unresolved',reason:'host SDK std; see host input'}:{repository:stdlib.sourceRepository??stdlib.repository,commit:stdlib.commit},
+          runtime:{repository:runtime.sourceRepository??runtime.repository,commit:runtime.commit},llvm:{repository:llvm.repository,commit:llvm.commit},
           ...(ast.astInstallation?{ast:{repository:ast.sourceRepository??ast.repository,commit:ast.commit}}:{})},
         configuration:{platform,phase:id,compilerRuntime:hostObjects||['stage1-initial','stage1-std'].includes(id)?'host':'target'}}};
   }
@@ -328,7 +328,7 @@ export function createBootstrapTargets(input) {
         compilerFile:'libexec/compiler/cjcj-stage1'+exe}:{}),
       sources:{...stage.metadata.sources,compiler:{repository:reused.compilerSource?.repository ?? compiler.repository,
           commit:reused.compilerSource?.commit ?? reused.compilerCommit},
-        std:{repository:reused.stdSource?.repository ?? runtime.repository,
+        std:{repository:reused.stdSource?.repository ?? stdlib.sourceRepository ?? stdlib.repository,
           commit:reused.stdSource?.commit ?? stdlib.commit}},
       compilerOriginRuntimeCommit:reused.bootstrapRuntimeCommit,llvmCommit:reused.llvmCommit,
       ...(ordinary?{compilerProducer:{mode:'ordinary-cjpm',buildResult:reused.buildResult,

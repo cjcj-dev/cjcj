@@ -78,6 +78,14 @@ test('explicit native source selection retains default pins and does not relabel
  for(const invalid of [{ast:null},{ast:{commit:ast.commit}},{llvm:ast},{unrecognized:ast}])
   assert.throws(()=>nativeSourceSelection({},pair,invalid),/GHA_NATIVE_SOURCE_SELECTION/);
 });
+test('H1 selection changes the source checkout without changing the native pair or AST',()=>{
+ const chosen='5a47f0bb15a072b38ff040df961875bb8f741038', env={CJCJ_NATIVE_H1_REF:chosen};
+ const base=nativeSourceSelection({}).selection;
+ const {selection}=nativeSourceSelection(env);
+ assert.deepEqual(selection,{...base,h1:{...base.h1,commit:chosen}});
+ assert.throws(()=>nativeSourceSelection({CJCJ_NATIVE_H1_REF:'HEAD'}),/NATIVE_H1_SOURCE_REF/);
+ assert.throws(()=>nativeSourceSelection(env,undefined,{h1:base.h1}),/NATIVE_H1_SOURCE_CONFLICT/);
+});
 test('formal native configure rejects invalid source choices before source transport or SDK preparation',async()=>{
  await fs.mkdir(root,{recursive:true});const work=await fs.mkdtemp(path.join(root,'native-source-rejection-'));
  await fs.mkdir(work+'/inputs');await fs.writeFile(work+'/inputs/locations.json',JSON.stringify({platform:hostPlatform()}));
