@@ -1875,14 +1875,18 @@ public class StructInheritanceChecker {
     private func DiagnoseForConflictInheritance(decl: InheritableDecl, members: MemberMap): Unit {
         for (name in members.Names()) {
             let found = members.Get(name)
+            // Only functions and properties allow overloading; properties overload by receiver mode.
             var allFunc = true
+            var allProp = true
             for (member in found) {
                 if (!member.IsFunc()) {
                     allFunc = false
-                    break
+                }
+                if (!member.IsProp()) {
+                    allProp = false
                 }
             }
-            if (found.size > 1 && !allFunc) {
+            if (found.size > 1 && !allFunc && !allProp) {
                 let builder = DiagnoseRefactor(
                     diag,
                     DiagKindRefactor.sema_inherit_super_member_kind_inconsistent,
