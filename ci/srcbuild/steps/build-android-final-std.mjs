@@ -29,8 +29,8 @@ const probe = probeRequirement('android-ndk');
 if (!probe.present) throw new Error(probe.detail);
 const ndk = path.resolve(probe.detail.slice(probe.detail.indexOf('=') + 1));
 const toolchain = path.join(ndk, 'toolchains', 'llvm', 'prebuilt', 'linux-x86_64');
-const sdk = path.join(path.resolve(required('CJCJ_BOOTSTRAP_WORK')), 'sdk-stage2');
-const originalCompiler = await installedStageOutput(sdk, 'stage2');
+const parentSdk = path.join(path.resolve(required('CJCJ_BOOTSTRAP_WORK')), 'sdk-stage2');
+const originalCompiler = await installedStageOutput(parentSdk, 'stage2');
 const repository = path.join(workspace, 'cangjie_runtime');
 const runtime = path.join(repository, 'runtime');
 const stdlib = path.join(repository, 'stdlib');
@@ -40,23 +40,42 @@ const runtimeInstall = path.join(runtime, 'output', 'common', 'linux_android_rel
 const runtimeRef = (await $({stdio: 'pipe'})`git -C ${repository} rev-parse HEAD`).stdout.trim();
 assertAndroidRuntimePair(hostRef, expectedRef, originalCompiler.lineage);
 if (runtimeRef !== expectedRef) throw new Error(`runtime source mismatch: ${runtimeRef} != ${expectedRef}`);
-const stageEnv = {...process.env, CANGJIE_HOME: sdk, CANGJIE_VERSION: version,
-  PATH: [path.join(sdk, 'bin'), path.join(sdk, 'tools', 'bin'), path.join(toolchain, 'bin'), process.env.PATH].join(path.delimiter)};
-const assertCompiler = async () => {
-  const command = (await $({env: stageEnv, stdio: 'pipe'})`command -v cjc`).stdout.trim();
-  await assertBootstrapCompiler({sdk, command, producer: originalCompiler.product, producerSha256: originalCompiler.lineage.compilerSha256});
-};
-await assertCompiler();
-await buildAndroidRuntime({workspace, ndk, version, runtimeRef, recordRepository: runtimeRef !== hostRef, env: stageEnv});
-await assertCompiler();
-await verifyStdBuildInputs(sdk);
-await fs.rm(finalStd, {recursive: true, force: true});
-await $({cwd: stdlib, env: stageEnv})`python3 build.py clean`;
-await $({cwd: stdlib, env: stageEnv})`python3 build.py build -t release -j ${crossBuildJobs(stageEnv, 'std')} --target android-aarch64 --target-lib=${path.join(runtime, 'output')} --target-lib=${path.join(runtimeInstall, 'runtime', 'lib', tuple)} --target-lib=${path.join(runtimeInstall, 'lib', tuple)} --target-toolchain ${path.join(toolchain, 'bin')} --target-sysroot ${path.join(toolchain, 'sysroot')}`;
-await $({cwd: stdlib, env: stageEnv})`python3 build.py install --prefix ${finalStd}`;
-await assertCompiler();
-await writeStdProvenance({sourceDir: stdlib, sourceRoot: repository, sourceRevision: runtimeRef, installPrefix: finalStd,
-  compiler: originalCompiler.product, note: `Android API 23 final std; runtime ${runtimeRef}`});
+// Build in a private copy: the preceding host stage is an immutable input.
+// Never seed this target with modules or libraries left over in a host SDK.
+const sdk = await fs.mkdtemp(path.join(workspace, '.android-stage2-'));
+try {
+  const excluded = new Set(['modules', 'lib', 'runtime/lib'].map(dir => path.join(parentSdk, dir, tuple)));
+  await fs.cp(parentSdk, sdk, {recursive:true, verbatimSymlinks:true, filter:file => !excluded.has(file)});
+  const stageEnv = {...process.env, CANGJIE_HOME: sdk, CANGJIE_VERSION: version,
+    PATH: [path.join(sdk, 'bin'), path.join(sdk, 'tools', 'bin'), path.join(toolchain, 'bin'), process.env.PATH].join(path.delimiter)};
+  const assertCompiler = async () => {
+    const command = (await $({env: stageEnv, stdio: 'pipe'})`command -v cjc`).stdout.trim();
+    await assertBootstrapCompiler({sdk, command, producer: originalCompiler.product, producerSha256: originalCompiler.lineage.compilerSha256});
+  };
+  await assertCompiler();
+  await buildAndroidRuntime({workspace, ndk, version, runtimeRef, recordRepository: runtimeRef !== hostRef, env: stageEnv});
+  // cjc links for this target using the just-produced runtime, while the
+  // compiler process still loads the original host libraries.
+  for (const dir of ['lib', 'runtime/lib']) {
+    await fs.cp(path.join(runtimeInstall, dir, tuple), path.join(sdk, dir, tuple), {recursive:true});
+  }
+  await assertCompiler();
+  await verifyStdBuildInputs(sdk);
+  await fs.rm(finalStd, {recursive: true, force: true});
+  await $({cwd: stdlib, env: stageEnv})`python3 build.py clean`;
+  // build.py creates this output before invoking cjc on std.core. Expose
+  // that very directory to DetectCangjieModules, including subsequent CJOs.
+  await fs.mkdir(path.join(sdk, 'modules'), {recursive:true});
+  await fs.symlink(path.join(stdlib, 'build', 'build-libs-aarch64-linux-android23', 'modules', tuple),
+    path.join(sdk, 'modules', tuple), 'dir');
+  await $({cwd: stdlib, env: stageEnv})`python3 build.py build -t release -j ${crossBuildJobs(stageEnv, 'std')} --target android-aarch64 --target-lib=${path.join(runtime, 'output')} --target-lib=${path.join(runtimeInstall, 'runtime', 'lib', tuple)} --target-lib=${path.join(runtimeInstall, 'lib', tuple)} --target-toolchain ${path.join(toolchain, 'bin')} --target-sysroot ${path.join(toolchain, 'sysroot')}`;
+  await $({cwd: stdlib, env: stageEnv})`python3 build.py install --prefix ${finalStd}`;
+  await assertCompiler();
+  await writeStdProvenance({sourceDir: stdlib, sourceRoot: repository, sourceRevision: runtimeRef, installPrefix: finalStd,
+    compiler: originalCompiler.product, note: `Android API 23 final std; runtime ${runtimeRef}`});
+} finally {
+  await fs.rm(sdk, {recursive:true, force:true});
+}
 // Keep runtime separate from std so package consumers cannot confuse their provenance.
 const runtimeArtifact = path.join(finalStd, 'cross-runtime');
 await fs.cp(runtimeInstall, runtimeArtifact, {recursive: true});
