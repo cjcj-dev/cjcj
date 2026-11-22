@@ -24,6 +24,7 @@ import * as tools from './srcbuild/stages/tools.mjs';
 import * as verify from './srcbuild/stages/verify.mjs';
 import {prepareSourceBuildInputs,resumeSourceComponents} from '../ci/bootstrap/sdk-inputs.mjs';
 import {installProducts} from '../ci/bootstrap/sdk-flow.mjs';
+import {stageSdkHandoff} from '../ci/srcbuild/stage-sdk-handoff.mjs';
 import {verifyInstall} from '../ci/bootstrap/sdk-verify-install.mjs';
 
 const VERSION = '0.1.0';
@@ -338,7 +339,16 @@ async function dispatch(config, command, args) {
       await tools.run(production);
       console.log(JSON.stringify({status:'NOT_INSTALLED',reason:'BUILD_ONLY',sources:production.sources}));return;
     }
-    await installProducts(production.installInputs,{packageOutput:false,consume:async pending=>{
+    // CI transports this same installed SDK across jobs. Package from the
+    // restored public root on Linux x64 as well, including component resume.
+    const destination=production.installInputs.install;
+    let stage;
+    if(production.installInputs.buildJavaInterop) {
+      await fs.promises.mkdir(production.installInputs.work,{recursive:true});
+      stage=await fs.promises.mkdtemp(path.join(production.installInputs.work,'stage-handoff-'));
+    }
+    const staged=stage?{...production.installInputs,install:path.join(stage,'cangjie')}:production.installInputs;
+    await installProducts(staged,{packageOutput:false,consume:async pending=>{
       const installed=Object.freeze({...production,producerSdk:null,consumerSdk:pending,
         stdxHostSdk:config.target.spec.key==='linux-x64'?pending:undefined});
       await stdx.run(installed);
@@ -346,7 +356,12 @@ async function dispatch(config, command, args) {
       if(!config.target.spec.crossCompile)await verifyInstall({sdk:pending,
         work:path.join(config.workspace,'verify-installed'),platform:config.target.spec.llvmPlatform});
     }});
-    const installed=Object.freeze({...production,producerSdk:null,consumerSdk:production.installInputs.install});
+    if(stage) {
+      await stageSdkHandoff('pack',staged.install,stage);
+      await stageSdkHandoff('publish',destination,stage);
+      await fs.promises.rm(stage,{recursive:true});
+    }
+    const installed=Object.freeze({...production,producerSdk:null,consumerSdk:destination});
     await packageStage.run(installed);
     return verify.run(installed);
   }

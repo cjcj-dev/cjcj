@@ -364,3 +364,6 @@ stage3 component build at SDK assembly using its original compiler, runtime,
 LLVM and final std producers. Select the same platform, host, version, build
 type and native pair. The new workspace owns the SDK, Java producer and
 downstream stdx/tools; no previously assembled SDK or Java prefix is needed.
+
+Linux x64 `run-all` publishes the SDK from the same installed-stage tar format
+used by the CI stage3/package jobs, then packages and tests the restored root.
