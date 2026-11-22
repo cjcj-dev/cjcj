@@ -69,7 +69,10 @@ export async function installedFinalStd(supplied, input) {
 }
 // Check source compatibility before opening installations, and again when a
 // saved build graph is consumed. Ordinary CJPM has no H1 execution node.
-async function validateSourceTrees(input) {
+async function validateSourceTrees(input, env) {
+  if (input.runtime.sourceRepository !== undefined &&
+      await checkoutSourceRepository('runtime',input.runtime.repository,input.runtime.commit,env) !== input.runtime.sourceRepository)
+    throw Error('NATIVE_SOURCE_SELECTION runtime');
   const expectedMacro=await fs.readFile(new URL('../../packages/macro/src/InvokeUtil.cj',import.meta.url),'utf8');
   for(const [name,row] of Object.entries({llvm:input.llvm,runtime:input.runtime,stdlib:input.stdlib??input.runtime,ast:input.ast,h1:input.h1,compiler:input.compiler})) {
     const actual=await gitInput(row.repository,row.commit);
@@ -86,7 +89,7 @@ async function validateSourceTrees(input) {
 // Validate the actual selected source objects, including an explicit inputs file.
 // The compiler's macro consumer must be this paired source, not an older C tree.
 export async function validateSourceInputs(input) {
-  await validateSourceTrees(input);
+  await validateSourceTrees(input,process.env);
   await validateInstalledInputs(input);
 }
 async function validateInstalledInputs(input) {
@@ -140,7 +143,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     rows[name]={...await gitInput(sources[name],row.commit),sourceRepository:row.repository};
   }
   const {compiler:{commit:compilerCommit},runtime:{commit:runtimeCommit},llvm:{commit:llvmCommit},ast:{commit:astCommit},h1:{commit:h1Commit}}=rows;
-  await validateSourceTrees({...rows,stage2:installations.stage2});
+  await validateSourceTrees({...rows,stage2:installations.stage2},env);
   const stdlib=rows.stdlib;
   // An imported normal producer carries its actual bootstrap host selection.
   // It need not relabel that existing SDK with today's bootstrap default pin.
