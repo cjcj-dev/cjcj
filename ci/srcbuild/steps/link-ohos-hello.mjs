@@ -5,8 +5,9 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {cleanSdkEnvironment} from '../../bootstrap/sdk-platform.mjs';
 
-const [sdk, output, native] = process.argv.slice(2);
-if (![sdk, output, native].every(p => p && path.isAbsolute(p))) {
+const args = globalThis.argv?._ ?? process.argv.slice(2);
+const [sdk, output, native] = args;
+if (args.length !== 3 || !args.every(p => typeof p === 'string' && path.isAbsolute(p))) {
   throw Error('usage: link-ohos-hello.mjs SDK EMPTY_OUTPUT_DIR OHOS_NATIVE_SDK');
 }
 const env = {...cleanSdkEnvironment(sdk, 'linux_x86_64'), LC_ALL: 'C'};
