@@ -87,8 +87,9 @@ public class Wasm_CJNATIVE <: Gnu {
         SortInputlibraryFileAndAppend(tool, objFiles)
         let missing = ArrayList<String>()
         let stdArchives = ArrayList<String>()
-        for (pkg in driverOptions.directBuiltinDependencies) { AddWasmStdArchive(pkg, cangjieLibPath, stdArchives, missing) }
-        for (pkg in driverOptions.indirectBuiltinDependencies) { AddWasmStdArchive(pkg, cangjieLibPath, stdArchives, missing) }
+        for (pkg in WasmStdLinkClosure(driverOptions.directBuiltinDependencies, driverOptions.indirectBuiltinDependencies)) {
+            AddWasmStdArchive(pkg, cangjieLibPath, stdArchives, missing)
+        }
         if (!missing.isEmpty()) {
             for (pkg in missing) {
                 eprintln("error: std package '" + pkg + "' is not available for the wasm32-wasi target yet")
@@ -114,4 +115,29 @@ public class Wasm_CJNATIVE <: Gnu {
             }
         }
     }
+}
+
+/**
+ * Native (foreign C) symbols one std archive takes from another std archive that the .cjo
+ * import graph does not record. std.env calls CJ_OS_GetCurrentPid, which is defined by the
+ * std.process native objects, so linking std.env alone left that symbol undefined on wasm32.
+ */
+let WASM_NATIVE_STD_DEPS: Array<(String, String)> = [("std.env", "std.process")]
+
+/** Direct plus indirect builtin packages, closed over WASM_NATIVE_STD_DEPS. */
+func WasmStdLinkClosure(direct: Collection<String>, indirect: Collection<String>): HashSet<String> {
+    let pkgs = HashSet<String>()
+    pkgs.add(all: direct)
+    pkgs.add(all: indirect)
+    var changed = true
+    while (changed) {
+        changed = false
+        for ((from, to) in WASM_NATIVE_STD_DEPS) {
+            if (pkgs.contains(from) && !pkgs.contains(to)) {
+                pkgs.add(to)
+                changed = true
+            }
+        }
+    }
+    return pkgs
 }
