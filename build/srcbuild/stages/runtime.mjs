@@ -33,6 +33,8 @@ export async function run(config) {
       for (const subdirectory of ['lib','runtime',...(config.target.spec.os==='linux'?['share/runtime-build']:[])])
         copyContents(path.join(input.install,subdirectory),path.join(compilerOutput,subdirectory),{stage:'runtime.adopt.native'});
       await fs.copyFile(path.join(input.install,RUNTIME_INPUTS),path.join(compilerOutput,RUNTIME_INPUTS));
+      if(config.target.spec.key==='linux-x64')copyContents(path.join(input.install,'include'),path.join(compilerOutput,'runtime/include'),{stage:'runtime.adopt.java-headers'});
+      await fs.copyFile(input.buildResult,path.join(compilerOutput,'NATIVE-INPUTS.json'));
       // The legacy stdlib stage consumes this build input snapshot. Reuse the
       // native SDK adapter without rebuilding or mutating the R installation.
       await prepareRuntimeInputs({runtime:input.install,link:targetDir,
@@ -59,6 +61,7 @@ export async function run(config) {
         stage: 'runtime.copy.host',
       });
     }
+    if(config.target.spec.key==='linux-x64')copyContents(path.join(hostSubdir,'include'),path.join(compilerOutput,'runtime/include'),{stage:'runtime.copy.java-headers'});
     if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') finishGcUnitLanguageDeferral(config, runtimeRoot, compilerOutput);
     if (!config.target.spec.crossCompile) {
       if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {

@@ -60,8 +60,13 @@ endforeach()
  assert.equal(fs.existsSync(carried+'/tests/gc_unit/language_toolchain.mjs'),kind==='modern');
  const observed=ok(run('host-version',[host+'/bin/cjc','--version']));
  const version=hostToolchainFromCjcVersion(observed).replace(/^nightly-/,'');
+ const configuration={buildType:'release',version,hostVersion:version,pairedLlvmCommit:commit};
+ const runtimeFiles=Object.fromEntries(['runtime/lib/'+tuple+'/libcangjie-runtime.so','lib/'+tuple+'/libcangjie-runtime.a'].map(rel=>
+  [rel,createHash('sha256').update(fs.readFileSync(sdk+'/'+rel)).digest('hex')]));
+ write(sdk+'/RUNTIME-INPUTS.json',JSON.stringify({source:{status:'resolved',repository:'file://'+source,commit},
+  embedded_stamp:'CJRT-COMMIT:'+commit,build:{configuration},artifacts:Object.entries(runtimeFiles).map(([path,sha256])=>({path,sha256}))}));
  write(sdk+'/SOURCE_SHA',commit+'\n');
- write(sdk+'/NATIVE-INPUTS.json',JSON.stringify({runtime_sha:commit,paired_llvm_sha:commit,platform,version,build_type:'release',language_test_mode:'defer',finiteFixture:true}));
+ write(sdk+'/NATIVE-INPUTS.json',JSON.stringify({runtime_sha:commit,paired_llvm_sha:commit,platform,version,build_type:'release',configuration,files:runtimeFiles,language_test_mode:'defer',finiteFixture:true}));
  const native=root+'/native-shapes';
  for(const member of ['third_party/llvm/bin/llc','third_party/llvm/bin/llvm-as','third_party/llvm/bin/llvm-dis','third_party/llvm/lib/libLLVM-15.so','third_party/llvm/fixed-llc/cjselfhost_llvmshim.o','tools/bin/cjdb',
  'schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h','third_party/flatbuffers/bin/flatc'])write(native+'/'+member,'Unexecuted finite component shape; not a native SDK.\n');
@@ -76,7 +81,7 @@ endforeach()
   ...Object.fromEntries(['compiler','h1','ast','llvm','runtime'].map(name=>[name+'Commit',commit])),
   nativePair:{llvm:commit,runtime:commit,hostVersion:version},
   installations:{llvm:{install:native,buildResult:nativeFacts,configuration:{finiteFixture:true}},ast:{install:native,buildResult:nativeFacts,configuration:{finiteFixture:true}},
-   runtime:{install:sdk,sourceRoot:sdk+'/share/runtime-build',buildResult:sdk+'/NATIVE-INPUTS.json',configuration:{buildType:'release',version,hostVersion:version,pairedLlvmCommit:commit}}}};
+   runtime:{install:sdk,sourceRoot:sdk+'/share/runtime-build',buildResult:sdk+'/NATIVE-INPUTS.json',configuration}}};
  const prepare=(label,{paired=true}={})=>{
   const d=structuredClone(descriptor);d.work=root+'/'+label+'-work';d.install=root+'/'+label+'-sdk-not-built';if(!paired)delete d.nativePair;
   const file=root+'/'+label+'.descriptor.json',workspace=root+'/'+label+'-workspace';write(file,JSON.stringify(d));

@@ -323,3 +323,55 @@ normally without rebuilding its complete peer. Libedit's configure consumes
 that ncurses prefix. Compiler environment construction uses these same prefixes;
 standalone native-CJDB descriptors must select the actual new installation and
 run their own affected native link/install gates before claiming that input.
+
+### Default managed Linux x64 development SDK
+
+Before acquiring the component checkouts, run
+`node ci/load_runtime_pin.mjs --development-sdk OUTPUT` with
+`CJCJ_SRCBUILD_TARGET=linux-x64`, `RUNTIME_NATIVE_PAIR=1` and a native Release
+runtime build. The new output file uses the existing job environment format.
+That invocation selects the scoped pair and official bootstrap host; an
+explicit pair takes precedence. Ordinary runtime builds, public fetch/run-all
+(including saved repository choices), and other targets keep their own pins.
+
+Use the selected refs for checkout and pass the output environment to
+`ci/platform_matrix/build_runtime.mjs`. For the direct target std producer
+pass the same runtime ref as `--commit`, its installed R as `--runtime`, and
+`--build-type release`. The configured SDK graph already binds commits in
+its command argv. Only a graph attempt with its original command and result
+can enter graph resume. A direct Git build may still omit its commit to build
+HEAD; that does not create graph history.
+
+Component `install --inputs` accepts its normal fully specified selection.
+For a locations-only Linux x64 component selection omit all three runtime,
+std and LLVM commits and pass the selected environment. It verifies R, std,
+N and the executing host from their original inputs. The optional llc/opt
+backend is separate from N. Package consumes the installed SDK at the selected
+consumer path, including after relocation, independent of checkout or current
+pin defaults. CI registrations and release workflows are unchanged.
+
+Native Linux x64 source SDK installation builds the pinned Java interop target
+from `ci/source_pin.env` with JDK 17 (JAVA_HOME, or the JDK containing javac)
+and the public compiler in the pending SDK. For an offline build set
+`CJCJ_JAVA_INTEROP_SOURCE` to a managed checkout at the pin; an explicitly
+missing checkout is an error. The default fetches the pin in the build workspace.
+The install cache is keyed by actual compiler, runtime, std, JDK and native
+tool inputs; `CJCJ_JAVA_INTEROP_WORK` can locate that private build/cache area
+outside CI handoffs. Reuse is local to one Linux boot and mount namespace with
+an unchanged system toolchain; use a fresh work directory after replacing host
+headers or tool resources in place. The producer runs with an empty private
+home and a fixed tool search path (selected JDK, pending SDK, platform LLVM,
+then system binaries). It accepts only the self-contained `JDK_JAVAC_OPTIONS`
+flags `-g`, `-g:none` and `-Werror` and keys their ordered values. Other javac
+flags are rejected before lookup. Ambient JVM, Python, compiler and linker
+options are not passed to the build or install. An incomplete cached install
+fails before SDK publication.
+
+`run-all --from-native-install /path/to/install-result.json` resumes a completed
+stage3 component build at SDK assembly using its original compiler, runtime,
+LLVM and final std producers. Select the same platform, host, version, build
+type and native pair. The new workspace owns the SDK, Java producer and
+downstream stdx/tools; no previously assembled SDK or Java prefix is needed.
+
+Linux x64 `run-all` publishes the SDK from the same installed-stage tar format
+used by the CI stage3/package jobs, then packages and tests the restored root.

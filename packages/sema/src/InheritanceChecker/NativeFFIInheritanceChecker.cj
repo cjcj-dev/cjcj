@@ -45,15 +45,15 @@ private func DiagConflictingForeignName(
     if (let Some(otherAnno) <- GetForeignNameAnnotation(otherDecl)) {
         if (!otherAnno.TestAttr(Attribute.COMPILER_ADD)) {
             builder.AddNote(MakeRange(otherAnno.GetBegin(), otherDecl.identifier.End()),
-                "Other declaration '" + otherDecl.identifier.Val() + "' has a different @ForeignName")
+                "Other declaration '" + otherDecl.identifier.Val() + "' has a different '@ForeignName'")
         } else {
             builder.AddNote(MakeRange(otherDecl.identifier.Begin(), otherDecl.identifier.End()),
-                "Other declaration '" + otherDecl.identifier.Val() + "' has a different derived @ForeignName '" +
+                "Other declaration '" + otherDecl.identifier.Val() + "' has a different derived '@ForeignName' '" +
                 GetAnnoValue(otherAnno) + "'")
         }
     } else {
         builder.AddNote(MakeRange(otherDecl.identifier.Begin(), otherDecl.identifier.End()),
-            "Other declaration '" + otherDecl.identifier.Val() + "' doesn't have a @ForeignName")
+            "Other declaration '" + otherDecl.identifier.Val() + "' doesn't have a '@ForeignName'")
     }
 
     builder.AddNote(MakeRange(checkingDecl.identifier.Begin(), checkingDecl.identifier.End()),

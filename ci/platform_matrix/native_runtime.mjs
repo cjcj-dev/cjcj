@@ -222,8 +222,12 @@ export async function recordNativeRuntime({source, installRoot, actualRef, versi
     }
   }
   const sourceRepository=await runtimeSourceRepository(repository);
-  const configuration={buildType,version,hostVersion:env.CJCJ_NATIVE_HOST_VERSION||version,pairedLlvmCommit:selection.llvm.commit};
+  const configuration=completedBuild?.configuration??{buildType,version,hostVersion:env.CJCJ_NATIVE_HOST_VERSION||version,pairedLlvmCommit:selection.llvm.commit};
   const artifacts=[required[0],required[2]];
+  if(completedBuild)for(const rel of artifacts) {
+    assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(installRoot,rel))).digest('hex'),
+      completedBuild.files?.[rel],'NATIVE_COMPLETED_PRODUCT '+rel);
+  }
   const stamps=embeddedStamp(fs.readFileSync(path.join(installRoot,artifacts[0])),'CJRT-COMMIT');
   let runtimeInputs;
   if(stamps.length===1&&/^src-[0-9a-f]{64}$/.test(stamps[0])) {

@@ -71,7 +71,7 @@ export async function run(config) {
     const jobs = await selectBuildJobs(config.jobs);
     const hostClosureEnv = {CANGJIE_BUILD_JOBS: String(jobs),
       ...(split ? {STDX_HOST_CANGJIE_HOME:
-        process.env.STDX_HOST_CANGJIE_HOME ?? hostSdk} : {})};
+        process.env.STDX_HOST_CANGJIE_HOME ?? config.stdxHostSdk ?? hostSdk} : {})};
     const nativeBuild=path.join(stdxRoot,'build_temp',config.target.spec.crossCompile?'build-libs-'+TARGET_TRIPLE:'build');
     const checkCommands=()=>assertHostRuntimeCommands({buildFile:path.join(nativeBuild,'build.ninja'),
       hostRuntime:split.hostRuntime,targetRuntime:split.targetRuntime,loaderEnv:config.target.spec.loaderEnv,

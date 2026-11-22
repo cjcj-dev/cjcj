@@ -211,9 +211,14 @@ for (const explicit of [false, true]) cases[`handoff-${explicit?'explicit':'defa
     CJCJ_SRCBUILD_TARGET:'linux-x64',GITHUB_ENV:path.join(area,'github-env'),GITHUB_PATH:path.join(area,'github-path')};
   for (const key of Object.keys(env)) if (/^(CJCJ_BOOTSTRAP_|CJCJ_RUNTIME_|RUNTIME_|CANGJIE_HOME$)/.test(key)) delete env[key];
   const handoff = path.join(root,'ci/srcbuild/job-handoff.mjs'), archive = path.join(area,'handoff');
-  fetched(command('handoff-pack',[handoff,'pack','stage3',archive],env));
+  // This fixture has fetched sources but has not produced an installed SDK.
+  // Stage 3 must reject it; use the actual source-only predecessor to exercise
+  // restored tools/stdx Git identity without fabricating Java or a stage SDK.
+  const rejected=command('handoff-stage3-no-sdk',[handoff,'pack','stage3',archive],env);
+  assert.notEqual(rejected.status,0);assert.match(rejected.text,/STAGE-INPUTS.json/);
+  fetched(command('handoff-pack',[handoff,'pack','stage1-compiler',archive],env));
   fs.rmSync(path.join(area,'.srcbuild'),{recursive:true}); // Only this test's produced fixture.
-  fetched(command('handoff-restore',[handoff,'restore','stage3',archive],env));
+  fetched(command('handoff-restore',[handoff,'restore','stage1-compiler',archive],env));
   console.log('HANDOFF_SOURCE_ASSERTIONS_REACHED',explicit);
   for (const name of ['tools','stdx']) {
     const repo = path.join(workspace,name==='tools'?'cjcj-tools':`cangjie_${name}`);

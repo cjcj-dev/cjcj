@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::modules.SemaImportManager
 import cjcj::sema.TypeManager
+import cjcj::sema.NativeFFI.IsGeneratedJavaImplConstructor
 import cjcj::utils.{CJC_ABORT, CJC_NULLPTR_CHECK}
 
 private class CtorPair {
@@ -136,8 +137,18 @@ public class AfterTypeCheckContext {
         let ctors = ArrayList<FuncDecl>()
         for (member in refWrapper.GetMemberDecls()) {
             if (let Some(fd) <- (member as FuncDecl)) {
-                if (fd.TestAttr(Attribute.CONSTRUCTOR) && !fd.TestAttr(Attribute.COMPILER_ADD)) {
+                if (!fd.TestAttr(Attribute.CONSTRUCTOR) || IsGeneratedJavaImplConstructor(fd)) {
+                    continue
+                }
+                // Primary constructors are lowered to compiler-added FuncDecls. The
+                // implicit zero-argument constructor also needs a Java-side counterpart.
+                if (!fd.TestAttr(Attribute.COMPILER_ADD) || fd.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
                     ctors.add(fd)
+                } else if (fd.TestAttr(Attribute.IMPLICIT_ADD)) {
+                    let body = fd.funcBody.getOrThrow()
+                    if (body.paramLists.isEmpty() || body.paramLists[0].params.isEmpty()) {
+                        ctors.add(fd)
+                    }
                 }
             }
         }

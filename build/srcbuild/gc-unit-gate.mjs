@@ -116,6 +116,7 @@ export async function runGcUnitLanguageTests(config,sdk,{env=process.env,source=
   fs.rmSync(status,{force:true});
   const deleted=Object.fromEntries(Object.keys(process.env).filter(key=>!(key in env)).map(key=>[key,null]));
   await runCommand(command,{stage,envOverlay:{...deleted,...envFrom(config,languageInputEnvironment(config,sdk,env),{
+    GC_UNIT_OUT:env.GC_UNIT_OUT||path.join(config.workspace,'build/gc-unit-language'),
     GC_UNIT_SOURCE_ROOT:root,GCV2_RUNTIME_CONFIG:null,GCV2_RUNTIME_OUTPUT_ROOT:headers,
     GCV2_RUNTIME_BUILD_DIR:path.join(runtime,'CMakebuild'),GC_UNIT_GATE_STATUS:status,GC_UNIT_GATE_LANGUAGE_TESTS:'only',
   })}});

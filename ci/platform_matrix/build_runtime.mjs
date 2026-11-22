@@ -3,6 +3,7 @@
 // MINGW64 only for build.py, whose Windows recipe requires POSIX make/PATH.
 
 import fs from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {nativeSourceSelection} from '../bootstrap/native-source-selection.mjs';
 import {hostPlatform} from '../host-toolchain-pin.mjs';
@@ -60,7 +61,22 @@ await fs.mkdir(installRoot, {recursive: true});
 const runtimeDirectory = path.join(source, 'runtime');
 const nativePython = (label, args) => darwinCommand(path.join(root, 'logs', 'native-runtime'),
   label, 'python3', args, {cwd:runtimeDirectory, env:process.env});
-if(nativePair&&process.platform==='linux') {
+const originalFile=path.join(installRoot,'NATIVE-INPUTS.json');
+let original;
+if(completedBuild){
+  original=JSON.parse(await fs.readFile(originalFile,'utf8'));
+  assert.equal(original.runtime_sha,actualRef,'NATIVE_COMPLETED_RUNTIME');
+  assert.equal(original.platform,hostPlatform(),'NATIVE_COMPLETED_PLATFORM');
+  assert.deepEqual(original.configuration,{buildType,version,pairedLlvmCommit:selection.llvm.commit,
+    hostVersion:process.env.CJCJ_NATIVE_HOST_VERSION||version},'NATIVE_COMPLETED_CONFIGURATION');
+  assert.equal(original.paired_llvm_sha,selection.llvm.commit,'NATIVE_COMPLETED_LLVM');
+  assert.equal(original.language_test_mode,process.env.GC_UNIT_GATE_LANGUAGE_TESTS||'all','NATIVE_COMPLETED_GATE_MODE');
+}
+// Once production can change the prefix, its previous success is history.
+// Keep it outside the tree that the producer inventories and transports.
+if(nativePair)await fs.rename(originalFile,path.join(root,'native-inputs.previous-'+randomUUID()+'.json'))
+  .catch(error=>{if(error.code!=='ENOENT')throw error;});
+if(nativePair&&!completedBuild&&process.platform==='linux') {
   process.env.GC_UNIT_GATE_STATUS=path.join(runtimeDirectory,'CMakebuild/gc-unit.status');
   await fs.rm(process.env.GC_UNIT_GATE_STATUS,{force:true});
 }
@@ -87,7 +103,7 @@ if (completedBuild) {
   if (nativePair) installNativeRuntimeDependencies({source, installRoot, buildType, manifestRoot: prefix});
   nativePython('install', ['build.py', 'install', '--prefix', installRoot]);
   installNativeRuntimeInputs({source,installRoot,gateStatus,selection});
-  await recordNativeRuntime({source,installRoot,actualRef,version,buildType,selection,repository,completedBuild:true,
+  await recordNativeRuntime({source,installRoot,actualRef,version,buildType,selection,repository,completedBuild:original,
     commands:[['cmake',...childArgs],['python3','build.py','install','--prefix',installRoot]]});
   return;
 }

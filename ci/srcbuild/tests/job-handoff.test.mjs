@@ -206,3 +206,11 @@ test('public handoff carries native tool dependency locations and rejects an una
  assert.equal(rejected.rc,1);assert.match(rejected.output,/handoff native tool dependency outside archived inputs/);
  // These are location/byte transport fixtures, not qualified Git producers.
 });
+
+test('Linux stage3 refuses a source-only predecessor before creating an SDK artifact', async t => {
+  const f=await fixture(t);
+  const dir=path.join(f.dir,'stage3');
+  const r=spawnSync(process.execPath,[product,'pack','stage3',dir],{env:f.env,encoding:'utf8'});
+  assert.equal(r.status,1);assert.match(r.stderr,/STAGE-INPUTS.json/);
+  await assert.rejects(fs.stat(path.join(dir,'stage3-sdk.tar')),{code:'ENOENT'});
+});

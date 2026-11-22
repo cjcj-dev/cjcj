@@ -1,5 +1,6 @@
 // The eight public bootstrap phases are an ordinary target dependency table.
 import path from 'node:path';
+import {javaInteropFiles} from './sdk-java-interop.mjs';
 import fs from 'node:fs/promises';
 import {visibleOptionsOnly} from './compiler-option-visibility.mjs';
 import {relative} from './sdk-flow.mjs';
@@ -76,7 +77,7 @@ export function backendArtifactPath(backend,rel) {
   return backend.installed?path.join(backend.installed,'.native-tools/third_party/llvm',rel):path.join(backend.install,rel);
 }
 
-export function installationRecipe(selection,{compiler:product,std,bootstrap=false,hostObjects=false,final=false,nativeChecks,tools,layout}={}) {
+export function installationRecipe(selection,{compiler:product,std,bootstrap=false,hostObjects=false,final=false,nativeChecks,tools,layout,javaInterop}={}) {
   const {platform,bootstrapHost:host,compilerExecution:execution,targetComponents:target}=selection;
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
   const nLib=['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+tuple,'lib/'+tuple,'tools/lib'];
@@ -142,7 +143,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     // compiler entries through the same installer as the bootstrap graph.
     copies.splice(0,copies.length,
       {from:target.compiler.install,to:'',owner:'native compiler/runtime/std producers',
-        exclude:['bin/cjc'+exe,'bin/cjc-frontend'+exe,'STAGE-INPUTS.json']},
+        exclude:['bin/cjc'+exe,'bin/cjc-frontend'+exe,'STAGE-INPUTS.json','NATIVE-INPUTS.json']},
       ...(!prefix?[]:[
         {from:execution.runtime.install+'/runtime/lib/'+execTuple,to:prefix+'/runtime/lib/'+execTuple,owner:'compiler execution runtime'},
         {from:execution.std.install+'/lib/'+execTuple,to:prefix+'/lib/'+execTuple,owner:'compiler execution std'},
@@ -190,7 +191,8 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   if(llvm.windowsToolchain)copies.push(
     {from:path.join(llvm.install,relative(llvm.windowsToolchain.original.path)),to:relative(llvm.windowsToolchain.original.path),owner:'native toolchain input'},
     ...llvm.windowsToolchain.installedFiles.filter(row=>row.path.startsWith('bin/')).map(row=>({from:path.join(llvm.install,relative(row.path)),to:relative(row.path),owner:'native toolchain runtime'})));
-  if(!hostObjects&&runtime.buildResult)copies.push({from:runtime.buildResult,to:'share/cjcj/build-inputs/native-runtime.json',owner:'R original build'});
+  if(!hostObjects&&(runtime.component||runtime.buildResult))copies.push({from:runtime.component?path.join(runtime.install,'NATIVE-INPUTS.json'):runtime.buildResult,to:'share/cjcj/build-inputs/native-runtime.json',owner:'R original build'});
+  if(javaInterop)copies.push(...javaInteropFiles.map(to=>({from:path.join(javaInterop.install,to),to,owner:'Java interop'})));
   if(runtime.gateStatus&&!runtime.sourceRoot)throw Error('INSTALL_RUNTIME_SOURCE_REQUIRED');
   return {copies,...(!hostObjects&&native.os==='linux'&&runtime.sourceRoot?{
     runtimeLanguageInputs:{runtime:path.join(runtime.sourceRoot,'runtime'),gateStatus:runtime.gateStatus}}:{}),entries:[
@@ -256,7 +258,7 @@ export function createBootstrapTargets(input) {
         executionSource||(name==='runtime'?runtime.install:name==='llvm'?llvm.install:std),platform}]))};
     const selection={platform,bootstrapHost:host,compilerExecution:execution,targetComponents:{compiler,std:stdlib,runtime,llvm,ast}};
     const recipe=installationRecipe(selection,{compiler:product,std,hostObjects,final:['stage3','stage2-target-sdk'].includes(id),bootstrap:true,nativeChecks:path.join(work,'native-check')});
-    return {id,depends,commands,output:id===finalStage?'${install}':path.join(work,'sdk-'+id),...recipe,
+    return {id,depends,commands,...(id==='stage3'&&platform==='linux_x86_64'?{buildJavaInterop:true}:{}),output:id===finalStage?'${install}':path.join(work,'sdk-'+id),...recipe,
       copies:[...recipe.copies,...(['stage2','stage3'].includes(id)?[
         {from:'${build}/compiler/share/cjcj',to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
         {from:'${build}/compiler/compiler-inputs.json',to:'compiler-inputs.json',owner:'compiler'}]:[])],

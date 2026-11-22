@@ -305,11 +305,33 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
                     if (kind == ExprKind.STORE && user.GetOperand(0).nodeId != allocation.nodeId) {
                         continue
                     }
+                    // Writing a field does not publish its base address. The write itself
+                    // still invalidates the reaching definitions of the tracked root.
+                    if (kind == ExprKind.STORE_ELEMENT_REF &&
+                        user.GetOperand(0).nodeId != allocation.nodeId) {
+                        continue
+                    }
+                    // A field reference that is only read (or used by Debug) cannot let
+                    // unrelated calls write through it. Keep the normal GetElementRef
+                    // invalidation at the point where a mutable field address is formed.
+                    if (kind == ExprKind.GET_ELEMENT_REF && IsReadOnlyFieldRefUse(user)) {
+                        continue
+                    }
                     aliasedAllocations.add(allocation)
                     break
                 }
             }
         }
+    }
+
+    private func IsReadOnlyFieldRefUse(fieldRef: Expression): Bool {
+        let result = fieldRef.GetResult() ?? return false
+        for (user in result.GetUsers()) {
+            if (user.GetExprKind() != ExprKind.LOAD && user.GetExprKind() != ExprKind.DEBUGEXPR) {
+                return false
+            }
+        }
+        return true
     }
 
     private func InvalidateAliasedAllocations(state: ReachingDefinitionDomain): Unit {

@@ -385,6 +385,11 @@ test('completed-install consumes CJThread from its child reinstall at the config
     " fs.writeFileSync(path.join(args[1],'install_manifest.txt'),files.join('\\n'));process.exit(0);\n"+
     "}\n"+
     'const r=spawnSync('+JSON.stringify(real)+",args,{stdio:'inherit'});process.exit(r.status??1);\n",{mode:0o755});
+  for(const mismatch of [{CJCJ_NATIVE_HOST_VERSION:'1.3.0-alpha.20000101000000'},{CJCJ_NATIVE_LLVM_REF:'c'.repeat(40)}]){
+    const denied=run({RUNTIME_PHASE:'completed-install',RUNTIME_COMPLETED_GATE_STATUS:gate,...mismatch});
+    assert.notEqual(denied.status,0);assert.match(denied.stdout+denied.stderr,/NATIVE_COMPLETED_CONFIGURATION/);
+    assert.equal(manifest().paired_llvm_sha,llvm);
+  }
   const r=run({RUNTIME_PHASE:'completed-install',RUNTIME_COMPLETED_GATE_STATUS:gate});
   console.log('COMPLETED_INSTALL_CJTHREAD_TARGET_REACHED');
   assert.doesNotMatch(r.stdout+r.stderr,/NATIVE_CJTHREAD_INSTALL_MANIFEST/);

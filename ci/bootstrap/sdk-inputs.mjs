@@ -14,6 +14,7 @@ import {randomUUID} from 'node:crypto';
 import {atomicJson, readJson, privateRoot, fileDigest} from './sdk-flow.mjs';
 import {FIXED_INPUTS,backendArtifactPath} from './sdk-targets.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
+import {javaInteropInput} from './sdk-java-interop.mjs';
 import {stage2Input} from './sdk-stage2-input.mjs';
 import {receiveNativeRuntime} from './native-runtime-input.mjs';
 import {languageSourceInputs} from '../../build/srcbuild/installed-language-source.mjs';
@@ -23,6 +24,7 @@ import {readInstalledNativeAst} from './installed-native-ast.mjs';
 import {installPath as mingwInstallPath} from '../../build/toolchain/mingw.mjs';
 import {installationSelection,resolveSources} from './native-source-selection.mjs';
 import {stdBuildType,flag} from './sdk-std-resume.mjs';
+import {nativePair} from '../runtime-pin.mjs';
 import {stdDependencyInputs} from './stdlib-build.mjs';
 const execute = promisify(execFile);
 
@@ -199,6 +201,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       verifications[name].librarySha256=facts.llvmLibrary.sha256;
     }
     rows[name] = {...rows[name], verification:verifications[name], buildResult:supplied.buildResult, configuration:supplied.configuration,
+      ...(name==='runtime' && descriptor.nativePair ? {component:true} : {}),
       ...(astInstallation?{astInstallation}:{}),
       ...(name==='llvm'&&facts.windowsToolchain?{windowsToolchain:facts.windowsToolchain}:{}),
       install:await installation(supplied.install, required),
@@ -302,13 +305,18 @@ export async function prepareSourceBuildInputs(config, env=process.env, startSta
   const hostInstall=config.officialSdkRoot??env.CJCJ_OFFICIAL_SDK_ROOT;
   if(!hostInstall)throw Error('SOURCE_BUILD_BOOTSTRAP_HOST_REQUIRED');
   const bootstrapHost={install:path.resolve(hostInstall),platform:host};
+  if(config.nativeRuntime) {
+    const observed=await execute(path.join(bootstrapHost.install,'bin','cjc'+sdkPlatform(host).exe),['--version']);
+    bootstrapHost.version=config.nativeRuntime.hostVersion;
+    if(hostToolchainFromCjcVersion(observed.stdout)!=='nightly-'+bootstrapHost.version)throw Error('INSTALL_COMPONENT_HOST');
+  }
   const component=name=>({...selected[name],install,platform});
   const compiler={...component('compiler'),product:path.join(install,'bin','cjc'+config.target.spec.exeSuffix),
     configuration:{producer:'build.py build/install',buildType:config.buildType}};
   const selection=installationSelection({platform,hostPlatform:host,bootstrapHost,
     compilerExecution:{role:'target',stage:'source-build',platform,
       compiler,...Object.fromEntries(['runtime','std','llvm'].map(name=>[name,component(name==='std'?'runtime':name)]))},
-    targetComponents:{compiler,runtime:component('runtime'),std:component('runtime'),
+    targetComponents:{compiler,runtime:{...component('runtime'),...(config.nativeRuntime?{component:true,buildResult:path.join(install,'NATIVE-INPUTS.json')}:{})},std:component('runtime'),
       // Native compiler/build.py consumes the selected LLVM checkout through its
       // existing third_party/llvm-project source input. AST is compiler source.
       llvm:{...component('llvm'),configuration:{producer:'compiler/build.py',component:'third_party/llvm'}},
@@ -337,16 +345,73 @@ export async function prepareSourceBuildInputs(config, env=process.env, startSta
   return Object.freeze({...config,sources:selected,selection,production,producerSdk:install,
     installInputs:{work:path.join(config.workspace,'build','sdk-install'),
       install:config.consumerSdk??path.join(config.softwareDir,'cangjie'),selection,production,
-      layout:'native-output',tools:{launcher:env.CMAKE_CXX_COMPILER_LAUNCHER,
+      layout:'native-output',buildJavaInterop:platform==='linux_x86_64'&&!config.target.spec.crossCompile,javaJdk:config.toolsJniHome,tools:{launcher:env.CMAKE_CXX_COMPILER_LAUNCHER,
         ...(config.target.spec.needsMingw?{targetToolchain:path.join(mingwInstallPath(config.buildRoot),'bin')}:{})}}});
+}
+
+// A completed component build may resume run-all at SDK installation. Take
+// its original native products, never the previously assembled SDK or Java.
+export async function resumeSourceComponents(config,file) {
+  const {status,selection}=await readJson(path.resolve(file));
+  if(status!=='COMPLETE'||selection?.compilerExecution?.stage!=='stage3'
+    ||selection.platform!==config.target.spec.llvmPlatform||selection.platform!==hostPlatform()
+    ||selection.bootstrapHost.install!==config.officialSdkRoot)throw Error('SOURCE_COMPONENT_RESUME_SELECTION');
+  const {runtime,llvm}=selection.targetComponents;
+  if(runtime.commit!==config.sources.runtime.commit||llvm.commit!==config.sources.llvm.commit
+    ||runtime.configuration.buildType!==config.buildType||runtime.configuration.version!==config.cangjieVersion)
+    throw Error('SOURCE_COMPONENT_RESUME_CONFIGURATION');
+  for(const component of Object.values(selection.targetComponents)) {
+    const actual=await gitInput(component.repository,component.commit);
+    if(component.tree!==actual.tree)throw Error('SOURCE_COMPONENT_RESUME_TREE '+component.repository);
+  }
+  return {...config,installInputs:{work:path.join(config.workspace,'build/sdk-install'),
+    install:config.consumerSdk??path.join(config.softwareDir,'cangjie'),selection,
+    buildJavaInterop:selection.platform==='linux_x86_64',javaJdk:config.toolsJniHome,
+    tools:{launcher:process.env.CMAKE_CXX_COMPILER_LAUNCHER}}};
 }
 
 // Installation of existing native products uses the same inputs and recipe,
 // without constructing the bootstrap graph or requiring private stage1 tools.
 export async function prepareInstallInputs(descriptor) {
-  const selection=installationSelection(descriptor.selection);
-  const {platform,targetComponents:target,compilerExecution:execution}=selection,native=sdkPlatform(platform);
+  const supplied=structuredClone(descriptor.selection), members=supplied?.targetComponents;
   const work=await privateRoot(descriptor.work),install=await privateRoot(descriptor.install);
+  // A locations-only component install consumes the upstream selection; never
+  // interpret a target or a checkout's current HEAD as a request for a pin.
+  if (supplied?.platform==='linux_x86_64' && descriptor.layout!=='native-output' && members
+    && ['runtime','std','llvm'].every(name=>members[name] && !Object.hasOwn(members[name],'commit'))) {
+    const pair=nativePair(process.env);
+    if(!pair)throw Error('INSTALL_COMPONENT_SELECTION_REQUIRED');
+    const {runtime,std,llvm}=members;
+    for(const [row,ref] of [[runtime,pair.runtime],[std,pair.runtime],[llvm,pair.llvm]])
+      Object.assign(row,await gitInput(row.repository,ref));
+    const host=supplied.bootstrapHost;
+    const observed=await execute(path.join(host.install,'bin','cjc'),['--version']);
+    if((host.version && host.version!==pair.hostVersion)
+      || hostToolchainFromCjcVersion(observed.stdout)!=='nightly-'+pair.hostVersion)throw Error('INSTALL_COMPONENT_HOST');
+    host.version=pair.hostVersion;
+    runtime.sourceRepository=await runtimeSourceRepository(runtime.repository);
+    Object.assign(runtime,await receiveNativeRuntime({root:runtime.install,sourceRepository:runtime.sourceRepository,
+      platform:supplied.platform,llvmCommit:llvm.commit,runtimeCommit:runtime.commit,
+      hostVersion:host.version,work}));
+    runtime.gateStatus=path.join(runtime.sourceRoot,'runtime','CMakebuild','gc-unit.status');
+    const commands=await readJson(std.install+'.commands.json');
+    const actions=commands.filter(row=>row.argv?.includes('build.py'));
+    const accepted=commands.findLast(row=>row.argv?.[0]==='resume-accepted' && row.rc===0);
+    const [build,installed]=accepted?[accepted.build,accepted.install]:actions.slice(-2).map(row=>row.argv);
+    if(commands.some(row=>Object.hasOwn(row,'rc') && (row.rc!==0||row.signal||row.cancelled||row.error))
+      || (!accepted && (actions.length<2 || actions.slice(-2).some(row=>row.rc!==0)))
+      || flag(build??[],'-t')!==runtime.configuration.buildType || !build.includes('build')
+      || !installed?.includes('install') || path.resolve(flag(installed,'--prefix')??'.')!==path.resolve(std.install))
+      throw Error('INSTALL_COMPONENT_STD_BUILD');
+    const provenance=await fs.readFile(path.join(std.install,'PROVENANCE.txt'),'utf8');
+    if(provenance.match(/^STD_SOURCE_COMMIT = ([a-f0-9]{40})$/m)?.[1]!==std.commit
+      || provenance.match(/^BUILT_BY_CJC = ([a-f0-9]{40})$/m)?.[1]!==members.compiler?.commit)
+      throw Error('INSTALL_COMPONENT_STD');
+    const facts=await readJson(llvm.buildResult??path.join(llvm.install,'BUILD-INPUTS.json'));
+    if(facts.platform!==supplied.platform || facts.commits?.llvm!==llvm.commit)throw Error('INSTALL_COMPONENT_LLVM');
+  }
+  const selection=installationSelection(supplied);
+  const {platform,targetComponents:target,compilerExecution:execution}=selection,native=sdkPlatform(platform);
   // An optional backend is a normal CMake component install, independent of
   // N's libLLVM/clang/CJDB/AST installation. Record the actual selected binaries
   // in the existing installation selection, without rewriting either producer.
@@ -400,7 +465,7 @@ export async function prepareInstallInputs(descriptor) {
       backend.artifacts.push({path:rel,sha256});
     }
   }
-  let dependencyRoot;
+  let dependencyRoot,compilerSha256;
   const executionPlatform=platform;
   if(descriptor.layout==='native-output') {
     // build.py installs the compiler and its linked inputs into one native
@@ -410,7 +475,8 @@ export async function prepareInstallInputs(descriptor) {
     dependencyRoot=target.compiler.install;
   } else {
     const facts=await readJson(path.join(target.compiler.install,'compiler-inputs.json'));
-    if(facts.commit!==target.compiler.commit||await fileDigest(target.compiler.product)!==facts.compilerSha256)
+    compilerSha256=await fileDigest(target.compiler.product);
+    if(facts.commit!==target.compiler.commit||compilerSha256!==facts.compilerSha256)
       throw Error('INSTALL_COMPILER_PRODUCT');
     dependencyRoot=path.join(target.compiler.install,'.compiler-exec');
     if(await fileDigest(path.join(dependencyRoot,'lib',native.tuple,'libcangjie-std-core.a'))!==facts.stdCoreSha256)
@@ -437,7 +503,9 @@ export async function prepareInstallInputs(descriptor) {
   console.log('INSTALL_COMPILER_EXECUTION_FROM_PRODUCER '+JSON.stringify({compiler:target.compiler.product,dependencyRoot,platform:executionPlatform}));
   // Cross installation is allowed, execution belongs to its native runner.
   const cross=platform!==hostPlatform();
-  return {...descriptor,work,install,platform,selection,cross};
+  if(descriptor.javaInterop!==undefined)compilerSha256??=await fileDigest(target.compiler.product);
+  const javaInterop=await javaInteropInput(descriptor.javaInterop,{platform,cross,compilerSha256,runtimeCommit:target.runtime.commit});
+  return {...descriptor,work,install,platform,selection,cross,javaInterop};
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { await prepareNativeInputs(await readJson(process.argv[2] || process.env.CJCJ_NATIVE_INPUTS)); }
