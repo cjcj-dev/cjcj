@@ -24,6 +24,17 @@ export const HOST_ONLY = new Map([
 // Native sources that belong to a different OS family.
 const FOREIGN_NATIVE = /(_win|_macos|_darwin)\.c$/;
 
+// The wasm32-wasi native sources of a package: `<stem>_wasi.c` replaces `<stem>.c`,
+// `<stem>_unix.c` and `<stem>_linux.c` (WASI Preview 1 lacks the POSIX APIs they need), and
+// `net_wasi.c` replaces every other source of the package (std.net has no sockets on WASI).
+export function wasiNativeSources(files) {
+  const cs = files.filter(f => f.endsWith('.c') && !FOREIGN_NATIVE.test(f));
+  const wasi = cs.filter(f => f.endsWith('_wasi.c'));
+  if (wasi.includes('net_wasi.c')) return wasi.sort();
+  const replaced = new Set(wasi.flatMap(f => { const stem = f.slice(0, -'_wasi.c'.length); return [stem + '.c', stem + '_unix.c', stem + '_linux.c']; }));
+  return cs.filter(f => !replaced.has(f)).sort();
+}
+
 export function archiveName(pkg) { return `libcangjie-${pkg.replace(/^std\./, 'std-').replace(/^std$/, 'std')}.a`; }
 
 export function discoverPackages(stdRoot) {
@@ -192,7 +203,7 @@ export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Sou
       const nativeDir = path.join(pkg.dir, 'native');
       const objects = [];
       if (fs.existsSync(nativeDir)) {
-        const cs = fs.readdirSync(nativeDir).filter(f => f.endsWith('.c') && !FOREIGN_NATIVE.test(f)).sort();
+        const cs = wasiNativeSources(fs.readdirSync(nativeDir));
         const incs = [`-I${nativeDir}`, `-I${path.join(bounds, 'include')}`, `-I${path.join(sdk, 'include')}`];
         if (name === 'std.regex') {
           pcre2 ??= pcre2Objects({pcre2Source, clang, sysroot, work: path.join(work, 'pcre2'), run});
