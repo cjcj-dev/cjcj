@@ -2,6 +2,9 @@ package modalpropextend
 
 public interface Seek {
     func seek(n: Int64): Int64
+    func seek(this @local!, n: Int64): Int64 {
+        throw Exception()
+    }
     prop length: Int64 {
         get() {
             seek(0)
