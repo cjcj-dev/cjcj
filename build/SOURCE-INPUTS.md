@@ -357,7 +357,15 @@ and the public compiler in the pending SDK. For an offline build set
 missing checkout is an error. The default fetches the pin in the build workspace.
 The install cache is keyed by actual compiler, runtime, std, JDK and native
 tool inputs; `CJCJ_JAVA_INTEROP_WORK` can locate that private build/cache area
-outside CI handoffs. An incomplete cached install fails before SDK publication.
+outside CI handoffs. Reuse is local to one Linux boot and mount namespace with
+an unchanged system toolchain; use a fresh work directory after replacing host
+headers or tool resources in place. The producer runs with an empty private
+home and a fixed tool search path (selected JDK, pending SDK, platform LLVM,
+then system binaries). It accepts only the self-contained `JDK_JAVAC_OPTIONS`
+flags `-g`, `-g:none` and `-Werror` and keys their ordered values. Other javac
+flags are rejected before lookup. Ambient JVM, Python, compiler and linker
+options are not passed to the build or install. An incomplete cached install
+fails before SDK publication.
 
 `run-all --from-native-install /path/to/install-result.json` resumes a completed
 stage3 component build at SDK assembly using its original compiler, runtime,
