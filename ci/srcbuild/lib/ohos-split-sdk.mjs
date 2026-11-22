@@ -56,7 +56,8 @@ export async function copyHost(parent, dest) {
   await fs.cp(parent, dest, {recursive:true, verbatimSymlinks:true, filter:p => !excluded.has(p)});
 }
 
-export async function installOhosStage3({parent, software, finalStd, stage2}) {
+export async function installOhosStage3({parent, software, finalStd, stage2, globalExportFlag}) {
+  if (globalExportFlag !== '0') throw Error('OHOS Stage3 requires verified GLOBAL_EXPORT_FLAG=0');
   const target = path.join(software, 'ohos-stage3', 'cangjie');
   await privateRoot(target);
   const input = await fs.realpath(parent);
@@ -78,7 +79,7 @@ export async function installOhosStage3({parent, software, finalStd, stage2}) {
     await fs.writeFile(path.join(pending, 'OHOS-TARGET.json'), JSON.stringify({tuple, hostRuntimeCommit:hostRef,
       compilerCommit:compiler, llvmCommit:llvm, stage2CompilerSha256:stage2.compilerSha256,
       stage3CompilerSha256:lineage.compilerSha256, runtimeCommit:targetRef, stdCommit:targetRef,
-      globalExportFlag:0, exportMap:'ohos_local_export.map', astSha256:astSha, fullHostToolsStdx:'NOT_INCLUDED'}, null, 2) + '\n');
+      globalExportFlag, exportMap:'ohos_local_export.map', astSha256:astSha, fullHostToolsStdx:'NOT_INCLUDED'}, null, 2) + '\n');
     await publishPaths([{pending,destination:target}]);
   } finally { await fs.rm(pending, {recursive:true, force:true}); }
   console.log('OHOS_STAGE3_INSTALLED', target);

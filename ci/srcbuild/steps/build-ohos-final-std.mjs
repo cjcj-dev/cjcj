@@ -66,7 +66,7 @@ try {
     await assertBootstrapCompiler({sdk, command, producer: originalCompiler.product, producerSha256: originalCompiler.lineage.compilerSha256});
   };
   await assertCompiler();
-  const runtimeInstall = await buildOhosRuntime({workspace, native, arch, version, runtimeRef, localExport:split, env: stageEnv});
+  const {root: runtimeInstall, globalExportFlag} = await buildOhosRuntime({workspace, native, arch, version, runtimeRef, localExport:split, env: stageEnv});
   await assertCompiler();
   await verifyStdBuildInputs(sdk);
   const extraLibs = [];
@@ -105,7 +105,7 @@ try {
   await $`file ${path.join(runtimeArtifact, 'runtime', 'lib', tuple, 'libcangjie-runtime.so')} ${path.join(finalStd, 'runtime', 'lib', tuple, 'libcangjie-std-core.so')}`;
   await $`sha256sum ${path.join(runtimeArtifact, 'runtime', 'lib', tuple, 'libcangjie-runtime.so')} ${path.join(finalStd, 'lib', tuple, 'libcangjie-std-core.a')}`;
   console.log(`OHOS_FINAL_STD_BUILT tuple=${tuple} runtime_ref=${runtimeRef} artifact=${finalStd}`);
-  if (split) await installOhosStage3({parent:parent3, software:path.dirname(finalStd), finalStd, stage2:originalCompiler.lineage});
+  if (split) await installOhosStage3({parent:parent3, software:path.dirname(finalStd), finalStd, stage2:originalCompiler.lineage, globalExportFlag});
 } finally {
   if (split) await fs.rm(sdk, {recursive:true, force:true});
 }

@@ -5,6 +5,17 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import {writeCrossRuntimeManifest} from '../../release/cross-runtime.mjs';
 
+// Read the completed runtime configure, before installing or publishing its output.
+export async function readLocalExportFlag(cacheFile) {
+  const cache = await fs.readFile(cacheFile, 'utf8');
+  const entries = cache.split(/\r?\n/).filter(line => line.startsWith('GLOBAL_EXPORT_FLAG:'));
+  const match = entries.length === 1 && /^GLOBAL_EXPORT_FLAG:(?:STRING|UNINITIALIZED)=(.*)$/.exec(entries[0]);
+  if (!match || match[1] !== '0') {
+    throw Error(`expected GLOBAL_EXPORT_FLAG=0 in ${cacheFile}; got ${JSON.stringify(entries)}`);
+  }
+  return match[1];
+}
+
 // runtime/build.py --ohos-public-sdk feeds the same native root to runtime
 // and cjthread; never construct a private OHOS_ROOT or rename libc++.so.
 export async function buildOhosRuntime({workspace, native, arch, version, runtimeRef, localExport = false, env = process.env}) {
@@ -21,6 +32,8 @@ export async function buildOhosRuntime({workspace, native, arch, version, runtim
   }
   await $({cwd: runtime, env})`python3 build.py clean`;
   await $({cwd: runtime, env})`python3 build.py build -t release --target ${`ohos-${arch}`} --prefix ${path.join(runtime, 'output', 'common')} --ohos-public-sdk ${native} -v ${version}`;
+  const globalExportFlag = localExport
+    ? await readLocalExportFlag(path.join(runtime, 'CMakebuild', 'CMakeCache.txt')) : undefined;
   await $({cwd: runtime, env})`python3 build.py install`;
   const root = path.join(runtime, 'output', 'common', `linux_ohos_release_${arch}`);
   const tuple = `linux_ohos_${arch}_cjnative`;
@@ -36,5 +49,5 @@ export async function buildOhosRuntime({workspace, native, arch, version, runtim
   const sourceRepository = localExport
     ? (await $({stdio:'pipe'})`git -C ${repository} remote get-url origin`).stdout.trim() : undefined;
   await writeCrossRuntimeManifest({root, tuple, runtimeRef, sourceRepository});
-  return root;
+  return {root, globalExportFlag};
 }
