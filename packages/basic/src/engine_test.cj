@@ -22,6 +22,54 @@ private class LSPDiagnosticHandlerTest <: DiagnosticHandler {
 
 @Test
 class EngineTest {
+    private func warning(group: WarnGroup): Diagnostic {
+        let diagnostic = Diagnostic()
+        diagnostic.diagSeverity = DiagSeverity.DS_WARNING
+        diagnostic.warnGroup = group
+        diagnostic.errorMessage = "test warning"
+        return diagnostic
+    }
+
+    @TestCase
+    func warningWithoutGroup(): Unit {
+        let diag = DiagnosticEngine()
+        let handler = LSPDiagnosticHandlerTest(diag)
+        diag.RegisterHandler(handler)
+        let diagnostic = warning(WarnGroup.NONE)
+        diag.HandleDiagnostic(diagnostic)
+        @Expect(handler.lastMessage, "test warning")
+        @Expect(diag.GetWarningCount(), 1u64)
+        @Expect(diagnostic.subDiags.isEmpty())
+    }
+
+    @TestCase
+    func warningGroupOptions(): Unit {
+        let diag = DiagnosticEngine()
+        diag.RegisterHandler(LSPDiagnosticHandlerTest(diag))
+        // -Woff unused changes just this slot. Restore it for other tests.
+        let index = UInt64(WarnGroupIndex(WarnGroup.UNUSED))
+        let saved = WarningOptionMgr.GetInstance().IsSuppressed(index)
+        try {
+            WarningOptionMgr.UpdateFlag(index, true)
+            diag.HandleDiagnostic(warning(WarnGroup.UNUSED))
+            @Expect(diag.GetWarningCount(), 0u64)
+            let ungrouped = warning(WarnGroup.UNGROUPED)
+            diag.HandleDiagnostic(ungrouped)
+            @Expect(diag.GetWarningCount(), 1u64)
+            @Expect(ungrouped.subDiags.isEmpty())
+            let deprecated = warning(WarnGroup.DEPRECATED)
+            diag.HandleDiagnostic(deprecated)
+            @Expect(diag.GetWarningCount(), 2u64)
+            @Assert(deprecated.subDiags.size, 1)
+            @Expect(deprecated.subDiags[0].subDiagMessage.contains("-Woff deprecated"))
+            WarningOptionMgr.UpdateFlag(index, false)
+            diag.HandleDiagnostic(warning(WarnGroup.UNUSED))
+            @Expect(diag.GetWarningCount(), 3u64)
+        } finally {
+            WarningOptionMgr.UpdateFlag(index, saved)
+        }
+    }
+
     // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:72 TEST(EngineTest, Register1)
     @TestCase
     func register1(): Unit {
