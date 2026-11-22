@@ -138,14 +138,42 @@ def install_xcode():
     export('DEVELOPER_DIR', developer)
 
 
+def install_wasi_sysroot(root):
+    """Install the wasi-sysroot pinned by ci/wasi_pin.env and export CJCJ_WASI_SYSROOT."""
+    pin = {}
+    for line in (Path(__file__).resolve().parent.parent / 'wasi_pin.env').read_text(encoding='utf-8').splitlines():
+        if line.strip() and not line.startswith('#'):
+            key, _, value = line.partition('=')
+            pin[key.strip()] = value.strip()
+    root.mkdir(parents=True, exist_ok=True)
+    archive = root / Path(pin['WASI_SYSROOT_URL']).name
+    run('curl', '--fail', '--location', '--retry', '3', '--output', archive, pin['WASI_SYSROOT_URL'])
+    digest = hashlib.sha256()
+    with archive.open('rb') as source:
+        for block in iter(lambda: source.read(1024 * 1024), b''):
+            digest.update(block)
+    actual = digest.hexdigest()
+    print(f'WASI_SYSROOT_SHA256={actual}', flush=True)
+    if actual != pin['WASI_SYSROOT_SHA256']:
+        raise ValueError(f"wasi-sysroot identity mismatch: expected {pin['WASI_SYSROOT_SHA256']}, got {actual}")
+    with tarfile.open(archive, 'r:gz') as bundle:
+        bundle.extractall(root, filter='data')
+    sysroot = root / 'wasi-sysroot'
+    if not (sysroot / 'lib' / 'wasm32-wasi' / 'libc.a').is_file():
+        raise ValueError(f'{archive} did not unpack a wasi-sysroot with lib/wasm32-wasi/libc.a')
+    export('CJCJ_WASI_SYSROOT', str(sysroot))
+    export('CJCJ_WASI_SYSROOT_TARBALL', str(archive))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('requirement', choices=['android-ndk', 'ohos-sdk', 'xcode-ios'])
+    parser.add_argument('requirement', choices=['android-ndk', 'ohos-sdk', 'xcode-ios', 'wasi-sysroot'])
     parser.add_argument('--root', type=Path, required=True)
     args = parser.parse_args()
     # Every invocation owns a fresh directory; never reuse a partially installed SDK.
     args.root.mkdir(parents=True, exist_ok=False)
-    {'android-ndk': install_ndk, 'ohos-sdk': lambda: install_ohos(args.root), 'xcode-ios': install_xcode}[args.requirement]()
+    {'android-ndk': install_ndk, 'ohos-sdk': lambda: install_ohos(args.root), 'xcode-ios': install_xcode,
+     'wasi-sysroot': lambda: install_wasi_sysroot(Path(args.root))}[args.requirement]()
 
 
 if __name__ == '__main__':

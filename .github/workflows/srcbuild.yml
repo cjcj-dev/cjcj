@@ -99,6 +99,11 @@ on:
         required: false
         type: boolean
         default: false
+      build_wasm:
+        description: Build the wasm32-wasi (WASI Preview 1) runtime and complete final std needed by -wasm release packages
+        required: false
+        type: boolean
+        default: false
       rebuild_llvm:
         description: Bypass the whole-artifact LLVM tools cache so the LLVM sccache hit rate can be measured.
         required: false
@@ -202,6 +207,11 @@ on:
         required: false
         type: boolean
         default: false
+      build_wasm:
+        description: Build the wasm32-wasi (WASI Preview 1) runtime and complete final std needed by -wasm release packages
+        required: false
+        type: boolean
+        default: false
       rebuild_llvm:
         description: Bypass the whole-artifact LLVM tools cache so the LLVM sccache hit rate can be measured.
         required: false
@@ -283,6 +293,7 @@ jobs:
       dry_run: ${{ inputs.dry_run || false }}
       runtime_ref: ${{ inputs.runtime_ref }}
       build_android: ${{ inputs.build_android || false }}
+      build_wasm: ${{ inputs.build_wasm || false }}
       build_ohos: ${{ inputs.build_ohos || false }}
       build_ios: ${{ inputs.build_ios || false }}
       rebuild_llvm: ${{ inputs.rebuild_llvm || false }}

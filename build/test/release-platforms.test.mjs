@@ -24,9 +24,12 @@ const OFFICIAL = [
   'linux-arm64', 'linux-x64', 'linux-x64-android', 'linux-x64-ohos', 'ohos-arm64',
   'win32-x64', 'win32-x64-android', 'win32-x64-ohos', 'win32-x64-ohos-arm32',
 ];
+// First-class WASI Preview 1 targets (0.0.2): no official archive exists yet; each mirrors the
+// matching -android host package and carries only the wasi_wasm32_cjnative cross tuple.
+const WASM = ['darwin-arm64-wasm', 'linux-x64-wasm', 'win32-x64-wasm'];
 
-test('the release platform table is exactly the fourteen official packages', () => {
-  assert.deepEqual([...allReleasePlatforms()].sort(), OFFICIAL);
+test('the release platform table is exactly the fourteen official packages plus the three -wasm targets', () => {
+  assert.deepEqual([...allReleasePlatforms()].sort(), [...OFFICIAL, ...WASM].sort());
 });
 
 test('every release platform names a buildable host target and a runner of that host', () => {
@@ -46,8 +49,8 @@ test('every release platform names a buildable host target and a runner of that 
 test('readiness is derived from DAG producers: complete native SDK producers are distinct from cross std/component producers', () => {
   const byStatus = {buildable: [], blocked: [], excluded: []};
   for (const key of allReleasePlatforms()) byStatus[releasePlatformReadiness(key).status].push(key);
-  assert.deepEqual(byStatus.buildable, ['linux-x64', 'linux-x64-android', 'linux-x64-ohos']);
-  for (const key of ['win32-x64', 'win32-x64-android', 'win32-x64-ohos']) {
+  assert.deepEqual(byStatus.buildable, ['linux-x64', 'linux-x64-android', 'linux-x64-wasm', 'linux-x64-ohos']);
+  for (const key of ['win32-x64', 'win32-x64-android', 'win32-x64-wasm', 'win32-x64-ohos']) {
     const readiness = releasePlatformReadiness(key);
     assert.equal(readiness.sdkSourceTarget, null, key + ': cross std does not supply a native SDK');
     assert.equal(readiness.status, 'blocked');
@@ -55,7 +58,7 @@ test('readiness is derived from DAG producers: complete native SDK producers are
     assert.equal(readiness.packageDeclared, true, 'the Windows package obligation remains');
   }
   assert.deepEqual(byStatus.excluded, ['win32-x64-ohos-arm32']);
-  assert.deepEqual(byStatus.blocked, ['linux-arm64', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'darwin-arm64-ios', 'darwin-arm64-ohos', 'ohos-arm64', 'win32-x64', 'win32-x64-android', 'win32-x64-ohos']);
+  assert.deepEqual(byStatus.blocked, ['linux-arm64', 'darwin-arm64', 'darwin-x64', 'darwin-arm64-android', 'darwin-arm64-ios', 'darwin-arm64-wasm', 'darwin-arm64-ohos', 'ohos-arm64', 'win32-x64', 'win32-x64-android', 'win32-x64-wasm', 'win32-x64-ohos']);
   for (const key of byStatus.blocked) {
     const readiness = releasePlatformReadiness(key);
     assert.ok(readiness.reasons.length > 0, `${key} blocked without a reason`);
@@ -215,5 +218,5 @@ test('a platform whose SDK is installed and probed no longer reports a missing c
   }
   // Nine uses over nine platforms (the excluded arm32 package also names ohos-sdk,
   // and is held to the same no-stale-claim rule before its own ARM32 line).
-  assert.equal(checkedRequirements, 9, 'the requirement uses across the release platform table');
+  assert.equal(checkedRequirements, 12, 'the requirement uses across the release platform table');
 });

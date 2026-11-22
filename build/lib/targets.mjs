@@ -312,6 +312,10 @@ export const CROSS_STD_BUILDS = Object.freeze([
   {family: 'ios', target: 'darwin-arm64', tuple: 'ios_aarch64_cjnative', arch: 'arm64', runtimeArch: 'aarch64', sdk: 'iphoneos', runtime_target: 'ios-aarch64', artifact: 'final-std-ios-aarch64-cjnative'},
   {family: 'ios', target: 'darwin-arm64', tuple: 'ios_simulator_aarch64_cjnative', arch: 'arm64', runtimeArch: 'aarch64', sdk: 'iphonesimulator', runtime_target: 'ios-simulator-aarch64', artifact: 'final-std-ios-simulator-aarch64-cjnative'},
   {family: 'ios', target: 'darwin-arm64', tuple: 'ios_simulator_x86_64_cjnative', arch: 'x86_64', runtimeArch: 'x86_64', sdk: 'iphonesimulator', runtime_target: 'ios-simulator-x86_64', artifact: 'final-std-ios-simulator-x86-64-cjnative'},
+  // WASI Preview 1 (wasm32-unknown-wasi): runtime archive + complete final std are produced on
+  // the linux-x64 source cell by ci/srcbuild/steps/build-wasm-final-std.mjs. No native SDK is
+  // needed on the consumer side: the SDK ships the pinned wasi-sysroot and its own wasm-ld.
+  {family: 'wasm', target: 'linux-x64', tuple: 'wasi_wasm32_cjnative', arch: 'wasm32', triple: 'wasm32-unknown-wasi', runtime_target: 'wasm32-wasi', artifact: 'final-std-wasm32-wasi'},
 ].map(Object.freeze));
 const DAG_CROSS_STD_PRODUCERS = Object.freeze({
   windows_x86_64_cjnative: 'linux-x64',
@@ -340,6 +344,11 @@ export const RELEASE_REQUIREMENTS = Object.freeze({
     envCandidates: Object.freeze(['OHOS_SDK_HOME', 'OHOS_NDK_HOME', 'HOS_SDK_HOME']),
     marker: 'native/llvm/bin',
   }),
+  'wasi-sysroot': Object.freeze({
+    summary: 'pinned wasi-sysroot (ci/wasi_pin.env) for wasm32-unknown-wasi',
+    envCandidates: Object.freeze(['CJCJ_WASI_SYSROOT', 'WASI_SYSROOT']),
+    marker: 'lib/wasm32-wasi/libc.a',
+  }),
   'xcode-ios': Object.freeze({
     summary: 'Xcode with iphoneos and iphonesimulator SDKs',
     xcrunSdks: Object.freeze(['iphoneos', 'iphonesimulator']),
@@ -355,6 +364,7 @@ export const DAG_REQUIREMENT_PRODUCERS = Object.freeze({
   'android-ndk': Object.freeze({job: 'prerequisites', action: './.github/actions/setup-release-sdk'}),
   'ohos-sdk': Object.freeze({job: 'prerequisites', action: './.github/actions/setup-release-sdk'}),
   'xcode-ios': Object.freeze({job: 'prerequisites', action: './.github/actions/setup-release-sdk'}),
+  'wasi-sysroot': Object.freeze({job: 'prerequisites', action: './.github/actions/setup-release-sdk'}),
 });
 
 // ARM32 is abandoned for 0.0.2 (user order: 放弃 32 位). Tuples listed here are
@@ -391,6 +401,10 @@ const RELEASE_PLATFORMS = Object.freeze([
     droppedTuples: Object.freeze(['linux_android23_arm_cjnative']), requires: Object.freeze(['android-ndk']),
   }),
   releasePlatform({
+    key: 'linux-x64-wasm', officialArchive: 'cangjie-sdk-linux-x64-wasm', host: 'linux-x64',
+    runner: 'ubuntu-24.04', crossTuples: Object.freeze(['wasi_wasm32_cjnative']), requires: Object.freeze(['wasi-sysroot']),
+  }),
+  releasePlatform({
     key: 'linux-x64-ohos', officialArchive: 'cangjie-sdk-linux-x64-ohos', host: 'linux-x64',
     runner: 'ubuntu-24.04',
     crossTuples: Object.freeze(['linux_ohos_aarch64_cjnative', 'linux_ohos_x86_64_cjnative', 'windows_x86_64_cjnative']),
@@ -414,6 +428,10 @@ const RELEASE_PLATFORMS = Object.freeze([
     requires: Object.freeze(['xcode-ios']),
   }),
   releasePlatform({
+    key: 'darwin-arm64-wasm', officialArchive: 'cangjie-sdk-mac-aarch64-wasm', host: 'darwin-arm64',
+    runner: 'macos-15', crossTuples: Object.freeze(['wasi_wasm32_cjnative']), requires: Object.freeze(['wasi-sysroot']),
+  }),
+  releasePlatform({
     key: 'darwin-arm64-ohos', officialArchive: 'cangjie-sdk-mac-aarch64-ohos', host: 'darwin-arm64',
     runner: 'macos-15', crossTuples: Object.freeze(['linux_ohos_aarch64_cjnative']),
     requires: Object.freeze(['ohos-sdk']),
@@ -435,6 +453,10 @@ const RELEASE_PLATFORMS = Object.freeze([
     key: 'win32-x64-android', officialArchive: 'cangjie-sdk-windows-x64-android', host: 'windows-x64',
     runner: 'windows-2025', crossTuples: Object.freeze(['linux_android_aarch64_cjnative', 'linux_x86_64_cjnative']),
     droppedTuples: Object.freeze(['linux_android23_arm_cjnative']), requires: Object.freeze(['android-ndk']),
+  }),
+  releasePlatform({
+    key: 'win32-x64-wasm', officialArchive: 'cangjie-sdk-windows-x64-wasm', host: 'windows-x64',
+    runner: 'windows-2025', crossTuples: Object.freeze(['wasi_wasm32_cjnative']), requires: Object.freeze(['wasi-sysroot']),
   }),
   releasePlatform({
     key: 'win32-x64-ohos', officialArchive: 'cangjie-sdk-windows-x64-ohos', host: 'windows-x64',
