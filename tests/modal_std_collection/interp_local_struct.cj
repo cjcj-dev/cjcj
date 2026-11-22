@@ -7,6 +7,7 @@ package modalinterplocal
 struct P <: ToString {
     let raw: String
     init(raw: String) { this.raw = raw }
+    exclave init(this @local!, raw: String @local!) { this.raw = raw }
     public func toString(): String { raw }
     public exclave func toString(this @local?): String @local! { raw.toString() }
 }
