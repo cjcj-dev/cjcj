@@ -6,6 +6,9 @@
 # values still cannot reach non-local slots. A value bound by `opt ?? throw` keeps plain properties
 # (arg_opt.cj:676) and exclave HashMap.mapValues with a concrete key lowers (hash_map.cj:1686).
 # The plain and the exclave std.core acquireArrayRawData<Byte> lower side by side in one package (file.cj:770).
+# A value bound from a trailing-closure call, a `|>` pipeline or `quote(...)` keeps plain properties
+# (std.unittest entry_main.cj:60, testmacro instrumentation.cj:697, macro_state.cj:37); a @local! pipeline
+# result still cannot read a plain-receiver property.
 set -u
 cjc=$1; out=$2; here=$(cd "$(dirname "$0")" && pwd); mkdir "$out" || exit 2
 fail=0
@@ -34,4 +37,6 @@ check coalesce_enum_prop 0 ""
 check exclave_map_values_add 0 ""
 check interp_local_struct 0 ""
 check exclave_raw_data_imported 0 ""
+check lowered_receiver_prop 0 ""
+check neg_lowered_receiver_plain 1 "'details' is not a member of class 'Box'"
 exit $fail
