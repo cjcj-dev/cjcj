@@ -283,7 +283,13 @@ readTest('Cangjie lint requires explicit analysis facts, bundled modules and hos
   const row=await f.write(retain+tail,'selected '+tail),built={source:'/raw/'+tail,sha256:row.sha256};
   p.build.payloads[row.path]=built;p.install.payloads[row.path]={...built,build:structuredClone(built)};f.input.payloadFiles[row.path]={sha256:row.sha256,producers:['cjlint']};
  }
+ const publicConfig='tools/config/cjlint_rule_list.json';
+ await f.write(publicConfig,'selected config/cjlint_rule_list.json');
  f.input.files[rel]=template;await f.save();assert.equal(publicRead(f.root).cjlint.ready,true);
+ await f.write(publicConfig,'old public configuration');
+ assert.match(publicRead(f.root).cjlint.reason,/installed bytes differ.*tools\/config\/cjlint_rule_list/);
+ assert.equal(publicRead(f.root).cjprof.ready,true);
+ await f.write(publicConfig,'selected config/cjlint_rule_list.json');
  const original=structuredClone(values.analysis);delete values.analysis;await f.save();
  assert.match(publicRead(f.root).cjlint.reason,/analysis configuration missing/);assert.equal(publicRead(f.root).cjprof.ready,true);
  values.analysis=original;await f.save();assert.equal(publicRead(f.root).cjlint.ready,true);

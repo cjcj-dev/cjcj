@@ -33,6 +33,7 @@ export async function run(config) {
       for (const subdirectory of ['lib','runtime',...(config.target.spec.os==='linux'?['share/runtime-build']:[])])
         copyContents(path.join(input.install,subdirectory),path.join(compilerOutput,subdirectory),{stage:'runtime.adopt.native'});
       await fs.copyFile(path.join(input.install,RUNTIME_INPUTS),path.join(compilerOutput,RUNTIME_INPUTS));
+      await fs.copyFile(input.buildResult,path.join(compilerOutput,'NATIVE-INPUTS.json'));
       // The legacy stdlib stage consumes this build input snapshot. Reuse the
       // native SDK adapter without rebuilding or mutating the R installation.
       await prepareRuntimeInputs({runtime:input.install,link:targetDir,

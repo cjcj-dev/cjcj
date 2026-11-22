@@ -60,6 +60,8 @@ test('A8 controlled HLE inputs and ten installed tool interfaces retain configur
  assert.equal(recorded.buildSelection.reusedExistingOutputs.length,10);
  for(const [name]of rows){const result=spawnSync(path.join(sdk,'tools/bin',name),[],{encoding:'utf8'});console.log('A8_NATIVE_INSTALL_TARGET_ASSERTION_REACHED',name,result.status,result.stdout.trim());assert.deepEqual({rc:result.status,out:result.stdout.trim()},{rc:0,out:name+':42'});}
  assert.equal(await fs.readFile(path.join(sdk,'tools/config/other.toml'),'utf8'),'preserved');
+ assert.equal(await fs.readFile(path.join(sdk,'tools/config/cjlint_rule_list.json'),'utf8'),
+  await fs.readFile(path.join(sdk,'.target-tools/tools/cjlint/config/cjlint_rule_list.json'),'utf8'));
  assert.equal(await fs.readFile(path.join(sdk,'tools/config/cangjie-repo.toml'),'utf8'),'new repository');
  assert.equal(await fs.readFile(path.join(sdk,'tools/dtsparser/analysis.js'),'utf8'),'controlled parser source');
  const caller=path.join(work,'unrelated caller');await fs.mkdir(caller);

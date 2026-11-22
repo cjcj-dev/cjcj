@@ -9,7 +9,7 @@ import {installEntries} from '../../ci/bootstrap/sdk-install-entries.mjs';
 import {sdkPlatform} from '../../ci/bootstrap/sdk-platform.mjs';
 import {installPath as mingwInstallPath} from '../toolchain/mingw.mjs';
 import {installedToolBuildInputs,sdkInputs,toolExecutionPayloads} from './tool-build-inputs.mjs';
-import {TOOL_NAMES,privateToolPayload,requireToolProducer,toolOutputs,toolPayloads,retainedToolPath} from './tool-layout.mjs';
+import {TOOL_NAMES,privateToolPayload,requireToolProducer,toolOutputs,toolPayloads,retainedToolPath,cjlintPublicConfigPath} from './tool-layout.mjs';
 
 export const sourceToolOutputs=toolOutputs;
 export async function installSourceTools(config, installRoot=path.join(config.softwareDir,'cangjie'), {consume,dependencies}={}) {
@@ -26,6 +26,11 @@ export async function installSourceTools(config, installRoot=path.join(config.so
     files[row.to]={source:row.from,sha256:await fileDigest(row.from),producer:await installedToolBuildInputs(config,name,row.from)};
   }
   const payloads=(await Promise.all(rows.map(row=>toolPayloads(config,row.producer)))).flat();
+  const lintConfig=payloads.flatMap(row=>{
+    const to=cjlintPublicConfigPath(row.to);
+    return to?[{...row,to}]:[];
+  });
+  payloads.push(...lintConfig);
   for(const row of rows)payloads.push(...await toolExecutionPayloads(config,row.producer,files[row.to].producer));
   const payloadFiles={};
   for(const row of payloads){

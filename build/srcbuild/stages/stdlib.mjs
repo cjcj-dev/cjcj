@@ -1,5 +1,6 @@
 // Port of cangjie-build/src/cangjie_build/stages/stdlib.py.
 
+import fs from 'node:fs';
 import path from 'node:path';
 import {stage} from '../../lib/logging.mjs';
 import {writeStdProvenance} from '../../lib/provenance.mjs';
@@ -10,6 +11,23 @@ import {bootstrapHostSdk, copyContents, opensslLibPath, runBuildPy, windowsCross
 
 export function shouldRunGcUnitLanguageTests(env = process.env) {
   return !env.CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE;
+}
+
+// The native-output installer takes compiler/output as a whole. On an
+// incremental build, copying std/output alone leaves retired flat libraries
+// behind. Mirror those entries from the std installation that owns them.
+export function copyHostStd(std, compiler, target) {
+  copyContents(std, compiler, {stage:'stdlib.copy.host'});
+  if (!['linux-x64', 'linux-aarch64'].includes(target.spec.key)) return;
+  const lib = path.join('runtime/lib', target.spec.runtimeTuple);
+  const installed = path.join(std, lib);
+  if (!fs.lstatSync(path.join(installed, 'pcre2'), {throwIfNoEntry:false})?.isDirectory()) return;
+  const merged = path.join(compiler, lib);
+  for (const entry of fs.readdirSync(merged, {withFileTypes:true})) {
+    if ((entry.isFile() || entry.isSymbolicLink()) && /^libpcre2-8\.so(?:\.\d+)*$/.test(entry.name)
+        && !fs.lstatSync(path.join(installed, entry.name), {throwIfNoEntry:false}))
+      fs.unlinkSync(path.join(merged, entry.name));
+  }
 }
 
 export async function run(config) {
@@ -43,7 +61,7 @@ export async function run(config) {
     if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
       await writeStdProvenance({sourceDir: stdlibRoot, installPrefix: stdlibOutput, compiler});
     }
-    copyContents(stdlibOutput, compilerOutput, {stage: 'stdlib.copy.host'});
+    copyHostStd(stdlibOutput, compilerOutput, config.target);
     // Report-mode output is quarantined and must never be executed as a
     // product.  The formal build path still runs this gate; diagnostic step 19
     // stops after compiling/installing every stdlib module and inventorying it.

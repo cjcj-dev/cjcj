@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import {readSourcePins} from './native-llvm-inputs.mjs';
+import {readHostToolchainPin} from './host-toolchain-pin.mjs';
 import {nativeSourceSelection} from './bootstrap/native-source-selection.mjs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -22,6 +24,18 @@ export function nativePair(env = process.env, {requireHost=true} = {}) {
   if (requireHost && !/^\d+\.\d+\.\d+-alpha\.\d+$/.test(hostVersion || ''))
     throw new Error('NATIVE_RUNTIME_EXPLICIT_HOST_REQUIRED');
   return {llvm, runtime, hostVersion};
+}
+
+// A development SDK chooses target components independently of the fixed
+// native LLVM tools and the legacy bootstrap/runtime matrix.
+export function developmentSdkPair(target) {
+  if (target !== 'linux-x64') return null;
+  const {runtime, llvm} = readSourcePins();
+  const pair = {runtime: runtime.LINUX_X64_SDK_RUNTIME_REF, llvm: llvm.LINUX_X64_SDK_LLVM_SHA,
+    hostVersion: readHostToolchainPin('linux_x86_64').replace(/^nightly-/, '')};
+  if (![pair.runtime, pair.llvm].every(ref => /^[0-9a-f]{40}$/.test(ref || '')))
+    throw new Error('LINUX_X64_SDK_PAIR_PIN');
+  return pair;
 }
 
 export async function resolveRuntimeSource(env = process.env, pinFile = env.CJCJ_BOOTSTRAP_RUNTIME_PIN) {

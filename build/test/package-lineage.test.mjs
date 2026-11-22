@@ -281,7 +281,11 @@ for(const separateBackend of [false,true])test('normal install pair and language
   }
   await write(R,statusRel,deferred);files[statusRel]=digest(deferred);
   await write(R,'include/schedule.h','finite installed runtime headers');
-  let original=JSON.stringify({runtime_sha:STD,paired_llvm_sha:STAGE2,platform,files});
+  const configuration={buildType:'release',version:'finite target',hostVersion:'finite host',pairedLlvmCommit:STAGE2};
+  const pair=JSON.parse(await fs.readFile(R+'/RUNTIME-INPUTS.json'));
+  pair.build={configuration};await write(R,'RUNTIME-INPUTS.json',JSON.stringify(pair));
+  files['RUNTIME-INPUTS.json']=digest(JSON.stringify(pair));
+  const original=JSON.stringify({runtime_sha:STD,paired_llvm_sha:STAGE2,platform,version:configuration.version,build_type:configuration.buildType,configuration,files});
   await write(R,'NATIVE-INPUTS.json',original);
   for(const rel of ['modules','lib/'+TUPLE+'/libcangjie-std-core.a','PROVENANCE.txt'])await copy(fixture,S,rel);
   const cjo='modules/'+TUPLE+'/std/std.core.cjo';await write(S,cjo,'finite std CJO');
@@ -376,7 +380,7 @@ export async function verifyRelocatedCjdbPython(){throw Error('not used');}`;
 
   const component=(install,extra={})=>({...source,platform,install,...extra});
   const target={compiler:component(C,{product:C+'/bin/cjcj-stage1'}),std:component(S),
-    runtime:component(R,{buildResult:R+'/NATIVE-INPUTS.json',sourceRoot:root+'/source',gateStatus:runtime+'/CMakebuild/gc-unit.status'}),
+    runtime:component(R,{component:true,configuration,sourceRoot:root+'/source',gateStatus:runtime+'/CMakebuild/gc-unit.status'}),
     llvm:component(N,{commit:STAGE2,buildResult:N+'/BUILD-INPUTS.json'}),ast:component(N,{astInstallation:produced.astInstallation})};
   let backend;
   if(separateBackend) {
@@ -398,10 +402,9 @@ endforeach()
     await command(['cmake','--build',build,'--parallel','2'],{records});
     for(const tool of ['llc','opt'])await command(['cmake','--install',build,'--component',tool],{records});
     backend=component(install,{commit,build});target.backend=backend;
-    original=JSON.stringify({runtime_sha:STD,paired_llvm_sha:commit,platform,files});
-    await write(R,'NATIVE-INPUTS.json',original);
+    assert.notEqual(commit,STAGE2,'backend is independent of the N paired with runtime');
   }
-  const descriptor={work:root+'/work',install:sdk,selection:{platform,hostPlatform:platform,bootstrapHost:{install:H,platform},
+  const descriptor={work:root+'/work',install:sdk,selection:{platform,hostPlatform:platform,bootstrapHost:{install:H,platform,version:configuration.hostVersion},
     compilerExecution:{role:'target',stage:'finite-final',platform,...target},targetComponents:target},test:{commands:[
       {argv:[process.execPath,'-e',`const f=require('node:fs'),a=require('node:assert/strict'),s=process.argv[1];console.log('INSTALL_PAIR_ASSERTION_REACHED');a.equal(f.readFileSync(s+'/RUNTIME-INPUTS.json','utf8'),f.readFileSync(${JSON.stringify(R+'/RUNTIME-INPUTS.json')},'utf8'));`, '${install}']},
       {argv:[process.execPath,new URL('../../ci/bootstrap/sdk-installed-language.mjs',import.meta.url).pathname,'--sdk','${install}','--platform',platform,'--work','${work}/language']},
@@ -423,6 +426,13 @@ endforeach()
   const inputs=await installedInputs(sdk,platform),r=inputs.components.find(row=>row.component==='runtime');
   if(separateBackend) {
     console.log('SEPARATE_BACKEND_SELECTION_ASSERTION_REACHED');
+    const fileNative=sdk+'/share/cjcj/build-inputs/native-runtime.json';
+    await fs.unlink(fileNative);
+    await assert.rejects(installedInputs(sdk,platform),error=>error.code==='ENOENT'&&error.path===fileNative);
+    const withoutConfig=JSON.parse(original);delete withoutConfig.configuration;
+    await fs.writeFile(fileNative,JSON.stringify(withoutConfig));
+    await assert.rejects(installedInputs(sdk,platform),/INSTALLED_RUNTIME_NATIVE_CONFIGURATION/);
+    await fs.writeFile(fileNative,original);
     const selected=inputs.components.find(row=>row.component==='llvm-backend');
     assert.equal(selected.source.commit,backend.commit);
     assert.equal(inputs.components.find(row=>row.component==='llvm-cjdb').source.commit,STAGE2);
@@ -498,6 +508,7 @@ endforeach()
   assert.notEqual(r.results[0].sha256,files[statusRel]);
   const {rows}=await writeInstalledReleaseManifest({stage:sdk,platform,...inputs});
   assert.deepEqual(rows.find(row=>row.component==='runtime').results,r.results);
+  if(backend)for(const name of ['llvm-llc','llvm-opt'])assert.equal(rows.find(row=>row.component===name).source.commit,backend.commit);
   await verifyInstalledReleaseManifest({stage:sdk,platform,...inputs});
   const lineage=await inspectPackagedLineage(sdk);console.log('NATIVE_TARGET_LINEAGE_ASSERTION_REACHED '+JSON.stringify(lineage));
   assert.equal(lineage.ok,true,lineage.message);

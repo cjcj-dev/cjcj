@@ -323,3 +323,29 @@ normally without rebuilding its complete peer. Libedit's configure consumes
 that ncurses prefix. Compiler environment construction uses these same prefixes;
 standalone native-CJDB descriptors must select the actual new installation and
 run their own affected native link/install gates before claiming that input.
+
+### Default managed Linux x64 development SDK
+
+Before acquiring the component checkouts, run
+`node ci/load_runtime_pin.mjs --development-sdk OUTPUT` with
+`CJCJ_SRCBUILD_TARGET=linux-x64`, `RUNTIME_NATIVE_PAIR=1` and a native Release
+runtime build. The new output file uses the existing job environment format.
+That invocation selects the scoped pair and official bootstrap host; an
+explicit pair takes precedence. Ordinary runtime builds, public fetch/run-all
+(including saved repository choices), and other targets keep their own pins.
+
+Use the selected refs for checkout and pass the output environment to
+`ci/platform_matrix/build_runtime.mjs`. For the direct target std producer
+pass the same runtime ref as `--commit`, its installed R as `--runtime`, and
+`--build-type release`. The configured SDK graph already binds commits in
+its command argv. Only a graph attempt with its original command and result
+can enter graph resume. A direct Git build may still omit its commit to build
+HEAD; that does not create graph history.
+
+Component `install --inputs` accepts its normal fully specified selection.
+For a locations-only Linux x64 component selection omit all three runtime,
+std and LLVM commits and pass the selected environment. It verifies R, std,
+N and the executing host from their original inputs. The optional llc/opt
+backend is separate from N. Package consumes the installed SDK at the selected
+consumer path, including after relocation, independent of checkout or current
+pin defaults. CI registrations and release workflows are unchanged.

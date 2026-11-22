@@ -4,6 +4,7 @@ import {stdxChirMembers} from '../../bootstrap/sdk-platform.mjs';
 // or a CI-provided expected tuple. Existing producer fields stay intact.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {isDeepStrictEqual} from 'node:util';
 import {fileDigest,readJson,relative} from '../../bootstrap/sdk-flow.mjs';
 import {stdInstallationExcludes,runtimeLibraryLinks,nativeTargetLibraryExcludes} from '../../bootstrap/sdk-targets.mjs';
 import {gcUnitStatusRelative} from '../../../build/srcbuild/gc-unit-gate.mjs';
@@ -114,9 +115,23 @@ async function installedPython(sdk,platform,llvm,loaded,checkArtifact){
 export async function installedInputs(sdk,platform,{checkArtifact}={}){
   const native=sdkPlatform(platform),stage=await optional(path.join(sdk,'STAGE-INPUTS.json')),
     compiler=await optional(path.join(sdk,'compiler-inputs.json')),tools=await optional(path.join(sdk,'TOOLS-INPUTS.json'));
-  const rows=[];
+  const rows=[], target=stage?.selection?.targetComponents;
+  const production=stage?.configuration?.layout==='native-output'?stage.production:null;
+  function built(name) {
+    const commands=production?.commands?.filter(row=>row.stage?.startsWith(name+'.'));
+    if(!commands?.some(row=>row.stage.startsWith(name+'.build')) ||
+       !commands.some(row=>row.stage.startsWith(name+'.install')) ||
+       commands.some(row=>row.exitCode!==0||row.error))throw Error('INSTALLED_NATIVE_PRODUCTION '+name);
+    return commands;
+  }
+  async function stamped(rel,prefix,commit){
+    const values=embeddedStamp(await fs.readFile(path.join(sdk,rel)),prefix);
+    if(!values.length || values.some(value=>value!==commit))throw Error('INSTALLED_SOURCE_STAMP '+rel);
+  }
   const nativeRecord='share/cjcj/build-inputs/native-build.json';
   const nativeFacts=await optional(path.join(sdk,nativeRecord));
+  if(target?.llvm?.install && stage.configuration?.layout!=='native-output' && !nativeFacts?.llvmLibrary)
+    throw Error('INSTALLED_LLVM_ORIGINAL_REQUIRED');
   const astRecord='share/cjcj/build-inputs/native-ast.json',astFacts=await optional(path.join(sdk,astRecord))??nativeFacts;
   if(astFacts){
     const selected=stage?.sources?.ast;
@@ -127,14 +142,15 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
   }else if(stage?.sources?.ast) {
     // Ordinary build.py installation records its own commands and sources. It
     // does not pretend to be a native-cjdb producer or synthesize its facts.
-    const production=stage.configuration?.layout==='native-output'?stage.production:null;
-    if(!production?.commands?.length)throw Error('INSTALLED_AST_ORIGINAL_RECORD');
-    const build=production.commands.filter(row=>row.stage?.startsWith('compiler.'));
-    if(!build.some(row=>row.stage.startsWith('compiler.install'))||build.some(row=>row.exitCode!==0||row.error))throw Error('INSTALLED_NATIVE_PRODUCTION');
+    const build=built('compiler');
+    const selected=production.sources;
+    if(selected?.compiler?.commit!==stage.sources.ast.commit || selected?.llvm?.commit!==stage.sources.llvm?.commit)
+      throw Error('INSTALLED_NATIVE_SOURCE');
+    await stamped('third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,'CJLLVM-COMMIT',selected.llvm.commit);
     rows.push({component:'ast-support',source:source(stage.sources.ast),build:{commands:build},
       artifacts:await Promise.all(['lib/'+native.tuple+'/libcangjie-ast-support.a','schema/StdAstFormat.fbs',
         'include/flatbuffers/StdAstFormat_generated.h',...stdxChirMembers,'third_party/flatbuffers/bin/flatc'+native.exe].map(rel=>artifact(sdk,rel,undefined,checkArtifact)))});
-    rows.push({component:'llvm-cjdb',source:source(stage.sources.llvm),build:{commands:build},
+    rows.push({component:'llvm-cjdb',source:source(selected.llvm),build:{commands:build},
       artifacts:await Promise.all(['third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,
         ...['llc','llvm-as','llvm-dis','opt'].map(name=>'third_party/llvm/bin/'+name+native.exe)].map(rel=>nativeProduct(sdk,rel,undefined,checkArtifact)))});
   }
@@ -147,7 +163,9 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
   }else rows.push({component:'compiler',source:unresolved('STAGE-INPUTS compiler missing')});
   const runtime=await optional(path.join(sdk,RUNTIME_INPUTS));
   if(runtime){
-    if(!Array.isArray(runtime.artifacts)||runtime.artifacts.length<2)throw new Error('INSTALLED_RUNTIME_PAIR');
+    if(!Array.isArray(runtime.artifacts)||!['runtime/lib/'+native.tuple+'/libcangjie-runtime'+native.shared,
+      'lib/'+native.tuple+'/libcangjie-runtime.a'].every(rel=>runtime.artifacts.some(row=>row.path===rel)))throw new Error('INSTALLED_RUNTIME_PAIR');
+    if(stage?.sources?.runtime && runtime.source?.commit!==stage.sources.runtime.commit)throw Error('INSTALLED_RUNTIME_SOURCE');
     const products=[],results=[];
     for(const row of runtime.artifacts){
       const value=await artifact(sdk,row.path,row.sha256,checkArtifact);
@@ -160,11 +178,27 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
     // Preserve and read R's original native install facts. The runtime pair
     // record intentionally does not stamp its C dependencies (bounds/aio/thread).
     // Reopening an absolute producer prefix would break archive relocation.
-    if(stage?.selection?.targetComponents?.runtime?.buildResult){
+    const adopted=production?.configuration?.nativeRuntime;
+    const received=target?.runtime?.component===true || Boolean(adopted);
+    if(received || target?.runtime?.buildResult){
       const original=await readJson(path.join(sdk,'share/cjcj/build-inputs/native-runtime.json'));
       if(original.runtime_sha!==runtime.source.commit||original.platform!==platform
-        ||original.paired_llvm_sha!==(stage.sources?.backend??stage.sources?.llvm)?.commit||!original.files)throw Error('INSTALLED_RUNTIME_NATIVE_SOURCE');
+        ||original.paired_llvm_sha!==stage.sources?.llvm?.commit||!original.files)throw Error('INSTALLED_RUNTIME_NATIVE_SOURCE');
+      const config=original.configuration;
+      if(received) {
+        const hostVersion=stage.selection.bootstrapHost?.version;
+        const selected={buildType:original.build_type,version:original.version,hostVersion,pairedLlvmCommit:stage.sources.llvm.commit};
+        if(!hostVersion || !selected.buildType || !selected.version || !isDeepStrictEqual(config,selected)
+          || !isDeepStrictEqual(config,runtime.build?.configuration)
+          || (target.runtime.configuration && !isDeepStrictEqual(config,target.runtime.configuration))
+          || (adopted && (adopted.runtimeCommit!==original.runtime_sha || adopted.llvmCommit!==original.paired_llvm_sha || adopted.hostVersion!==hostVersion)))
+          throw Error('INSTALLED_RUNTIME_NATIVE_CONFIGURATION');
+      } else if(config && (config.pairedLlvmCommit!==original.paired_llvm_sha
+        || config.hostVersion!==runtime.build?.configuration?.hostVersion
+        || (target.runtime.configuration && config.hostVersion!==target.runtime.configuration.hostVersion)))
+        throw Error('INSTALLED_RUNTIME_NATIVE_CONFIGURATION');
       const pair=new Set(products.map(row=>row.path));
+      if((received || target.runtime.install) && products.some(row=>original.files[row.path]!==row.sha256))throw Error('INSTALLED_RUNTIME_NATIVE_BYTES pair');
       for(const [rel,expected] of Object.entries(original.files)) {
         if(!/^(lib|runtime\/lib)\//.test(rel)||pair.has(rel))continue;
         if(!/^[a-f0-9]{64}$/.test(expected))throw Error('INSTALLED_RUNTIME_NATIVE_BYTES '+rel);
@@ -179,7 +213,19 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
       if(await fs.readlink(path.join(sdk,rel))!==target)throw Error('INSTALLED_RUNTIME_ALIAS '+rel);
     }
     rows.push({component:'runtime',...runtime,artifacts:products,...(results.length?{results}:{})});
-  }else rows.push({component:'runtime',source:source(stage?.sources?.runtime),build:{status:'unresolved',reason:'original runtime inputs missing'}});
+  }else if(production && !production.configuration?.nativeRuntime) {
+    // build.py has no component R record. Its own successful build/install
+    // and both Git stamps identify R. An adopted R must keep its pair record.
+    const commands=built('runtime'),origin=source(production.sources?.runtime);
+    if(origin.status!=='resolved'||origin.commit!==stage.sources.runtime?.commit)throw Error('INSTALLED_RUNTIME_SOURCE');
+    const artifacts=[];
+    for(const rel of ['runtime/lib/'+native.tuple+'/libcangjie-runtime'+native.shared,'lib/'+native.tuple+'/libcangjie-runtime.a']){
+      await stamped(rel,'CJRT-COMMIT',origin.commit);
+      artifacts.push(await artifact(sdk,rel,undefined,checkArtifact));
+    }
+    rows.push({component:'runtime',source:origin,build:{commands},embedded_stamp:'CJRT-COMMIT:'+origin.commit,artifacts});
+  }else rows.push({component:'runtime',source:unresolved('original runtime inputs missing')});
+  if(production)built('stdlib');
   const stdProvenance=path.join(sdk,'PROVENANCE.txt');
   try{
     const text=await fs.readFile(stdProvenance,'utf8'),commit=text.match(/^STD_SOURCE_COMMIT\s*=\s*([0-9a-f]{40})$/m)?.[1];
@@ -191,7 +237,8 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
   // Component installs carry N's normal BUILD-INPUTS verbatim. A bootstrap
   // check is optional history, not the producer of these installed bytes.
   // Reuse the existing artifact/Python readers without inventing a check rc.
-  if(!llvmCheck&&nativeFacts?.llvmLibrary&&(nativeFacts.platform!==platform
+  if(nativeFacts?.commands?.some(row=>row.rc!==0||row.signal||row.error||row.cancelled))throw Error('INSTALLED_LLVM_BUILD_FAILED');
+  if(nativeFacts?.llvmLibrary&&(nativeFacts.platform!==platform
     ||nativeFacts.commits?.llvm!==stage?.sources?.llvm?.commit))throw Error('INSTALLED_NATIVE_SOURCE');
   const llvm=llvmCheck??(nativeFacts?.llvmLibrary?{
     platform:nativeFacts.platform,source:source(stage.sources.llvm),configuration:nativeFacts.configuration,
@@ -246,6 +293,11 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
     }
     rows.push({component:'llvm-cjdb',source:source(llvm.source),build:{configuration:llvm.configuration,python:llvm.pythonConfiguration,...(llvm.commands?{commands:llvm.commands}:{}),...(windowsToolchain?{windowsToolchain}:{})},artifacts:products});
     rows.push(await installedPython(sdk,platform,llvm,python,checkArtifact));
+  }
+  if(stage?.configuration?.layout && target)for(const [name,key] of [['runtime','runtime'],['std','std'],['llvm-cjdb','llvm'],...(target.backend?[['llvm-backend','backend']]:[])]){
+    const row=rows.find(row=>row.component===name);
+    if(row?.source?.status!=='resolved'||row.source.commit!==target[key]?.commit || stage.sources?.[key]?.commit!==target[key].commit)
+      throw Error('INSTALLED_COMPONENT_SOURCE '+name);
   }
   for(const producer of TOOL_NAMES){
     const name=TOOL_PUBLIC_NAMES[producer]??producer;

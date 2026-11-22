@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {spawnSync} from 'node:child_process';
+import {copyHostStd} from '../srcbuild/stages/stdlib.mjs';
+import {getTarget} from '../lib/targets.mjs';
 import {fileURLToPath} from 'node:url';
 import {
   assertSdkPathParity,
@@ -280,6 +282,68 @@ test('native Linux loader-name links accept changed internal versions and reject
   fs.unlinkSync(link);
   fs.symlinkSync('libxml2.so.16.1.4', link);
   await assertSdkPathParity(candidate, options);
+});
+
+test('Linux package maps only its private PCRE2 loader chain and rejects fallback or a stale flat copy',
+  {skip: process.platform !== 'linux'}, async t => {
+  const {official, candidate} = fixture(t);
+  const dir = 'runtime/lib/linux_x86_64_cjnative/';
+  const link = 'libpcre2-8.so', abi = link + '.0', original = abi + '.14.0', updated = abi + '.15.0';
+  function chain(root, prefix, version) {
+    sharedLibrary(root, prefix + version, abi);
+    fs.symlinkSync(version, path.join(root, prefix, abi));
+    fs.symlinkSync(abi, path.join(root, prefix, link));
+  }
+  chain(official, dir, original);
+  chain(candidate, dir + 'pcre2/', updated);
+  const options = {officialRoot:official, target:'linux-x64'};
+  const check = () => assertSdkPathParity(candidate, options);
+  const result = await check();
+  assert.deepEqual(result.counterparts.map(row => [row.official, row.candidate]),
+    [[link,link], [abi,abi], [original,updated]].map(([a,b]) => [dir + a, dir + 'pcre2/' + b]));
+  for (const target of [undefined, 'windows-x64', 'linux-aarch64'])
+    await assert.rejects(assertSdkPathParity(candidate, {officialRoot:official, target}), /missing-official-path/);
+
+  const local = path.join(candidate, dir, 'pcre2');
+  fs.unlinkSync(path.join(local, link));
+  await assert.rejects(check(), /pcre2-loader-chain/);
+  fs.symlinkSync(updated, path.join(local, link)); // bypasses the required SONAME link
+  await assert.rejects(check(), /pcre2-loader-chain/);
+  fs.unlinkSync(path.join(local, link));
+  fs.symlinkSync(abi, path.join(local, link));
+  fs.renameSync(path.join(local, updated), path.join(candidate, 'other.so'));
+  await assert.rejects(check(), /package-link-invalid/);
+  fs.symlinkSync('../../../../other.so', path.join(local, updated));
+  await assert.rejects(check(), /pcre2-loader-chain/);
+  fs.unlinkSync(path.join(local, updated));
+  sharedLibrary(candidate, dir + 'pcre2/' + updated, link + '.1');
+  await assert.rejects(check(), /pcre2-loader-chain/);
+  sharedLibrary(candidate, dir + 'pcre2/' + updated, abi);
+  chain(candidate, dir, original);
+  await assert.rejects(check(), /pcre2-flat-library/);
+  fs.rmSync(local, {recursive:true});
+  await assert.rejects(check(), /pcre2-loader-chain/);
+  // If ELF inspection fails, even an exact replica of the old flat tree is unsafe.
+  fs.writeFileSync(path.join(official, dir, original), 'unreadable ELF identity');
+  await assert.rejects(check(), /pcre2-reference-chain/);
+});
+
+test('incremental Linux std copy retires flat PCRE2 and preserves private links and other libraries', t => {
+  const {official:std, candidate:compiler} = fixture(t);
+  const target = getTarget('linux-x64');
+  const dir = 'runtime/lib/' + target.spec.runtimeTuple + '/';
+  const link = 'libpcre2-8.so', abi = link + '.0', version = abi + '.14.0';
+  for (const [root, prefix] of [[compiler, dir], [std, dir + 'pcre2/']]) {
+    put(root, prefix + version);
+    fs.symlinkSync(version, path.join(root, prefix, abi));
+    fs.symlinkSync(abi, path.join(root, prefix, link));
+  }
+  put(compiler, dir + 'libother.so');
+  copyHostStd(std, compiler, target);
+  copyHostStd(std, compiler, target); // another install into the migrated output
+  assert.deepEqual(fs.readdirSync(path.join(compiler, dir)).sort(), ['libother.so', 'pcre2']);
+  assert.equal(fs.readlinkSync(path.join(compiler, dir, 'pcre2', link)), abi);
+  assert.equal(fs.readlinkSync(path.join(compiler, dir, 'pcre2', abi)), version);
 });
 
 // Exercise the actual public package path on retained installed products.

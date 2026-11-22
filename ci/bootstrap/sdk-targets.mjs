@@ -165,7 +165,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     // compiler entries through the same installer as the bootstrap graph.
     copies.splice(0,copies.length,
       {from:target.compiler.install,to:'',owner:'native compiler/runtime/std producers',
-        exclude:['bin/cjc'+exe,'bin/cjc-frontend'+exe,'STAGE-INPUTS.json']},
+        exclude:['bin/cjc'+exe,'bin/cjc-frontend'+exe,'STAGE-INPUTS.json','NATIVE-INPUTS.json']},
       ...(!prefix?[]:[
         {from:execution.runtime.install+'/runtime/lib/'+execTuple,to:prefix+'/runtime/lib/'+execTuple,owner:'compiler execution runtime'},
         {from:execution.std.install+'/lib/'+execTuple,to:prefix+'/lib/'+execTuple,owner:'compiler execution std'},
@@ -213,7 +213,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   if(llvm.windowsToolchain)copies.push(
     {from:path.join(llvm.install,relative(llvm.windowsToolchain.original.path)),to:relative(llvm.windowsToolchain.original.path),owner:'native toolchain input'},
     ...llvm.windowsToolchain.installedFiles.filter(row=>row.path.startsWith('bin/')).map(row=>({from:path.join(llvm.install,relative(row.path)),to:relative(row.path),owner:'native toolchain runtime'})));
-  if(!hostObjects&&runtime.buildResult)copies.push({from:runtime.buildResult,to:'share/cjcj/build-inputs/native-runtime.json',owner:'R original build'});
+  if(!hostObjects&&(runtime.component||runtime.buildResult))copies.push({from:runtime.component?path.join(runtime.install,'NATIVE-INPUTS.json'):runtime.buildResult,to:'share/cjcj/build-inputs/native-runtime.json',owner:'R original build'});
   if(runtime.gateStatus&&!runtime.sourceRoot)throw Error('INSTALL_RUNTIME_SOURCE_REQUIRED');
   return {copies,...(!hostObjects&&native.os==='linux'&&runtime.sourceRoot?{
     runtimeLanguageInputs:{runtime:path.join(runtime.sourceRoot,'runtime'),gateStatus:runtime.gateStatus}}:{}),entries:[

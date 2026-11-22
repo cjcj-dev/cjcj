@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env zx
 
 // Install one source-built Cangjie tool over the stock copy in the release SDK,
 // keeping the stock bytes under tools/stock the way install_cjpm_artifact.mjs
@@ -9,7 +9,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {parseArgs} from 'node:util';
 import {privateRoot} from '../bootstrap/sdk-flow.mjs';
-import {toolName,retainedToolPath} from '../../build/srcbuild/tool-layout.mjs';
+import {toolName,retainedToolPath,cjlintPublicConfigPath} from '../../build/srcbuild/tool-layout.mjs';
+import {requireCjlintRuntimePair} from './cjlint-runtime-pair.mjs';
 import {preserveStock} from '../../build/lib/stock-backup.mjs';
 import {
   readToolsPin, artifactSourceBinary,
@@ -48,6 +49,25 @@ const provenance = await verifyComponentProvenance({
 });
 
 const sdkRoot=await privateRoot(values.sdk);
+const lintConfig=[];
+if(values.tool==='cjlint') {
+  await requireCjlintRuntimePair(artifactRoot);
+  await fs.mkdir(sdkRoot,{recursive:true});
+  // The verified artifact already transports the private source configuration.
+  // Preflight the corresponding public paths before replacing any stock entry.
+  const prefix='.target-tools/tools/cjlint/config';
+  const config=await safePayloadPath(artifactRoot,prefix);
+  for(const name of await fs.readdir(config,{recursive:true})) {
+    const fromRel=prefix+'/'+name.split(path.sep).join('/');
+    const toRel=cjlintPublicConfigPath(fromRel);
+    if(!toRel)continue;
+    const from=await safePayloadPath(artifactRoot,fromRel);
+    if(!(await fs.stat(from)).isFile())continue;
+    lintConfig.push({from,to:await safePayloadPath(sdkRoot,toRel)});
+  }
+  if(!lintConfig.some(row=>row.to===path.join(sdkRoot,'tools/config/cjlint_rule_list.json')))
+    throw Error('CJLINT_PUBLIC_RULE_LIST_MISSING');
+}
 const toolsBin = await privateRoot(path.join(sdkRoot, 'tools', 'bin'));
 const installed = path.join(toolsBin, name);
 const staged = path.join(toolsBin, values.tool + '-source' + (windows ? '.exe' : ''));
@@ -83,6 +103,10 @@ for (const entry of provenance.payloads) {
     await fs.rm(to,{recursive:true,force:true});
   // Merge genuinely shared directories.
   await fs.cp(from, to, {recursive: entry.type === 'directory', force:true});
+}
+for(const {from,to} of lintConfig) {
+  await fs.mkdir(path.dirname(to),{recursive:true});
+  await fs.copyFile(from,to);
 }
 if(isolated) {
   const body=await safePayloadPath(sdkRoot,retained);
