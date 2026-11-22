@@ -1446,11 +1446,9 @@ public class FileUtil {
         if (directoryPath.size > DIR_PATH_MAX_LENGTH) {
             return -1
         }
-        var current = ""
         var fileNameStartIdx: Int64 = 0
         var idx: Int64 = 0
         while (idx < directoryPath.size) {
-            current += String.fromUtf8([directoryPath[idx]])
             if (!isPathSlashByte(directoryPath[idx])) {
                 idx++
                 continue
@@ -1459,6 +1457,8 @@ public class FileUtil {
                 return -1
             }
             fileNameStartIdx = idx + 1
+            // An ASCII separator ends a complete UTF-8 prefix.
+            let current = directoryPath[0..fileNameStartIdx]
             if (!FileExist(current)) {
                 try {
                     FSDirectory.create(current, recursive: true)
