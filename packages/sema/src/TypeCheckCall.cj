@@ -1392,6 +1392,10 @@ public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Op
         if (let Some(inner) <- ae.leftExpr) { return CallSiteMode(inner, receiver, seen) }
     }
     if (expr is LitConstExpr || expr.resolvedMode != ASTMode.NOT) { return expr.resolvedMode }
+    // Sugar lowered before or during type checking (a trailing closure, `|>`/`~>`, `quote(...)`,
+    // `?.`) has the mode of its lowering: std.unittest entry_main.cj:48 `Framework.launch(...) { }`,
+    // testmacro instrumentation.cj:690 `... |> collectHashSet`, macro_state.cj:23 `quote(@Attribute[)`.
+    if (let Some(lowered) <- expr.desugarExpr) { return CallSiteMode(lowered, receiver, seen) }
     return None
 }
 
