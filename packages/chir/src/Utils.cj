@@ -699,21 +699,28 @@ private func GetInstParentType(candidate: ArrayList<ClassType>, callee: Function
         paramTypes.remove(at: 0)
     }
     CJC_ASSERT(argTypes.size == paramTypes.size)
-    for (parentTy in candidate) {
-        let res = parentTy.GetClassDef().GetType().getOrThrow().CalculateGenericTyMapping(parentTy)
-        CJC_ASSERT(res[0])
-        var argTypeMatched = true
-        var paramIdx: Int64 = 0
-        while (paramIdx < paramTypes.size) {
-            let instType = ReplaceRawGenericArgType(paramTypes[paramIdx], res[1], builder)
-            if (!ParamTypeIsEquivalent(instType, argTypes[paramIdx])) {
-                argTypeMatched = false
-                break
+    // Pass 1 is the official exact match (Utils.cpp GetInstParentType @63bf237b). Pass 2 runs only when pass 1
+    // finds nothing and compares each parameter by data type: a Local Mode argument carries an outermost modal
+    // (`T @local!`) that the instantiated parameter of a candidate parent need not carry, which is the same
+    // call-site/declaration split CustomTypeDef.GetExpectedFunc already resolves by data type.
+    for (relaxed in [false, true]) {
+        for (parentTy in candidate) {
+            let res = parentTy.GetClassDef().GetType().getOrThrow().CalculateGenericTyMapping(parentTy)
+            CJC_ASSERT(res[0])
+            var argTypeMatched = true
+            var paramIdx: Int64 = 0
+            while (paramIdx < paramTypes.size) {
+                let instType = ReplaceRawGenericArgType(paramTypes[paramIdx], res[1], builder)
+                if (!ParamTypeIsEquivalent(instType, argTypes[paramIdx]) && !(relaxed &&
+                    ParamTypeIsEquivalent(instType.GetDataType(builder), argTypes[paramIdx].GetDataType(builder)))) {
+                    argTypeMatched = false
+                    break
+                }
+                paramIdx++
             }
-            paramIdx++
-        }
-        if (argTypeMatched) {
-            return parentTy
+            if (argTypeMatched) {
+                return parentTy
+            }
         }
     }
     CJC_ABORT()
