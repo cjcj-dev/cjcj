@@ -9,6 +9,7 @@ import cjcj::chir.CustomDefKind
 import cjcj::chir.EnumType
 import cjcj::chir.ExprKind
 import cjcj::chir.Function
+import cjcj::chir.LocalLoweringTargetChecker
 import cjcj::chir.NoHeapAllocChecker
 import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.Type
@@ -257,9 +258,10 @@ private func ConsumeModuleGenerationResults(results: ArrayList<TaskResult<Unit>>
 
 public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enableIncrement: Bool,
     noHeapAllocChecker: NoHeapAllocChecker, noWriteBarrierRecChecker: NoWriteBarrierRecChecker,
-    cachedMangleMap!: CachedMangleMap = CachedMangleMap()): ArrayList<LLVMModuleHandle> {
+    cachedMangleMap!: CachedMangleMap = CachedMangleMap(),
+    localLoweringChecker!: Option<LocalLoweringTargetChecker> = None): ArrayList<LLVMModuleHandle> {
     let cgPkgContext = CGPkgContext(chirData, options, enableIncrement, noHeapAllocChecker,
-        noWriteBarrierRecChecker, cachedMangleMap)
+        noWriteBarrierRecChecker, cachedMangleMap, localLoweringChecker: localLoweringChecker)
     var failed = false
     try {
     let splitter = CHIRSplitter(cgPkgContext)

@@ -176,7 +176,11 @@ ${body}
 `, 0o755);
   executable(path.join(base, 'bin/cjc'), `
 const sdk = process.env.CANGJIE_HOME;
-assert(args.includes('--no-prelude'));
+ assert(args.includes('--no-prelude'));
+assert(args.includes('--experimental'));
+assert(args.includes('--enable-local-mode'));
+assert(args.includes('--cfg'));
+assert(args.includes('local_mode_api=off'));
 assert.equal(fs.readFileSync(path.join(sdk, 'libexec/compiler/cjcj-stage1'), 'utf8'), 'wasm cjc');
 assert.equal(fs.readFileSync(path.join(sdk, '${NATIVE_LLVM_BIN}/opt'), 'utf8'), 'wasm opt');
 assert.equal(fs.readFileSync(path.join(sdk, 'runtime/lib/wasi_wasm32_cjnative/libcangjie-runtime.a'), 'utf8'), 'rt');

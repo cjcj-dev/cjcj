@@ -2,7 +2,8 @@
 // Build the complete std package graph for wasi_wasm32_cjnative (WASI Preview 1) into an SDK.
 //
 // Every directory under stdlib/libs/std holding .cj files is one package. Packages are compiled
-// in import order with `cjc --target=wasm32-wasi -O2 --output-type=staticlib`; each package's
+// in import order with `cjc --target=wasm32-wasi --experimental --enable-local-mode
+// --cfg local_mode_api=off -O2 --output-type=staticlib`; each package's
 // native/*.c sources (and, for std.regex, the PCRE2 library) are compiled with clang for
 // wasm32-wasi and merged into the package archive, mirroring the native MergeArchives layout.
 // The result is a per-package inventory; failures are recorded, never silently dropped.
@@ -11,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {SYSROOT_DIR} from './wasi-toolchain.mjs';
-import {wasmStdInputs, buildWasmStdCore} from './wasm-std-core.mjs';
+import {wasmStdInputs, buildWasmStdCore, WASM_LOCAL_MODE_CJC_ARGS} from './wasm-std-core.mjs';
 
 export const WASM_TARGET_DIR = 'wasi_wasm32_cjnative';
 const target = '--target=wasm32-wasi';
@@ -181,9 +182,9 @@ export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Sou
     } else {
       fs.mkdirSync(pw, {recursive: true});
       const out = path.join(pw, name);
-      const args = [target, '-O2', '--no-sub-pkg', '-p', pkg.dir, '--output-type=staticlib', `--output=${out}`,
+      const subpkg = name === 'std' ? [] : ['--no-sub-pkg'];
+      const args = [target, ...WASM_LOCAL_MODE_CJC_ARGS, '-O2', ...subpkg, '-p', pkg.dir, '--output-type=staticlib', `--output=${out}`,
         `--import-path=${path.join(sdk, 'modules', WASM_TARGET_DIR)}`, '-Woff', 'all'];
-      if (name === 'std') args.splice(2, 1); // the aggregate root package only re-exports
       const errors = out => (out.match(/error[^\n]*(\n[^\n]*){0,3}/g) || [out]).slice(0, 4).join(' | ').slice(0, 900);
       let r = run(cjc, args, {cwd: pw, env});
       rec.opt = 'O2';

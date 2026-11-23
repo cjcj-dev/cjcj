@@ -640,6 +640,150 @@ class OptionTableTest {
             " dylib=" + if (dylib) { "true" } else { "false" })
     }
 
+    private func localModeCfgOff(opts: GlobalOptions): Bool {
+        for ((key, value) in opts.passedWhenKeyValue) {
+            if (key == "local_mode_api" && value == "off") { return true }
+        }
+        return false
+    }
+
+    private func runLocalMode(name: String, target: String, extra: Array<String>, opts: GlobalOptions): Bool {
+        eprintln("LOCAL_MODE_BEGIN " + name)
+        let args = ArrayList<String>()
+        args.add("cjc")
+        args.add("--experimental")
+        args.add("--enable-local-mode")
+        args.add("--cfg")
+        args.add("local_mode_api=off")
+        args.add("--output-type")
+        args.add("staticlib")
+        args.add("--target")
+        args.add(target)
+        args.add(all: extra)
+        args.add(srcFile)
+        let parsed = parseArgs(args.toArray())
+        if (!parsed[0]) {
+            eprintln("LOCAL_MODE_END " + name + " rc=false stage=parse")
+            return false
+        }
+        let succ = opts.ParseFromArgs(parsed[1])
+        let rcText = if (succ) { "true" } else { "false" }
+        eprintln("LOCAL_MODE_END " + name + " rc=" + rcText)
+        return succ
+    }
+
+    @TestCase
+    func LocalModeCrossTargetAccepted(): Unit {
+        let targets = ["wasm32-wasi", "aarch64-linux-android", "x86_64-w64-mingw32", "aarch64-apple-darwin",
+            "aarch64-unknown-linux-ohos", "x86_64-unknown-linux-gnu"]
+        for (target in targets) {
+            let opts = GlobalOptions()
+            let succ = runLocalMode("LocalModeCrossTargetAccepted " + target, target, Array<String>(), opts)
+            println("EXECUTED LocalModeCrossTargetAccepted target=" + target + " rc=" + if (succ) { "true" } else { "false" })
+            @Expect(succ, true)
+            @Expect(opts.enableLocalMode, true)
+            @Expect(localModeCfgOff(opts), true)
+        }
+    }
+
+    @TestCase
+    func LocalModeIllegalComboRejected(): Unit {
+        let host = "x86_64-unknown-linux-gnu"
+        let incremental = runLocalMode("LocalModeIncremental", host, ["--incremental-compile"], GlobalOptions())
+        println("EXECUTED LocalModeIncremental rc=" + if (incremental) { "true" } else { "false" })
+        @Expect(incremental, false)
+        let emitChir = runLocalMode("LocalModeEmitChir", host, ["--emit-chir=raw"], GlobalOptions())
+        println("EXECUTED LocalModeEmitChir rc=" + if (emitChir) { "true" } else { "false" })
+        @Expect(emitChir, false)
+        let chirPath = "/tmp/local_mode_common_part.chir"
+        let wrote = FileUtil.WriteToFile(chirPath, "common\n")
+        @Expect(wrote, true)
+        let commonChir = runLocalMode("LocalModeCommonChir", host, ["--common-part-chir", chirPath], GlobalOptions())
+        println("EXECUTED LocalModeCommonChir rc=" + if (commonChir) { "true" } else { "false" })
+        @Expect(commonChir, false)
+        let interpreterOpts = GlobalOptions()
+        interpreterOpts.interpreter = true
+        let interpreter = runLocalMode("LocalModeInterpreter", host, Array<String>(), interpreterOpts)
+        println("EXECUTED LocalModeInterpreter rc=" + if (interpreter) { "true" } else { "false" })
+        @Expect(interpreter, false)
+        let cjdOpts = GlobalOptions()
+        cjdOpts.compileCjd = true
+        let cjd = runLocalMode("LocalModeCompileCjd", host, Array<String>(), cjdOpts)
+        println("EXECUTED LocalModeCompileCjd rc=" + if (cjd) { "true" } else { "false" })
+        @Expect(cjd, false)
+        let backendOpts = GlobalOptions()
+        backendOpts.backend = BackendType.UNKNOWN
+        let backend = runLocalMode("LocalModeNonCjnative", host, Array<String>(), backendOpts)
+        println("EXECUTED LocalModeNonCjnative rc=" + if (backend) { "true" } else { "false" })
+        @Expect(backend, false)
+    }
+
+    @TestCase
+    func LocalModeIllegalComboControl(): Unit {
+        let host = "x86_64-unknown-linux-gnu"
+        let plain = runLocalMode("LocalModePlainHost", host, Array<String>(), GlobalOptions())
+        println("EXECUTED LocalModePlainHost rc=" + if (plain) { "true" } else { "false" })
+        @Expect(plain, true)
+        let args = ArrayList<String>()
+        args.add("cjc")
+        args.add("--experimental")
+        args.add("--incremental-compile")
+        args.add("--output-type")
+        args.add("staticlib")
+        args.add("--target")
+        args.add(host)
+        args.add(srcFile)
+        let parsed = parseArgs(args.toArray())
+        @Expect(parsed[0], true)
+        let opts = GlobalOptions()
+        let withoutLocal = opts.ParseFromArgs(parsed[1])
+        println("EXECUTED LocalModeIncrementalWithoutFlag rc=" + if (withoutLocal) { "true" } else { "false" })
+        @Expect(withoutLocal, true)
+        @Expect(opts.enIncrementalCompilation, true)
+        @Expect(opts.enableLocalMode, false)
+    }
+
+    private func runLocalModeApi(name: String, target: String, api: String, opts: GlobalOptions): Bool {
+        eprintln("LOCAL_MODE_BEGIN " + name)
+        let args = ArrayList<String>()
+        args.add("cjc")
+        args.add("--experimental")
+        args.add("--enable-local-mode")
+        args.add("--cfg")
+        args.add("local_mode_api=" + api)
+        args.add("--output-type")
+        args.add("staticlib")
+        args.add("--target")
+        args.add(target)
+        args.add(srcFile)
+        let parsed = parseArgs(args.toArray())
+        if (!parsed[0]) {
+            eprintln("LOCAL_MODE_END " + name + " rc=false stage=parse")
+            return false
+        }
+        let succ = opts.ParseFromArgs(parsed[1])
+        let rcText = if (succ) { "true" } else { "false" }
+        eprintln("LOCAL_MODE_END " + name + " rc=" + rcText)
+        return succ
+    }
+
+    @TestCase
+    func LocalModeApiOnRejectedOffHost(): Unit {
+        let targets = ["wasm32-wasi", "aarch64-linux-android", "x86_64-w64-mingw32", "aarch64-unknown-linux-ohos"]
+        for (target in targets) {
+            let opts = GlobalOptions()
+            let succ = runLocalModeApi("LocalModeApiOn " + target, target, "on", opts)
+            println("EXECUTED LocalModeApiOn target=" + target + " rc=" + if (succ) { "true" } else { "false" })
+            @Expect(succ, false)
+        }
+        let host = GlobalOptions()
+        let hostOk = runLocalModeApi("LocalModeApiOnHost", "x86_64-unknown-linux-gnu", "on", host)
+        println("EXECUTED LocalModeApiOnHost rc=" + if (hostOk) { "true" } else { "false" })
+        @Expect(hostOk, true)
+        @Expect(host.enableLocalMode, true)
+        @Expect(host.SupportsLocalModeLowering(), true)
+    }
+
     @TestCase
     func FlagOccurrenceSetTest(): Unit {
         let optionTable = CreateOptionTable()

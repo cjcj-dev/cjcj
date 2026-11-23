@@ -45,6 +45,9 @@ import cjcj::chir.INVALID_LOCATION as CHIR_INVALID_LOCATION
 import cjcj::chir.MergeBlocks
 import cjcj::chir.MergeEffectMap
 import cjcj::chir.NoHeapAllocChecker
+import cjcj::chir.LocalLoweringTargetChecker
+import cjcj::chir.LocalLoweringUnsupportedException
+import cjcj::chir.LocalLoweringReport
 import cjcj::chir.NoSideEffectMarker
 import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.OptFuncRetType
@@ -1235,8 +1238,18 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
     noHeapAllocChecker.RunOnPackage(realPackage)
     let noWriteBarrierRecChecker = NoWriteBarrierRecChecker(instance.diag.AsBasicDiagnosticEngine())
     noWriteBarrierRecChecker.RunOnPackage(realPackage)
-    let packageModules = CodegenGenPackageModules(codegenData, codegenOptions, enableIncrement,
-        noHeapAllocChecker, noWriteBarrierRecChecker, cachedMangleMap: cachedMangleMap)
+    // Option.cj SupportsLocalModeLowering: the authoritative Local Mode target gate is CodeGen's own
+    // emission point, so it sees exactly the IR that SetMemRegion and ModalWrite selection produced.
+    let localLoweringChecker = LocalLoweringTargetChecker(instance.invocation.globalOptions.SupportsLocalModeLowering())
+    let generated = GenWithLocalLoweringDiagnostics(instance.diag, localLoweringChecker, { =>
+        CodegenGenPackageModules(codegenData, codegenOptions, enableIncrement,
+            noHeapAllocChecker, noWriteBarrierRecChecker, cachedMangleMap: cachedMangleMap,
+            localLoweringChecker: localLoweringChecker)
+    })
+    let packageModules = match (generated) {
+        case Some(modules) => modules
+        case None => return llvmModules
+    }
     var transferred = false
     var failed = false
     try {
@@ -1260,6 +1273,44 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
             }
         }
     }
+}
+
+// The Local Mode target rejection boundary of GenPackageModules: runs CodeGen and, when its emission point
+// rejects a Local Mode symbol, reports every recorded rejection and returns None so the caller emits nothing.
+// Other exceptions propagate unchanged.
+func GenWithLocalLoweringDiagnostics<T>(diag: DiagnosticEngine, localLoweringChecker: LocalLoweringTargetChecker,
+    gen: () -> T): Option<T> {
+    try {
+        return Some(gen())
+    } catch (e: LocalLoweringUnsupportedException) {
+        DiagnoseLocalLoweringReports(diag, localLoweringChecker.GetReports(), e.message)
+        return None
+    }
+}
+
+func HasLocalLoweringSourcePosition(report: LocalLoweringReport): Bool {
+    let begin = report.position[1].begin
+    return report.position[0] && begin != DEFAULT_POSITION && !begin.IsZero()
+}
+
+// Reports every Local Mode target rejection through the registered diagnostic handler, all as CHIR so
+// they share one sorted flush and one error-count category (GetErrorCount counts only the first error
+// category). A report without a source position (module-level or generated code with no debug location)
+// goes through DiagnoseWithoutLocation, because a CHIR diagnostic at DEFAULT_POSITION is counted but never
+// printed. If the exception arrives without any recorded report, its own message is reported.
+func DiagnoseLocalLoweringReports(diag: DiagnosticEngine, reports: ArrayList<LocalLoweringReport>,
+    fallback: String): Unit {
+    for (report in reports) {
+        if (HasLocalLoweringSourcePosition(report)) {
+            diag.Diagnose(DiagCategory.CHIR, report.position[1].begin, report.Message())
+        } else {
+            diag.DiagnoseWithoutLocation(DiagCategory.CHIR, report.Message())
+        }
+    }
+    if (reports.isEmpty()) {
+        diag.DiagnoseWithoutLocation(DiagCategory.CHIR, fallback)
+    }
+    diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
 }
 
 // C++: FrontendTool/DefaultCompilerInstance.cpp:252-299.
