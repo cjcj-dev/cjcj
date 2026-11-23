@@ -68,8 +68,9 @@ public class Wasm_CJNATIVE <: Gnu {
         tool.AppendArg(output)
         // wasm-ld turns signature mismatches into warnings plus trapping stubs; never accept that.
         tool.AppendArg("--fatal-warnings")
-        tool.AppendArgIf(driverOptions.stripSymbolTable, "--strip-all")
-        tool.AppendArgIf(!driverOptions.stripSymbolTable && !driverOptions.enableCompileDebug, "--strip-debug")
+        // Compressing relocations changes code offsets used by DWARF. Keep debug links uncompressed.
+        tool.AppendArgIf(!driverOptions.enableCompileDebug || driverOptions.stripSymbolTable, "--strip-all")
+        tool.AppendArgIf(!driverOptions.enableCompileDebug, "--compress-relocations")
         // Command module: wasi-libc crt1-command.o provides `_start`, which runs
         // `__main_argc_argv` (wasm runtime) -> Cangjie `main` -> proc_exit(rc).
         tool.AppendArg(FileUtil.JoinPath(WasiSysrootLibPath(), "crt1-command.o"))
