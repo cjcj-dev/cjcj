@@ -647,6 +647,12 @@ jobs:
           run-id: ${{ inputs.native_inputs_run_id }}
           github-token: ${{ github.token }}
           path: ${{ github.workspace }}/.srcbuild/native-inputs
+      # Actions artifacts drop POSIX modes; the producer transports one tar.
+      - &unpack-selected-native-inputs-with-their-file-modes
+        name: Unpack selected native inputs with their file modes
+        if: inputs.native_runtime_artifact != ''
+        shell: bash
+        run: node ci/bootstrap/native-artifact-archive.mjs unpack "$GITHUB_WORKSPACE/.srcbuild/native-inputs" native-inputs.tar
 
       - name: Receive native CMake installation produced in this run
         if: inputs.native_build_inputs_artifact != ''
@@ -1089,6 +1095,11 @@ jobs:
           run-id: ${{ inputs.native_runtime_run_id }}
           github-token: ${{ github.token }}
           path: ${{ github.workspace }}/.srcbuild/native-runtime-install
+      - &unpack-fixed-native-runtime-installation-with-its-file-modes
+        name: Unpack fixed native runtime installation with its file modes
+        if: inputs.native_runtime_artifact != ''
+        shell: bash
+        run: node ci/bootstrap/native-artifact-archive.mjs unpack "$GITHUB_WORKSPACE/.srcbuild/native-runtime-install" runtime-install.tar
 
       - &configure-native-bootstrap-from-actual-repositories-and-target-installations
         name: Configure native bootstrap from actual repositories and target installations
@@ -2733,6 +2744,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/source-zx" --no-package-lock --no-save zx@8
           node --input-type=module -e 'import fs from "node:fs"; import path from "node:path"; const root=path.join(process.env.RUNNER_TEMP,"source-zx","node_modules","zx"); const cli=fs.realpathSync(path.join(root,JSON.parse(fs.readFileSync(path.join(root,"package.json"))).bin.zx)); fs.appendFileSync(process.env.GITHUB_ENV,"CJCJ_ZX_CLI="+cli+"\n")'
       - *receive-selected-native-inputs-before-choosing-the-host
+      - *unpack-selected-native-inputs-with-their-file-modes
       - name: Receive optional completed N and AST installation
         if: inputs.native_build_inputs_artifact != ''
         uses: actions/download-artifact@v8
@@ -2759,6 +2771,7 @@ jobs:
       - *download-pinned-source
       - *verify-source-revisions
       - *receive-fixed-native-runtime-installation
+      - *unpack-fixed-native-runtime-installation-with-its-file-modes
       - *configure-native-bootstrap-from-actual-repositories-and-target-installations
       - *bootstrap-stage0-compiler
       - *bootstrap-stage1-initial-std
@@ -2932,61 +2945,20 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: native-runtime-install-${{ matrix.llvm_platform }}
-          path: .platform-ci/runtime-install
+          # The package verified above (same bytes as the installation, modes
+          # kept); ci/bootstrap/native-artifact-archive.mjs extracts it.
+          path: .platform-ci/runtime-install.tar
           if-no-files-found: error
-      - name: Provision the fixed host SDK into the native input root
+      - name: Provision the official host SDK archive into the native input root
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/native-inputs"
-          mkdir -p "$root/host-archive"
-          npx --yes zx@8 ci/load_runtime_pin.mjs
-          export CJCJ_SDK_STOCK_LLC=1
-          npx --yes zx@8 ci/setup_sdk.mjs
-          host_sdk="$HOME/.cjv/toolchains/$(sed -n 's/^CJCJ_TOOLCHAIN=//p' "$GITHUB_ENV" | tail -n 1)"
-          test -d "$host_sdk"
-          cp -a "$host_sdk" "$root/host"
-          tar -cf "$root/host-archive/host-sdk.tar" -C "$host_sdk" .
+          mkdir -p "$root"
+          node build/sdk/producers/release/prepare_native_inputs.mjs install-host --root "$root" --target "${{ matrix.target }}"
           cp -a .platform-ci/runtime-install "$root/runtime"
-      # N/LLVM: the pinned fork's in-process library, built on this host by the
-      # public producers (Unix: the b2701d39 build-llvm-dylib.yml CMake build;
-      # Windows: build/sdk/producers/platform_tuples as in fixed-llvm above).
-      - name: Build the pinned in-process LLVM library on this Unix host
-        if: runner.os != 'Windows'
-        env:
-          NATIVE_PLATFORM: ${{ matrix.llvm_platform }}
-        run: |
-          set -euo pipefail
-          ulimit -c 0
-          if [ "$RUNNER_OS" = Linux ]; then
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq clang cmake ninja-build
-          else
-            brew install ninja
-          fi
-          jobs=$(node ci/build-resources.mjs --jobs-only)
-          library=$(node --input-type=module -e "import {sdkPlatform} from './ci/bootstrap/sdk-platform.mjs';console.log(sdkPlatform(process.argv[1]).llvmLibrary)" "$NATIVE_PLATFORM")
-          git init llvm-fork
-          git -C llvm-fork remote add origin "$LLVM_URL"
-          git -C llvm-fork fetch --depth=1 origin "${{ steps.pin.outputs.sha }}"
-          git -C llvm-fork checkout --detach FETCH_HEAD
-          test "$(git -C llvm-fork rev-parse HEAD)" = "${{ steps.pin.outputs.sha }}"
-          npx --yes zx@8 ci/fetch-llvm-runtime.mjs paired-runtime
-          cmake -G Ninja -S llvm-fork/llvm -B dylib-build \
-            -DCANGJIE_RUNTIME_SOURCE_DIR="$PWD/paired-runtime" \
-            -DCJ_LLVM_COMMIT="${{ steps.pin.outputs.sha }}" \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_C_FLAGS_RELWITHDEBINFO='-O2 -g1 -DNDEBUG' \
-            -DCMAKE_CXX_FLAGS_RELWITHDEBINFO='-O2 -g1 -DNDEBUG' \
-            -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_ENABLE_RTTI=OFF \
-            -DLLVM_PARALLEL_COMPILE_JOBS="$jobs" -DLLVM_PARALLEL_LINK_JOBS=1 \
-            -DBUILD_SHARED_LIBS=OFF -DLLVM_BUILD_LLVM_DYLIB=ON -DLLVM_LINK_LLVM_DYLIB=OFF \
-            -DLLVM_TARGETS_TO_BUILD='X86;ARM;AArch64' -DLLVM_ENABLE_PROJECTS='' \
-            -DCMAKE_CXX_FLAGS='-include cstdint -include unordered_map -include map -include vector -include string'
-          cmake --build dylib-build --target LLVM llvm-nm --parallel "$jobs"
-          dylib-build/bin/llvm-nm --defined-only "dylib-build/lib/$library" > dylib-build/defined-symbols.txt
-          grep -q LLVMInitializeX86TargetInfo dylib-build/defined-symbols.txt
-          mkdir -p "$RUNNER_TEMP/llvm-out"
-          cp -L "dylib-build/lib/$library" "$RUNNER_TEMP/llvm-out/$library"
+      # N/LLVM: the pinned fork's in-process library and llc/llvm-as/llvm-dis,
+      # built on this host by one public producer (b2701d39 build-llvm-dylib.yml
+      # CMake configuration); Windows runs the same build under MSYS2 MINGW64.
       - name: Prepare MSYS2/MinGW native toolchain
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
@@ -3000,28 +2972,38 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-ninja
-      - name: Build the Windows LLVM tuple on this host
+      - name: Build the pinned in-process LLVM and its tools on this Unix host
+        if: runner.os != 'Windows'
+        env:
+          NATIVE_PLATFORM: ${{ matrix.llvm_platform }}
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq clang cmake ninja-build
+          else
+            brew install ninja
+          fi
+          node build/sdk/producers/release/build_prepare_llvm.mjs --platform "$NATIVE_PLATFORM" \
+            --sha "${{ steps.pin.outputs.sha }}" --out "$RUNNER_TEMP/llvm-out"
+      - name: Build the pinned in-process LLVM and its tools on this Windows host
         if: runner.os == 'Windows'
         shell: msys2 {0}
         env:
-          TUPLE_PLATFORM: ${{ matrix.llvm_platform }}
-          LLVM_TARGETS: X86;ARM;AArch64
-          TUPLE_ROOT: .tuple-build
+          NATIVE_PLATFORM: ${{ matrix.llvm_platform }}
         run: |
           set -euo pipefail
-          npx --yes zx@8 build/sdk/producers/platform_tuples/fetch_sources.mjs
-          npx --yes zx@8 build/sdk/producers/platform_tuples/build_tuple.mjs
-          library=$(find .tuple-build -type f -name libLLVM-15.dll | head -n 1)
-          test -n "$library"
-          mkdir -p "$RUNNER_TEMP/llvm-out"
-          cp "$library" "$RUNNER_TEMP/llvm-out/libLLVM-15.dll"
-      # AST: the pinned compiler's cangjie-ast-support target with std support ON
-      # (b2701d39 build-ast-support.yml via ci/build_ast_support.sh); the official
-      # host SDK provisioned above supplies the flatbuffers module and flatc.
-      - name: Fetch the pinned compiler source for AST support
+          node build/sdk/producers/release/build_prepare_llvm.mjs --platform "$NATIVE_PLATFORM" \
+            --sha "${{ steps.pin.outputs.sha }}" --out "$(cygpath -m "$RUNNER_TEMP")/llvm-out"
+      # AST: the compiler's cangjie-ast-support target with std support ON
+      # (b2701d39 build-ast-support.yml via ci/build_ast_support.sh) from the
+      # compiler source the consumer compares against (explicit selection or
+      # ci/source_pin.env); the official host SDK above supplies flatc.
+      - name: Fetch the selected compiler source for AST support
         run: |
           set -euo pipefail
-          set -a; . ci/source_pin.env; . ci/llvm_pin.env; set +a
+          set -a; . ci/llvm_pin.env; eval "$(node build/sdk/producers/release/prepare_native_inputs.mjs compiler-source)"; set +a
           git init compiler
           git -C compiler remote add origin "$COMPILER_SRC_URL"
           git -C compiler fetch --depth=1 origin "$COMPILER_REF"
@@ -3031,7 +3013,6 @@ jobs:
           git -C compiler/third_party/flatbuffers remote add origin "$FLATBUFFERS_URL"
           git -C compiler/third_party/flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
           git -C compiler/third_party/flatbuffers checkout --detach FETCH_HEAD
-          echo "PREPARE_COMPILER_COMMIT=$COMPILER_REF" >> "$GITHUB_ENV"
       - name: Build AST support on this Unix host
         if: runner.os != 'Windows'
         run: bash ci/build_ast_support.sh compiler ast-build "$RUNNER_TEMP/ast-out" "$RUNNER_TEMP/native-inputs/host"
@@ -3045,19 +3026,21 @@ jobs:
           PREPARE_RUNTIME_COMMIT: ${{ steps.pin.outputs.runtime_sha }}
         run: |
           set -euo pipefail
-          producer=${{ runner.os == 'Windows' && 'platform-tuples' || 'llvm-dylib' }}
           node build/sdk/producers/release/prepare_native_inputs.mjs install-llvm \
-            --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}" --from "$RUNNER_TEMP/llvm-out" --producer "$producer"
+            --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}" --from "$RUNNER_TEMP/llvm-out" --producer llvm-dylib
           node build/sdk/producers/release/prepare_native_inputs.mjs install-ast \
             --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}" --from "$RUNNER_TEMP/ast-out"
       - name: Assemble native inputs and bind their provenance
         run: >-
           node build/sdk/producers/release/prepare_native_inputs.mjs assemble
           --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}"
-          --host-version "${CJCJ_NATIVE_HOST_VERSION:-$(sed -n 's/^CJCJ_NATIVE_HOST_VERSION=//p' "$GITHUB_ENV" | tail -n 1)}"
+      - name: Pack native inputs with their file modes
+        run: >-
+          node build/sdk/producers/release/prepare_native_inputs.mjs pack
+          --root "$RUNNER_TEMP/native-inputs" --out "$RUNNER_TEMP/native-inputs.tar"
       - name: Upload native inputs
         uses: actions/upload-artifact@v7
         with:
           name: native-inputs-${{ matrix.target }}
-          path: ${{ runner.temp }}/native-inputs
+          path: ${{ runner.temp }}/native-inputs.tar
           if-no-files-found: error

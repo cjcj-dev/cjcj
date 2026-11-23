@@ -13,7 +13,7 @@ const root = path.resolve(process.env.PLATFORM_CI_ROOT || '.platform-ci');
 const source = path.resolve(process.env.RUNTIME_SOURCE || 'runtime-source');
 const platform = process.env.NATIVE_RUNTIME_PLATFORM;
 const native = sdkPlatform(platform);
-assert.ok(['linux', 'darwin'].includes(native.os), 'NATIVE_CONSUMER_PLATFORM');
+assert.ok(['linux', 'darwin', 'win32'].includes(native.os), 'NATIVE_CONSUMER_PLATFORM');
 assert.equal(native.os, process.platform, 'NATIVE_CONSUMER_HOST');
 assert.equal(native.arch, process.arch, 'NATIVE_CONSUMER_CPU');
 const install = path.join(root, 'runtime-install');
@@ -24,6 +24,10 @@ const summary = {platform, source, install, installed:'NOT_RUN', package:'NOT_RU
 const run = (label, executable, args, options = {}) => command(work, label, executable, args,
   {cwd:root, ...options});
 const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+// The package is the transported artifact. On Windows only the system bsdtar is
+// used, so a Git/MSYS GNU tar on PATH cannot reinterpret the archive name.
+const tar = native.os === 'win32'
+  ? path.join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
 function members(directory, relative = '') {
   const result = {};
   for (const name of fs.readdirSync(path.join(directory, relative)).sort()) {
@@ -49,9 +53,9 @@ try {
   const launcher = value('CMAKE_CXX_COMPILER_LAUNCHER');
   assert.ok(!launcher || path.isAbsolute(launcher) && !launcher.includes(';'), 'NATIVE_CONSUMER_COMPILER_LAUNCHER');
   run('compiler-version', compiler, ['--version']);
-  const loader = path.join(work, 'native-loader');
+  const loader = path.join(work, 'native-loader' + native.exe);
   const args = ['-std=c++17', fileURLToPath(new URL('../release/darwin_loader.cpp', import.meta.url)),
-    ...(native.os === 'linux' ? ['-ldl'] : []), '-o', loader];
+    ...(native.os === 'linux' ? ['-ldl'] : []), ...(native.os === 'win32' ? ['-static'] : []), '-o', loader];
   if (native.os === 'darwin') {
     const sysroot = value('CMAKE_OSX_SYSROOT');
     if (sysroot) args.unshift('-isysroot', sysroot);
@@ -63,7 +67,10 @@ try {
     const env = cleanSdkEnvironment(prefix, platform);
     // Only this prefix contributes runtime library directories. System libraries remain native OS dependencies.
     const libraryDirectory = path.join(prefix, 'runtime/lib', native.tuple);
-    env[native.loader] = libraryDirectory;
+    // On Windows PATH is also the executable/system search path; the prefix
+    // comes first and the loader compares the owning module path anyway.
+    env[native.loader] = native.os === 'win32' ? [libraryDirectory, env.PATH || env.Path || ''].filter(Boolean).join(path.delimiter)
+      : libraryDirectory;
     summary[phase] = {runtime:'NOT_RUN', bounds:'NOT_RUN', libraryDirectory};
     for (const [role, basename, symbol, mode] of [
       ['runtime', 'libcangjie-runtime', 'CJ_MCC_HandleReturnSafepoint', 'runtime'],
@@ -81,11 +88,11 @@ try {
   await consume(install, 'installed');
   const original = members(install);
   assert.ok(!fs.existsSync(path.join(root, 'runtime-install.tar')), 'NATIVE_PACKAGE_ALREADY_EXISTS');
-  run('package', 'tar', ['-cf', './runtime-install.tar', '-C', './runtime-install', '.']);
+  run('package', tar, ['-cf', './runtime-install.tar', '-C', './runtime-install', '.']);
   summary.package = 0;
   const unpack = path.join(root, 'runtime-unpacked');
   fs.mkdirSync(unpack); // Must be fresh, including when an earlier unpack failed.
-  run('unpack', 'tar', ['-xf', './runtime-install.tar', '-C', './runtime-unpacked']);
+  run('unpack', tar, ['-xf', './runtime-install.tar', '-C', './runtime-unpacked']);
   summary.unpack = 0;
   assert.deepEqual(members(unpack), original, 'NATIVE_PACKAGE_MEMBER_BYTES');
   fs.writeFileSync(path.join(work, 'package-members.json'), JSON.stringify(original, null, 2)+'\n');
