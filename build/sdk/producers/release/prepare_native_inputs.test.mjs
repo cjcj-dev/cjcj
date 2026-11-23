@@ -292,6 +292,10 @@ test('every native-inputs consumer unpacks the tar before the host or runtime is
     assert.ok(at('Unpack selected native inputs with their file modes') < at('Select actual native host and freeze the same inputs'), name);
     assert.ok(at('Unpack fixed native runtime installation with its file modes') === at('Receive fixed native runtime installation') + 1, name);
   }
+  // ci.yml consumes the same native-inputs artifact for its coloured target SDK.
+  const ci = loadYaml(read('ci')).jobs.build.steps.map(step => step.name || '');
+  assert.equal(ci.indexOf('Unpack native SDK producer inputs with their file modes'), ci.indexOf('Receive native SDK producer inputs') + 1);
+  assert.ok(ci.indexOf('Unpack native SDK producer inputs with their file modes') < ci.indexOf('Prepare paired coloured target SDK'));
 });
 
 // ---- N/LLVM producer: the same dylib build with its tools on all hosts ----
