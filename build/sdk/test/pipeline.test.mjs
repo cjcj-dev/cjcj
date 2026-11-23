@@ -75,7 +75,7 @@ test('cli: arguments and config are validated against the pins', () => {
   const dir = tmp(), file = path.join(dir, 'c.json');
   const base = {work: dir, evidence: dir, cjcj: dir, platform: 'linux_x86_64', asset: 'linux-x64', nativeInstall: dir, runtimeInstall: dir,
     seedInputs: dir, sources: {}, env: {}, commits: {runtime: 'e5060a7bf96a50c7e7b65eac2a3a029f65db9a07', llvm: 'eb7ad0120f43f802fbc60615e6c6f068183fffe3',
-      ast: '41b22350b8eb5b0c8244704f906b7b8d3096eb9c', tools: '3460b1e55a16414f52385663ba780fb4ed07ee65', stdx: '76c9da37332d5ec2f82fedaf6c0a3793d3200e2c'}};
+      ast: '2e7b7dd9f363b8b7ae1fc724273e5399a5ea7c0d', tools: '3460b1e55a16414f52385663ba780fb4ed07ee65', stdx: '76c9da37332d5ec2f82fedaf6c0a3793d3200e2c'}};
   fs.writeFileSync(file, JSON.stringify(base));
   assert.equal(readConfig(file).asset, 'linux-x64');
   fs.writeFileSync(file, JSON.stringify({...base, commits: {...base.commits, stdx: 'b10784b27a5b3f815c9542d28f3ba02f48db48d5'}}));
