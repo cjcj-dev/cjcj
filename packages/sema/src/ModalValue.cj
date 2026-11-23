@@ -6,22 +6,36 @@ import cjcj::ast.*
 // Each tuple projection takes the mode of the tuple. A Nothing branch contributes no value;
 // Copyable values constrain the join only when there are no non-Copyable contributors.
 public func JoinResultModes(tm: TypeManager, values: ArrayList<Expr>, modeOf: (Expr) -> Option<ASTMode>): ASTMode {
+    return JoinResultModesImpl(tm, values, modeOf, false) ?? ASTMode.NOT
+}
+
+// Before the lifetime walk, a value with unknown mode must not be treated as NOT.
+public func JoinKnownResultModes(tm: TypeManager, values: ArrayList<Expr>,
+    modeOf: (Expr) -> Option<ASTMode>): Option<ASTMode> {
+    return JoinResultModesImpl(tm, values, modeOf, true)
+}
+
+private func JoinResultModesImpl(tm: TypeManager, values: ArrayList<Expr>, modeOf: (Expr) -> Option<ASTMode>,
+    requireKnown: Bool): Option<ASTMode> {
     var nonCopy: Option<ASTMode> = None
     var copy: Option<ASTMode> = None
     for (value in values) {
-        if (value.GetTy().isNone()) { continue }
-        let ty = value.GetTy().getOrThrow()
+        let ty = match (value.GetTy()) {
+            case Some(ty) => ty
+            case None => if (requireKnown) { return None } else { continue }
+        }
         if (ty.IsNothing()) { continue }
-        let actual = modeOf(value)
-        if (actual.isNone()) { continue }
-        let mode = actual.getOrThrow()
+        let mode = match (modeOf(value)) {
+            case Some(mode) => mode
+            case None => if (requireKnown) { return None } else { continue }
+        }
         if (tm.IsModalCopyType(ty)) {
             copy = if ((let Some(prior) <- copy) && prior != mode) { Some(ASTMode.HALF) } else { Some(mode) }
         } else {
             nonCopy = if ((let Some(prior) <- nonCopy) && prior != mode) { Some(ASTMode.HALF) } else { Some(mode) }
         }
     }
-    return nonCopy ?? (copy ?? ASTMode.NOT)
+    return Some(nonCopy ?? (copy ?? ASTMode.NOT))
 }
 
 public func BindingResultMode(tm: TypeManager, value: Expr, receiver: ASTMode): Option<ASTMode> {

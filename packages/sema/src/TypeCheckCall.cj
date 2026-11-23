@@ -1296,10 +1296,10 @@ public func CallSiteMode(typeManager: TypeManager, expr: Expr, receiver: ASTMode
     seen: HashSet<Decl>): Option<ASTMode> {
     if (let Some(array) <- (expr as ArrayLit)) {
         if (let Some(expected) <- array.expectedLocalMode) { return expected }
-        return CallSiteAggregateMode(typeManager, array.children, receiver, seen)
+        return JoinKnownResultModes(typeManager, array.children, { e => CallSiteMode(typeManager, e, receiver, seen) })
     }
     if (let Some(tuple) <- (expr as TupleLit)) {
-        return CallSiteAggregateMode(typeManager, tuple.children, receiver, seen)
+        return JoinKnownResultModes(typeManager, tuple.children, { e => CallSiteMode(typeManager, e, receiver, seen) })
     }
     if (let Some(paren) <- (expr as ParenExpr)) {
         if (let Some(inner) <- paren.expr) { return CallSiteMode(typeManager, inner, receiver, seen) }
@@ -1407,22 +1407,6 @@ public func CallSiteMode(typeManager: TypeManager, expr: Expr, receiver: ASTMode
     // testmacro instrumentation.cj:690 `... |> collectHashSet`, macro_state.cj:23 `quote(@Attribute[)`.
     if (let Some(lowered) <- expr.desugarExpr) { return CallSiteMode(typeManager, lowered, receiver, seen) }
     return None
-}
-
-// Use the same join as the lifetime walk, but do not guess a region for a
-// value whose mode is still unknown during type checking.
-private func CallSiteAggregateMode(typeManager: TypeManager, values: ArrayList<Expr>, receiver: ASTMode,
-    seen: HashSet<Decl>): Option<ASTMode> {
-    for (value in values) {
-        if (value.GetTy().isNone()) { return None }
-    }
-    var allKnown = true
-    let joined = JoinResultModes(typeManager, values, { value =>
-        let mode = CallSiteMode(typeManager, value, receiver, seen)
-        allKnown = allKnown && mode.isSome()
-        mode
-    })
-    return if (allKnown) { Some(joined) } else { None }
 }
 
 private func ModeArgumentIndex(fd: FuncDecl, call: CallExpr, i: Int64): Int64 {
