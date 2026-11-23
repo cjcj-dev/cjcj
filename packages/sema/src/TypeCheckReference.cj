@@ -781,7 +781,7 @@ private func FilterPropertyReceivers(tm: TypeManager, ctx: ASTContext, expr: Exp
     if (!hasProperty) { return }
     let owner = GetCurFuncBody(ctx, expr.scopeName).flatMap({ b => b.funcDecl })
     let enclosing = owner.map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
-    let actual = if (let Some(b) <- base) { CallSiteMode(b, enclosing, HashSet<Decl>()) } else { Some(enclosing) }
+    let actual = if (let Some(b) <- base) { CallSiteMode(tm, b, enclosing, HashSet<Decl>()) } else { Some(enclosing) }
     let ty = if (let Some(b) <- base) { b.GetTy() }
         else { GetCurInheritableDecl(ctx, expr.scopeName).flatMap({ d => d.GetTy() }) }
     let copy = ty.map({ t => tm.IsModalCopyType(t) }) ?? false
