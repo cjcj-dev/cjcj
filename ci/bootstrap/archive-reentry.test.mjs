@@ -44,7 +44,7 @@ test('public build-shim reentry reaches real CMake after all source archives are
   CJCJ_RUNTIME_REF_OVERRIDE:selection.runtime.commit,CJCJ_ALLOW_RUNTIME_OVERRIDE:'true',CJCJ_NATIVE_LLVM_REF:selection.llvm.commit};
  for(const key of ['CJCJ_BOOTSTRAP_SHIM_SOURCES','CJCJ_BOOTSTRAP_RUNTIME_PIN','CJCJ_BOOTSTRAP_CPP_SRC','CANGJIE_CPP_SRC',
   'CJCJ_SRCBUILD_CONSUMER_SDK','CANGJIE_WORKSPACE','CJCJ_LLVM_SHIM_O'])delete env[key];
- const entry=[process.execPath,path.join(source,'ci/srcbuild/steps/build-shim.mjs')];
+ const entry=[process.execPath,path.join(source,'build/sdk/producers/srcbuild/steps/build-shim.mjs')];
  const first=run('public-first',entry,consumer,env);
  assert.equal(first.status,1);assert.match(first.text,/ARCHIVE_REENTRY_CMAKE_REACHED/);
  for(const row of Object.values(selection)) {

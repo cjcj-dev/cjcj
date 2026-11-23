@@ -116,7 +116,7 @@ jobs:
         with:
           node-version: '24.22.1'
       - name: Check release source targets
-        run: node ci/srcbuild/target-matrix.mjs --targets all --require-ready
+        run: node build/sdk/producers/srcbuild/target-matrix.mjs --targets all --require-ready
 
   # Each phase produces its own native SDK and consumes that same installation.
   # Linux retains its separate cross std artifact for Linux's FFI payload.

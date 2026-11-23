@@ -98,7 +98,7 @@ test('public producer rejects a non-Windows host before creating a work tree',as
 test('original layout crosses N copy and installedInputs with null CONFIG_ARGS; full DLL/original bytes stay required',async()=>{
  const {copyWindowsPythonInstallation}=await import('./native-python-install.mjs');
  const {pythonSourceInputs}=await import('./sdk-cjdb-python.mjs');
- const {installedInputs}=await import('../srcbuild/lib/installed-inputs.mjs');
+ const {installedInputs}=await import('../../build/sdk/producers/srcbuild/lib/installed-inputs.mjs');
  const f=process.env.WINDOWS_PYTHON_COPY_INPUT?{install:process.env.WINDOWS_PYTHON_COPY_INPUT}:await fixture('native-copy');
  const sdk=path.join(root,'sdk'),nativeRoot=path.join(sdk,'third_party/llvm');
  const record=path.join(f.install,'PYTHON-BUILD-INPUTS.json');

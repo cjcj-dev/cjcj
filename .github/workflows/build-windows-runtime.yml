@@ -151,7 +151,7 @@ jobs:
           RUNTIME_TARGET: windows-x86_64
           RUNTIME_TOOLCHAIN: ${{ github.workspace }}/.windows-runtime-buildtools/llvm-mingw-w64
           RUNTIME_VERSION: ${{ inputs.version || env.RUNTIME_VERSION }}
-        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/build_runtime.mjs
 
       - name: Restore Cangjie toolchain
         id: cjv-cache
@@ -256,7 +256,7 @@ jobs:
           RUNTIME_TOOLCHAIN: ${{ github.workspace }}/.windows-runtime-buildtools/llvm-mingw-w64
           COMPILER_SOURCE: ${{ github.workspace }}/compiler
           AST_SUPPORT_ARTIFACT: ${{ github.workspace }}/.windows-stdast-buildtools/ast-support-artifact
-        run: CANGJIE_HOME="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN" npx --yes zx@8 ci/platform_matrix/build_windows_std_ast.mjs
+        run: CANGJIE_HOME="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN" npx --yes zx@8 build/sdk/producers/platform_matrix/build_windows_std_ast.mjs
 
       - name: Report sccache
         if: always()
@@ -275,4 +275,4 @@ jobs:
           retention-days: 7
 
       - name: Verify official Windows runtime ABI
-        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/verify_windows_runtime_exports.mjs

@@ -10,7 +10,7 @@ import {resolveGateHostRuntime} from '../lib/release-gate-apparatus.mjs';
 import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
-const baseSdkIdentities = JSON.parse(fs.readFileSync(path.join(root, 'ci/release/base-sdk-identities.json'), 'utf8'));
+const baseSdkIdentities = JSON.parse(fs.readFileSync(path.join(root, 'build/sdk/producers/release/base-sdk-identities.json'), 'utf8'));
 const workflow = name => fs.readFileSync(path.join(root, '.github/workflows', name), 'utf8');
 const job = (text, name) => text.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0];
 
@@ -63,7 +63,7 @@ test('ARM caller requests only ARM and package fields consume the same plan', t 
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'arm-source-'));
   t.after(() => fs.rmSync(temp, {recursive: true, force: true}));
   const output = path.join(temp, 'output');
-  const result = spawnSync(process.execPath, ['ci/srcbuild/target-matrix.mjs', '--targets', requested], {
+  const result = spawnSync(process.execPath, ['build/sdk/producers/srcbuild/target-matrix.mjs', '--targets', requested], {
     cwd: root, encoding: 'utf8', env: {...process.env, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: ''},
   });
   assert.equal(result.status, 0, result.stderr);
@@ -117,7 +117,7 @@ test('every target mapping reaches archive naming, runtime lookup and native hos
 test('every native host identity consumer returns the registry platform and library', () => {
   for (const {target} of sourceBuildCells()) {
     const result = spawnSync(process.execPath, ['--input-type=module', '-e',
-      "import {hostIdentity} from './ci/release/host_llvm.mjs'; console.log(JSON.stringify(hostIdentity()));"], {
+      "import {hostIdentity} from './build/sdk/producers/release/host_llvm.mjs'; console.log(JSON.stringify(hostIdentity()));"], {
       cwd: root, encoding: 'utf8', env: {...process.env, CJCJ_SRCBUILD_TARGET: target, STAGE1_HOST_IDENTITIES: ''},
     });
     assert.equal(result.status, 0, `${target}: ${result.stderr}`);
@@ -133,8 +133,8 @@ for (const key of allTargets()) {
   test(`Python preparation enforces the registry package host for ${key}`, () => {
     const result = spawnSync(process.execPath, ['--input-type=module', '-e',
       `Object.defineProperty(process, 'platform', {value: 'unsupported'});
-       process.argv = [process.execPath, 'ci/release/prepare_python_bundle.mjs', ${JSON.stringify(key)}, 'unused'];
-       await import('./ci/release/prepare_python_bundle.mjs');`], {
+       process.argv = [process.execPath, 'build/sdk/producers/release/prepare_python_bundle.mjs', ${JSON.stringify(key)}, 'unused'];
+       await import('./build/sdk/producers/release/prepare_python_bundle.mjs');`], {
       cwd: root, encoding: 'utf8',
     });
     const expected = `${key} Python must be prepared natively on ${getTarget(key).spec.packageHost.join('/')}, got unsupported/${process.arch}`;
@@ -149,12 +149,12 @@ test('all audited spec consumers reference registry fields without independent t
     ['build/lib/release-component-provenance.mjs', ['spec.sdkName', 'spec.archiveFormat']],
     ['build/lib/release-gate-apparatus.mjs', ['spec.runtimeTuple', 'spec.runtimeLibrary']],
     ['scripts/verify_packaged_cjdb.mjs', ['getTarget(platform).spec.runtimeTuple']],
-    ['ci/release/prepare_python_bundle.mjs', ['getTarget(platform).spec.packageHost']],
-    ['ci/platform_matrix/build_cjcj.mjs', ['targetForHost()?.spec.runtimeTuple']],
-    ['ci/platform_matrix/fetch_llvm_tuple.mjs', ['targetForHost()?.spec.llvmPlatform']],
+    ['build/sdk/producers/release/prepare_python_bundle.mjs', ['getTarget(platform).spec.packageHost']],
+    ['build/sdk/producers/platform_matrix/build_cjcj.mjs', ['targetForHost()?.spec.runtimeTuple']],
+    ['build/sdk/producers/platform_matrix/fetch_llvm_tuple.mjs', ['targetForHost()?.spec.llvmPlatform']],
     ['ci/setup_sdk.mjs', ['targetForHost()?.spec.llvmPlatform']],
-    ['ci/release/host_llvm.mjs', ['spec.llvmPlatform', 'spec.hostLlvmLibrary']],
-    ['ci/release/prepare_bootstrap_fixture.mjs', ['getTarget(target).spec.llvmPlatform']],
+    ['build/sdk/producers/release/host_llvm.mjs', ['spec.llvmPlatform', 'spec.hostLlvmLibrary']],
+    ['build/sdk/producers/release/prepare_bootstrap_fixture.mjs', ['getTarget(target).spec.llvmPlatform']],
     ['scripts/package_sdk.mjs', ['getTarget(platform)', 'targetSpec.nativeFilePattern', 'targetSpec.requiredLlvmTools']],
   ];
   for (const [file, fields] of consumers) {

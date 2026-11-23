@@ -6,7 +6,7 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {getEventListeners} from 'node:events';
 import {fileURLToPath} from 'node:url';
-import {streamStdProcess} from '../srcbuild/lib/assert-std-barriers.mjs';
+import {streamStdProcess} from '../../build/sdk/producers/srcbuild/lib/assert-std-barriers.mjs';
 import {stringEnvironment} from './sdk-installed-string.mjs';
 import {fileDigest} from './sdk-flow.mjs';
 const js=body=>[process.execPath,'-e',body];

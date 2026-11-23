@@ -10,7 +10,7 @@ await entry(async () => {
   const yml = '.github/workflows/build-llvm-tools.yml';
   // Updated contract: srcbuild now acquires verified bytes. This is the active
   // tuple producer; its flag cut is new relative to the retired Bash test data.
-  const src = 'ci/platform_tuples/build_tuple.mjs';
+  const src = 'build/sdk/producers/platform_tuples/build_tuple.mjs';
   const checker = 'ci/assert_no_libxml2_needed.sh';
   const token = '-DLLVM_ENABLE_LIBXML2=OFF';
   const files = [[yml, 'yml'], [src, 'src'], [checker, 'checker']];

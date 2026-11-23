@@ -210,7 +210,7 @@ for (const explicit of [false, true]) cases[`handoff-${explicit?'explicit':'defa
   const env = {...process.env,GITHUB_WORKSPACE:area,GITHUB_SHA:'a'.repeat(40),GITHUB_RUN_ID:'input-integration',
     CJCJ_SRCBUILD_TARGET:'linux-x64',GITHUB_ENV:path.join(area,'github-env'),GITHUB_PATH:path.join(area,'github-path')};
   for (const key of Object.keys(env)) if (/^(CJCJ_BOOTSTRAP_|CJCJ_RUNTIME_|RUNTIME_|CANGJIE_HOME$)/.test(key)) delete env[key];
-  const handoff = path.join(root,'ci/srcbuild/job-handoff.mjs'), archive = path.join(area,'handoff');
+  const handoff = path.join(root,'build/sdk/producers/srcbuild/job-handoff.mjs'), archive = path.join(area,'handoff');
   // This fixture has fetched sources but has not produced an installed SDK.
   // Stage 3 must reject it; use the actual source-only predecessor to exercise
   // restored tools/stdx Git identity without fabricating Java or a stage SDK.
@@ -291,7 +291,7 @@ cases['ci-verify-h'] = () => {
     for (const key of ['CJCJ_OFFICIAL_SDK_ROOT','CJCJ_SRCBUILD_HOST_SDK','CJCJ_VERIFY_NO_FAIL_FAST']) delete env[key];
     Object.assign(env,selected);
     const p = command(`ci-verify-${label}`,['--experimental-loader',observer,
-      ...zxCommand([path.join(root,'ci/srcbuild/steps/verify.mjs'),sdk],env).slice(1)],env);
+      ...zxCommand([path.join(root,'build/sdk/producers/srcbuild/steps/verify.mjs'),sdk],env).slice(1)],env);
     console.log('CI_VERIFY_WIRING_ASSERTION_REACHED',label);
     observed(p,'LINEAGE_INPUT_OBSERVED'); assert.doesNotMatch(p.text,/LINEAGE_INPUT_MISMATCH/);
   }

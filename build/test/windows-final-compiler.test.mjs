@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
-import {buildWindowsFinalCompiler} from '../../ci/platform_matrix/windows-final-compiler.mjs';
-import {fileSha256, FINAL_COMPILER_PROVENANCE} from '../../ci/srcbuild/lib/final-compiler.mjs';
+import {buildWindowsFinalCompiler} from '../sdk/producers/platform_matrix/windows-final-compiler.mjs';
+import {fileSha256, FINAL_COMPILER_PROVENANCE} from '../sdk/producers/srcbuild/lib/final-compiler.mjs';
 import {getTarget} from '../lib/targets.mjs';
 
 const workspaceToml = await fs.readFile(new URL('../../cjpm.toml', import.meta.url), 'utf8');

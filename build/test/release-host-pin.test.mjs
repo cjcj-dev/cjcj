@@ -22,8 +22,8 @@ test('a changed pin reaches both release selectors and requires matching archive
   t.after(() => fs.rm(fixture, {recursive: true, force: true}));
   const root = path.resolve(import.meta.dirname, '../..');
   for (const relative of [
-    'ci/host-toolchain-pin.mjs', 'ci/release/base-sdk-identities.json',
-    'ci/release/source-tool-payloads.mjs', 'build/srcbuild/tool-layout.mjs',
+    'ci/host-toolchain-pin.mjs', 'build/sdk/producers/release/base-sdk-identities.json',
+    'build/sdk/producers/release/source-tool-payloads.mjs', 'build/srcbuild/tool-layout.mjs',
     'build/lib/release-component-provenance.mjs', 'build/lib/release-gate-apparatus.mjs',
     'build/lib/targets.mjs', 'build/lib/errors.mjs',
   ]) {
@@ -53,7 +53,7 @@ test('a changed pin reaches both release selectors and requires matching archive
   assert.equal(unregistered.release, pin);
   assert.equal(unregistered.apparatus, pin);
   assert.match(unregistered.error, /no pinned archive identity/);
-  const identityPath = path.join(fixture, 'ci/release/base-sdk-identities.json');
+  const identityPath = path.join(fixture, 'build/sdk/producers/release/base-sdk-identities.json');
   const identities = JSON.parse(await fs.readFile(identityPath, 'utf8'));
   identities.version = 'control';
   delete identities.platforms['linux-x64'].version;

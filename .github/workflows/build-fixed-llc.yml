@@ -160,7 +160,7 @@ jobs:
           files.push({path: 'SHA256SUMS', mode: 0o644, sha256: crypto.createHash('sha256').update(sums).digest('hex')});
           fs.writeFileSync(`${process.env.RUNNER_TEMP}/bootstrap-files.json`, JSON.stringify(files));
           NODE
-          node ci/release/publish_bootstrap_inputs.mjs "$STATIC_TUPLE" "$RUNNER_TEMP/bootstrap-files.json" "$RUNNER_TEMP/bootstrap-inputs-pin.json"
+          node build/sdk/producers/release/publish_bootstrap_inputs.mjs "$STATIC_TUPLE" "$RUNNER_TEMP/bootstrap-files.json" "$RUNNER_TEMP/bootstrap-inputs-pin.json"
       - uses: actions/upload-artifact@v7
         with:
           name: bootstrap-inputs-pin-${{ matrix.platform }}

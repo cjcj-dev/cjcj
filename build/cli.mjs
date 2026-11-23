@@ -24,7 +24,7 @@ import * as tools from './srcbuild/stages/tools.mjs';
 import * as verify from './srcbuild/stages/verify.mjs';
 import {prepareSourceBuildInputs,resumeSourceComponents} from '../ci/bootstrap/sdk-inputs.mjs';
 import {installProducts} from '../ci/bootstrap/sdk-flow.mjs';
-import {stageSdkHandoff} from '../ci/srcbuild/stage-sdk-handoff.mjs';
+import {stageSdkHandoff} from './sdk/producers/srcbuild/stage-sdk-handoff.mjs';
 import {verifyInstall} from '../ci/bootstrap/sdk-verify-install.mjs';
 
 const VERSION = '0.1.0';

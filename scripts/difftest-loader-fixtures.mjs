@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {parseSummary} from '../ci/release/g8.mjs';
+import {parseSummary} from '../build/sdk/producers/release/g8.mjs';
 import {buildFullGateFloor} from '../build/lib/full-gate-floor-schema.mjs';
 
 export async function testLoaderContract({root, script, evidence, zx}) {

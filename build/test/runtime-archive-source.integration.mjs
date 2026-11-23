@@ -6,7 +6,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileDigest} from '../../ci/bootstrap/sdk-flow.mjs';
-import {installedInputs} from '../../ci/srcbuild/lib/installed-inputs.mjs';
+import {installedInputs} from '../sdk/producers/srcbuild/lib/installed-inputs.mjs';
 import {runtimeInputsForArtifact,recordRuntimeInputs} from '../lib/runtime-source-inputs.mjs';
 import {writeToolchainIdentity,TOOLCHAIN_IDENTITY_ARTIFACTS} from '../lib/toolchain-identity.mjs';
 import {contentSignals} from '../lib/package-lineage.mjs';

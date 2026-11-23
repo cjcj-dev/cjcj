@@ -115,7 +115,7 @@ test('asking the build for a blocked release platform fails closed with the miss
 // the table so there is one truth about which runner packages which platform.
 test('release.yml package jobs agree with the release platform table', () => {
   const release = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
-  assert.match(release, /run: node ci\/srcbuild\/target-matrix.mjs --targets all --require-ready/);
+  assert.match(release, /run: node build\/sdk\/producers\/srcbuild\/target-matrix.mjs --targets all --require-ready/);
   assert.match(release, /source-p1-linux-x64:\n    needs: plan/);
   const jobs = release.split(/\n  (?=[a-z0-9-]+:\n)/).filter(job => job.includes('uses: ./.github/workflows/build-release-package.yml'));
   assert.equal(jobs.length, allReleasePlatforms().filter(key => !getReleasePlatform(key).excluded && !getReleasePlatform(key).crossCompiledHost).length);
@@ -177,7 +177,7 @@ test('each requirement producer resolves to a real job in release-matrix.yml tha
   // forwards it as a step output, and the step writes it into GITHUB_OUTPUT.
   assert.ok(workflow.includes('prerequisite_matrix: ${{ steps.plan.outputs.prerequisite_matrix }}'),
     'the plan job does not forward prerequisite_matrix');
-  const matrix = fs.readFileSync(path.join(root, 'ci/release/platform-matrix.mjs'), 'utf8');
+  const matrix = fs.readFileSync(path.join(root, 'build/sdk/producers/release/platform-matrix.mjs'), 'utf8');
   assert.ok(matrix.includes('`prerequisite_matrix=${JSON.stringify({include: plan.prerequisites})}`'),
     'the plan step does not write prerequisite_matrix into GITHUB_OUTPUT');
 });
@@ -185,7 +185,7 @@ test('each requirement producer resolves to a real job in release-matrix.yml tha
 test('the action behind a requirement producer runs both the installer and the probe', () => {
   for (const [requirement, producer] of Object.entries(DAG_REQUIREMENT_PRODUCERS)) {
     const action = fs.readFileSync(path.join(root, producer.action.replace(/^\.\//, ''), 'action.yml'), 'utf8');
-    assert.ok(action.includes('ci/release/install-runner-sdk.py "$SDK_REQUIREMENT"'),
+    assert.ok(action.includes('build/sdk/producers/release/install-runner-sdk.py "$SDK_REQUIREMENT"'),
       `${requirement}: the action does not run the SDK installer`);
     assert.ok(action.includes('platform-matrix.mjs probe --requirement "$SDK_REQUIREMENT"'),
       `${requirement}: the action does not run the capability probe`);

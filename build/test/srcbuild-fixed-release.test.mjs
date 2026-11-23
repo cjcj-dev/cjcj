@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
-import {fixture} from '../../ci/release/prepare_bootstrap_fixture.mjs';
+import {fixture} from '../sdk/producers/release/prepare_bootstrap_fixture.mjs';
 
-const entry = new URL('../../ci/release/acquire_fixed_tuple.mjs', import.meta.url).pathname;
+const entry = new URL('../sdk/producers/release/acquire_fixed_tuple.mjs', import.meta.url).pathname;
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 function acquire(inputs) {

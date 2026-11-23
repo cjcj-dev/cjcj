@@ -6,7 +6,7 @@ import {BuildError} from '../../lib/errors.mjs';
 import {getLogger, stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
 import {assertNoVerifierReportArtifacts} from '../../../scripts/verifier_artifact_gate.mjs';
-import {packageInstall} from '../../../ci/srcbuild/lib/package-install.mjs';
+import {packageInstall} from '../../sdk/producers/srcbuild/lib/package-install.mjs';
 import {archiveInstall, privateRoot} from '../../../ci/bootstrap/sdk-flow.mjs';
 import {consumerSdk, ensureDir, requireDir, requireFile} from './common.mjs';
 import {toolOutputs, retainedToolPath} from '../tool-layout.mjs';

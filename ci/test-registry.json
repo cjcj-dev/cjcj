@@ -35,21 +35,21 @@
     "reason": "Requires an assembled stage1 target SDK with separately bound host libraries and pinned coloured target runtime, not the official host SDK."
   },
   {
-    "file": "ci/release/test_darwin_runtime_controls.sh",
+    "file": "build/sdk/producers/release/test_darwin_runtime_controls.sh",
     "executor": "bash",
     "args": [
       "{output}"
     ]
   },
   {
-    "file": "ci/release/test_language_tuple.py",
+    "file": "build/sdk/producers/release/test_language_tuple.py",
     "executor": "python3",
     "args": []
   },
   {
     "file": "ci/test-ast-support-wiring.mjs",
     "executor": "manual",
-    "reason": "Fault-arm tool rewrites ci/release/prepare_bootstrap_inputs.mjs in place; run only in an isolated checkout, not alongside its Node contract suite."
+    "reason": "Fault-arm tool rewrites build/sdk/producers/release/prepare_bootstrap_inputs.mjs in place; run only in an isolated checkout, not alongside its Node contract suite."
   },
   {
     "file": "ci/test-g1-signal-cleanup.mjs",
@@ -552,7 +552,7 @@
     "reason": "Standalone compiler regression built by test/named_struct_factory/build.sh with explicitly selected candidate SDK."
   },
   {
-    "file": "ci/platform_matrix/tests/runtime_core_diagnostics.py",
+    "file": "build/sdk/producers/platform_matrix/tests/runtime_core_diagnostics.py",
     "executor": "manual",
     "reason": "Requires a same-build runtime unit ELF/SO pair, PyYAML, GDB and real core evidence; generates a core if none supplied, which is prohibited on kkk2."
   },
@@ -746,7 +746,7 @@
     "reason": "Requires complete original NATIVE_HOST_TEST_INPUT_ROOT and fixed CJCJ_TEST_RUNTIME_GENERATOR plus private RELEASE_EVIDENCE_TEST_ROOT. Actual native ELF/SO/ar source capture through formal host/freeze/capture/G1/G2; archive verifier is explicitly controlled, not complete SDK or official release evidence."
   },
   {
-    "file": "ci/release/installed-manifest-entry.integration.mjs",
+    "file": "build/sdk/producers/release/installed-manifest-entry.integration.mjs",
     "executor": "manual",
     "reason": "Formal package/compose finite native fixture; explicitly controlled unavailable SDK functional prerequisites, requires private evidence root."
   },
@@ -766,12 +766,12 @@
     "reason": "Requires SDK_NATIVE_INSTALLED_SDK/TEST_ROOT/INPUTS, real paired Linux installed SDK; jobs follow actual resources. Public CLI installs existing std bytes without rebuilding std; missing artifacts, exact native-stage product cut, independent control, restored actual String compile/run. Windows/Darwin native production remains NOT_RUN."
   },
   {
-    "file": "ci/platform_matrix/windows-runtime-consumers.integration.test.mjs",
+    "file": "build/sdk/producers/platform_matrix/windows-runtime-consumers.integration.test.mjs",
     "executor": "manual",
     "reason": "Requires formal CJCJ_TEST_ZX_RECEIPT (real ProcessOutput), owned WINDOWS_CONSUMERS_EVIDENCE on controlled Linux worker. Executes installed/package public entries with explicit Windows/compiler/consumer command fixtures and real capture/tar; checks product CMake inputs, IAT invocation, isolated install/unpack origin and child failure propagation. Actual COFF/PE/import-library/Windows OS qualification requires the official Windows runner."
   },
   {
-    "file": "ci/platform_matrix/windows-runtime-shell.integration.test.mjs",
+    "file": "build/sdk/producers/platform_matrix/windows-runtime-shell.integration.test.mjs",
     "executor": "manual",
     "reason": "Requires owned WINDOWS_SHELL_EVIDENCE, Node registerHooks and Bash on controlled Linux worker. Public Windows entry with explicit host/tool command fixtures exercises real Bash stdin, literal special paths, build/install capture and failure sequencing. Native MSYS/COFF/DLL qualification requires official Windows runner."
   },
@@ -806,17 +806,17 @@
     "reason": "Platform fixed producer tool spelling gate requires NATIVE_TOOLS_EVIDENCE, NATIVE_JOBS_PYTHON and actual NATIVE_UPPERCASE_SCCACHE; finite real CMake/C compile, not full native N."
   },
   {
-    "file": "ci/platform_matrix/cross-runtime-build-type.test.mjs",
+    "file": "build/sdk/producers/platform_matrix/cross-runtime-build-type.test.mjs",
     "executor": "manual",
     "reason": "Requires private CROSS_TYPE_EVIDENCE and ZX; public Windows cross runtime build/install uses explicitly labelled command fixture, not Windows runtime qualification."
   },
   {
-    "file": "ci/platform_matrix/pick_cc.test.mjs",
+    "file": "build/sdk/producers/platform_matrix/pick_cc.test.mjs",
     "executor": "manual",
     "reason": "Requires actual /usr/lib/llvm-15/bin/clang; explicit compiler selection runs real small C compile probe on Linux, not Windows execution."
   },
   {
-    "file": "ci/srcbuild/tests/cross-jobs-entry.test.mjs",
+    "file": "build/sdk/producers/srcbuild/tests/cross-jobs-entry.test.mjs",
     "executor": "manual",
     "reason": "Requires private CROSS_JOBS_EVIDENCE and ZX; formal cross runtime CLI exercises controlled dependency commands and actual resource propagation, full cross SDK remains separate."
   },
@@ -866,12 +866,12 @@
     "reason": "Finite public artifact materialization, adapter source/tool selection and SDK copy/archive/installed-input consumption. Requires WINDOWS_TOOLCHAIN_ENTRY_EVIDENCE, actual tar and Node22; explicit synthetic transport bytes do not qualify Windows/N/SDK."
   },
   {
-    "file": "ci/platform_tuples/migration.integration.mjs",
+    "file": "build/sdk/producers/platform_tuples/migration.integration.mjs",
     "executor": "manual",
     "reason": "Fixed G2 leaf parity and AST tests require G2_MIGRATION_EVIDENCE, pinned shfmt 3.12.0 via CJCJ_BASH_AST_PARSER, real git/cmake/zx@8. Reuse original script owner results; finite configure is not full native production."
   },
   {
-    "file": "ci/platform_tuples/workflow-entry.integration.mjs",
+    "file": "build/sdk/producers/platform_tuples/workflow-entry.integration.mjs",
     "executor": "manual",
     "reason": "Public build-llvm-tools workflow run body with real local Git transport and first CMake observation boundary. Requires private G2_WORKFLOW_EVIDENCE and zx@8. Linux caller test does not execute Windows/MSYS2 or full LLVM."
   },
@@ -906,13 +906,13 @@
     "member": "packages/chir"
   },
   {
-    "file": "ci/release/test_darwin_loader_controls.mjs",
+    "file": "build/sdk/producers/release/test_darwin_loader_controls.mjs",
     "executor": "workflow",
     "workflow": ".github/workflows/darwin-input-consumers.yml",
     "interpreter": "node"
   },
   {
-    "file": "ci/release/test_darwin_llvm_controls.mjs",
+    "file": "build/sdk/producers/release/test_darwin_llvm_controls.mjs",
     "executor": "workflow",
     "workflow": ".github/workflows/darwin-input-consumers.yml",
     "interpreter": "node"

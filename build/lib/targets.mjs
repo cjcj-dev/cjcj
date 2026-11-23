@@ -299,7 +299,7 @@ export function assertHostContract(key, {
 // or more target-side tuples cross-built on that host. The table below is the
 // only place that says which GitHub-hosted runner packages a platform, which
 // tuples the package carries, and what the runner must provide. Workflows read
-// it through ci/release/platform-matrix.mjs; nothing else may restate it.
+// it through build/sdk/producers/release/platform-matrix.mjs; nothing else may restate it.
 //
 // Readiness is derived, not declared: a platform is buildable only when every
 // tuple it carries has a producer in the P01-P23 DAG. A tuple without a producer
@@ -308,10 +308,10 @@ export function assertHostContract(key, {
 
 // What the P01-P23 chain produces today. Host SDKs: every key in the target
 // registry, each producing final-std-<target> for its own runtime tuple. Cross
-// std: ci/srcbuild/steps/build-windows-final-std.mjs runs on the linux-x64
+// std: build/sdk/producers/srcbuild/steps/build-windows-final-std.mjs runs on the linux-x64
 // source cell only (srcbuild-target.yml source-mingw/source-android), so the
 // Windows and Android tuples are produced by the Linux source cell; Android
-// runtime and final std use ci/srcbuild/steps/build-android-final-std.mjs.
+// runtime and final std use build/sdk/producers/srcbuild/steps/build-android-final-std.mjs.
 // Shared by release artifact selection and segmented cross jobs. Each row names
 // a real producer consuming the matching native stage3 handoff.
 export const CROSS_STD_BUILDS = Object.freeze([
@@ -321,7 +321,7 @@ export const CROSS_STD_BUILDS = Object.freeze([
   {family: 'ios', target: 'darwin-arm64', tuple: 'ios_simulator_aarch64_cjnative', arch: 'arm64', runtimeArch: 'aarch64', sdk: 'iphonesimulator', runtime_target: 'ios-simulator-aarch64', artifact: 'final-std-ios-simulator-aarch64-cjnative'},
   {family: 'ios', target: 'darwin-arm64', tuple: 'ios_simulator_x86_64_cjnative', arch: 'x86_64', runtimeArch: 'x86_64', sdk: 'iphonesimulator', runtime_target: 'ios-simulator-x86_64', artifact: 'final-std-ios-simulator-x86-64-cjnative'},
   // WASI Preview 1 (wasm32-unknown-wasi): runtime archive + complete final std are produced on
-  // the linux-x64 source cell by ci/srcbuild/steps/build-wasm-final-std.mjs. No native SDK is
+  // the linux-x64 source cell by build/sdk/producers/srcbuild/steps/build-wasm-final-std.mjs. No native SDK is
   // needed on the consumer side: the SDK ships the pinned wasi-sysroot and its own wasm-ld.
   {family: 'wasm', target: 'linux-x64', tuple: 'wasi_wasm32_cjnative', arch: 'wasm32', triple: 'wasm32-unknown-wasi', runtime_target: 'wasm32-wasi', artifact: 'final-std-wasm32-wasi'},
 ].map(Object.freeze));
@@ -340,7 +340,7 @@ function stdProducerFor(tuple) {
 }
 
 // Runner-side capabilities a platform needs beyond what the DAG installs itself.
-// `probe` is what ci/release/platform-matrix.mjs check runs on the runner.
+// `probe` is what build/sdk/producers/release/platform-matrix.mjs check runs on the runner.
 export const RELEASE_REQUIREMENTS = Object.freeze({
   'android-ndk': Object.freeze({
     summary: 'Android NDK (r25+) with toolchains/llvm/prebuilt',

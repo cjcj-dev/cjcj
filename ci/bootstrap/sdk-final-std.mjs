@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {command,withProcessCancellation} from './sdk-flow.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
-import {assertStdBarriers} from '../srcbuild/lib/assert-std-barriers.mjs';
+import {assertStdBarriers} from '../../build/sdk/producers/srcbuild/lib/assert-std-barriers.mjs';
 export async function assertFinalStdInput({sdk,std,runtime,host,platform,work,signal}) {
   if(!sdk||!std||!runtime||!host||!work)throw new Error('FINAL_STD_CONSUMER_INPUT_REQUIRED');
   const native=sdkPlatform(platform);

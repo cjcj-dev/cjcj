@@ -36,7 +36,7 @@ jobs:
           ulimit -H -c 0
           export PLATFORM_CI_ROOT="$RUNNER_TEMP/native-tuple-consumer"
           echo "PLATFORM_CI_ROOT=$PLATFORM_CI_ROOT" >> "$GITHUB_ENV"
-          node ci/platform_matrix/native_llvm_consumer.mjs prepare-shim
+          node build/sdk/producers/platform_matrix/native_llvm_consumer.mjs prepare-shim
       - name: Install native header build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -73,7 +73,7 @@ jobs:
           set -euo pipefail
           ulimit -S -c 0
           ulimit -H -c 0
-          node ci/platform_matrix/native_llvm_consumer.mjs consume-shim
+          node build/sdk/producers/platform_matrix/native_llvm_consumer.mjs consume-shim
       - name: Report sccache
         if: always() && env.SCCACHE_PATH != ''
         uses: ./.github/actions/sccache-report

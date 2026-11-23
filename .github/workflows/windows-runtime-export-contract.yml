@@ -3,10 +3,10 @@ name: Windows runtime export contract
 on:
   pull_request:
     paths:
-      - 'ci/platform_matrix/verify_windows_runtime_exports*.mjs'
-      - 'ci/platform_matrix/windows_runtime_*.mjs'
-      - 'ci/platform_matrix/windows_runtime_toolchain.cmake'
-      - 'ci/platform_matrix/build_runtime.mjs'
+      - 'build/sdk/producers/platform_matrix/verify_windows_runtime_exports*.mjs'
+      - 'build/sdk/producers/platform_matrix/windows_runtime_*.mjs'
+      - 'build/sdk/producers/platform_matrix/windows_runtime_toolchain.cmake'
+      - 'build/sdk/producers/platform_matrix/build_runtime.mjs'
       - '.github/workflows/windows-runtime-export-contract.yml'
   workflow_dispatch:
     inputs:
@@ -86,22 +86,22 @@ jobs:
       - name: Build through the production MINGW64 entry
         id: native
         shell: bash
-        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/build_runtime.mjs
       - name: Verify the installed runtime contract
         shell: bash
-        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs --reference-services
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/verify_windows_runtime_exports.mjs --reference-services
       - name: Compile and run installed native OS consumers
         shell: bash
-        run: node ci/platform_matrix/windows_runtime_consumers.mjs
+        run: node build/sdk/producers/platform_matrix/windows_runtime_consumers.mjs
       - name: Package and consume the same installed runtime
         shell: bash
-        run: npx --yes zx@8 ci/platform_matrix/windows_runtime_package.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/windows_runtime_package.mjs
       - name: Preserve link and install outputs even after a failed post-build contract
         if: always()
         shell: bash
         env:
           WINDOWS_RUNTIME_BUILD_OUTCOME: ${{ steps.native.outcome }}
-        run: node ci/platform_matrix/windows_runtime_capture.mjs collect
+        run: node build/sdk/producers/platform_matrix/windows_runtime_capture.mjs collect
       - name: Report sccache
         if: always()
         uses: ./.github/actions/sccache-report

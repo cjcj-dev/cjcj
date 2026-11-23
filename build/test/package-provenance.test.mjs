@@ -6,7 +6,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {archiveInstall} from '../../ci/bootstrap/sdk-flow.mjs';
-import {writeCrossRuntimeManifest} from '../../ci/release/cross-runtime.mjs';
+import {writeCrossRuntimeManifest} from '../sdk/producers/release/cross-runtime.mjs';
 import {CROSS_STD_BUILDS} from '../lib/targets.mjs';
 import {
   BASE_SDK_PROVENANCE,
@@ -32,7 +32,7 @@ import {
   RELEASE_PYTHON_SOURCE_URL,
   RELEASE_PYTHON_VERSION,
 } from '../lib/python-bundle.mjs';
-import {produceFinalCompiler, stdIdentity, FINAL_COMPILER_PROVENANCE} from '../../ci/srcbuild/lib/final-compiler.mjs';
+import {produceFinalCompiler, stdIdentity, FINAL_COMPILER_PROVENANCE} from '../sdk/producers/srcbuild/lib/final-compiler.mjs';
 import {parsePackagedLlvmToolsManifest} from '../../ci/llvm-tools-manifest.mjs';
 
 const TUPLE = 'linux_x86_64_cjnative';
@@ -348,7 +348,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
       stdSha256: await stdIdentity(std), llvmManifestSha256: await sha256(llvmManifest)},
   });
   const selectedEnv = path.join(root, 'selected.env');
-  run('node', [path.resolve('ci/release/select_final_compiler.mjs')], {env: {...process.env,
+  run('node', [path.resolve('build/sdk/producers/release/select_final_compiler.mjs')], {env: {...process.env,
     FINAL_COMPILER_DIR: artifact, FINAL_STD_DIR: std, RELEASE_PLATFORM: 'linux-x64',
     GITHUB_SERVER_URL: 'https://github.com', GITHUB_REPOSITORY: 'cjcj-dev/cjcj', GITHUB_SHA: CJCJ_SHA,
     GITHUB_RUN_ID: 'fixture-run', GITHUB_RUN_ATTEMPT: '1', GITHUB_ENV: selectedEnv,
@@ -442,7 +442,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     await writeCrossRuntimeManifest({root: crossRuntime, tuple, runtimeRef: RUNTIME_SHA});
     const androidOut = path.join(root, `android-dist-${mode}`);
     const input=path.join(root,'missing-native-android-'+mode);await fs.mkdir(input);
-    const result=runRaw('zx',[path.resolve('ci/release/compose-package.mjs')],{env:{...process.env,
+    const result=runRaw('zx',[path.resolve('build/sdk/producers/release/compose-package.mjs')],{env:{...process.env,
       NATIVE_SDK_ARTIFACT_DIR:input,NATIVE_SDK_INSTALL_DIR:path.join(root,'received-android-'+mode),
       RELEASE_PLATFORM:'linux-x64',RELEASE_KEY:'linux-x64-android',CJCJ_NATIVE_SDK_VERSION:'fixture',
       CJCJ_RELEASE_SOURCE_SHA:CJCJ_SHA,CJCJ_NATIVE_RUNTIME_REF:RUNTIME_SHA,FINAL_STD_DIR:std,RELEASE_DIST:androidOut,
@@ -513,7 +513,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
       const outputRoot = path.join(root, `dist-${label}-${mode}`);
       const input=path.join(root,'missing-native-'+label+'-'+mode);await fs.mkdir(input);
       const platform=family==='ios'?'darwin-arm64':'linux-x64',key=family==='ios'?'darwin-arm64-ios':'linux-x64-ohos';
-      const result=runRaw('zx',[path.resolve('ci/release/compose-package.mjs')],{env:{...process.env,
+      const result=runRaw('zx',[path.resolve('build/sdk/producers/release/compose-package.mjs')],{env:{...process.env,
         NATIVE_SDK_ARTIFACT_DIR:input,NATIVE_SDK_INSTALL_DIR:path.join(root,'received-'+label+'-'+mode),
         RELEASE_PLATFORM:platform,RELEASE_KEY:key,CJCJ_NATIVE_SDK_VERSION:'fixture',
         CJCJ_RELEASE_SOURCE_SHA:CJCJ_SHA,CJCJ_NATIVE_RUNTIME_REF:RUNTIME_SHA,FINAL_STD_DIR:std,RELEASE_DIST:outputRoot,

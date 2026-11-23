@@ -7,7 +7,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {readJson, fileDigest, privateRoot} from './sdk-flow.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
-import {stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
+import {stdIdentity} from '../../build/sdk/producers/srcbuild/lib/final-compiler.mjs';
 import {requireOptionVisibility} from './compiler-option-visibility.mjs';
 const execute = promisify(execFile);
 const sha = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);

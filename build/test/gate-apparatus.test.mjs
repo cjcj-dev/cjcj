@@ -62,7 +62,7 @@ test('gate apparatus records actual host bytes separately from its review covera
     const childEnv = {...process.env, GITHUB_ENV: githubEnv};
     delete childEnv.NODE_TEST_CONTEXT;
     const captured = spawnSync(process.execPath, [
-      path.resolve('ci/release/prepare_gate_apparatus.mjs'),
+      path.resolve('build/sdk/producers/release/prepare_gate_apparatus.mjs'),
       '--sdk', sdk,
       '--platform', 'linux-x64',
       '--actual-host-toolchain', toolchain,

@@ -55,7 +55,7 @@ This establishes host LLVM acquisition and provenance, not complete platform
 bootstrap support. The existing bootstrap/stage1 runner platform and runtime
 identity constraints still apply independently.
 
-`ci/release/prepare_bootstrap_inputs.mjs` uses `prepareHostLlvm` verification before
+`build/sdk/producers/release/prepare_bootstrap_inputs.mjs` uses `prepareHostLlvm` verification before
 constructing bootstrap arguments. Set `CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT` to an
 artifact directory to reuse a download; otherwise it downloads the declared
 artifact ID through the shared GitHub artifact transport. Neither a supplied

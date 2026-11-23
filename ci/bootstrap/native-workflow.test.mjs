@@ -6,8 +6,8 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {load} from '../vendor/js-yaml/js-yaml.mjs';
 import {getBuildTarget} from '../../build/lib/build-target.mjs';
-import {packageConsumption} from '../srcbuild/lib/package-install.mjs';
-import {workflowSourceSelection} from '../srcbuild/source-selection.mjs';
+import {packageConsumption} from '../../build/sdk/producers/srcbuild/lib/package-install.mjs';
+import {workflowSourceSelection} from '../../build/sdk/producers/srcbuild/source-selection.mjs';
 import {nativeInstallationLocations} from './native-installation-locations.mjs';
 import {verifyRelocatedCjdbPython} from './sdk-cjdb-python.mjs';
 

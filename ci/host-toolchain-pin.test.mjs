@@ -151,8 +151,8 @@ for (const [name, changedFile, mutate] of scanControls) {
       }
       for (const relative of [
         'ci/host-toolchain-pin.test.mjs', 'ci/host-toolchain-pin.mjs', 'ci/vendor/js-yaml/js-yaml.mjs',
-        'ci/host_sdk_pin.env', 'ci/release/base-sdk-identities.json',
-        'build/lib/release-component-provenance.mjs', 'ci/release/source-tool-payloads.mjs',
+        'ci/host_sdk_pin.env', 'build/sdk/producers/release/base-sdk-identities.json',
+        'build/lib/release-component-provenance.mjs', 'build/sdk/producers/release/source-tool-payloads.mjs',
         'ci/bootstrap/sdk-platform.mjs', 'ci/bootstrap/sdk-io.mjs', 'ci/bootstrap/sdk-flow.mjs',
         'ci/bootstrap/sdk-command-lifetime.mjs', 'ci/bootstrap/sdk-std-resume.mjs',
         'ci/bootstrap/sdk-source.mjs', 'ci/bootstrap/sdk-install-entries.mjs', 'ci/build-resources.mjs',
@@ -195,7 +195,7 @@ for (const [name, changedFile, mutate] of scanControls) {
 
 test('release markdown does not carry an ordinary nightly literal', async () => {
   const bounded = [
-    'ci/release/H48_LANGUAGE_TUPLE.md',
+    'build/sdk/producers/release/H48_LANGUAGE_TUPLE.md',
     'ci/ast_support/README.md',
   ];
   for (const rel of bounded) {
@@ -379,7 +379,7 @@ test('measured cjc version is converted to the exact nightly identity', () => {
 test('release consumes native installs while official archive selectors retain the declared host pin', async () => {
   const release = await fs.readFile(path.join(root, '.github/workflows/build-release-package.yml'), 'utf8');
   assert.doesNotMatch(release, /Load release host pin|prepare_base_sdk|setup_sdk/);
-  assert.ok(release.includes('run: node ci/release/compose-package.mjs'));
+  assert.ok(release.includes('run: node build/sdk/producers/release/compose-package.mjs'));
   assert.equal(RELEASE_HOST_TOOLCHAIN, await hostPin());
   for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64'])
     assert.match(baseSdkDownload(platform, readHostToolchainPin(platform)).sha256, /^[0-9a-f]{64}$/);
@@ -388,7 +388,7 @@ test('release consumes native installs while official archive selectors retain t
 });
 
 test('both JavaScript entry points require the loaded environment value', async () => {
-  for (const name of ['ci/setup_sdk.mjs', 'ci/platform_matrix/build_cjcj.mjs']) {
+  for (const name of ['ci/setup_sdk.mjs', 'build/sdk/producers/platform_matrix/build_cjcj.mjs']) {
     const text = await fs.readFile(path.join(root, name), 'utf8');
     assert.ok(text.includes('requireHostToolchain()'), name);
     assert.ok(!text.includes('process.env.CJCJ_TOOLCHAIN ||'), name);

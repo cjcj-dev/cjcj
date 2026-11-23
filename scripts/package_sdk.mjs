@@ -2,7 +2,7 @@
 // Repackage an official SDK with the self-host compiler and optional patched runtime into a relocatable release archive.
 
 import crypto from 'node:crypto';
-import {installCrossRuntime} from '../ci/release/cross-runtime.mjs';
+import {installCrossRuntime} from '../build/sdk/producers/release/cross-runtime.mjs';
 import {getReleasePlatform, getTarget} from '../build/lib/targets.mjs';
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -23,7 +23,7 @@ import {
   GATE_APPARATUS_PROVENANCE,
   verifyGateApparatusProvenance,
 } from '../build/lib/release-gate-apparatus.mjs';
-import {consumeFinalCompiler, FINAL_COMPILER_PROVENANCE, fileSha256} from '../ci/srcbuild/lib/final-compiler.mjs';
+import {consumeFinalCompiler, FINAL_COMPILER_PROVENANCE, fileSha256} from '../build/sdk/producers/srcbuild/lib/final-compiler.mjs';
 import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
 import {writeToolchainIdentity} from '../build/lib/toolchain-identity.mjs';
 import {assertNoVerifierReportArtifacts} from './verifier_artifact_gate.mjs';

@@ -38,13 +38,13 @@ function run(label,script,extra={},args=[],root=path.join(work,label)){
  return command([process.env.ZX||'zx',path.join(repo,script),...args],selected,work,label);
 }
 function target(name,actual,expected){console.log('ASSERT_REACHED '+name);assert.deepEqual(actual,expected,name);console.log('ASSERT_PASS '+name);}
-const tuple=(label,extra)=>run(label,'ci/platform_tuples/fetch_sources.mjs',extra);
+const tuple=(label,extra)=>run(label,'build/sdk/producers/platform_tuples/fetch_sources.mjs',extra);
 function checkout(label,ref=privateRef){const dest=path.join(work,label,'paired-runtime');fs.mkdirSync(path.dirname(dest));git('init',dest);git('-C',dest,'fetch','--depth=1','file://'+mirror,ref);git('-C',dest,'checkout','--detach','FETCH_HEAD');return dest;}
 function reject(label,extra,reason){const r=tuple(label,extra),trace=fs.existsSync(path.join(work,label+'.trace'))?fs.readFileSync(path.join(work,label+'.trace'),'utf8'):'';
  target(label+'_rc',r.status,1);assert.match(r.stderr+r.stdout,reason);assert.doesNotMatch(trace,/ fetch /);target(label+'_no_llvm',fs.existsSync(path.join(work,label,'llvm-project')),false);}
 function build(label,dest,extra={}){const bin=path.join(work,label+'-bin'),capture=path.join(work,label+'.cmake.json');fs.mkdirSync(bin);
  fs.writeFileSync(path.join(bin,'cmake'),`#!${process.execPath}\nimport('node:fs').then(fs=>{fs.writeFileSync(${JSON.stringify(capture)},JSON.stringify(process.argv.slice(2)));process.exitCode=86;});\n`,{mode:0o755});
- return {r:run(label,'ci/platform_tuples/build_tuple.mjs',{...explicit,...extra,PATH:bin+path.delimiter+env.PATH},[],path.dirname(dest)),capture};}
+ return {r:run(label,'build/sdk/producers/platform_tuples/build_tuple.mjs',{...explicit,...extra,PATH:bin+path.delimiter+env.PATH},[],path.dirname(dest)),capture};}
 const cases={
  test_default_pin(){const r=tuple('default',{RUNTIME_REF:privateRef,RUNTIME_SRC_URL:'invalid'});target('default_rc',r.status,0);target('default_head',git('-C',path.join(work,'default/paired-runtime'),'rev-parse','HEAD'),pin);target('default_clean',git('-C',path.join(work,'default/paired-runtime'),'status','--porcelain'),'');},
  test_private_selection(){target('private_rc',tuple('private',explicit).status,0);target('private_head',git('-C',path.join(work,'private/paired-runtime'),'rev-parse','HEAD'),privateRef);target('private_clean',git('-C',path.join(work,'private/paired-runtime'),'status','--porcelain'),'');},

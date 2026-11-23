@@ -148,7 +148,7 @@ test('public native language wrong host tuple stays rejected independently',()=>
 });
 for(const platform of ['linux_x86_64','linux_aarch64'])test('public release gate uses fixed reader for '+platform,()=>{
  const f=fixture('release-reader',null,platform),active=f.root+'/release';
- const args=[new URL('../../ci/release/gate_colour_runtime.mjs',import.meta.url).pathname,f.source,f.sdk,active,f.sdk];
+ const args=[new URL('../sdk/producers/release/gate_colour_runtime.mjs',import.meta.url).pathname,f.source,f.sdk,active,f.sdk];
  const out=fs.openSync(f.root+'/release.stdout','wx'),err=fs.openSync(f.root+'/release.stderr','wx');
  const r=spawnSync(process.env.ZX||'zx',args,{env:{...process.env,PLATFORM_TUPLE:platform,GC_UNIT_GATE_CONTRACT_SELFTEST:'1',GC_UNIT_GATE_SKIP:'0',MRT_TESTABLE_INTERNALS:'0',DIRECT_TRACE:f.trace},stdio:['ignore',out,err]});fs.closeSync(out);fs.closeSync(err);
  write(f.root+'/release-command.json',JSON.stringify({argv:[process.env.ZX||'zx',...args],rc:r.status,signal:r.signal}));

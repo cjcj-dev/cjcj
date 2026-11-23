@@ -103,7 +103,7 @@ test('base SDK digest mismatch cannot turn into provenance success', async () =>
 });
 
 test('packaged SDK ABI mismatch is rejected by the current package consumer', async t => {
-  const {packageInstall}=await import('../../ci/srcbuild/lib/package-install.mjs');
+  const {packageInstall}=await import('../sdk/producers/srcbuild/lib/package-install.mjs');
   const {getTarget}=await import('../lib/targets.mjs');
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'package-abi-negative-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
@@ -123,7 +123,7 @@ test('packaged SDK ABI mismatch is rejected by the current package consumer', as
 test('tuple fetch script rejects an unsupported non-dry-run host', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tuple-fetch-host-negative-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
-  const target = pathToFileURL(path.resolve('ci/platform_matrix/fetch_llvm_tuple.mjs')).href;
+  const target = pathToFileURL(path.resolve('build/sdk/producers/platform_matrix/fetch_llvm_tuple.mjs')).href;
   const evaluate = [
     'Object.defineProperty(process, "platform", {value: "freebsd"});',
     `await import(${JSON.stringify(target)});`,
@@ -149,7 +149,7 @@ test('tuple fetch script rejects an incomplete current-run artifact', async t =>
   await fs.writeFile(path.join(artifact, 'incomplete-marker'), 'fixture\n');
   const result = spawnSync(zxCommand.command, [
     ...zxCommand.prefix,
-    path.resolve('ci/platform_matrix/fetch_llvm_tuple.mjs'),
+    path.resolve('build/sdk/producers/platform_matrix/fetch_llvm_tuple.mjs'),
   ], {
     encoding: 'utf8',
     env: {
@@ -167,7 +167,7 @@ test('tuple fetch script rejects an incomplete current-run artifact', async t =>
 
   const dryRun = spawnSync(zxCommand.command, [
     ...zxCommand.prefix,
-    path.resolve('ci/platform_matrix/fetch_llvm_tuple.mjs'),
+    path.resolve('build/sdk/producers/platform_matrix/fetch_llvm_tuple.mjs'),
   ], {
     encoding: 'utf8',
     env: {
@@ -194,7 +194,7 @@ test('tuple fetch script rejects a failed gh prerequisite', async t => {
   ].join('\n'), {mode: 0o755});
   const result = spawnSync(zxCommand.command, [
     ...zxCommand.prefix,
-    path.resolve('ci/platform_matrix/fetch_llvm_tuple.mjs'),
+    path.resolve('build/sdk/producers/platform_matrix/fetch_llvm_tuple.mjs'),
   ], {
     encoding: 'utf8',
     env: {

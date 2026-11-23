@@ -181,7 +181,7 @@ test('public bootstrap and both stage3 wrappers consume real full or C2 phase co
     console.log('F6_PUBLIC_PHASE_ASSERTION',reused?'C2':'full',r.rc);
     assert.equal(r.rc,0,r.text);
     const order=JSON.parse(r.stdout.trim());assert.equal(order.some(s=>s.id==='stage0'),!reused);assert.ok(order.some(s=>s.id==='stage2'));
-    for(const [entryName,args] of [['../srcbuild/steps/build-stage3.mjs',[]],['./gha-run.mjs',['all']]]) {
+    for(const [entryName,args] of [['../../build/sdk/producers/srcbuild/steps/build-stage3.mjs',[]],['./gha-run.mjs',['all']]]) {
       r=await run([process.execPath,fileURLToPath(new URL(entryName,import.meta.url)),...args],{CJCJ_SDK_TARGETS:f.configFile,CJCJ_SDK_FROM:'stage3-std'});
       assert.equal(r.rc,1,r.text);assert.match(r.text,/WORK_INPUTS_MISSING/);assert.doesNotMatch(r.text,/BOOTSTRAP_PHASE_MISSING|target-command/);
     }

@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {fileDigest,atomicJson} from './sdk-flow.mjs';
-import {stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
+import {stdIdentity} from '../../build/sdk/producers/srcbuild/lib/final-compiler.mjs';
 export async function stage2Fixture(){
  const root=await fs.mkdtemp(path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir(),'c2-record-'));
  const write=async(rel,data)=>{const p=path.join(root,rel);await fs.mkdir(path.dirname(p),{recursive:true});await fs.writeFile(p,data);return p;};

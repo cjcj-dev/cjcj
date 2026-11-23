@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Colour LLVM tools must not DT_NEEDED libxml2. The fat tuple recipe turns the
-# dependency off at cmake (ci/platform_tuples/build_tuple.sh); this is the check
+# dependency off at cmake (build/sdk/producers/platform_tuples/build_tuple.sh); this is the check
 # the publisher runs on the linked binary.
 set -euo pipefail
 

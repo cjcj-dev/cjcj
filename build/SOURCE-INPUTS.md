@@ -84,7 +84,7 @@ error. An omitted option preserves the existing pinned fallback. No HOME
 override or shared SDK write is needed. The CLI passes `officialSdkRoot`
 through config, `packageMainSdk`, `packageInstall` and `assertSdkPathParity`;
 the parity boundary still rejects a materialized depot reference. The CI
-`ci/srcbuild/steps/package-install.mjs` already supplies the official env value
+`build/sdk/producers/srcbuild/steps/package-install.mjs` already supplies the official env value
 to buildConfig; an omitted value uses the same pinned fallback.
 CI `steps/verify.mjs`, config and both parity/lineage consumers use the same
 `resolveOfficialSdkRoot` function; CI has env precedence and the same pinned
@@ -335,7 +335,7 @@ explicit pair takes precedence. Ordinary runtime builds, public fetch/run-all
 (including saved repository choices), and other targets keep their own pins.
 
 Use the selected refs for checkout and pass the output environment to
-`ci/platform_matrix/build_runtime.mjs`. For the direct target std producer
+`build/sdk/producers/platform_matrix/build_runtime.mjs`. For the direct target std producer
 pass the same runtime ref as `--commit`, its installed R as `--runtime`, and
 `--build-type release`. The configured SDK graph already binds commits in
 its command argv. Only a graph attempt with its original command and result

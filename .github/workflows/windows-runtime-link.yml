@@ -3,9 +3,9 @@ name: Windows runtime link controls
 on:
   pull_request:
     paths:
-      - 'ci/platform_matrix/build_runtime.mjs'
-      - 'ci/platform_matrix/windows_runtime_toolchain.cmake'
-      - 'ci/platform_matrix/test_windows_runtime_link.mjs'
+      - 'build/sdk/producers/platform_matrix/build_runtime.mjs'
+      - 'build/sdk/producers/platform_matrix/windows_runtime_toolchain.cmake'
+      - 'build/sdk/producers/platform_matrix/test_windows_runtime_link.mjs'
       - '.github/workflows/windows-runtime-link.yml'
   workflow_dispatch:
     inputs:
@@ -79,7 +79,7 @@ jobs:
           pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
       - name: Exercise production entry and linker controls
         shell: bash
-        run: npx --yes zx@8 ci/platform_matrix/test_windows_runtime_link.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/test_windows_runtime_link.mjs
       - name: Record toolchain versions
         if: always()
         shell: msys2 {0}

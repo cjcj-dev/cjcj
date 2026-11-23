@@ -86,7 +86,7 @@ jobs:
         env:
           MATRIX_INPUTS: ${{ toJSON(inputs) }}
         run: |
-          node ci/platform_matrix/summarize_scope.mjs
+          node build/sdk/producers/platform_matrix/summarize_scope.mjs
           cat "$GITHUB_STEP_SUMMARY"
 
   darwin-source-input:
@@ -138,22 +138,22 @@ jobs:
           ulimit -c 0
           CANGJIE_BUILD_JOBS=$(sysctl -n hw.logicalcpu)
           export CANGJIE_BUILD_JOBS
-          npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+          npx --yes zx@8 build/sdk/producers/platform_matrix/build_runtime.mjs
       - name: Package independent native libraries
         env:
           PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
-          node ci/release/darwin_runtime.mjs prepare colour-runtime "$PLATFORM" .platform-ci/runtime-install
+          node build/sdk/producers/release/darwin_runtime.mjs prepare colour-runtime "$PLATFORM" .platform-ci/runtime-install
           COLOUR_RT_MANIFEST_SHA256=$(shasum -a 256 colour-runtime/manifest.json | awk '{print $1}')
           export COLOUR_RT_MANIFEST_SHA256
           export COLOUR_RT_RUN_ID=$GITHUB_RUN_ID COLOUR_RT_RUN_ATTEMPT=$GITHUB_RUN_ATTEMPT
-          node ci/release/darwin_runtime.mjs verify colour-runtime "$PLATFORM" .platform-ci/runtime-install | tee colour-runtime/verified.log
+          node build/sdk/producers/release/darwin_runtime.mjs verify colour-runtime "$PLATFORM" .platform-ci/runtime-install | tee colour-runtime/verified.log
       - name: Test native producer and consumer with controlled cuts
         env:
           PLATFORM: ${{ matrix.platform }}
           DARWIN_RT_NATIVE_SOURCE: .platform-ci/runtime-install
-        run: bash ci/release/test_darwin_runtime_controls.sh colour-runtime/controls
+        run: bash build/sdk/producers/release/test_darwin_runtime_controls.sh colour-runtime/controls
       - name: Record native build identity
         env:
           PLATFORM: ${{ matrix.platform }}
@@ -229,7 +229,7 @@ jobs:
           NATIVE_SDK_TARGET: ${{ matrix.target }}
           CANDIDATE_RUN: ${{ inputs.native_sdk_run_id }}
           CANDIDATE_VERSION: ${{ inputs.native_sdk_version }}
-        run: node ci/release/persist_native_sdk.mjs select "$NATIVE_SDK_TARGET" >> "$GITHUB_OUTPUT"
+        run: node build/sdk/producers/release/persist_native_sdk.mjs select "$NATIVE_SDK_TARGET" >> "$GITHUB_OUTPUT"
       - name: Receive packaged native SDK
         id: candidate
         if: steps.native-sdk.outputs.mode == 'candidate'
@@ -239,17 +239,17 @@ jobs:
           CANDIDATE_ARTIFACT: ${{ steps.native-sdk.outputs.artifact }}
           CANDIDATE_RUN: ${{ steps.native-sdk.outputs.run }}
           CANDIDATE_VERSION: ${{ steps.native-sdk.outputs.version }}
-        run: node ci/release/persist_native_sdk.mjs receive-candidate "$NATIVE_SDK_TARGET" "$RUNNER_TEMP/native-sdk-artifact" >> "$GITHUB_OUTPUT"
+        run: node build/sdk/producers/release/persist_native_sdk.mjs receive-candidate "$NATIVE_SDK_TARGET" "$RUNNER_TEMP/native-sdk-artifact" >> "$GITHUB_OUTPUT"
       - name: Receive persisted native SDK
         if: steps.native-sdk.outputs.mode == 'persisted'
         env:
           GH_TOKEN: ${{ github.token }}
           NATIVE_SDK_ARTIFACT: ${{ steps.native-sdk.outputs.artifact }}
-        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "$NATIVE_SDK_ARTIFACT" "$RUNNER_TEMP/native-sdk-artifact"
+        run: node build/sdk/producers/release/download_pinned.mjs cjcj-dev/cjcj "$NATIVE_SDK_ARTIFACT" "$RUNNER_TEMP/native-sdk-artifact"
       - name: Verify and select installed native SDK
         env:
           CJCJ_NATIVE_SDK_VERSION: ${{ steps.native-sdk.outputs.version }}
-        run: node ci/release/receive_native_sdk.mjs "$RUNNER_TEMP/native-sdk-artifact" "$RUNNER_TEMP/native-sdk" "${{ matrix.target }}"
+        run: node build/sdk/producers/release/receive_native_sdk.mjs "$RUNNER_TEMP/native-sdk-artifact" "$RUNNER_TEMP/native-sdk" "${{ matrix.target }}"
       - name: Provision native gate debugger
         run: |
           sudo apt-get update -qq
@@ -262,11 +262,11 @@ jobs:
           # language SDK. The complete gate below is mandatory before upload.
           GC_UNIT_GATE_LANGUAGE_TESTS: defer
         run: |
-          source ci/platform_matrix/runtime_core_setup.sh || echo "::warning::Core setup incomplete; see setup.log"
-          npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+          source build/sdk/producers/platform_matrix/runtime_core_setup.sh || echo "::warning::Core setup incomplete; see setup.log"
+          npx --yes zx@8 build/sdk/producers/platform_matrix/build_runtime.mjs
       - name: Complete gate with native installed SDK and same-build target
         run: |
-          npx --yes zx@8 ci/release/gate_colour_runtime.mjs runtime-source \
+          npx --yes zx@8 build/sdk/producers/release/gate_colour_runtime.mjs runtime-source \
             "$CJCJ_TARGET_SDK" "$RUNNER_TEMP/native-active" .platform-ci/runtime-install
       - name: Package same-build runtime pair
         id: package
@@ -275,7 +275,7 @@ jobs:
           # The output layout also retains staging and earlier configurations.
           source "$RUNNER_TEMP/native-active.env"
           cp "$GCV2_RUNTIME_LIB_DIR/libboundscheck.so" ".platform-ci/runtime-install/runtime/lib/${COLOUR_RT_PLATFORM}_cjnative/libboundscheck.so"
-          node ci/release/colour_runtime.mjs "$CJCJ_TARGET_SDK" colour-runtime
+          node build/sdk/producers/release/colour_runtime.mjs "$CJCJ_TARGET_SDK" colour-runtime
           so="colour-runtime/runtime/lib/${COLOUR_RT_PLATFORM}_cjnative/libcangjie-runtime.so"
           sha256sum "$so" "colour-runtime/runtime/lib/${COLOUR_RT_PLATFORM}_cjnative/libboundscheck.so"
           nm --defined-only "$so" > colour-runtime/symbols.txt
@@ -322,7 +322,7 @@ jobs:
           fi
       - name: Collect runtime core backtraces
         if: ${{ failure() && steps.runtime-build.outcome == 'failure' }}
-        run: python3 ci/platform_matrix/collect_runtime_cores.py
+        run: python3 build/sdk/producers/platform_matrix/collect_runtime_cores.py
       - name: Upload runtime gate diagnostics
         if: always()
         uses: actions/upload-artifact@v7
@@ -431,11 +431,11 @@ jobs:
 
       - name: Runtime build (Linux/macOS native)
         if: always() && runner.os != 'Windows'
-        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/build_runtime.mjs
 
       - name: Preserve runtime gate diagnostics
         if: always() && runner.os != 'Windows'
-        run: node ci/platform_matrix/collect_runtime_gate_logs.mjs
+        run: node build/sdk/producers/platform_matrix/collect_runtime_gate_logs.mjs
 
       - name: Upload runtime gate diagnostics before compiler build
         if: always() && runner.os != 'Windows'
@@ -455,7 +455,7 @@ jobs:
 
       - name: Verify cross-built Windows runtime
         if: always() && runner.os == 'Windows'
-        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/verify_windows_runtime_exports.mjs
 
       - name: Download current-run fixed LLVM tuple
         if: always()
@@ -470,14 +470,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TUPLE_ARTIFACT_DIR: ${{ runner.temp }}/current-run-fixed-llvm
-        run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/fetch_llvm_tuple.mjs
 
       - name: Download native fixed LLVM tuple (Windows)
         if: always() && runner.os == 'Windows'
         env:
           GH_TOKEN: ${{ github.token }}
           TUPLE_ARTIFACT_DIR: ${{ runner.temp }}/current-run-fixed-llvm
-        run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/fetch_llvm_tuple.mjs
 
       - name: Receive native SDK producer inputs
         uses: actions/download-artifact@v8
@@ -492,7 +492,7 @@ jobs:
         env:
           CJCJ_SDK_PROVISION_ONLY: '1'
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-        run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/build_cjcj.mjs
 
       - name: Download current-run patched cjpm
         if: always() && runner.os == 'Windows'
@@ -508,23 +508,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CJPM_ARTIFACT_DIR: ${{ runner.temp }}/current-run-patched-cjpm
-        run: npx --yes zx@8 ci/platform_matrix/fetch_cjpm.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/fetch_cjpm.mjs
 
       - name: Official SDK + O1 cjcj build
         if: always() && runner.os != 'Windows'
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-        run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/build_cjcj.mjs
 
       - name: O1 cjcj build (Windows)
         if: always() && runner.os == 'Windows' && steps.fetch-cjpm.outcome == 'success'
         env:
           CJCJ_SDK_ALREADY_PROVISIONED: '1'
-        run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/build_cjcj.mjs
 
       - name: cjcj compile/run + pinned-runtime combination smoke
         if: always()
-        run: npx --yes zx@8 ci/platform_matrix/run_smoke.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/run_smoke.mjs
 
       - name: Report sccache
         if: always() && runner.os != 'Windows'
@@ -536,7 +536,7 @@ jobs:
 
       - name: Summarize final key error
         if: always()
-        run: npx --yes zx@8 ci/platform_matrix/summarize_job.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/summarize_job.mjs
 
       - name: Upload diagnostics and key products
         if: always()

@@ -1,8 +1,8 @@
 // Fixed runtime readers/gate; compilation and language payloads below are finite
 // recorders, never runtime/SDK qualification. Retain originals in the test root.
 import fs from 'node:fs';import path from 'node:path';
-const legacyInputs=JSON.parse(fs.readFileSync(new URL('../platform_matrix/fixtures/runtime-language-259.json',import.meta.url)));
-const inputs=JSON.parse(fs.readFileSync(new URL('../platform_matrix/fixtures/runtime-direct-inputs.json',import.meta.url)));
+const legacyInputs=JSON.parse(fs.readFileSync(new URL('../../build/sdk/producers/platform_matrix/fixtures/runtime-language-259.json',import.meta.url)));
+const inputs=JSON.parse(fs.readFileSync(new URL('../../build/sdk/producers/platform_matrix/fixtures/runtime-direct-inputs.json',import.meta.url)));
 export const write=(file,text,mode)=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,text,mode?{mode}:undefined);};
 export function directSource(runtime,{legacy=false}={}) {
  for(const [name,text]of Object.entries(inputs.files))write(path.join(runtime,name),text);

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
-const entry=new URL('../../ci/srcbuild/steps/compose-sdk.mjs',import.meta.url).pathname;
+const entry=new URL('../sdk/producers/srcbuild/steps/compose-sdk.mjs',import.meta.url).pathname;
 // Actual CLI preparation refusals. Complete stage3/source/run/installed package
 // guarantees remain in the registered real installed gate and platform producer
 // gates; these fixtures never manufacture STAGE/BUILD facts for a C program.

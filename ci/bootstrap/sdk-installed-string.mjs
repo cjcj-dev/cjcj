@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {sdkPlatform,sdkEnvironment} from './sdk-platform.mjs';
 import {atomicJson,fileDigest,privateRoot,relative,withProcessCancellation} from './sdk-flow.mjs';
-import {streamStdProcess} from '../srcbuild/lib/assert-std-barriers.mjs';
+import {streamStdProcess} from '../../build/sdk/producers/srcbuild/lib/assert-std-barriers.mjs';
 
 export function stringEnvironment({sdk,std,runtime,platform,work}) {
  // Use an allowlist, not sdkEnvironment(process.env): it retains old loader paths.

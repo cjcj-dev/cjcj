@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {installedInputs} from '../../ci/srcbuild/lib/installed-inputs.mjs';
+import {installedInputs} from '../sdk/producers/srcbuild/lib/installed-inputs.mjs';
 import {validateReleaseManifestSource} from './release-manifest.mjs';
 import {parseHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 

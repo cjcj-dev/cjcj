@@ -232,7 +232,7 @@ test('normal native facts reach public verify after relocation; missing/tampered
   await fs.rm(path.join(official.root,`lib/${TUPLE}/libcangjie-aio.a`));
   await fs.rm(path.join(official.root,'tools'),{recursive:true,force:true});
   const relocated=f.root+'-relocated';await fs.rename(f.root,relocated);t.after(()=>fs.rm(relocated,{recursive:true,force:true}));
-  const run=()=>spawnSync('npx',['--yes','zx@8',path.resolve('ci/srcbuild/steps/verify.mjs'),relocated],{
+  const run=()=>spawnSync('npx',['--yes','zx@8',path.resolve('build/sdk/producers/srcbuild/steps/verify.mjs'),relocated],{
     encoding:'utf8',timeout:120000,env:{...process.env,CJCJ_OFFICIAL_SDK_ROOT:official.root,CJCJ_SRCBUILD_TARGET:'linux-x64',CANGJIE_WORKSPACE:relocated,TMPDIR:relocated,RUNNER_TEMP:relocated,CJCJ_ALLOW_NIGHTLY_STD:'0',CJCJ_VERIFY_NO_FAIL_FAST:'0'}});
   let r=run();assert.ifError(r.error);assert.equal(r.status,1);assert.match(r.stdout+r.stderr,/FINITE_COMPILER_CONSUMER_REACHED/);
   console.log('NATIVE_LINEAGE_PUBLIC_CONSUMER_REACHED rc='+r.status);
@@ -263,7 +263,7 @@ test('normal native facts reach public verify after relocation; missing/tampered
 // records, runtime files or language results and do not claim tool production.
 for(const separateBackend of [false,true])test('normal install pair and language transition reach release rows and relocated lineage'+(separateBackend?' with separate backend':''),async t=>{
   const {directSource,directBuild}=await import('../../ci/fixtures/runtime-direct-inputs.mjs');
-  const {installedInputs}=await import('../../ci/srcbuild/lib/installed-inputs.mjs');
+  const {installedInputs}=await import('../sdk/producers/srcbuild/lib/installed-inputs.mjs');
   const {writeInstalledReleaseManifest,verifyInstalledReleaseManifest}=await import('../lib/release-manifest.mjs');
   const {archiveInstall}=await import('../../ci/bootstrap/sdk-flow.mjs');
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'lineage-normal-install-')),{root:fixture}=await miniTree('final');
@@ -532,7 +532,7 @@ endforeach()
   const relocated=archive+'.unpacked/installed';
   assert.equal((await inspectPackagedLineage(relocated)).ok,true);
   const moved=await installedInputs(relocated,platform);await verifyInstalledReleaseManifest({stage:relocated,platform,...moved});
-  const verify=spawnSync(process.env.ZX||'zx',[path.resolve('ci/srcbuild/steps/verify.mjs'),relocated],{encoding:'utf8',timeout:120000,
+  const verify=spawnSync(process.env.ZX||'zx',[path.resolve('build/sdk/producers/srcbuild/steps/verify.mjs'),relocated],{encoding:'utf8',timeout:120000,
     env:{...process.env,CJCJ_SRCBUILD_TARGET:'linux-x64',CANGJIE_WORKSPACE:root,TMPDIR:root,RUNNER_TEMP:root,CJCJ_ALLOW_NIGHTLY_STD:'0',CJCJ_VERIFY_NO_FAIL_FAST:'0'}});
   console.log('NORMAL_INSTALL_PUBLIC_VERIFY '+JSON.stringify({rc:verify.status,signal:verify.signal,stdout:verify.stdout,stderr:verify.stderr}));
   assert.ifError(verify.error);assert.equal(verify.status,1);assert.match(verify.stdout+verify.stderr,/FINITE_COMPILER_CONSUMER_REACHED/);

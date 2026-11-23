@@ -1,5 +1,5 @@
 import {TOOL_NAMES,TOOL_PUBLIC_NAMES} from '../srcbuild/tool-layout.mjs';
-import {sourceToolPayloads} from '../../ci/release/source-tool-payloads.mjs';
+import {sourceToolPayloads} from '../sdk/producers/release/source-tool-payloads.mjs';
 import {getTarget} from './targets.mjs';
 import {sdkPlatform,entryPlatformName} from '../../ci/bootstrap/sdk-platform.mjs';
 import crypto from 'node:crypto';
@@ -30,7 +30,7 @@ const NIGHTLY_RELEASE_REPOSITORY = 'https://gitcode.com/Cangjie/nightly_build';
 const NIGHTLY_RELEASE_BASE = `${NIGHTLY_RELEASE_REPOSITORY}/releases/download`;
 export const RELEASE_HOST_TOOLCHAIN = readHostToolchainPin();
 const baseSdkIdentities = JSON.parse(await fs.readFile(
-  new URL('../../ci/release/base-sdk-identities.json', import.meta.url), 'utf8',
+  new URL('../sdk/producers/release/base-sdk-identities.json', import.meta.url), 'utf8',
 ));
 const baseSdkPlatforms = new Map(Object.entries(baseSdkIdentities.platforms));
 

@@ -12,16 +12,16 @@ on:
       - 'packages/codegen/src/**'
       - 'tests/runtime_layout/**'
       - 'ci/test-llvm-tuple*.mjs'
-      - 'ci/release/prepare_bootstrap_inputs*'
-      - 'ci/release/prepare_bootstrap_fixture.mjs'
-      - 'ci/release/prepare_llvm_dylib.test.mjs'
+      - 'build/sdk/producers/release/prepare_bootstrap_inputs*'
+      - 'build/sdk/producers/release/prepare_bootstrap_fixture.mjs'
+      - 'build/sdk/producers/release/prepare_llvm_dylib.test.mjs'
       - 'ci/llvm-dylib/**'
-      - 'ci/release/colour_runtime*'
+      - 'build/sdk/producers/release/colour_runtime*'
       - 'ci/bootstrap_inputs_pin.json'
-      - 'ci/release/acquire_fixed_tuple.mjs'
-      - 'ci/release/bootstrap_store.mjs'
-      - 'ci/release/bootstrap_tuple.mjs'
-      - 'ci/release/tuple_platform.mjs'
+      - 'build/sdk/producers/release/acquire_fixed_tuple.mjs'
+      - 'build/sdk/producers/release/bootstrap_store.mjs'
+      - 'build/sdk/producers/release/bootstrap_tuple.mjs'
+      - 'build/sdk/producers/release/tuple_platform.mjs'
       - 'ci/colour-runtime/**'
       - '.github/workflows/test-llvm-tuple.yml'
 permissions:
@@ -88,7 +88,7 @@ jobs:
       - name: Download verified prerelease input
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.LLVM_DYLIB_ARTIFACT_ID }}" "${{ runner.temp }}/dylib"
+        run: node build/sdk/producers/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.LLVM_DYLIB_ARTIFACT_ID }}" "${{ runner.temp }}/dylib"
       - name: Verify downloaded library and manifest rejection
         run: |
           set -euo pipefail
@@ -137,7 +137,7 @@ jobs:
       - name: Download verified prerelease input
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node ci/release/acquire_fixed_tuple.mjs "${{ runner.temp }}/tuple" "${{ runner.temp }}/fixed-tools"
+        run: node build/sdk/producers/release/acquire_fixed_tuple.mjs "${{ runner.temp }}/tuple" "${{ runner.temp }}/fixed-tools"
       - name: Check reviewed digest and precise layout fault
         run: |
           set -euo pipefail
@@ -145,7 +145,7 @@ jobs:
           cmp ci/llvm_tuple_SHA256SUMS "$RUNNER_TEMP/tuple/SHA256SUMS"
           npx --yes zx@8 ci/test-llvm-tuple-layout.mjs "$RUNNER_TEMP/layout-test" "$RUNNER_TEMP/tuple"
       - name: Exercise bootstrap input consumer
-        run: node --test ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs ci/release/colour_runtime.test.mjs
+        run: node --test build/sdk/producers/release/prepare_bootstrap_inputs.test.mjs build/sdk/producers/release/prepare_llvm_dylib.test.mjs build/sdk/producers/release/colour_runtime.test.mjs
       - name: Cut producer and consumer script wiring
         run: npx --yes zx@8 ci/test-llvm-tuple-wiring.test.mjs "$RUNNER_TEMP/wiring-test"
       - uses: actions/upload-artifact@v7

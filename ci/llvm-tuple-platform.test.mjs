@@ -33,7 +33,7 @@ for (const platform of ['linux_x86_64', 'linux_aarch64', 'darwin_aarch64', 'darw
       assert.equal(fs.readFileSync(path.join(tuple, 'lib/STATIC_LLVM.txt'), 'utf8'), fs.readFileSync(path.join(tuple, 'MANIFEST'), 'utf8'));
       const sums = spawnSync('sha256sum', ['--strict', '-c', 'SHA256SUMS'], {cwd: tuple, encoding: 'utf8'});
       assert.equal(sums.status, 0, sums.stderr);
-      const verify = () => spawnSync(process.execPath, ['ci/release/verify-tuple-payloads.mjs', tuple], {encoding: 'utf8'});
+      const verify = () => spawnSync(process.execPath, ['build/sdk/producers/release/verify-tuple-payloads.mjs', tuple], {encoding: 'utf8'});
       const verified = verify();
       assert.equal(verified.status, 0, verified.stderr);
       assert.match(verified.stdout, /^LLVM_TUPLE_SUMS_SHA=[a-f0-9]{64}\n$/);

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {test} from 'node:test';
-import {assertColouredRuntime} from '../../ci/srcbuild/lib/runtime-colour.mjs';
+import {assertColouredRuntime} from '../sdk/producers/srcbuild/lib/runtime-colour.mjs';
 
 // Real ELF inputs exercise nm and the shared Python predicate, not a symbol mock.
 test('runtime colour uses defined export difference, independent of retired markers', async t => {

@@ -5,7 +5,7 @@ import os from 'node:os';
 await entry(async () => {
   const shell = process.env.BASH_UNDER_TEST || process.env.BASH || 'bash';
   const helper = process.env.SRCBUILD_GIT_SH || path.join(repo, 'build/lib/srcbuild_git.sh');
-  const fetch = process.env.FETCH_SOURCES_MJS || path.join(repo, 'ci/platform_tuples/fetch_sources.mjs');
+  const fetch = process.env.FETCH_SOURCES_MJS || path.join(repo, 'build/sdk/producers/platform_tuples/fetch_sources.mjs');
   const work = fs.mkdtempSync(path.join(process.env.SRCBUILD_GIT_EVIDENCE || os.tmpdir(), 'git-shell-'));
   console.log(`CONTRACT_EVIDENCE=${work}\nHELPER=${helper}`);
   await run([shell, '-c', 'printf "BASH_VERSION=%s\\nBASH_PATH=%s\\n" "$BASH_VERSION" "$BASH"']);
@@ -51,8 +51,8 @@ await entry(async () => {
   if (process.env.SKIP_FETCH_SOURCES !== '1') {
     const fixture = path.join(work, 'fetch-repo');
     for (const [from, to] of [
-      [fetch, 'ci/platform_tuples/fetch_sources.mjs'], [helper, 'build/lib/srcbuild_git.sh'],
-      ...['ci/platform_tuples/entry.mjs', 'ci/entry-common.mjs', 'ci/fetch-llvm-runtime.mjs',
+      [fetch, 'build/sdk/producers/platform_tuples/fetch_sources.mjs'], [helper, 'build/lib/srcbuild_git.sh'],
+      ...['build/sdk/producers/platform_tuples/entry.mjs', 'ci/entry-common.mjs', 'ci/fetch-llvm-runtime.mjs',
         'ci/native-llvm-inputs.mjs','ci/source_pin.env','ci/llvm_pin.env','ci/host_sdk_pin.env',
         'ci/host-toolchain-pin.mjs','ci/build-resources.mjs','build/srcbuild/tool-layout.mjs',
         ...['native-source-selection','sdk-targets','sdk-flow','sdk-io','sdk-platform',
@@ -67,7 +67,7 @@ await entry(async () => {
     for (const [prefix, name] of [['CANGJIE_COMPILER', 'compiler'], ['FLATBUFFERS', 'flatbuffers']]) {
       env[`${prefix}_URL`] = `file://${inputs[name].bare}`; env[`${prefix}_SHA`] = inputs[name].sha;
     }
-    const r = await run(['npx', '--yes', 'zx@8', path.join(fixture, 'ci/platform_tuples/fetch_sources.mjs')], {env, log: path.join(work, 'sources.log'), check: false});
+    const r = await run(['npx', '--yes', 'zx@8', path.join(fixture, 'build/sdk/producers/platform_tuples/fetch_sources.mjs')], {env, log: path.join(work, 'sources.log'), check: false});
     fs.writeFileSync(path.join(work, 'sources.rc'), `${r.exitCode}\n`);
     const heads = {};
     for (const [name, dir] of [['llvm', 'llvm-project'], ['compiler', 'cangjie-compiler'], ['flatbuffers', 'flatbuffers'], ['runtime', 'paired-runtime']]) {

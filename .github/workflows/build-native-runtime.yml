@@ -86,7 +86,7 @@ jobs:
           node --input-type=module <<'JS'
           import fs from 'node:fs';
           import path from 'node:path';
-          import {darwinCommand as run} from './ci/release/darwin_commands.mjs';
+          import {darwinCommand as run} from './build/sdk/producers/release/darwin_commands.mjs';
           import {readSourcePins} from './ci/native-llvm-inputs.mjs';
           const logs='.platform-ci/logs/native-prepare', pin=readSourcePins().source;
           const destination=path.resolve('runtime-source/runtime/third_party/third_party_bounds_checking_function');
@@ -132,11 +132,11 @@ jobs:
           ulimit -H -c 0
           CANGJIE_BUILD_JOBS=$(node ci/build-resources.mjs --jobs-only)
           export CANGJIE_BUILD_JOBS
-          npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+          npx --yes zx@8 build/sdk/producers/platform_matrix/build_runtime.mjs
       - name: Consume the installation and the same package on this native host
         env:
           NATIVE_RUNTIME_PLATFORM: ${{ matrix.platform }}
-        run: node ci/platform_matrix/native_runtime_package.mjs
+        run: node build/sdk/producers/platform_matrix/native_runtime_package.mjs
       - uses: actions/upload-artifact@v7
         with:
           name: native-runtime-install-${{ matrix.platform }}
@@ -144,7 +144,7 @@ jobs:
           if-no-files-found: error
       - name: Retain the exact Linux gate libraries beside its original ELF
         if: always() && runner.os == 'Linux'
-        run: node ci/platform_matrix/native_runtime.mjs retain-gate runtime-source
+        run: node build/sdk/producers/platform_matrix/native_runtime.mjs retain-gate runtime-source
       - uses: actions/upload-artifact@v7
         if: always()
         with:

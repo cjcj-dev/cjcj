@@ -6,7 +6,7 @@ import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {resolveProductBinary} from '../srcbuild/lib/product-binary.mjs';
+import {resolveProductBinary} from '../../build/sdk/producers/srcbuild/lib/product-binary.mjs';
 
 export const TOKEN = 'OBJC_DARWIN_E2E_OK';
 export const MARKERS = Object.freeze(['objc.lang', 'objc.internal', 'objCMsgSend']);

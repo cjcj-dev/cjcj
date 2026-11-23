@@ -11,7 +11,7 @@ import {toolBuildInputs} from '../srcbuild/tool-build-inputs.mjs';
 import {installSourceTools} from '../srcbuild/install-tools.mjs';
 import {installHleDependencies} from '../srcbuild/hle-dependencies.mjs';
 import {hlePayloadFixture} from './hle-payload-fixture.mjs';
-import {installedInputs} from '../../ci/srcbuild/lib/installed-inputs.mjs';
+import {installedInputs} from '../sdk/producers/srcbuild/lib/installed-inputs.mjs';
 import {writeInstalledReleaseManifest,verifyInstalledReleaseManifest} from '../lib/release-manifest.mjs';
 const base=process.env.RELEASE_EVIDENCE_TEST_ROOT;
 if(!base)throw new Error('tool facts integration needs evidence root');
@@ -124,7 +124,7 @@ if(process.env.CJCJ_TOOL_FACTS_INSTALL==='1'){
  await fs.appendFile(retained,'cut');await assert.rejects(installedInputs(sdk,'linux_x86_64'),/INSTALLED_INPUT_BYTES/);
  await fs.writeFile(retained,retainedBytes);await installedInputs(sdk,'linux_x86_64');
  const checker=path.join(root,'unpacked.mjs');
- await write(checker,`import {installedInputs} from ${JSON.stringify(new URL('../../ci/srcbuild/lib/installed-inputs.mjs',import.meta.url).href)};\nimport assert from 'node:assert/strict';\nimport fs from 'node:fs/promises';\nimport {spawnSync} from 'node:child_process';\nconst root=process.argv[2],row=(await installedInputs(root,'linux_x86_64')).components.find(x=>x.component==='LSPServer');\nassert.equal(row.source.commit,${JSON.stringify(commit)});const release=(await fs.readFile(root+'/RELEASE-MANIFEST.jsonl','utf8')).trim().split('\\n').map(x=>JSON.parse(x)).find(x=>x.component==='tool-LSPServer');assert.equal(release.source.commit,row.source.commit);assert.deepEqual(release.artifact,row.artifact);const r=spawnSync(root+'/tools/bin/LSPServer',[],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);assert.equal(r.stdout.trim(),'42');console.log('UNPACKED_TOOL_FACTS_REACHED');\n`);
+ await write(checker,`import {installedInputs} from ${JSON.stringify(new URL('../sdk/producers/srcbuild/lib/installed-inputs.mjs',import.meta.url).href)};\nimport assert from 'node:assert/strict';\nimport fs from 'node:fs/promises';\nimport {spawnSync} from 'node:child_process';\nconst root=process.argv[2],row=(await installedInputs(root,'linux_x86_64')).components.find(x=>x.component==='LSPServer');\nassert.equal(row.source.commit,${JSON.stringify(commit)});const release=(await fs.readFile(root+'/RELEASE-MANIFEST.jsonl','utf8')).trim().split('\\n').map(x=>JSON.parse(x)).find(x=>x.component==='tool-LSPServer');assert.equal(release.source.commit,row.source.commit);assert.deepEqual(release.artifact,row.artifact);const r=spawnSync(root+'/tools/bin/LSPServer',[],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);assert.equal(r.stdout.trim(),'42');console.log('UNPACKED_TOOL_FACTS_REACHED');\n`);
  await fs.rename(tools,tools+'.parked');
  try{
    await archiveInstall({install:sdk,archive:path.join(root,'tools-interface.tar.gz'),format:'tar.gz',

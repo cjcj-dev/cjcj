@@ -67,7 +67,7 @@ test('ordinary CJPM source-build is an explicit C2 input without fabricated comp
  assert.deepEqual(row.stdSource.repository,'https://github.com/cjcj-dev/cangjie-runtime.git');
  assert.equal(row.stdSourceInstall,path.resolve(path.join(f.root,'std')));
  assert.deepEqual(await stage2Input(row,f.input),row);
- assert.equal(row.stdSha256,await (await import('../srcbuild/lib/final-compiler.mjs')).stdIdentity(path.join(f.root,'std')));
+ assert.equal(row.stdSha256,await (await import('../../build/sdk/producers/srcbuild/lib/final-compiler.mjs')).stdIdentity(path.join(f.root,'std')));
  const host=await f.write('host/bin/cjc',`#!${process.execPath}\nconsole.log('Cangjie Compiler: 1.3.0-alpha.20261009001050 (cjnative)');\n`);
  await fs.chmod(host,0o755);
  const validated={...f.input,ast:f.input.compiler,stage2:row,

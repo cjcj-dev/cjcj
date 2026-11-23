@@ -13,7 +13,7 @@ export function nativeConfig({template, sources, build, install, commits, jobs =
 export function nativeSteps({cjcj, config, runtimeEnv, zx}) {
   return [
     {label: 'native-llvm', argv: [process.execPath, path.join(cjcj, 'ci/bootstrap/native-cjdb.mjs'), config]},
-    {label: 'native-runtime', argv: [zx, path.join(cjcj, 'ci/platform_matrix/build_runtime.mjs')], env: runtimeEnv, cwd: cjcj},
+    {label: 'native-runtime', argv: [zx, path.join(cjcj, 'build/sdk/producers/platform_matrix/build_runtime.mjs')], env: runtimeEnv, cwd: cjcj},
   ];
 }
 

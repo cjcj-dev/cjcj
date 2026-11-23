@@ -29,7 +29,7 @@ export const REGISTERED = Object.freeze(JSON.parse(fs.readFileSync(new URL('./te
 // boundary test. The checker rejects missing, branch or foreign checkouts.
 export const WORKFLOW_TEST_SOURCES = Object.freeze([
   {workflow:'darwin-input-consumers.yml', source_ref:'${{ github.sha }}',
-    gating:['ci/release/darwin_consumer_boundary.test.mjs']},
+    gating:['build/sdk/producers/release/darwin_consumer_boundary.test.mjs']},
 ]);
 
 // The second axis, and the reason it exists. The name patterns above cannot see
@@ -43,11 +43,11 @@ export const DRIVERS = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
-  'ci/platform_matrix/windows_runtime_capture.test.mjs',
+  'build/sdk/producers/platform_matrix/windows_runtime_capture.test.mjs',
   'ci/bootstrap/sdk-python-source.test.mjs',
   'ci/colour-sdk.test.mjs',
-  'ci/release/receive_native_sdk.test.mjs',
-  'ci/release/native-release.test.mjs',
+  'build/sdk/producers/release/receive_native_sdk.test.mjs',
+  'build/sdk/producers/release/native-release.test.mjs',
   'build/test/installed-release-manifest.test.mjs',
   'ci/bootstrap/native-runtime-input.test.mjs',
   'ci/bootstrap/native-host.test.mjs',
@@ -60,9 +60,9 @@ export const GATING = Object.freeze([
   'ci/bootstrap/sdk-installed-string.test.mjs',
   'ci/bootstrap/sdk-std-barrier-resume.test.mjs',
   'ci/check-colour-tlab.test.mjs',
-  'ci/release/darwin_workflow_entry.test.mjs',
-  'ci/release/darwin_consumer_boundary.test.mjs',
-  'ci/release/darwin_llvm.test.mjs',
+  'build/sdk/producers/release/darwin_workflow_entry.test.mjs',
+  'build/sdk/producers/release/darwin_consumer_boundary.test.mjs',
+  'build/sdk/producers/release/darwin_llvm.test.mjs',
   'ci/bootstrap/compiler-identity.integration.test.mjs',
   'ci/g1-entry-branches.test.mjs',
   'ci/g1-entry-differential.test.mjs',
@@ -72,18 +72,18 @@ export const GATING = Object.freeze([
   'ci/llvm-tuple-layout.test.mjs',
   'ci/llvm-tuple-platform.test.mjs',
   'ci/native-llvm-inputs.test.mjs',
-  'ci/platform_matrix/native_runtime.test.mjs',
-  'ci/srcbuild/tests/cross-runtime-cache.test.mjs',
+  'build/sdk/producers/platform_matrix/native_runtime.test.mjs',
+  'build/sdk/producers/srcbuild/tests/cross-runtime-cache.test.mjs',
   'ci/llvm-dylib/record-manifest.test.mjs',
   'ci/colour-runtime/platform.test.mjs',
-  'ci/release/acquire_fixed_tuple.test.mjs',
+  'build/sdk/producers/release/acquire_fixed_tuple.test.mjs',
   'ci/abi-migration.test.mjs',
   'ci/llvm-runtime-input.test.mjs',
   'build/test/source-matrix.test.mjs',
-  'ci/platform_matrix/summarize_scope.test.mjs',
-  'ci/platform_matrix/llvm-tuple.test.mjs',
-  'ci/platform_matrix/native_llvm_consumer.test.mjs',
-  'ci/release/g8.test.mjs',
+  'build/sdk/producers/platform_matrix/summarize_scope.test.mjs',
+  'build/sdk/producers/platform_matrix/llvm-tuple.test.mjs',
+  'build/sdk/producers/platform_matrix/native_llvm_consumer.test.mjs',
+  'build/sdk/producers/release/g8.test.mjs',
   'build/test/archive.test.mjs',
   'build/test/cangjie-test-preparation.test.mjs',
   'ci/cangjie-test/prepare.test.mjs',
@@ -131,33 +131,33 @@ export const GATING = Object.freeze([
   'ci/release-gates.test.mjs',
   'ci/smoke/smoke-runtime-isolation.test.mjs',
   'ci/release-run-evidence.test.mjs',
-  'ci/release/android-platform.test.mjs',
-  'ci/release/wasm-platform.test.mjs',
-  'ci/release/ohos-platform.test.mjs',
-  'ci/release/ios-platform.test.mjs',
-  'ci/release/bootstrap_store.test.mjs',
-  'ci/release/colour_runtime.test.mjs',
-  'ci/release/cross-runtime.test.mjs',
-  'ci/release/darwin_runtime.test.mjs',
-  'ci/release/host_llvm.test.mjs',
-  'ci/release/prepare_llvm_dylib.test.mjs',
-  'ci/release/publish_bootstrap_inputs.test.mjs',
-  'ci/release/package_checksums.test.mjs',
-  'ci/release/platform-matrix.test.mjs',
-  'ci/release/native-sdk-producer.test.mjs',
-  'ci/release/prepare_bootstrap_inputs.test.mjs',
+  'build/sdk/producers/release/android-platform.test.mjs',
+  'build/sdk/producers/release/wasm-platform.test.mjs',
+  'build/sdk/producers/release/ohos-platform.test.mjs',
+  'build/sdk/producers/release/ios-platform.test.mjs',
+  'build/sdk/producers/release/bootstrap_store.test.mjs',
+  'build/sdk/producers/release/colour_runtime.test.mjs',
+  'build/sdk/producers/release/cross-runtime.test.mjs',
+  'build/sdk/producers/release/darwin_runtime.test.mjs',
+  'build/sdk/producers/release/host_llvm.test.mjs',
+  'build/sdk/producers/release/prepare_llvm_dylib.test.mjs',
+  'build/sdk/producers/release/publish_bootstrap_inputs.test.mjs',
+  'build/sdk/producers/release/package_checksums.test.mjs',
+  'build/sdk/producers/release/platform-matrix.test.mjs',
+  'build/sdk/producers/release/native-sdk-producer.test.mjs',
+  'build/sdk/producers/release/prepare_bootstrap_inputs.test.mjs',
   'ci/sccache/report.test.mjs',
-  'ci/srcbuild/tests/inject-version.test.mjs',
-  'ci/srcbuild/tests/job-handoff.test.mjs',
-  'ci/srcbuild/tests/phase-control.test.mjs',
-  'ci/srcbuild/tests/ohos-ios-segmented.test.mjs',
-  'ci/srcbuild/tests/pin-compiler-llvm.test.mjs',
-  'ci/srcbuild/tests/product-binary.test.mjs',
-  'ci/srcbuild/tests/sccache-contract.test.mjs',
-  'ci/srcbuild/tests/package-options.test.mjs',
-  'ci/srcbuild/tests/verify-sdk.test.mjs',
-  'ci/srcbuild/tests/build-shim-output.test.mjs',
-  'ci/srcbuild/tests/workflow-inputs.test.mjs',
+  'build/sdk/producers/srcbuild/tests/inject-version.test.mjs',
+  'build/sdk/producers/srcbuild/tests/job-handoff.test.mjs',
+  'build/sdk/producers/srcbuild/tests/phase-control.test.mjs',
+  'build/sdk/producers/srcbuild/tests/ohos-ios-segmented.test.mjs',
+  'build/sdk/producers/srcbuild/tests/pin-compiler-llvm.test.mjs',
+  'build/sdk/producers/srcbuild/tests/product-binary.test.mjs',
+  'build/sdk/producers/srcbuild/tests/sccache-contract.test.mjs',
+  'build/sdk/producers/srcbuild/tests/package-options.test.mjs',
+  'build/sdk/producers/srcbuild/tests/verify-sdk.test.mjs',
+  'build/sdk/producers/srcbuild/tests/build-shim-output.test.mjs',
+  'build/sdk/producers/srcbuild/tests/workflow-inputs.test.mjs',
   'ci/test-manifest.test.mjs',
   'ci/contract-shards.test.mjs',
   'ci/run-registered-tests.test.mjs',
@@ -171,13 +171,13 @@ export const GATING = Object.freeze([
   'ci/bootstrap/sdk-installed-macros.test.mjs',
   'ci/bootstrap/sdk-pair-inputs.test.mjs',
   'ci/bootstrap/sdk-resume-inputs.integration.mjs',
-  'ci/srcbuild/lib/package-install.test.mjs',
+  'build/sdk/producers/srcbuild/lib/package-install.test.mjs',
   'build/test/source-tool-install-interface.test.mjs',
   'ci/bootstrap/sdk-stage2-input.test.mjs',
   'ci/bootstrap/sdk-stage2-cli.integration.test.mjs',
   'build/test/source-tool-production-entry.test.mjs',
-  'ci/release/download_pinned.test.mjs',
-  'ci/release/persist_native_sdk.test.mjs',
+  'build/sdk/producers/release/download_pinned.test.mjs',
+  'build/sdk/producers/release/persist_native_sdk.test.mjs',
   'build/test/target-registry.test.mjs',
   'build/test/bootstrap-handoff.test.mjs',
   'build/test/cangjie-written-tools.test.mjs',
@@ -196,12 +196,12 @@ export const GATING = Object.freeze([
   'ci/wasm-sdk-overlay.test.mjs',
   'ci/wasm-sdk-host.test.mjs',
   'ci/bootstrap/prepare_cpp_headers.test.mjs',
-  'ci/release/bootstrap_entries.test.mjs',
-  'ci/release/bootstrap_host_sdk.test.mjs',
-  'ci/release/trimpath.test.mjs',
-  'ci/srcbuild/tests/platform-contract.test.mjs',
-  'ci/srcbuild/tests/release-wire.test.mjs',
-  'ci/srcbuild/tests/segmented-workflow.test.mjs',
+  'build/sdk/producers/release/bootstrap_entries.test.mjs',
+  'build/sdk/producers/release/bootstrap_host_sdk.test.mjs',
+  'build/sdk/producers/release/trimpath.test.mjs',
+  'build/sdk/producers/srcbuild/tests/platform-contract.test.mjs',
+  'build/sdk/producers/srcbuild/tests/release-wire.test.mjs',
+  'build/sdk/producers/srcbuild/tests/segmented-workflow.test.mjs',
   'scripts/difftest-timeout.test.mjs',
   'ci/bootstrap/sdk-archive-readonly.test.mjs',
 ]);
@@ -211,10 +211,10 @@ export const GATING = Object.freeze([
 // wiring one of these in is a decision about CI shape, not a re-investigation.
 export const DEFERRED = Object.freeze([
   Object.freeze({
-    file: 'ci/platform_matrix/native-runtime-package.integration.test.mjs',
+    file: 'build/sdk/producers/platform_matrix/native-runtime-package.integration.test.mjs',
     needs: 'Native Linux or Darwin x64/arm64, Node, CXX (default clang++) with shared-library support, which and tar; '
       + 'NATIVE_PACKAGE_EVIDENCE must name an absolute private directory retaining real compiled libraries, loader and package evidence. '
-      + 'Run node --test ci/platform_matrix/native-runtime-package.integration.test.mjs after preparing these inputs; generic GATING does not provision that evidence directory.',
+      + 'Run node --test build/sdk/producers/platform_matrix/native-runtime-package.integration.test.mjs after preparing these inputs; generic GATING does not provision that evidence directory.',
     verified: 'Fixed c7f447 finite-v2 on kkk2: 4 tests pass, rc0; real Linux ELF load/origin/memcpy and same-package unpack, '
       + 'missing library and wrong-origin rejection/recovery. Fixtures do not qualify a native runtime, Darwin execution or SDK.',
   }),
@@ -232,7 +232,7 @@ export const DEFERRED = Object.freeze([
   Object.freeze({file: 'ci/bootstrap/archive-reentry.test.mjs',
     needs: 'CMake/tar and an isolated worker; public shim CMake boundary and native-stage controlled producer entry; CPU count is not admission',
     verified: '1019 CPU correction: 47 affected tests passed; public stage reached configured producer with explicit/default jobs, 2-core product cut rejected old CPU minimum and restoration passed; full stage/SDK separate'}),
-  Object.freeze({file: 'ci/srcbuild/shim-reentry.integration.test.mjs',
+  Object.freeze({file: 'build/sdk/producers/srcbuild/shim-reentry.integration.test.mjs',
     needs: 'SHIM_REENTRY_INPUT: fixed complete Reference TU, two real prepared Cjo/LLVM header outputs and actual previously compiled installed shim component; isolated 8-core worker',
     verified: '1019 subtraction: public real-TU regression passed, including explicit/installed bad-object source fallback and actual inc/config failure/control/recovery; full N/SDK NOT_RUN'}),
   Object.freeze({file: 'ci/bootstrap/native-cjdb-shim.integration.test.mjs',
@@ -256,7 +256,7 @@ export const DEFERRED = Object.freeze([
   Object.freeze({file: 'build/test/windows-sdk-interface.test.mjs',
     needs: 'Linux Node configuration/host rejection apparatus using the fixed SDK source closure',
     verified: '3 pass rc0 on kkk2; Ndb51/R79b target graph and public foreign-host rejection, no native production'}),
-  Object.freeze({file: 'ci/platform_matrix/windows-native-runtime.test.mjs',
+  Object.freeze({file: 'build/sdk/producers/platform_matrix/windows-native-runtime.test.mjs',
     needs: 'Linux Node installer fixture with Windows selector; no Windows program execution',
     verified: '3 pass rc0 on kkk2; staging DLL bytes, command input requirement, stale dependency refusal'}),
   Object.freeze({
@@ -302,19 +302,19 @@ export const DEFERRED = Object.freeze([
       + '(2026-08-11, local)',
   }),
   Object.freeze({
-    file: 'ci/platform_matrix/build_windows_std_ast.test.mjs',
+    file: 'build/sdk/producers/platform_matrix/build_windows_std_ast.test.mjs',
     needs: 'the zx runtime -- a zx self-test rather than a node:test file, same shape as '
       + 'verify_windows_runtime_exports.test.mjs. It spawns the product script with a fake MinGW '
       + 'driver and does not need a Windows cross compiler',
-    verified: 'zx ci/platform_matrix/build_windows_std_ast.test.mjs => SELFTEST_RESULT=PASS rc=0 '
+    verified: 'zx build/sdk/producers/platform_matrix/build_windows_std_ast.test.mjs => SELFTEST_RESULT=PASS rc=0 '
       + '(2026-09-26, local, zx /usr/bin/zx); schema/header/archive/ast_object rejects exit 4/5/7/8 '
       + 'before compile, guard divergence exits 3, matching generation installs',
   }),
   Object.freeze({
-    file: 'ci/platform_matrix/verify_windows_runtime_exports.test.mjs',
+    file: 'build/sdk/producers/platform_matrix/verify_windows_runtime_exports.test.mjs',
     needs: 'the zx runtime -- also a zx self-test rather than a node:test file. Note the guard it '
       + 'tests, verify_windows_runtime_exports.mjs, does run in three workflows; only its self-test does not',
-    verified: 'npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.test.mjs => '
+    verified: 'npx --yes zx@8 build/sdk/producers/platform_matrix/verify_windows_runtime_exports.test.mjs => '
       + 'SELFTEST_RESULT=PASS rc=0 (2026-08-11, local)',
   }),
 ]);
@@ -339,7 +339,7 @@ export function discoverTestFiles(root = repoRoot) {
   const found = listed.split('\0').filter(Boolean)
     .filter(file => !file.split('/').includes('node_modules'))
     .filter(file => /\.(?:test|integration)\.mjs$|(?:^|\/)test[_.-][^/]*\.(?:py|sh)$|[._-]test\.sh$|_test\.cj$|^build\/test\/.*\.sh$|\/tests\/[^/]+\.(?:py|sh)$/.test(file)
-      || /^ci\/release\/test_[^/]*\.mjs$/.test(file)
+      || /^build\/sdk\/producers\/release\/test_[^/]*\.mjs$/.test(file)
       || (/^ci\/test-[^/]*\.mjs$/.test(file)
         && /^#!\/usr\/bin\/env zx(?:\r?\n|$)/.test(fs.readFileSync(path.join(root, file), 'utf8'))));
   return [...new Set(found)].sort();

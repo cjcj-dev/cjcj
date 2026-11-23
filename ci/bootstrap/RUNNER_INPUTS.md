@@ -17,7 +17,7 @@ three option implementations match the known hardcoded-true 8e9 source bytes;
 unknown legacy implementations are rejected before build commands.
 
 Both runners resolve bootstrap inputs with
-`ci/release/prepare_bootstrap_inputs.mjs` before entering
+`build/sdk/producers/release/prepare_bootstrap_inputs.mjs` before entering
 `ci/bootstrap/bootstrap.mjs`. Actions consumes the exported environment through
 `ci/bootstrap/gha_run.sh`; kkk2's `load_bootstrap_pins` consumes the same
 resolver's quoted shell output. Preparation failures publish no bootstrap
@@ -102,7 +102,7 @@ Normal CMake targets handle regeneration and re-entry; no header inventory or
 second configuration certificate is produced. The selected LLVM/runtime pair
 is checked when preparing its real sources.
 
-The final `ci/srcbuild/steps/build-shim.mjs` validates an explicit copy or the installed object
+The final `build/sdk/producers/srcbuild/steps/build-shim.mjs` validates an explicit copy or the installed object
 against the same original producer source/byte facts. If that object is
 unavailable, it genuinely compiles the complete TU with the selected headers,
 preparing them normally when no external header output was supplied. Source
@@ -122,8 +122,8 @@ Run the preparation tests on the build host:
 
 ```sh
 ulimit -c 0
-node --test ci/release/bootstrap_entries.test.mjs \
-  ci/release/prepare_bootstrap_inputs.test.mjs ci/release/host_llvm.test.mjs
+node --test build/sdk/producers/release/bootstrap_entries.test.mjs \
+  build/sdk/producers/release/prepare_bootstrap_inputs.test.mjs build/sdk/producers/release/host_llvm.test.mjs
 ```
 
 ## Native target configuration

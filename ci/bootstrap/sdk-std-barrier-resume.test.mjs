@@ -8,7 +8,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {getEventListeners} from 'node:events';
-import {assertStdBarriers, streamStdProcess} from '../srcbuild/lib/assert-std-barriers.mjs';
+import {assertStdBarriers, streamStdProcess} from '../../build/sdk/producers/srcbuild/lib/assert-std-barriers.mjs';
 import {prepareRuntimeInputs} from './sdk-native-stage.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {copyOutputs, inventory} from './sdk-flow.mjs';

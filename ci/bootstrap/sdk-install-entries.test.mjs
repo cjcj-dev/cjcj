@@ -203,7 +203,7 @@ test('native public entries retain actual bytes and separate host and target lib
 // and wraps the regular lldb, so the package reader reaches the original bytes
 // N recorded through the alias and the launcher recipe, and nothing else.
 test('package reader resolves native aliases and launchers to the original bytes N recorded',async()=>{
- const {installedInputs}=await import('../srcbuild/lib/installed-inputs.mjs');
+ const {installedInputs}=await import('../../build/sdk/producers/srcbuild/lib/installed-inputs.mjs');
  const root=await fs.mkdtemp(path.join(parent,'native-alias-')),sdk=path.join(root,'install');
  const put=async(rel,text,mode=0o755)=>{await fs.mkdir(path.dirname(path.join(sdk,rel)),{recursive:true});await fs.writeFile(path.join(sdk,rel),text,{mode});};
  await put('third_party/llvm/lib/libLLVM-15.so','llvm library',0o644);await put('third_party/llvm/bin/lldb','original lldb');await put('tools/bin/chir-dis','original chir-dis');

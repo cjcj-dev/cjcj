@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {STDX_BUILD_INPUTS} from '../srcbuild/stdx-build-inputs.mjs';
 import {readInstalledStdxInputs} from '../lib/installed-stdx-inputs.mjs';
-import {installedInputs} from '../../ci/srcbuild/lib/installed-inputs.mjs';
+import {installedInputs} from '../sdk/producers/srcbuild/lib/installed-inputs.mjs';
 import {writeInstalledReleaseManifest} from '../lib/release-manifest.mjs';
 import {fixture, tuple, run} from './fixtures/stdx-native.mjs';
 

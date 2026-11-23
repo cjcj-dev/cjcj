@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {verifyOfficialSdkIdentity} from '../../build/lib/official-sdk-identity.mjs';
 import {targetForHost} from '../../build/lib/targets.mjs';
-import {hostIdentity} from '../release/host_llvm.mjs';
+import {hostIdentity} from '../../build/sdk/producers/release/host_llvm.mjs';
 import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
 import {fileDigest, readJson} from './sdk-io.mjs';
 const sdk=process.env.HOST_IDENTITY_SDK, archive=process.env.HOST_IDENTITY_ARCHIVE, library=process.env.HOST_IDENTITY_LLVM;

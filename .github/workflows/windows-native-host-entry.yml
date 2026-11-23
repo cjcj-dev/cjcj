@@ -37,7 +37,7 @@ jobs:
           node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
       - name: Download the pinned official host archive
         shell: bash
-        run: node ci/release/prepare_base_sdk.mjs --platform windows-x64 --toolchain "$CJCJ_TOOLCHAIN" --outdir "$RUNNER_TEMP/windows-native-host-inputs"
+        run: node build/sdk/producers/release/prepare_base_sdk.mjs --platform windows-x64 --toolchain "$CJCJ_TOOLCHAIN" --outdir "$RUNNER_TEMP/windows-native-host-inputs"
       - name: Unpack the official host beside its original archive
         shell: pwsh
         run: |

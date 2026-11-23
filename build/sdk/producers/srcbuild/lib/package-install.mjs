@@ -1,0 +1,44 @@
+#!/usr/bin/env zx
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {archiveInstall,atomicJson,command} from '../../../../../ci/bootstrap/sdk-flow.mjs';
+import {verifyInstall} from '../../../../../ci/bootstrap/sdk-verify-install.mjs';
+import {assertSdkCompilerRuntimeAbi} from '../../../../lib/runtime-split.mjs';
+import {assertSdkPathParity} from '../../../../lib/sdk-path-parity.mjs';
+import {assertNoVerifierReportArtifacts} from '../../../../../scripts/verifier_artifact_gate.mjs';
+import {installedInputs} from './installed-inputs.mjs';
+import {writeInstalledReleaseManifest} from '../../../../lib/release-manifest.mjs';
+export function packageConsumption(target){
+ const platform=target?.spec?.llvmPlatform??null;
+ if(target?.spec?.crossCompile===true)return {status:'NOT_RUN',reason:'HOST_CROSS_EXEC',platform};
+ return {status:'EXECUTED',platform};
+}
+export async function packageInstall({sdk,target,version,officialSdkRoot,archive,javaHome,android=false}){
+ assertNoVerifierReportArtifacts([sdk]);assertSdkCompilerRuntimeAbi({sdk,target});
+ await assertSdkPathParity(sdk,{officialRoot:officialSdkRoot,target:target.spec.key});
+ const work=path.join(path.dirname(archive),'package-test');
+ const consumption=packageConsumption(target);
+ const lspMacro=target.spec.key==='windows-x64'&&consumption.status==='EXECUTED';
+ const java=target.spec.key==='linux-x64';
+ const packageRegex=['linux-x64','linux-aarch64'].includes(target.spec.key);
+ if(consumption.status==='EXECUTED'){
+  await verifyInstall({sdk,work:work+'/installed',platform:target.spec.llvmPlatform,finalStd:true,precompiledStdx:true,packageRegex,java,javaHome,lspMacro});
+ }else await atomicJson(path.join(work,'cross-consumption.json'),consumption);
+ const inputs=await installedInputs(sdk,target.spec.llvmPlatform);
+ for(const name of ['runtime','std','llvm-cjdb',...(java?['java-interop']:[])]){
+   if(!inputs.components.some(row=>row.component===name && row.source?.status==='resolved' && (row.artifact||row.artifacts?.length)))
+     throw Error('SDK_PACKAGE_ORIGINAL_REQUIRED '+name);
+ }
+ await writeInstalledReleaseManifest({stage:sdk,platform:target.spec.llvmPlatform,...inputs});
+ await atomicJson(path.join(sdk,'BUILD-MANIFEST.json'),{version,target:target.spec.key,consumption,...inputs});
+ const test=consumption.status==='EXECUTED'?{commands:[{argv:[process.execPath,fileURLToPath(new URL('../../../../../ci/bootstrap/sdk-verify-install.mjs',import.meta.url)),
+  '--sdk','${install}','--work','${work}/relocated','--platform',target.spec.llvmPlatform,'--final-std','--precompiled-stdx',...(java?['--java',...(javaHome?['--java-home',javaHome]:[])]:[]),...(packageRegex?['--package-regex']:[]),...(lspMacro?['--lsp-macro']:[])]}]}:{commands:[],consumption};
+ if(android) {
+  if(target.spec.key!=='linux-x64'||consumption.status!=='EXECUTED')throw Error('ANDROID_PACKAGE_HOST');
+  const link=fileURLToPath(new URL('../steps/link-android-hello.mjs',import.meta.url));
+  await command([process.execPath,link,sdk,path.join(work,'android-installed')]);
+  test.commands.push({argv:[process.execPath,link,'${install}','${work}/android-relocated']});
+ }
+ const archived=await archiveInstall({install:sdk,archive,format:target.spec.archiveFormat,test,vars:{work},records:[]});
+ return {...archived,consumption};
+}

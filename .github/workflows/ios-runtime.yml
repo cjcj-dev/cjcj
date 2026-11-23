@@ -3,11 +3,11 @@ on:
   pull_request:
     paths:
       - '.github/workflows/ios-runtime.yml'
-      - 'ci/release/cross-runtime.mjs'
-      - 'ci/release/verify-ios-runtime.mjs'
-      - 'ci/srcbuild/steps/ios-runtime-control.mjs'
-      - 'ci/srcbuild/lib/ios-runtime.mjs'
-      - 'ci/srcbuild/steps/build-ios-*.mjs'
+      - 'build/sdk/producers/release/cross-runtime.mjs'
+      - 'build/sdk/producers/release/verify-ios-runtime.mjs'
+      - 'build/sdk/producers/srcbuild/steps/ios-runtime-control.mjs'
+      - 'build/sdk/producers/srcbuild/lib/ios-runtime.mjs'
+      - 'build/sdk/producers/srcbuild/steps/build-ios-*.mjs'
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: '24.22.1'
       - id: select
-        run: node ci/srcbuild/target-matrix.mjs --targets darwin-arm64 --single
+        run: node build/sdk/producers/srcbuild/target-matrix.mjs --targets darwin-arm64 --single
   runtime:
     needs: plan
     strategy:
@@ -61,16 +61,16 @@ jobs:
       - name: Prepare controlled arm
         env:
           ARM: ${{ matrix.arm }}
-        run: npx --yes zx@8 ci/srcbuild/steps/ios-runtime-control.mjs --action prepare
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/ios-runtime-control.mjs --action prepare
       - name: Build iOS runtime through product entry
         env:
           IOS_TARGET: ${{ matrix.target }}
-        run: npx --yes zx@8 ci/srcbuild/steps/build-ios-runtime.mjs
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-ios-runtime.mjs
       - name: Assert produced and installed runtime bytes
         env:
           IOS_TARGET: ${{ matrix.target }}
           ARM: ${{ matrix.arm }}
-        run: npx --yes zx@8 ci/srcbuild/steps/ios-runtime-control.mjs --action verify
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/ios-runtime-control.mjs --action verify
       - uses: ./.github/actions/sccache-report
         if: always()
         with:

@@ -5,7 +5,7 @@ import os from 'node:os';
 import {command} from './bootstrap/sdk-flow.mjs';
 import {selectBuildResources} from './build-resources.mjs';
 import {colourEnvironment} from './prepare-colour-sdk.mjs';
-import {PRODUCT_NAMES} from './srcbuild/lib/product-binary.mjs';
+import {PRODUCT_NAMES} from '../build/sdk/producers/srcbuild/lib/product-binary.mjs';
 try {
   const env = await colourEnvironment('build');
   const work = env.RUNNER_TEMP;

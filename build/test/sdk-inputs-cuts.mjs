@@ -56,7 +56,7 @@ const cuts = [
   {name: 'source-selection', file: 'build/srcbuild/stages/fetch.mjs',
     from: 'saveSourceSelection(config);', to: '// Controlled cut: lose explicit fetch options before build.',
     cases: 'fetch-explicit', target: /EXPLICIT_BUILD_ASSERTIONS_REACHED/, failure: /AssertionError/, control: 'h-default', isolated: true},
-  {name: 'ci-verify-h', file: 'ci/srcbuild/steps/verify.mjs',
+  {name: 'ci-verify-h', file: 'build/sdk/producers/srcbuild/steps/verify.mjs',
     from: 'officialRoot:resolveOfficialSdkRoot()', to: "officialRoot:'/controlled-disconnected-h'",
     cases: 'ci-verify-h', target: /CI_VERIFY_WIRING_ASSERTION_REACHED/, failure: /LINEAGE_INPUT_MISMATCH/, control: 'h-explicit'},
   {name: 'resume-native-check', file: 'ci/bootstrap/sdk-flow.mjs',

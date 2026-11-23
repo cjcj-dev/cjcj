@@ -120,7 +120,7 @@ test('formal cjprof artifact transports the recorded install set and excludes di
  // Independent artifact arm: a prior unrecorded page must not be attributed
  // to the new source, even when the artifact caller sees a residual directory.
  for(const prefix of prefixes)await write(path.join(sdk,prefix,'artifact-residue.html'),'unrecorded previous installation');
- const artifact=path.join(work,'artifact');await succeeds('prepare-artifact',[process.execPath,path.resolve('ci/release/prepare_tools_artifact.mjs'),'--tool','cjprof','--platform','linux-x64','--binary',path.join(sdk,'tools/bin/cjprof'),'--outdir',artifact,'--sdk',sdk]);
+ const artifact=path.join(work,'artifact');await succeeds('prepare-artifact',[process.execPath,path.resolve('build/sdk/producers/release/prepare_tools_artifact.mjs'),'--tool','cjprof','--platform','linux-x64','--binary',path.join(sdk,'tools/bin/cjprof'),'--outdir',artifact,'--sdk',sdk]);
  const archive=path.join(work,'cjprof.tar.gz'),unpacked=path.join(work,'unpacked');await fs.mkdir(unpacked);await succeeds('archive',['tar','-czf',archive,'-C',artifact,'.']);await succeeds('unpack',['tar','-xzf',archive,'-C',unpacked]);
  console.log('CJPROF_ARTIFACT_TARGET_ASSERTION_REACHED',work);
  for(const prefix of prefixes){await assert.rejects(fs.access(path.join(unpacked,prefix,'artifact-residue.html')),{code:'ENOENT'});await assert.rejects(fs.access(path.join(unpacked,prefix,'legacy.html')),{code:'ENOENT'});assert.deepEqual(await fs.readFile(path.join(unpacked,prefix,'html/index.html')),current);}

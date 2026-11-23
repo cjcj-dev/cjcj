@@ -19,11 +19,11 @@ import test from 'node:test';
 import {linkedPeFixture} from './linked-pe-fixture.mjs';
 import {sdkPlatform,entryPlatformName} from '../../ci/bootstrap/sdk-platform.mjs';
 import {getTarget} from '../lib/targets.mjs';
-import {sourceToolPayloads} from '../../ci/release/source-tool-payloads.mjs';
+import {sourceToolPayloads} from '../sdk/producers/release/source-tool-payloads.mjs';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
-const prepare = path.join(root, 'ci', 'release', 'prepare_tools_artifact.mjs');
-const install = path.join(root, 'ci', 'release', 'install_tools_artifact.mjs');
+const prepare = path.join(root, 'build', 'sdk', 'producers', 'release', 'prepare_tools_artifact.mjs');
+const install = path.join(root, 'build', 'sdk', 'producers', 'release', 'install_tools_artifact.mjs');
 const digest = contents => createHash('sha256').update(contents).digest('hex');
 
 function writeExecutable(file, contents) {
@@ -213,8 +213,8 @@ test('hle carries its parser payload through its own producer and installer', ()
   const release = path.join(fixture, 'release-sdk');
   writeExecutable(path.join(release, 'tools', 'bin', 'hle'), 'official hle bytes\n');
   writeFile(path.join(release, 'tools', 'dtsparser', 'analysis.js'), 'official parser\n');
-  const hlePrepare = path.join(root, 'ci', 'release', 'prepare_hle_artifact.mjs');
-  const hleInstall = path.join(root, 'ci', 'release', 'install_hle_artifact.mjs');
+  const hlePrepare = path.join(root, 'build', 'sdk', 'producers', 'release', 'prepare_hle_artifact.mjs');
+  const hleInstall = path.join(root, 'build', 'sdk', 'producers', 'release', 'install_hle_artifact.mjs');
   try {
     run(hlePrepare, ['--platform', 'linux-x64',
       '--binary', path.join(source, 'tools', 'bin', 'hle'),
@@ -241,7 +241,7 @@ test('hle carries its parser payload through its own producer and installer', ()
 
 test('the payload table covers every tool the release installs', async () => {
   const {SOURCE_TOOLS_NATIVE, SOURCE_TOOLS_WINDOWS} = await import('../lib/release-component-provenance.mjs');
-  const {sourceToolPayloads} = await import('../../ci/release/source-tool-payloads.mjs');
+  const {sourceToolPayloads} = await import('../sdk/producers/release/source-tool-payloads.mjs');
   // A tool the release installs without a payload declaration would silently
   // keep the official files beside a source-built binary.
   for (const tool of new Set([...SOURCE_TOOLS_NATIVE, ...SOURCE_TOOLS_WINDOWS, 'hle'])) {
@@ -291,8 +291,8 @@ for(const [platform,suffix,libraries]of [
  if(tool==='cjprof')for(const prefix of ['tools/config/static','.target-tools/tools/config/static'])writeFile(path.join(release,prefix,'legacy.html'),'previous installed page');
  if(tool!=='hle')producerFacts(sdk,tool,binary,platform);
  const dedicated=tool==='hle';
- const producer=dedicated?path.join(root,'ci/release/prepare_hle_artifact.mjs'):prepare;
- const consumer=dedicated?path.join(root,'ci/release/install_hle_artifact.mjs'):install;
+ const producer=dedicated?path.join(root,'build/sdk/producers/release/prepare_hle_artifact.mjs'):prepare;
+ const consumer=dedicated?path.join(root,'build/sdk/producers/release/install_hle_artifact.mjs'):install;
  const toolArgs=dedicated?[]:['--tool',tool];
  try {
   if(tool==='cjlint'&&!['linux-x64','windows-x64'].includes(platform)) {
@@ -321,7 +321,7 @@ for(const [platform,suffix,libraries]of [
 
 test('A8 workflow native callers provide their actual SDK input',()=>{
  const source=fs.readFileSync(path.join(root,'.github/workflows/srcbuild-target.yml'),'utf8');
- const calls=[...source.matchAll(/node ci\/release\/prepare_tools_artifact\.mjs \\\n((?:[^\n]*\\\n)*[^\n]*--outdir[^\n]*)/g)]
+ const calls=[...source.matchAll(/node build\/sdk\/producers\/release\/prepare_tools_artifact\.mjs \\\n((?:[^\n]*\\\n)*[^\n]*--outdir[^\n]*)/g)]
   .map(match=>match[1]).filter(text=>text.includes('${{ matrix.target }}'));
  assert.equal(calls.length,8);
  const work=fs.mkdtempSync(path.join(os.tmpdir(),'a8-caller-')),sdk=sourceSdk(work);
@@ -433,7 +433,7 @@ test('A8 unsafe payload cannot write outside either transport root',()=>{
 test('A8 hle producer refuses a parser directory without runtime dependencies',()=>{
  const work=fs.mkdtempSync(path.join(os.tmpdir(),'a8-hle-missing-')),sdk=path.join(work,'sdk');
  writeExecutable(path.join(sdk,'tools/bin/hle'),'controlled hle');writeExecutable(path.join(sdk,'tools/bin/node'),'controlled node');writeFile(path.join(sdk,'tools/dtsparser/analysis.js'),'parser alone');
- let rejected=false;try{run(path.join(root,'ci/release/prepare_hle_artifact.mjs'),['--platform','linux-x64','--binary',path.join(sdk,'tools/bin/hle'),'--sdk',sdk,'--outdir',path.join(work,'artifact')]);}catch{rejected=true;}
+ let rejected=false;try{run(path.join(root,'build/sdk/producers/release/prepare_hle_artifact.mjs'),['--platform','linux-x64','--binary',path.join(sdk,'tools/bin/hle'),'--sdk',sdk,'--outdir',path.join(work,'artifact')]);}catch{rejected=true;}
  console.log('A8_HLE_CLOSURE_TARGET_ASSERTION_REACHED',rejected);assert.equal(rejected,true);
  fs.rmSync(work,{recursive:true,force:true});
 });

@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 const root = path.resolve(import.meta.dirname, '../..');
-const cli = 'ci/srcbuild/target-matrix.mjs';
+const cli = 'build/sdk/producers/srcbuild/target-matrix.mjs';
 
 function run(t, args, command) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'source-matrix-'));

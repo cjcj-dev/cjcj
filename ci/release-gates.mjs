@@ -758,10 +758,10 @@ async function evaluateG4(context) {
   const phases = [...release.matchAll(/^  source-p(\d+)-[^:]+:\s*$/gm)].map(match => Number(match[1]));
   const uniquePhases = new Set(phases);
   const tests = runTests(context, [
-    'ci/srcbuild/tests/phase-control.test.mjs',
-    'ci/srcbuild/tests/release-wire.test.mjs',
-    'ci/srcbuild/tests/workflow-inputs.test.mjs',
-    'ci/srcbuild/tests/platform-contract.test.mjs',
+    'build/sdk/producers/srcbuild/tests/phase-control.test.mjs',
+    'build/sdk/producers/srcbuild/tests/release-wire.test.mjs',
+    'build/sdk/producers/srcbuild/tests/workflow-inputs.test.mjs',
+    'build/sdk/producers/srcbuild/tests/platform-contract.test.mjs',
   ]);
   const structural = sourceCalls > 0 && sourceCalls === phases.length && phases.length === uniquePhases.size;
   const status = structural && tests.status === 'MET' ? 'MET' : 'NOT_MET';
@@ -781,14 +781,14 @@ async function evaluateG5(context) {
     readFile(context, 'scripts/check_packaged_std.mjs'),
     readFile(context, '.github/workflows/build-release-package.yml'),
   ]);
-  const [nativeConsumer, composer] = workflow.includes('run: node ci/release/compose-package.mjs')
-    ? await Promise.all([readFile(context, 'ci/release/verify_native_release.mjs'), readFile(context, 'ci/release/compose-package.mjs')]) : ['', ''];
+  const [nativeConsumer, composer] = workflow.includes('run: node build/sdk/producers/release/compose-package.mjs')
+    ? await Promise.all([readFile(context, 'build/sdk/producers/release/verify_native_release.mjs'), readFile(context, 'build/sdk/producers/release/compose-package.mjs')]) : ['', ''];
   const classes = checker.match(/const CLASS_NAMES\s*=\s*\[([^\]]+)\]/)?.[1]
     ?.match(/['"][^'"]+['"]/g)?.map(value => value.slice(1, -1)) || [];
   const expectedClasses = ['cjo', 'bc', 'static-ffi', 'shared', 'provenance'];
   const invocationCount = workflow.match(/node scripts\/check_packaged_std\.mjs/g)?.length || 0;
   const block = stepBlock(workflow, 'Verify packaged standard library');
-  const native = workflow.includes('run: node ci/release/compose-package.mjs')
+  const native = workflow.includes('run: node build/sdk/producers/release/compose-package.mjs')
     && composer.includes('await verifyNativeRelease(options, env)') && composer.includes('await archiveInstall(')
     && composer.includes("new URL('./verify_native_release.mjs'")
     && nativeConsumer.includes('scripts/check_packaged_std.mjs')
@@ -806,7 +806,7 @@ async function evaluateG5(context) {
   }
   const tests = runTests(context, [
     'build/test/package-std-integrity.test.mjs',
-    'ci/srcbuild/tests/release-wire.test.mjs',
+    'build/sdk/producers/srcbuild/tests/release-wire.test.mjs',
   ]);
   return gateResult('G5', tests.status,
     `classes=5 workflow_consumers=1 bounded_fail_closed=yes; ${tests.detail}`);
@@ -1599,13 +1599,13 @@ async function evaluateG15(context) {
     readFile(context, '.github/workflows/build-release-package.yml'),
     releaseScope(context),
   ]);
-  const [nativeConsumer, composer] = packageWorkflow.includes('run: node ci/release/compose-package.mjs')
-    ? await Promise.all([readFile(context, 'ci/release/verify_native_release.mjs'), readFile(context, 'ci/release/compose-package.mjs')]) : ['', ''];
+  const [nativeConsumer, composer] = packageWorkflow.includes('run: node build/sdk/producers/release/compose-package.mjs')
+    ? await Promise.all([readFile(context, 'build/sdk/producers/release/verify_native_release.mjs'), readFile(context, 'build/sdk/producers/release/compose-package.mjs')]) : ['', ''];
   const version = python.match(/RELEASE_PYTHON_VERSION\s*=\s*['"](3\.11\.\d+)['"]/)?.[1] || '';
   const bundleArgs = packageWorkflow.match(/--python-bundle/g)?.length || 0;
   const verifiers = packageWorkflow.match(/verify_packaged_cjdb\.mjs/g)?.length || 0;
   const packageJobs = scope.jobs.length;
-  const native = packageWorkflow.includes('run: node ci/release/compose-package.mjs')
+  const native = packageWorkflow.includes('run: node build/sdk/producers/release/compose-package.mjs')
     && composer.includes('await verifyNativeRelease(options, env)') && composer.includes('await archiveInstall(')
     && nativeConsumer.includes('scripts/verify_packaged_cjdb.mjs');
   const structural = Boolean(version) && (native || bundleArgs === 2 && verifiers === 2) && scope.failures.length === 0;
@@ -1615,7 +1615,7 @@ async function evaluateG15(context) {
   }
   const tests = runTests(context, [
     'build/test/python-bundle.test.mjs',
-    'ci/srcbuild/tests/release-wire.test.mjs',
+    'build/sdk/producers/srcbuild/tests/release-wire.test.mjs',
   ]);
   return gateResult('G15', tests.status,
     `policy=A bundled Python ${version}; package_jobs=${packageJobs} unix+windows verifiers=2; ${tests.detail}; ${scopeSummary(scope)}`, {scope});
@@ -1645,7 +1645,7 @@ async function evaluateG17(context) {
     return gateResult('G17', 'NOT_MET', `policy_ready=${ready} runbook=${runbookShape} phase_test_live=${manifestLive}`);
   }
   const tests = runTests(context, [
-    'ci/srcbuild/tests/phase-control.test.mjs',
+    'build/sdk/producers/srcbuild/tests/phase-control.test.mjs',
     'ci/test-manifest.test.mjs',
   ]);
   return gateResult('G17', tests.status,

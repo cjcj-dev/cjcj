@@ -4,12 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {fixture} from '../release/prepare_bootstrap_fixture.mjs';
+import {fixture} from '../../build/sdk/producers/release/prepare_bootstrap_fixture.mjs';
 
 for (const [target, platform] of [['linux-x64', 'linux_x86_64'], ['linux-aarch64', 'linux_aarch64']]) {
   test(`producer CLI binds ${platform} runtime and coloured std`, () => fixture(({env, runtimeSource}) => {
     const output = path.join(path.dirname(runtimeSource), 'packaged');
-    const result = spawnSync(process.execPath, [new URL('../release/colour_runtime.mjs', import.meta.url).pathname,
+    const result = spawnSync(process.execPath, [new URL('../../build/sdk/producers/release/colour_runtime.mjs', import.meta.url).pathname,
       runtimeSource, output], {encoding: 'utf8', env: {...env, COLOUR_RT_PLATFORM: platform,
       GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', GITHUB_OUTPUT: ''}});
     assert.equal(result.status, 0, result.stderr);

@@ -15,7 +15,7 @@ import {hostToolchainFromCjcVersion} from '../host-toolchain-pin.mjs';
 const parent=process.env.RELEASE_EVIDENCE_TEST_ROOT,host=process.env.CJCJ_LANGUAGE_PREPARE_HOST;
 assert(parent&&host,'RELEASE_EVIDENCE_TEST_ROOT and read-only CJCJ_LANGUAGE_PREPARE_HOST required');
 const entry=new URL('./prepare-bootstrap-plans.mjs',import.meta.url).pathname;
-const fixed=JSON.parse(fs.readFileSync(new URL('../platform_matrix/fixtures/runtime-language-259.json',import.meta.url)));
+const fixed=JSON.parse(fs.readFileSync(new URL('../../build/sdk/producers/platform_matrix/fixtures/runtime-language-259.json',import.meta.url)));
 const platform='linux_x86_64',tuple=platform+'_cjnative';
 function fixture(kind) {
  const root=fs.mkdtempSync(path.join(parent,'descriptor-'+kind+'-')),source=root+'/source',runtime=source+'/runtime',sdk=root+'/runtime-install';

@@ -3,9 +3,9 @@ on:
   pull_request:
     paths:
       - '.github/workflows/android-runtime.yml'
-      - 'ci/srcbuild/**/android-runtime.mjs'
-      - 'ci/srcbuild/steps/build-android-*.mjs'
-      - 'ci/release/cross-runtime.mjs'
+      - 'build/sdk/producers/srcbuild/**/android-runtime.mjs'
+      - 'build/sdk/producers/srcbuild/steps/build-android-*.mjs'
+      - 'build/sdk/producers/release/cross-runtime.mjs'
   workflow_dispatch:
     inputs:
       runtime_ref:
@@ -46,9 +46,9 @@ jobs:
         if: matrix.arm == 'candidate'
         shell: bash
         run: |
-          node --test ci/release/android-platform.test.mjs ci/release/cross-runtime.test.mjs ci/release/platform-matrix.test.mjs ci/release-pair-pin.test.mjs ci/srcbuild/tests/platform-contract.test.mjs ci/srcbuild/tests/sccache-contract.test.mjs build/test/package-provenance.test.mjs build/test/runtime-pin.test.mjs
+          node --test build/sdk/producers/release/android-platform.test.mjs build/sdk/producers/release/cross-runtime.test.mjs build/sdk/producers/release/platform-matrix.test.mjs ci/release-pair-pin.test.mjs build/sdk/producers/srcbuild/tests/platform-contract.test.mjs build/sdk/producers/srcbuild/tests/sccache-contract.test.mjs build/test/package-provenance.test.mjs build/test/runtime-pin.test.mjs
           SDK_FLOW_TEST_ROOT="$RUNNER_TEMP/sdk-flow-tests" node --test ci/bootstrap/sdk-flow.test.mjs
-          node --test ci/release/bootstrap_entries.test.mjs
+          node --test build/sdk/producers/release/bootstrap_entries.test.mjs
       - uses: ./.github/actions/setup-release-sdk
         with:
           requirement: android-ndk
@@ -82,27 +82,27 @@ jobs:
           if [[ "$ARM" != candidate ]]; then
             python3 - <<'PYCODE'
           from pathlib import Path
-          p = Path('ci/srcbuild/lib/android-runtime.mjs')
+          p = Path('build/sdk/producers/srcbuild/lib/android-runtime.mjs')
           text = p.read_text()
           source = "'aarch64_Release', 'libboundscheck.so'"
           assert text.count(source) == 1
           p.write_text(text.replace(source, "'aarch64_Release', 'libcangjie-runtime.so'"))
           PYCODE
-            git diff -- ci/srcbuild/lib/android-runtime.mjs > "$RUNNER_TEMP/producer-cut.diff"
+            git diff -- build/sdk/producers/srcbuild/lib/android-runtime.mjs > "$RUNNER_TEMP/producer-cut.diff"
           fi
           if [[ "$ARM" == restored ]]; then
-            git restore ci/srcbuild/lib/android-runtime.mjs
+            git restore build/sdk/producers/srcbuild/lib/android-runtime.mjs
           fi
-          sha256sum ci/srcbuild/lib/android-runtime.mjs ci/release/verify-android-runtime.mjs
+          sha256sum build/sdk/producers/srcbuild/lib/android-runtime.mjs build/sdk/producers/release/verify-android-runtime.mjs
       - name: Build Android runtime through product entry
-        run: npx --yes zx@8 ci/srcbuild/steps/build-android-runtime.mjs
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-android-runtime.mjs
       - name: Assert installed boundscheck bytes from this build
         env:
           ARM: ${{ matrix.arm }}
         shell: bash
         run: |
           set +e
-          node ci/release/verify-android-runtime.mjs > "$RUNNER_TEMP/producer-assertion.log" 2>&1
+          node build/sdk/producers/release/verify-android-runtime.mjs > "$RUNNER_TEMP/producer-assertion.log" 2>&1
           rc=$?
           set -e
           cat "$RUNNER_TEMP/producer-assertion.log"

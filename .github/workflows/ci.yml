@@ -256,7 +256,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           CANDIDATE_RUN: ${{ inputs.native_sdk_run_id }}
           CANDIDATE_VERSION: ${{ inputs.native_sdk_version }}
-        run: node ci/release/persist_native_sdk.mjs select linux-x64 >> "$GITHUB_OUTPUT"
+        run: node build/sdk/producers/release/persist_native_sdk.mjs select linux-x64 >> "$GITHUB_OUTPUT"
       - name: Receive packaged native SDK
         id: candidate
         if: steps.native-sdk.outputs.mode == 'candidate'
@@ -265,17 +265,17 @@ jobs:
           CANDIDATE_ARTIFACT: ${{ steps.native-sdk.outputs.artifact }}
           CANDIDATE_RUN: ${{ steps.native-sdk.outputs.run }}
           CANDIDATE_VERSION: ${{ steps.native-sdk.outputs.version }}
-        run: node ci/release/persist_native_sdk.mjs receive-candidate linux-x64 "$RUNNER_TEMP/native-sdk-artifact" >> "$GITHUB_OUTPUT"
+        run: node build/sdk/producers/release/persist_native_sdk.mjs receive-candidate linux-x64 "$RUNNER_TEMP/native-sdk-artifact" >> "$GITHUB_OUTPUT"
       - name: Receive persisted native SDK
         if: steps.native-sdk.outputs.mode == 'persisted'
         env:
           GH_TOKEN: ${{ github.token }}
           NATIVE_SDK_ARTIFACT: ${{ steps.native-sdk.outputs.artifact }}
-        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "$NATIVE_SDK_ARTIFACT" "$RUNNER_TEMP/native-sdk-artifact"
+        run: node build/sdk/producers/release/download_pinned.mjs cjcj-dev/cjcj "$NATIVE_SDK_ARTIFACT" "$RUNNER_TEMP/native-sdk-artifact"
       - name: Verify and select installed native SDK
         env:
           CJCJ_NATIVE_SDK_VERSION: ${{ steps.native-sdk.outputs.version }}
-        run: node ci/release/receive_native_sdk.mjs "$RUNNER_TEMP/native-sdk-artifact" "$RUNNER_TEMP/native-sdk" linux-x64
+        run: node build/sdk/producers/release/receive_native_sdk.mjs "$RUNNER_TEMP/native-sdk-artifact" "$RUNNER_TEMP/native-sdk" linux-x64
       - name: Start sccache
         uses: ./.github/actions/sccache
         with:
@@ -343,7 +343,7 @@ jobs:
           ACCEPTANCE_JOB: package-tests
         run: |
           mkdir -p "$RUNNER_TEMP/native-sdk-persist"
-          node ci/release/persist_native_sdk.mjs publish linux-x64 "$RUNNER_TEMP/native-sdk-persist" 2>&1 | tee "$RUNNER_TEMP/native-sdk-persist/persist.log"
+          node build/sdk/producers/release/persist_native_sdk.mjs publish linux-x64 "$RUNNER_TEMP/native-sdk-persist" 2>&1 | tee "$RUNNER_TEMP/native-sdk-persist/persist.log"
       - name: Preserve persistence provenance and log
         if: always()
         uses: actions/upload-artifact@v7
@@ -501,7 +501,7 @@ jobs:
       - name: Build workspace
         run: |
           node ci/check-codegen-runtime-layout.mjs
-          node ci/release/trimpath.mjs .
+          node build/sdk/producers/release/trimpath.mjs .
           node ci/with-runtime-audit.mjs -- node ci/with-colour-sdk.mjs build -- cjpm build
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
       - name: Compose compiler

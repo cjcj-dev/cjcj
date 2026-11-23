@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import {produceFinalCompiler, consumeFinalCompiler, fileSha256, stdIdentity} from '../../ci/srcbuild/lib/final-compiler.mjs';
+import {produceFinalCompiler, consumeFinalCompiler, fileSha256, stdIdentity} from '../sdk/producers/srcbuild/lib/final-compiler.mjs';
 
 for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64']) {
   test(`final compiler producer/consumer identity: ${platform}`, async t => {

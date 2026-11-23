@@ -82,16 +82,16 @@ jobs:
       - name: Fetch selected cjcj-tools source
         if: steps.cjpm-cache.outputs.cache-hit != 'true'
         shell: msys2 {0}
-        run: node ci/release/build_cjpm.mjs fetch
+        run: node build/sdk/producers/release/build_cjpm.mjs fetch
 
       - name: Build Cangjie cjpm
         if: steps.cjpm-cache.outputs.cache-hit != 'true'
         shell: msys2 {0}
-        run: MINGW_PATH="$(cygpath -w /mingw64)" node ci/release/build_cjpm.mjs build
+        run: MINGW_PATH="$(cygpath -w /mingw64)" node build/sdk/producers/release/build_cjpm.mjs build
 
       - name: Verify patched cjpm payload
         run: |
-          node ci/release/prepare_cjpm_artifact.mjs \
+          node build/sdk/producers/release/prepare_cjpm_artifact.mjs \
             --platform windows-x64 \
             --binary patched-cjpm/windows_x86_64/cjpm.exe \
             --outdir "$RUNNER_TEMP/cjpm-provenance"

@@ -26,8 +26,8 @@ jobs:
       - name: Extract and verify the official pair
         run: |
           set -euo pipefail
-          node ci/release/host_runtime.mjs prepare "$CANGJIE_HOME" host-runtime "$PLATFORM"
-          node ci/release/host_runtime.mjs verify "$CANGJIE_HOME" host-runtime "$PLATFORM" | tee host-runtime/verified.log
+          node build/sdk/producers/release/host_runtime.mjs prepare "$CANGJIE_HOME" host-runtime "$PLATFORM"
+          node build/sdk/producers/release/host_runtime.mjs verify "$CANGJIE_HOME" host-runtime "$PLATFORM" | tee host-runtime/verified.log
           lib="host-runtime/runtime/lib/${PLATFORM}_cjnative"
           file "$lib"/*.dylib | tee host-runtime/architecture.txt
           shasum -a 256 "$lib"/*.dylib | tee host-runtime/SHA256SUMS
@@ -36,28 +36,28 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p host-runtime/controls
-          cp ci/release/host_runtime.mjs host-runtime/controls/candidate.mjs
+          cp build/sdk/producers/release/host_runtime.mjs host-runtime/controls/candidate.mjs
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('ci/release/host_runtime.mjs')
+          p = Path('build/sdk/producers/release/host_runtime.mjs')
           s = p.read_text()
           old = 'fs.copyFileSync(source, destination);'
           assert s.count(old) == 1
           p.write_text(s.replace(old, "fs.copyFileSync(path.join(sdk, `runtime/lib/${platform}_cjnative/libboundscheck.dylib`), destination);"))
           PY
-          cp ci/release/host_runtime.mjs host-runtime/controls/cut.mjs
-          node ci/release/host_runtime.mjs prepare "$CANGJIE_HOME" host-cut "$PLATFORM"
+          cp build/sdk/producers/release/host_runtime.mjs host-runtime/controls/cut.mjs
+          node build/sdk/producers/release/host_runtime.mjs prepare "$CANGJIE_HOME" host-cut "$PLATFORM"
           set +e
-          node ci/release/host_runtime.mjs verify "$CANGJIE_HOME" host-cut "$PLATFORM" > host-runtime/controls/cut.log 2>&1
+          node build/sdk/producers/release/host_runtime.mjs verify "$CANGJIE_HOME" host-cut "$PLATFORM" > host-runtime/controls/cut.log 2>&1
           rc=$?
           set -e
           echo "$rc" > host-runtime/controls/cut.rc
           test "$rc" -ne 0
           grep -F "HOST_RT_COPY_SHA256: runtime/lib/${PLATFORM}_cjnative/libcangjie-runtime.dylib" host-runtime/controls/cut.log
-          cp host-runtime/controls/candidate.mjs ci/release/host_runtime.mjs
-          cp ci/release/host_runtime.mjs host-runtime/controls/restored.mjs
-          node ci/release/host_runtime.mjs prepare "$CANGJIE_HOME" host-restored "$PLATFORM"
-          node ci/release/host_runtime.mjs verify "$CANGJIE_HOME" host-restored "$PLATFORM" | tee host-runtime/controls/restored.log
+          cp host-runtime/controls/candidate.mjs build/sdk/producers/release/host_runtime.mjs
+          cp build/sdk/producers/release/host_runtime.mjs host-runtime/controls/restored.mjs
+          node build/sdk/producers/release/host_runtime.mjs prepare "$CANGJIE_HOME" host-restored "$PLATFORM"
+          node build/sdk/producers/release/host_runtime.mjs verify "$CANGJIE_HOME" host-restored "$PLATFORM" | tee host-runtime/controls/restored.log
           for name in libcangjie-runtime.dylib libboundscheck.dylib; do
             relative="runtime/lib/${PLATFORM}_cjnative/$name"
             cmp "host-runtime/$relative" "host-restored/$relative"

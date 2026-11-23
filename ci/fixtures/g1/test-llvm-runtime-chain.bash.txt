@@ -24,7 +24,7 @@ export CANGJIE_COMPILER_URL="file://$other_mirror" CANGJIE_COMPILER_SHA=$other_s
 export FLATBUFFERS_URL="file://$other_mirror" FLATBUFFERS_SHA=$other_sha
 export GIT_TRACE="$work/fetch.trace"
 printf 'CHAIN_INPUT runtime=%s other=%s runtime_mirror=%s\n' "$CJCJ_LLVM_RUNTIME_SHA" "$other_sha" "$runtime_mirror"
-bash "$repo/ci/platform_tuples/fetch_sources.sh" > "$work/fetch.log" 2>&1
+bash "$repo/build/sdk/producers/platform_tuples/fetch_sources.sh" > "$work/fetch.log" 2>&1
 head=$(git -C "$TUPLE_ROOT/paired-runtime" rev-parse HEAD)
 printf 'CHAIN_ASSERT_REACHED runtime_head actual=%s expected=%s\n' "$head" "$CJCJ_LLVM_RUNTIME_SHA"
 test "$head" = "$CJCJ_LLVM_RUNTIME_SHA"
@@ -42,7 +42,7 @@ chmod 0755 "$work/bin/cmake"
 export PATH="$work/bin:$PATH"
 # The same tuple root and private environment enter the real build script.
 set +e
-bash "$repo/ci/platform_tuples/build_tuple.sh" > "$work/build.log" 2>&1
+bash "$repo/build/sdk/producers/platform_tuples/build_tuple.sh" > "$work/build.log" 2>&1
 rc=$?
 set -e
 printf '%s\n' "$rc" > "$work/build.rc"

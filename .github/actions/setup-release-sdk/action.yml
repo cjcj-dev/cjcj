@@ -11,9 +11,9 @@ runs:
       shell: bash
       env:
         SDK_REQUIREMENT: ${{ inputs.requirement }}
-      run: python3 ci/release/install-runner-sdk.py "$SDK_REQUIREMENT" --root "$RUNNER_TEMP/release-sdk-$SDK_REQUIREMENT"
+      run: python3 build/sdk/producers/release/install-runner-sdk.py "$SDK_REQUIREMENT" --root "$RUNNER_TEMP/release-sdk-$SDK_REQUIREMENT"
     - name: Probe installed target SDK
       shell: bash
       env:
         SDK_REQUIREMENT: ${{ inputs.requirement }}
-      run: node ci/release/platform-matrix.mjs probe --requirement "$SDK_REQUIREMENT" --summary "$GITHUB_STEP_SUMMARY"
+      run: node build/sdk/producers/release/platform-matrix.mjs probe --requirement "$SDK_REQUIREMENT" --summary "$GITHUB_STEP_SUMMARY"

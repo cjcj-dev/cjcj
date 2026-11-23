@@ -228,7 +228,7 @@ test('G15 runs real child assertions and preserves their failure under a parent 
   assert.equal(normal.result.status, 0, JSON.stringify(normal.value));
   assert.match(normal.value.value, /tests pass=[1-9]\d* fail=0/);
   const control = gate(root, 'G3');
-  await fs.appendFile(path.join(root, 'ci/srcbuild/tests/release-wire.test.mjs'),
+  await fs.appendFile(path.join(root, 'build/sdk/producers/srcbuild/tests/release-wire.test.mjs'),
     "\ntest('G15 child failure control', () => assert.fail('G15_REAL_CHILD_FAILURE'));\n");
   const failed = gate(root, 'G15');
   assert.equal(failed.result.status, 1, JSON.stringify(failed.value));

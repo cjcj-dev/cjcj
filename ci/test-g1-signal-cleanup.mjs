@@ -22,7 +22,7 @@ const signals = rows.filter(row => row.kind === 'command' && row.name === 'trap'
     return {signal: `SIG${row.arguments[1].text}`, rc, row};
   });
 assert.equal(signals.length, 2);
-const consumer = path.join(source, 'ci/release/prepare_bootstrap_inputs.mjs');
+const consumer = path.join(source, 'build/sdk/producers/release/prepare_bootstrap_inputs.mjs');
 const original = fs.readFileSync(consumer);
 const old = path.join(source, 'ci/.g1-old-signal.bash.txt');
 assert.equal(spawnSync('git', ['status', '--porcelain', '--', consumer], {cwd: source, encoding: 'utf8'}).stdout, '');

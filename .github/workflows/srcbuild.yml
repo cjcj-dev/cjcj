@@ -273,7 +273,7 @@ jobs:
         id: select
         env:
           REQUESTED: ${{ inputs.targets }}
-        run: node ci/srcbuild/target-matrix.mjs --targets "$REQUESTED"
+        run: node build/sdk/producers/srcbuild/target-matrix.mjs --targets "$REQUESTED"
 
   srcbuild:
     name: ${{ matrix.target }} / source SDK
@@ -323,4 +323,4 @@ jobs:
       - name: Report missing source inputs
         env:
           REQUESTED: ${{ inputs.targets }}
-        run: node ci/srcbuild/target-matrix.mjs --targets "$REQUESTED" --require-ready
+        run: node build/sdk/producers/srcbuild/target-matrix.mjs --targets "$REQUESTED" --require-ready

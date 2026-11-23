@@ -2,7 +2,7 @@
 
 `build-host-runtime.yml` runs on macos-15 and macos-15-intel. It loads
 `ci/host_sdk_pin.env` and provisions the official SDK with `ci/setup_sdk.mjs`,
-then copies its runtime and boundscheck libraries with `ci/release/host_runtime.mjs`.
+then copies its runtime and boundscheck libraries with `build/sdk/producers/release/host_runtime.mjs`.
 The manifest retains the actual toolchain identity and both source digests.
 The verifier compares each output against the original SDK bytes. Native
 candidate/cut/restored checks replace the runtime copy with boundscheck and

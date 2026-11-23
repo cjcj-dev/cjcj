@@ -22,7 +22,7 @@ Object.assign(process.env, {
   FLATBUFFERS_URL: `file://${otherMirror}`, FLATBUFFERS_SHA: otherSha, GIT_TRACE: path.join(work, 'fetch.trace'),
 });
 console.log(`CHAIN_INPUT runtime=${runtimeSha} other=${otherSha} runtime_mirror=${runtimeMirror}`);
-await run(['npx', '--yes', 'zx@8', path.join(repo, 'ci/platform_tuples/fetch_sources.mjs')], {cwd: process.cwd(), log: path.join(work, 'fetch.log')});
+await run(['npx', '--yes', 'zx@8', path.join(repo, 'build/sdk/producers/platform_tuples/fetch_sources.mjs')], {cwd: process.cwd(), log: path.join(work, 'fetch.log')});
 const selected = path.join(process.env.TUPLE_ROOT, 'paired-runtime');
 const head = (await capture(['git', '-C', selected, 'rev-parse', 'HEAD'])).stdout.trim();
 console.log(`CHAIN_ASSERT_REACHED runtime_head actual=${head} expected=${runtimeSha}`);
@@ -31,7 +31,7 @@ fs.mkdirSync(path.join(work, 'bin'));
 process.env.LLVM_RUNTIME_CMAKE_CAPTURE = path.join(work, 'cmake.json');
 fs.writeFileSync(path.join(work, 'bin/cmake'), "#!/usr/bin/env python3\nimport json,os,sys\nwith open(os.environ['LLVM_RUNTIME_CMAKE_CAPTURE'], 'w') as out:\n    json.dump(sys.argv[1:], out)\nsys.exit(86)\n", {mode: 0o755});
 process.env.PATH = `${path.join(work, 'bin')}:${process.env.PATH}`;
-const build = await run(['npx', '--yes', 'zx@8', path.join(repo, 'ci/platform_tuples/build_tuple.mjs')], {cwd: process.cwd(), log: path.join(work, 'build.log'), check: false});
+const build = await run(['npx', '--yes', 'zx@8', path.join(repo, 'build/sdk/producers/platform_tuples/build_tuple.mjs')], {cwd: process.cwd(), log: path.join(work, 'build.log'), check: false});
 fs.writeFileSync(path.join(work, 'build.rc'), `${build.exitCode}\n`);
 console.log(`CHAIN_ASSERT_REACHED first_cmake_boundary actual=${build.exitCode} expected=86`);
 assert.equal(build.exitCode, 86); console.log('CHAIN_ASSERT_PASS first_cmake_boundary');

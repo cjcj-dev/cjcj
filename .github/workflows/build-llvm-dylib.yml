@@ -166,7 +166,7 @@ jobs:
           fi
           grep -F 'LLVM_DYLIB_SHA256_MISMATCH expected=' dylib-build/invalid-dylib/stderr.log
           DYLIB_TEST_FILE="$PWD/depot/dylib/libLLVM-15.so" DYLIB_TEST_WRONG_FILE="$wrong" \
-            node --test ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs | tee depot/dylib/input-tests.log
+            node --test build/sdk/producers/release/prepare_bootstrap_inputs.test.mjs build/sdk/producers/release/prepare_llvm_dylib.test.mjs | tee depot/dylib/input-tests.log
       - name: Reject a changed Darwin library before loading it
         if: runner.os == 'macOS'
         run: |

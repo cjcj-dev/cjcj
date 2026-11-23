@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
-import {platformizeCjcToml} from '../../ci/platform_matrix/link_option.mjs';
+import {platformizeCjcToml} from '../sdk/producers/platform_matrix/link_option.mjs';
 
 const read = file => fs.readFile(new URL('../../' + file, import.meta.url), 'utf8');
 const workspace = await read('cjpm.toml');

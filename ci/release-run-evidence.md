@@ -59,7 +59,7 @@ rc is NOT_MET and names the record/check. Known failures take precedence over
 incomplete evidence. MET requires all records, checks and artifact metadata.
 
 A `smoke` record means the **entire** `ci/smoke/run_smoke.mjs` batch finished;
-`checksums` means all outward files passed `ci/release/package_checksums.mjs`;
+`checksums` means all outward files passed `build/sdk/producers/release/package_checksums.mjs`;
 `artifact_sha` means all artifacts in the archive manifest were checked, not a
 sample. `clean_stamp` means one clean lineage stamp across the packaged set.
 `manifest_pin` and SHA/version checks use `ci/llvm-tools-manifest.mjs` and the

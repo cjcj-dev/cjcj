@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {getTarget} from '../lib/targets.mjs';
 import {nativeToolBuildPayloads,toolPayloads,toolBuildProduct} from '../srcbuild/tool-layout.mjs';
-import {sourceToolPayloads} from '../../ci/release/source-tool-payloads.mjs';
+import {sourceToolPayloads} from '../sdk/producers/release/source-tool-payloads.mjs';
 // Independent literals from fixed ec1 native CMake producers/install rules.
 // Text transport fixtures only: no compiler, DLL, Windows execution or SDK pass.
 const layouts=[

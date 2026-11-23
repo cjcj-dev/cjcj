@@ -353,7 +353,7 @@ test('public package reaches native path parity and rejects a different real ELF
   {skip: process.platform !== 'linux' || !process.env.PACKAGE_PARITY_SDK || !process.env.PACKAGE_PARITY_OFFICIAL_SDK}, t => {
     const {root, official} = fixture(t);
     const repo = fileURLToPath(new URL('../../', import.meta.url));
-    const targetModule = new URL('../../ci/srcbuild/lib/package-install.mjs', import.meta.url).href;
+    const targetModule = new URL('../sdk/producers/srcbuild/lib/package-install.mjs', import.meta.url).href;
     const observer = put(root, 'observer.mjs', `export async function load(url, context, nextLoad) {
  const loaded = await nextLoad(url, context);
  if (url !== ${JSON.stringify(targetModule)}) return loaded;

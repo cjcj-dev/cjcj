@@ -7,7 +7,7 @@ import {buildConfig} from '../lib/config.mjs';
 import {installGcUnitInputs,assertGcUnitLanguageDone,assertGcUnitLanguageDeferred,gcUnitStatusPath} from '../srcbuild/gc-unit-gate.mjs';
 import {completedGcUnitGate} from '../srcbuild/installed-language-inputs.mjs';
 import {languageSourceInputs} from '../srcbuild/installed-language-source.mjs';
-const fixed=JSON.parse(fs.readFileSync(new URL('../../ci/platform_matrix/fixtures/runtime-language-259.json',import.meta.url)));
+const fixed=JSON.parse(fs.readFileSync(new URL('../sdk/producers/platform_matrix/fixtures/runtime-language-259.json',import.meta.url)));
 const tuple='linux_x86_64_cjnative',entry=new URL('../../ci/bootstrap/sdk-installed-language.mjs',import.meta.url).pathname;
 function fixture(label,{payloads=true,testable=false,reentry=false}={}) {
   if(process.env.RELEASE_EVIDENCE_TEST_ROOT)fs.mkdirSync(process.env.RELEASE_EVIDENCE_TEST_ROOT,{recursive:true});

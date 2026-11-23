@@ -8,7 +8,7 @@ import {spawnSync} from 'node:child_process';
 import {load} from '../vendor/js-yaml/js-yaml.mjs';
 import {createBootstrapTargets,FIXED_INPUTS} from './sdk-targets.mjs';
 import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
-import {installedInputs} from '../srcbuild/lib/installed-inputs.mjs';
+import {installedInputs} from '../../build/sdk/producers/srcbuild/lib/installed-inputs.mjs';
 const root=process.env.WINDOWS_TOOLCHAIN_ENTRY_EVIDENCE;if(!root)throw Error('WINDOWS_TOOLCHAIN_ENTRY_EVIDENCE required');
 await fs.mkdir(root,{recursive:true});
 const hash=b=>createHash('sha256').update(b).digest('hex');

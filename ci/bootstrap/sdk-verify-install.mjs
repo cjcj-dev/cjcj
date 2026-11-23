@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {verifyInstalledRegex} from './sdk-installed-regex.mjs';
 import {verifyInstalledJava} from './sdk-installed-java.mjs';
-import {consumeInstalledLspMacro} from '../release/installed-lsp-macro.mjs';
+import {consumeInstalledLspMacro} from '../../build/sdk/producers/release/installed-lsp-macro.mjs';
 import {helloInstall} from './sdk-hello.mjs';
 import {macroInstall,precompiledStdxMacros} from './sdk-installed-macros.mjs';
 import {readJson,withProcessCancellation} from './sdk-flow.mjs';

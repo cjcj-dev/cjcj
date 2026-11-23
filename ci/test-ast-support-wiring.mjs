@@ -8,7 +8,7 @@ const required = index => requireArgument(index, ...requiredArguments[index]);
 await entry(async () => {
 const work = path.resolve(required(0, 'empty evidence directory'));
 fs.mkdirSync(work);
-const consumer = 'ci/release/prepare_bootstrap_inputs.mjs';
+const consumer = 'build/sdk/producers/release/prepare_bootstrap_inputs.mjs';
 const status = await capture(['git', 'status', '--porcelain', '--', consumer], {check: false});
 process.stderr.write(status.stderr);
 if (status.stdout.trim()) { console.error('consumer must be clean'); exit(1); }
@@ -30,7 +30,7 @@ function finish() {
 const removeSignalHandlers = cleanupOnSignals(finish);
 async function arm(name) {
   const start = Date.now();
-  const result = await run(['timeout', '-k', '5', '180', 'node', '--test', '--test-reporter=tap', 'ci/release/prepare_bootstrap_inputs.test.mjs'], {log: path.join(work, `${name}.log`), check: false});
+  const result = await run(['timeout', '-k', '5', '180', 'node', '--test', '--test-reporter=tap', 'build/sdk/producers/release/prepare_bootstrap_inputs.test.mjs'], {log: path.join(work, `${name}.log`), check: false});
   fs.writeFileSync(path.join(work, `${name}.rc`), `${result.exitCode}\n`);
   fs.writeFileSync(path.join(work, `${name}.wall`), `wall=${Math.floor((Date.now() - start) / 1000)}\n`);
   await run(['python3', '-', work, name], {input: validator});
@@ -93,7 +93,7 @@ if arm in ('green', 'restored'):
         assert markers == json.loads((work / 'green-markers.json').read_text()), 'restored markers changed'
 print(f'{arm}: rc={rc} tests={len(names)} failures={failed}')`;
 try {
-  await hash([consumer, 'ci/release/prepare_bootstrap_inputs.test.mjs', 'ci/release/prepare_bootstrap_fixture.mjs'], path.join(work, 'inputs.sha256'));
+  await hash([consumer, 'build/sdk/producers/release/prepare_bootstrap_inputs.test.mjs', 'build/sdk/producers/release/prepare_bootstrap_fixture.mjs'], path.join(work, 'inputs.sha256'));
   await hash([consumer], path.join(work, 'green.sha256'));
   await arm('green');
   replace(path.join(repo, consumer), 'pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT || process.env.CJCJ_BOOTSTRAP_AST_SUPPORT,', 'pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_SUPPORT || process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT,');

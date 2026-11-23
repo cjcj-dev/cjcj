@@ -81,7 +81,7 @@ if sys.argv[1]=='install':
  const source=mode.startsWith('archive')?materialized:objects;
  // Explicit unavailable functionality, never a fabricated CPP PASS file.
  const boundaries={
-  'ci/platform_matrix/native_runtime.mjs':{installNativeRuntimeInputs:'const root=arguments[0].installRoot;controlledDirectSource(path.join(root,"share/runtime-build/runtime"));for(const f of ["share/runtime-build/runtime/CMakebuild/compile_commands.json","share/runtime-build/runtime/CMakebuild/gc-unit.status","runtime/include/schedule.h"]){fs.mkdirSync(path.dirname(path.join(root,f)),{recursive:true});fs.writeFileSync(path.join(root,f),"CONTROLLED_CPP_NOT_RUN");}console.log("CONTROLLED_CPP_DIRECT_INPUT_NOT_RUN");'},
+  'build/sdk/producers/platform_matrix/native_runtime.mjs':{installNativeRuntimeInputs:'const root=arguments[0].installRoot;controlledDirectSource(path.join(root,"share/runtime-build/runtime"));for(const f of ["share/runtime-build/runtime/CMakebuild/compile_commands.json","share/runtime-build/runtime/CMakebuild/gc-unit.status","runtime/include/schedule.h"]){fs.mkdirSync(path.dirname(path.join(root,f)),{recursive:true});fs.writeFileSync(path.join(root,f),"CONTROLLED_CPP_NOT_RUN");}console.log("CONTROLLED_CPP_DIRECT_INPUT_NOT_RUN");'},
   'build/srcbuild/gc-unit-gate.mjs':{
    assertLanguageState:'console.log("CONTROLLED_CPP_GATE_NOT_RUN");return new Map([["CPP_SUITE","PASS"]]);',
   },
@@ -89,7 +89,7 @@ if sys.argv[1]=='install':
  await write(root+'/boundaries.json',JSON.stringify({functions:boundaries,otherSourcePins:'H1/AST/LLVM use actual finite Git object; no native qualification',commands:['sudo apt-get preparation','npx qualify_teardown_tools'],host:'actual complete private H925'},null,2));
  await write(root+'/loader.mjs',String.raw`const boundaries=${JSON.stringify(Object.fromEntries(Object.entries(boundaries).map(([p,v])=>[new URL(p,'file://'+repo).href,v])))};
 export async function load(url,context,next){const r=await next(url,context);if(!boundaries[url]&&!url.endsWith('/ci/bootstrap/sdk-targets.mjs'))return r;let source=String(r.source);
-if(url.endsWith('/ci/platform_matrix/native_runtime.mjs'))source+='\nimport {directSource as controlledDirectSource} from '+JSON.stringify(${JSON.stringify(new URL('ci/fixtures/runtime-direct-inputs.mjs','file://'+repo).href)})+';\n';
+if(url.endsWith('/build/sdk/producers/platform_matrix/native_runtime.mjs'))source+='\nimport {directSource as controlledDirectSource} from '+JSON.stringify(${JSON.stringify(new URL('ci/fixtures/runtime-direct-inputs.mjs','file://'+repo).href)})+';\n';
 if(boundaries[url])for(const [name,body]of Object.entries(boundaries[url])){const re=new RegExp('export (async )?function '+name+'\\(');if(!re.test(source))throw Error('BOUNDARY_ANCHOR '+name);source=source.replace(re,(_,a='')=>a+'function CONTROLLED_ORIGINAL_'+name+'(');source+='\nexport function '+name+'(){'+body+'}\n';}
 if(url.endsWith('/ci/bootstrap/sdk-targets.mjs')){const anchor='compiler:pins.source.COMPILER_REF';if(!source.includes(anchor))throw Error('BOUNDARY_COMPILER_PIN_ANCHOR');source=source.replace(anchor,"compiler:'${commit}'").replace(/h1:'[0-9a-f]{40}'/,"h1:'${commit}'");}
 return {...r,source};}
@@ -102,7 +102,7 @@ return {...r,source};}
   CJCJ_NATIVE_RUNTIME_REF:commit,CJCJ_NATIVE_LLVM_REF:commit,NATIVE_RUNTIME_PLATFORM:platform,
   RUNTIME_VERSION:version,RUNTIME_BUILD_TYPE:'release',CJCJ_NATIVE_HOST_VERSION:version,
   FINITE_CACHE_WRAPPER:mode==='archive-wrapper'?'1':'',SCCACHE_PATH:bin+'/sccache',CMAKE_TOOLCHAIN_FILE:'',CJ_RUNTIME_COMMIT:'',GC_UNIT_GATE_LANGUAGE_TESTS:'defer',GITHUB_STEP_SUMMARY:'',RUNNER_TEMP:root+'/preinstall'};
- await write(root+'/producer-entry.mjs',`import {buildRuntime} from '${repo}ci/platform_matrix/build_runtime.mjs'; await buildRuntime({objectRepository:${JSON.stringify(objects)}});`);
+ await write(root+'/producer-entry.mjs',`import {buildRuntime} from '${repo}build/sdk/producers/platform_matrix/build_runtime.mjs'; await buildRuntime({objectRepository:${JSON.stringify(objects)}});`);
  await run('formal-producer',[process.env.ZX||'zx',root+'/producer-entry.mjs'],env);
  const installed=root+'/producer/runtime-install',carried=root+'/received';await fs.mkdir(carried);
  if(mode==='archive-wrapper'){const m=JSON.parse(await fs.readFile(installed+'/NATIVE-INPUTS.json'));for(const k of ['C','CXX'])assert.equal(m.compiler_cache_configuration[k].mode,'compiler-wrapper');console.log('NATIVE_WRAPPER_RECORD_TO_RECEIVE_REACHED');}

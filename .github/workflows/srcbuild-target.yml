@@ -157,7 +157,7 @@ jobs:
         id: select
         env:
           REQUESTED: ${{ inputs.targets }}
-        run: node ci/srcbuild/target-matrix.mjs --targets "$REQUESTED" --single --require-ready
+        run: node build/sdk/producers/srcbuild/target-matrix.mjs --targets "$REQUESTED" --single --require-ready
 
   fixed-llvm:
     name: Build native LLVM tools
@@ -327,7 +327,7 @@ jobs:
 
       - &resolve-actual-source-selection
         name: Resolve actual source selection
-        run: node ci/srcbuild/source-selection.mjs
+        run: node build/sdk/producers/srcbuild/source-selection.mjs
 
       - &select-actual-native-host-and-freeze-the-same-inputs
         name: Select actual native host and freeze the same inputs
@@ -386,7 +386,7 @@ jobs:
           echo "$host_sdk/bin" >> "$GITHUB_PATH"
           echo "$host_sdk/tools/bin" >> "$GITHUB_PATH"
           test -d "$host_sdk"
-          node ci/srcbuild/host-env.mjs "$host_sdk"
+          node build/sdk/producers/srcbuild/host-env.mjs "$host_sdk"
           echo "CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk" >> "$GITHUB_ENV"
           echo "CJCJ_OFFICIAL_SDK_ROOT=$host_sdk" >> "$GITHUB_ENV"
 
@@ -474,7 +474,7 @@ jobs:
 
       - &verify-source-revisions
         name: Verify source revisions
-        run: npx --yes zx@8 ci/srcbuild/steps/verify-source-pins.mjs
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/verify-source-pins.mjs
 
       - name: Download native LLVM tuple
         if: inputs.native_runtime_artifact == ''
@@ -488,7 +488,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node ci/release/host_llvm.mjs env >> "$GITHUB_ENV"
+          node build/sdk/producers/release/host_llvm.mjs env >> "$GITHUB_ENV"
           echo "CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT=$GITHUB_WORKSPACE/.srcbuild/inputs/bootstrap-host-llvm" >> "$GITHUB_ENV"
 
       - name: Download pinned bootstrap host LLVM
@@ -496,7 +496,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.HOST_LLVM_ARTIFACT_ID }}" "${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT }}"
+        run: node build/sdk/producers/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.HOST_LLVM_ARTIFACT_ID }}" "${{ env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT }}"
 
       - name: Load immutable in-process LLVM dylib provenance
         if: inputs.native_runtime_artifact == '' && (runner.os == 'Linux' || runner.os == 'macOS')
@@ -517,7 +517,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.LLVM_DYLIB_ARTIFACT_ID }}" "${{ env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT }}"
+        run: node build/sdk/producers/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.LLVM_DYLIB_ARTIFACT_ID }}" "${{ env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT }}"
 
       - name: Load pinned colour runtime provenance
         if: inputs.native_runtime_artifact == ''
@@ -536,13 +536,13 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.COLOUR_RT_ARTIFACT_ID }}" "${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}"
+        run: node build/sdk/producers/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.COLOUR_RT_ARTIFACT_ID }}" "${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}"
 
       - name: Verify independent Darwin libraries and classify std input
         if: inputs.native_runtime_artifact == '' && (runner.os == 'macOS')
         env:
           RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
-        run: node ci/release/darwin_runtime.mjs source "$CJCJ_BOOTSTRAP_COLOUR_RT" "$RUNTIME_PLATFORM"
+        run: node build/sdk/producers/release/darwin_runtime.mjs source "$CJCJ_BOOTSTRAP_COLOUR_RT" "$RUNTIME_PLATFORM"
 
       - name: Inspect downloaded colour runtime symbols
         if: inputs.native_runtime_artifact == '' && (runner.os != 'macOS')
@@ -574,7 +574,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.AST_SUPPORT_ARTIFACT_ID }}" "${{ github.workspace }}/.srcbuild/inputs/ast-support"
+        run: node build/sdk/producers/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.AST_SUPPORT_ARTIFACT_ID }}" "${{ github.workspace }}/.srcbuild/inputs/ast-support"
 
       # set -a: `source` alone makes shell variables, and prepare_bootstrap_inputs
       # reads LLVM_SHA from its environment -- without the export every host
@@ -594,7 +594,7 @@ jobs:
           CJCJ_BOOTSTRAP_INPUTS_WORK="$GITHUB_WORKSPACE/.srcbuild/inputs/bootstrap-inputs" \
           CJCJ_BOOTSTRAP_HOST_LLVM_WORK="$GITHUB_WORKSPACE/.srcbuild/inputs/host-llvm" \
           CJCJ_BOOTSTRAP_AST_ARTIFACT="$GITHUB_WORKSPACE/.srcbuild/inputs/ast-support/libcangjie-ast-support.a" \
-            node ci/release/prepare_bootstrap_inputs.mjs
+            node build/sdk/producers/release/prepare_bootstrap_inputs.mjs
 
       - name: Verify complete official H and repaired host LLVM identities
         if: inputs.native_runtime_artifact == ''
@@ -621,7 +621,7 @@ jobs:
           wrong="$first${COLOUR_RT_MANIFEST_SHA256:1}"
           set +e
           COLOUR_RT_MANIFEST_SHA256="$wrong" GITHUB_ENV="$RUNNER_TEMP/invalid-runtime.env" \
-            node ci/release/prepare_bootstrap_inputs.mjs > "$RUNNER_TEMP/invalid-runtime.log" 2>&1
+            node build/sdk/producers/release/prepare_bootstrap_inputs.mjs > "$RUNNER_TEMP/invalid-runtime.log" 2>&1
           rc=$?
           set -e
           test "$rc" = 1
@@ -646,7 +646,7 @@ jobs:
           PY
           sha256sum ci/bootstrap/stage1_host_identities.txt "$RUNNER_TEMP/host-pin-cut.txt"
           if STAGE1_HOST_IDENTITIES="$RUNNER_TEMP/host-pin-cut.txt" \
-              node ci/release/prepare_bootstrap_inputs.mjs > "$RUNNER_TEMP/host-pin-cut.log" 2>&1; then
+              node build/sdk/producers/release/prepare_bootstrap_inputs.mjs > "$RUNNER_TEMP/host-pin-cut.log" 2>&1; then
             echo 'host pin change unexpectedly accepted' >&2
             exit 1
           else
@@ -683,7 +683,7 @@ jobs:
           PY
           sha256sum ci/bootstrap/stage1_host_identities.txt "$RUNNER_TEMP/host-provenance-cut.txt"
           if STAGE1_HOST_IDENTITIES="$RUNNER_TEMP/host-provenance-cut.txt" \
-              node ci/release/prepare_bootstrap_inputs.mjs > "$RUNNER_TEMP/host-provenance-cut.log" 2>&1; then
+              node build/sdk/producers/release/prepare_bootstrap_inputs.mjs > "$RUNNER_TEMP/host-provenance-cut.log" 2>&1; then
             echo 'host provenance change unexpectedly accepted' >&2
             exit 1
           else
@@ -752,7 +752,7 @@ jobs:
         run: bash ci/bootstrap/gha_run.sh stage0
 
       - name: Seal source phase handoff
-        run: node ci/srcbuild/job-handoff.mjs pack stage0 "$RUNNER_TEMP/source-handoff-output"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs pack stage0 "$RUNNER_TEMP/source-handoff-output"
 
       - name: Upload source phase handoff
         uses: actions/upload-artifact@v7
@@ -806,7 +806,7 @@ jobs:
           path: ${{ runner.temp }}/source-handoff
 
       - name: Verify preceding source phase
-        run: node ci/srcbuild/job-handoff.mjs restore stage0 "$RUNNER_TEMP/source-handoff"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs restore stage0 "$RUNNER_TEMP/source-handoff"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -838,7 +838,7 @@ jobs:
         run: bash ci/bootstrap/gha_run.sh stage1-initial-std
 
       - name: Seal source phase handoff
-        run: node ci/srcbuild/job-handoff.mjs pack stage1-initial-std "$RUNNER_TEMP/source-handoff-output"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs pack stage1-initial-std "$RUNNER_TEMP/source-handoff-output"
 
       - name: Upload source phase handoff
         uses: actions/upload-artifact@v7
@@ -892,7 +892,7 @@ jobs:
           path: ${{ runner.temp }}/source-handoff
 
       - name: Verify preceding source phase
-        run: node ci/srcbuild/job-handoff.mjs restore stage1-initial-std "$RUNNER_TEMP/source-handoff"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs restore stage1-initial-std "$RUNNER_TEMP/source-handoff"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -924,7 +924,7 @@ jobs:
         run: bash ci/bootstrap/gha_run.sh stage1-std
 
       - name: Seal source phase handoff
-        run: node ci/srcbuild/job-handoff.mjs pack stage1-std "$RUNNER_TEMP/source-handoff-output"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs pack stage1-std "$RUNNER_TEMP/source-handoff-output"
 
       - name: Upload source phase handoff
         uses: actions/upload-artifact@v7
@@ -978,7 +978,7 @@ jobs:
           path: ${{ runner.temp }}/source-handoff
 
       - name: Verify preceding source phase
-        run: node ci/srcbuild/job-handoff.mjs restore stage1-std "$RUNNER_TEMP/source-handoff"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs restore stage1-std "$RUNNER_TEMP/source-handoff"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -1010,7 +1010,7 @@ jobs:
         run: bash ci/bootstrap/gha_run.sh stage1-compiler
 
       - name: Seal source phase handoff
-        run: node ci/srcbuild/job-handoff.mjs pack stage1-compiler "$RUNNER_TEMP/source-handoff-output"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs pack stage1-compiler "$RUNNER_TEMP/source-handoff-output"
 
       - name: Upload source phase handoff
         uses: actions/upload-artifact@v7
@@ -1064,7 +1064,7 @@ jobs:
           path: ${{ runner.temp }}/source-handoff
 
       - name: Verify preceding source phase
-        run: node ci/srcbuild/job-handoff.mjs restore stage1-compiler "$RUNNER_TEMP/source-handoff"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs restore stage1-compiler "$RUNNER_TEMP/source-handoff"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -1095,8 +1095,8 @@ jobs:
         env:
           SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
         run: |
-          npx --yes zx@8 ci/srcbuild/tests/inject-version.test.mjs
-          npx --yes zx@8 ci/srcbuild/steps/inject-version.mjs
+          npx --yes zx@8 build/sdk/producers/srcbuild/tests/inject-version.test.mjs
+          npx --yes zx@8 build/sdk/producers/srcbuild/steps/inject-version.mjs
 
       - name: Select JDK for native Java interop
         if: matrix.target == 'linux-x64'
@@ -1119,7 +1119,7 @@ jobs:
         env:
           CJCJ_JAVA_INTEROP_WORK: ${{ runner.temp }}/java-interop
           CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
-        run: npx --yes zx@8 ci/srcbuild/steps/build-stage3.mjs
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-stage3.mjs
 
       - &upload-final-source-built-std-install-root
         name: Upload final source-built std install root
@@ -1132,7 +1132,7 @@ jobs:
 
       - name: Seal the installed Darwin stage2 SDK for iOS
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
-        run: node ci/srcbuild/ios-stage2-handoff.mjs pack "$RUNNER_TEMP/ios-stage2-output"
+        run: node build/sdk/producers/srcbuild/ios-stage2-handoff.mjs pack "$RUNNER_TEMP/ios-stage2-output"
 
       - name: Upload the installed Darwin stage2 SDK for iOS
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
@@ -1145,7 +1145,7 @@ jobs:
           retention-days: 3
 
       - name: Seal source phase handoff
-        run: node ci/srcbuild/job-handoff.mjs pack stage3 "$RUNNER_TEMP/source-handoff-output"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs pack stage3 "$RUNNER_TEMP/source-handoff-output"
 
       - name: Upload source phase handoff
         uses: actions/upload-artifact@v7
@@ -1210,7 +1210,7 @@ jobs:
           path: ${{ runner.temp }}/source-handoff
 
       - name: Verify preceding source phase
-        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -1261,12 +1261,12 @@ jobs:
         env:
           CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
           CJCJ_NATIVE_INPUT_ROOT: ${{ github.workspace }}/.srcbuild/native-inputs
-        run: node ci/srcbuild/steps/build-windows-tools.mjs "${{ inputs.build_type || 'relwithdebinfo' }}" "${{ steps.version.outputs.value }}"
+        run: node build/sdk/producers/srcbuild/steps/build-windows-tools.mjs "${{ inputs.build_type || 'relwithdebinfo' }}" "${{ steps.version.outputs.value }}"
 
       - &prepare-source-built-cjpm-artifact
         name: Prepare source-built cjpm artifact
         run: |
-          node ci/release/prepare_cjpm_artifact.mjs \
+          node build/sdk/producers/release/prepare_cjpm_artifact.mjs \
             --platform "${{ matrix.target }}" \
             --binary "$CANGJIE_WORKSPACE/build/tools/cjpm/install/bin/cjpm${{ runner.os == 'Windows' && '.exe' || '' }}" \
             --outdir "$GITHUB_WORKSPACE/.release-cjpm/${{ matrix.target }}"
@@ -1283,7 +1283,7 @@ jobs:
       - &prepare-source-built-hle-artifact
         name: Prepare source-built hle artifact
         run: |
-          node ci/release/prepare_hle_artifact.mjs \
+          node build/sdk/producers/release/prepare_hle_artifact.mjs \
             --platform "${{ matrix.target }}" \
             --binary "$CANGJIE_WORKSPACE/build/tools/hle/install/bin/hle${{ runner.os == 'Windows' && '.exe' || '' }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
@@ -1303,7 +1303,7 @@ jobs:
       - &prepare-source-built-cjlint-artifact
         name: Prepare source-built cjlint artifact
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjlint --platform "${{ matrix.target }}" \
             --binary "$CANGJIE_WORKSPACE/build/tools/cjlint/install/bin/cjlint${{ runner.os == 'Windows' && '.exe' || '' }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
@@ -1321,7 +1321,7 @@ jobs:
       - &prepare-source-built-cjprof-artifact
         name: Prepare source-built cjprof artifact
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjprof --platform "${{ matrix.target }}" \
             --binary "$CANGJIE_WORKSPACE/build/tools/cjprof/install/bin/cjprof${{ runner.os == 'Windows' && '.exe' || '' }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
@@ -1339,7 +1339,7 @@ jobs:
       - &prepare-source-built-cjcompat-artifact
         name: Prepare source-built cjcompat artifact
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjcompat --platform "${{ matrix.target }}" \
             --binary "$CANGJIE_WORKSPACE/build/tools/cjcompat/install/bin/cjcompat${{ runner.os == 'Windows' && '.exe' || '' }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
@@ -1357,7 +1357,7 @@ jobs:
       - &prepare-source-built-cjhead-artifact
         name: Prepare source-built cjhead artifact
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjhead --platform "${{ matrix.target }}" \
             --binary "$CANGJIE_WORKSPACE/build/tools/cjhead/install/bin/cjhead${{ runner.os == 'Windows' && '.exe' || '' }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
@@ -1375,7 +1375,7 @@ jobs:
       - &prepare-source-built-cjfmt-artifact
         name: Prepare source-built cjfmt artifact
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjfmt --platform "${{ matrix.target }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
             --binary "$CANGJIE_WORKSPACE/build/tools/cjfmt/install/bin/cjfmt${{ runner.os == 'Windows' && '.exe' || '' }}" \
@@ -1393,7 +1393,7 @@ jobs:
       - &prepare-source-built-lspserver-artifact
         name: Prepare source-built LSPServer artifact
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool LSPServer --platform "${{ matrix.target }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
             --binary "$CANGJIE_WORKSPACE/build/tools/lsp/install/bin/cangjie-lsp${{ runner.os == 'Windows' && '.exe' || '' }}" \
@@ -1411,7 +1411,7 @@ jobs:
       - &prepare-source-built-cjcov-artifact
         name: Prepare source-built cjcov artifact
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjcov --platform "${{ matrix.target }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
             --binary "$CANGJIE_WORKSPACE/build/tools/cjcov/install/bin/cjcov${{ runner.os == 'Windows' && '.exe' || '' }}" \
@@ -1429,7 +1429,7 @@ jobs:
       - &prepare-source-built-cjtrace-recover-artifact
         name: Prepare source-built cjtrace-recover artifact
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjtrace-recover --platform "${{ matrix.target }}" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
             --binary "$CANGJIE_WORKSPACE/build/tools/cjtrace-recover/install/bin/cjtrace-recover${{ runner.os == 'Windows' && '.exe' || '' }}" \
@@ -1455,7 +1455,7 @@ jobs:
 
       - name: Install source-built Windows FFI outputs
         if: matrix.target == 'linux-x64'
-        run: node ci/srcbuild/steps/install-windows-ffi.mjs
+        run: node build/sdk/producers/srcbuild/steps/install-windows-ffi.mjs
 
       - name: Download Android final std and runtime from this run
         if: matrix.target == 'linux-x64' && inputs.build_android
@@ -1466,7 +1466,7 @@ jobs:
 
       - name: Install Android target libraries in the host SDK
         if: matrix.target == 'linux-x64' && inputs.build_android
-        run: node ci/srcbuild/steps/install-android.mjs
+        run: node build/sdk/producers/srcbuild/steps/install-android.mjs
 
       - name: Install Android NDK for installed and relocated consumers
         if: matrix.target == 'linux-x64' && inputs.build_android
@@ -1485,7 +1485,7 @@ jobs:
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
         env:
           IOS_ARTIFACT_DIR: ${{ runner.temp }}/ios-products
-        run: node ci/srcbuild/steps/install-ios-final-std.mjs
+        run: node build/sdk/producers/srcbuild/steps/install-ios-final-std.mjs
 
       - &verify-installed-sdk
         name: Verify installed SDK
@@ -1498,7 +1498,7 @@ jobs:
         name: Build compiler shim
         env:
           CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
-        run: npx --yes zx@8 ci/srcbuild/steps/build-shim.mjs
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-shim.mjs
 
       - name: Upload stage diagnostics
         if: failure()
@@ -1516,7 +1516,7 @@ jobs:
         env:
           CJCJ_PACKAGE_ANDROID: ${{ matrix.target == 'linux-x64' && inputs.build_android && '1' || '' }}
           SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
-        run: npx --yes zx@8 ci/srcbuild/steps/package-install.mjs
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/package-install.mjs
 
       - name: Test real SDK source-tool installation and packaging
         if: matrix.target == 'linux-x64'
@@ -1557,7 +1557,7 @@ jobs:
 
       - &verify-self-hosted-sdk
         name: Verify self-hosted SDK
-        run: npx --yes zx@8 ci/srcbuild/steps/verify.mjs "$CANGJIE_WORKSPACE/software/cangjie"
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/verify.mjs "$CANGJIE_WORKSPACE/software/cangjie"
 
       # Keep the archive and sidecar at the artifact root read by compose.
       - name: Upload complete source-built SDK
@@ -1630,7 +1630,7 @@ jobs:
           path: ${{ runner.temp }}/source-handoff
 
       - name: Verify preceding source phase
-        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -1665,15 +1665,15 @@ jobs:
       - name: Build and install Android AST support
         env:
           CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
-        run: npx --yes zx@8 ci/srcbuild/steps/build-android-ast.mjs
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-android-ast.mjs
 
       - name: Build Android runtime and final std with stage2 cjc
         if: matrix.target == 'linux-x64' && inputs.build_android
         env:
-          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/ci/platform_matrix/native_runtime_toolchain.cmake
+          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/build/sdk/producers/platform_matrix/native_runtime_toolchain.cmake
           CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
           CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
-        run: npx --yes zx@8 ci/srcbuild/steps/build-android-final-std.mjs
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-android-final-std.mjs
 
       - name: Upload Android runtime and final std
         if: matrix.target == 'linux-x64' && inputs.build_android
@@ -1733,7 +1733,7 @@ jobs:
           path: ${{ runner.temp }}/source-handoff
 
       - name: Verify preceding source phase
-        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -1768,14 +1768,14 @@ jobs:
       - name: Build wasm32-wasi runtime and complete final std with stage2 cjc
         if: matrix.target == 'linux-x64' && inputs.build_wasm
         env:
-          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/ci/platform_matrix/native_runtime_toolchain.cmake
+          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/build/sdk/producers/platform_matrix/native_runtime_toolchain.cmake
           CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
           CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
           CJCJ_WASM_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/wasm-sdk
           CJCJ_WASM_CLANG: ${{ env.CJCJ_FIXED_LLVM_DIR }}/bin/clang
           CJCJ_WASM_LLVM_AR: ${{ env.CJCJ_FIXED_LLVM_DIR }}/bin/llvm-ar
           CJCJ_BOUNDSCHECK_SOURCE: ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/third_party/third_party_bounds_checking_function
-        run: node ci/srcbuild/steps/build-wasm-final-std.mjs
+        run: node build/sdk/producers/srcbuild/steps/build-wasm-final-std.mjs
 
       - name: Upload wasm32-wasi runtime and final std
         if: matrix.target == 'linux-x64' && inputs.build_wasm
@@ -1830,7 +1830,7 @@ jobs:
           path: ${{ runner.temp }}/source-handoff
 
       - name: Verify preceding source phase
-        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -1865,11 +1865,11 @@ jobs:
       - name: Build OHOS runtime and final std with stage2 cjc
         if: matrix.target == 'linux-x64' && inputs.build_ohos
         env:
-          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/ci/platform_matrix/native_runtime_toolchain.cmake
+          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/build/sdk/producers/platform_matrix/native_runtime_toolchain.cmake
           CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
           CROSS_STD_TUPLE: ${{ matrix.tuple }}
           CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
-        run: npx --yes zx@8 ci/srcbuild/steps/build-ohos-final-std.mjs
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-ohos-final-std.mjs
 
       - name: Upload OHOS runtime and final std
         if: matrix.target == 'linux-x64' && inputs.build_ohos
@@ -1925,7 +1925,7 @@ jobs:
           path: ${{ runner.temp }}/ios-stage2-input
 
       - name: Restore the installed Darwin stage2 SDK for iOS
-        run: node ci/srcbuild/ios-stage2-handoff.mjs restore "$RUNNER_TEMP/ios-stage2-input"
+        run: node build/sdk/producers/srcbuild/ios-stage2-handoff.mjs restore "$RUNNER_TEMP/ios-stage2-input"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -1951,11 +1951,11 @@ jobs:
       - name: Build iOS runtime and final std with stage2 cjc
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
         env:
-          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/ci/platform_matrix/native_runtime_toolchain.cmake
+          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/build/sdk/producers/platform_matrix/native_runtime_toolchain.cmake
           CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
           CROSS_STD_TUPLE: ${{ matrix.tuple }}
           CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
-        run: npx --yes zx@8 ci/srcbuild/steps/build-ios-final-std.mjs
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-ios-final-std.mjs
 
       - name: Upload iOS runtime and final std
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
@@ -2053,7 +2053,7 @@ jobs:
           key: ${{ steps.windows-mingw-cache.outputs.cache-primary-key }}
 
       - name: Seal source phase handoff
-        run: node ci/srcbuild/job-handoff.mjs pack mingw "$RUNNER_TEMP/source-handoff-output"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs pack mingw "$RUNNER_TEMP/source-handoff-output"
 
       - name: Upload source phase handoff
         uses: actions/upload-artifact@v7
@@ -2113,7 +2113,7 @@ jobs:
           path: ${{ runner.temp }}/source-handoff
 
       - name: Verify native stage3 handoff
-        run: node ci/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
 
       - name: Download MinGW handoff
         uses: actions/download-artifact@v8
@@ -2122,7 +2122,7 @@ jobs:
           path: ${{ runner.temp }}/mingw-handoff
 
       - name: Verify MinGW handoff
-        run: node ci/srcbuild/job-handoff.mjs restore mingw "$RUNNER_TEMP/mingw-handoff"
+        run: node build/sdk/producers/srcbuild/job-handoff.mjs restore mingw "$RUNNER_TEMP/mingw-handoff"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -2153,7 +2153,7 @@ jobs:
         env:
           CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
           CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
-        run: npx --yes zx@8 ci/srcbuild/steps/build-windows-final-std.mjs
+        run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-windows-final-std.mjs
 
       # Keep these Linux cross-built outputs distinct from the native Windows
       # tool artifacts; the two source targets run in the same release run.
@@ -2166,7 +2166,7 @@ jobs:
       - name: Prepare cross-built Windows cjlint artifact
         if: matrix.target == 'linux-x64'
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjlint --platform "windows-x64" \
             --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjlint/dist/bin/cjlint.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
@@ -2184,7 +2184,7 @@ jobs:
       - name: Prepare cross-built Windows cjprof artifact
         if: matrix.target == 'linux-x64'
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjprof --platform "windows-x64" \
             --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjprof/dist/bin/cjprof.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
@@ -2202,7 +2202,7 @@ jobs:
       - name: Prepare cross-built Windows cjcompat artifact
         if: matrix.target == 'linux-x64'
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjcompat --platform "windows-x64" \
             --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjcompat/dist/bin/cjcompat.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
@@ -2220,7 +2220,7 @@ jobs:
       - name: Prepare cross-built Windows cjhead artifact
         if: matrix.target == 'linux-x64'
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjhead --platform "windows-x64" \
             --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjhead/dist/bin/cjhead.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
@@ -2238,7 +2238,7 @@ jobs:
       - name: Prepare cross-built Windows cjfmt artifact
         if: matrix.target == 'linux-x64'
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjfmt --platform windows-x64 \
             --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjfmt/dist/bin/cjfmt.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
@@ -2256,7 +2256,7 @@ jobs:
       - name: Prepare cross-built Windows LSPServer artifact
         if: matrix.target == 'linux-x64'
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool LSPServer --platform windows-x64 \
             --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/lsp/dist/bin/cangjie-lsp.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
@@ -2274,7 +2274,7 @@ jobs:
       - name: Prepare cross-built Windows cjcov artifact
         if: matrix.target == 'linux-x64'
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjcov --platform windows-x64 \
             --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjcov/dist/bin/cjcov.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
@@ -2292,7 +2292,7 @@ jobs:
       - name: Prepare cross-built Windows cjtrace-recover artifact
         if: matrix.target == 'linux-x64'
         run: |
-          node ci/release/prepare_tools_artifact.mjs \
+          node build/sdk/producers/release/prepare_tools_artifact.mjs \
             --tool cjtrace-recover --platform windows-x64 \
             --binary "$CANGJIE_WORKSPACE/cjcj-tools/packages/cjtrace-recover/dist/bin/cjtrace-recover.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \
@@ -2310,7 +2310,7 @@ jobs:
       - name: Prepare cross-built Windows hle artifact
         if: matrix.target == 'linux-x64'
         run: |
-          node ci/release/prepare_hle_artifact.mjs \
+          node build/sdk/producers/release/prepare_hle_artifact.mjs \
             --platform windows-x64 \
             --binary "$CANGJIE_BUILD_ROOT/hle/bin/main.exe" \
             --sdk "$CANGJIE_WORKSPACE/software/cangjie-windows" \

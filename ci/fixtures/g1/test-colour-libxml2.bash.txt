@@ -26,7 +26,7 @@ restore() {
 trap restore EXIT
 
 recipe_ok() {
-    python3 - "$token" "$yml" "$src" ci/platform_tuples/build_tuple.sh <<'PY'
+    python3 - "$token" "$yml" "$src" build/sdk/producers/platform_tuples/build_tuple.sh <<'PY'
 import sys
 from pathlib import Path
 token, yml, src, anchor = sys.argv[1:]

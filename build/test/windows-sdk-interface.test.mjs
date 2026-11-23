@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {getBuildTarget} from '../lib/build-target.mjs';
-import {packageConsumption} from '../../ci/srcbuild/lib/package-install.mjs';
+import {packageConsumption} from '../sdk/producers/srcbuild/lib/package-install.mjs';
 import {createBootstrapTargets, validateBootstrapTargets, FIXED_INPUTS} from '../../ci/bootstrap/sdk-targets.mjs';
 import {targetOrder} from '../../ci/bootstrap/sdk-flow.mjs';
 

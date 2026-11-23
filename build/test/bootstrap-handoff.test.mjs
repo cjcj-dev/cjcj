@@ -1,5 +1,5 @@
 import test from'node:test';import assert from'node:assert/strict';import fs from'node:fs/promises';import path from'node:path';import {spawnSync}from'node:child_process';
-import {prepareBootstrapHandoff,assertBootstrapCompiler}from'../../ci/srcbuild/lib/bootstrap-handoff.mjs';
+import {prepareBootstrapHandoff,assertBootstrapCompiler}from'../sdk/producers/srcbuild/lib/bootstrap-handoff.mjs';
 import {verifyCompiler,compilerProducer}from'../../ci/bootstrap/compiler_identity.mjs';
 import {installCompiler}from'../../ci/fixtures/compiler-install.mjs';
 import {fileDigest,atomicJson}from'../../ci/bootstrap/sdk-flow.mjs';

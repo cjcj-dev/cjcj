@@ -7,7 +7,7 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {getEventListeners} from 'node:events';
 import {fileDigest} from './sdk-flow.mjs';
-import {streamStdProcess,streamBarrierObjdump} from '../srcbuild/lib/assert-std-barriers.mjs';
+import {streamStdProcess,streamBarrierObjdump} from '../../build/sdk/producers/srcbuild/lib/assert-std-barriers.mjs';
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 async function fixture(mode){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'string-desc-'));

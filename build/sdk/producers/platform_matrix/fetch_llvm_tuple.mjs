@@ -1,0 +1,250 @@
+#!/usr/bin/env zx
+// Prefer the tuple artifact downloaded from this workflow run. If it is absent,
+// retain the cross-run job lookup as a recovery path.
+
+import {targetForHost} from '../../../lib/targets.mjs';
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {downloadArtifact} from '../release/download_artifact.mjs';
+import {runRequiredProbe} from '../../../lib/fail-closed-probes.mjs';
+import {emitBlockedSummary, toCommandPath} from './common.mjs';
+
+$.stdio = 'inherit';
+
+const root = process.env.PLATFORM_CI_ROOT || path.join(process.cwd(), '.platform-ci');
+const repo = process.env.SHIM_ARTIFACT_REPOSITORY || 'cjcj-dev/cjcj';
+const workflow = process.env.TUPLE_WORKFLOW || 'platform-tuples.yml';
+const currentRunArtifact = process.env.TUPLE_ARTIFACT_DIR || '';
+const dryRun = process.env.TUPLE_DRY_RUN === '1';
+// Follow the branch this workflow runs on; a fixed default starves consumers on
+// iteration branches (darwin waited 30min for artifacts that lived elsewhere).
+// Feature branches without their own tuple run fall back to master's artifact
+// (the tuple is branch-independent: built from the pinned LLVM fork SHA).
+const branches = [...new Set([
+  process.env.TUPLE_BRANCH || process.env.GITHUB_REF_NAME || 'ci/platform-matrix',
+  'master',
+  'ci/platform-matrix',
+])];
+
+const platform = targetForHost()?.spec.llvmPlatform;
+
+function stopBlocked(reason) {
+  emitBlockedSummary(reason);
+  if (dryRun) process.exit(0);
+  console.error(`FATAL: required LLVM tuple unavailable: ${reason}`);
+  process.exit(78);
+}
+
+if (!platform) stopBlocked(`unsupported tuple host ${process.platform}/${process.arch}`);
+const artifactName = `fixed-llvm-tools-${platform}`;
+
+async function ghLines(endpoint, jq) {
+  const result = await $({nothrow: true, stdio: 'pipe'})`gh api ${endpoint} --jq ${jq}`;
+  if (result.exitCode !== 0) process.exit(result.exitCode);
+  return result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+export async function selectTupleArtifact() {
+  const attempts = Number(process.env.TUPLE_FETCH_ATTEMPTS || 60);
+  const delaySeconds = Number(process.env.TUPLE_FETCH_DELAY_SECONDS || 30);
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    for (const branch of branches) {
+      const runIds = await ghLines(`repos/${repo}/actions/workflows/${workflow}/runs?branch=${encodeURIComponent(branch)}&status=completed&per_page=30`, '.workflow_runs[].id');
+      for (const runId of runIds) {
+        const jobs = await ghLines(`repos/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100`, `.jobs[] | select(.name | contains("${platform}")) | select(.conclusion == "success") | .id`);
+        if (!jobs[0]) continue;
+        const artifacts = await ghLines(`repos/${repo}/actions/runs/${runId}/artifacts`, `.artifacts[] | select(.name == "${artifactName}" and .expired == false) | .id`);
+        if (artifacts[0]) return {runId, artifactId: artifacts[0], branch};
+      }
+    }
+    if (attempt < attempts) {
+      console.log(`waiting for ${artifactName} (${attempt}/${attempts})`);
+      await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
+    }
+  }
+  return {runId: '', artifactId: ''};
+}
+
+await fs.mkdir(path.join(root, 'fixed-toolchain'), {recursive: true});
+async function collectFiles(directory, relativeTo = directory) {
+  const found = [];
+  for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) found.push(...await collectFiles(target, relativeTo));
+    else if (entry.isFile()) found.push(path.relative(relativeTo, target));
+  }
+  return found;
+}
+
+let runId = 'current';
+let artifactId = 'same-run';
+let selectedBranch = 'current';
+let extracted = currentRunArtifact;
+let entries = [];
+if (extracted) {
+  try {
+    entries = await collectFiles(extracted);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+if (entries.length) {
+  console.log(`tuple_selection source=current-run platform=${platform} path=${extracted}`);
+} else {
+  try {
+    await runRequiredProbe({
+      label: 'LLVM tuple fallback prerequisite gh --version',
+      run: () => $({nothrow: true, stdio: 'pipe'})`gh --version`,
+    });
+  } catch (error) {
+    stopBlocked(error.message);
+  }
+  if (process.platform !== 'win32') {
+    try {
+      await runRequiredProbe({
+        label: 'LLVM tuple fallback prerequisite unzip -v',
+        run: () => $({nothrow: true, stdio: 'pipe'})`unzip -v`,
+      });
+    } catch (error) {
+      stopBlocked(error.message);
+    }
+  }
+
+  ({runId, artifactId, branch: selectedBranch} = await selectTupleArtifact());
+  if (!artifactId) {
+    stopBlocked(`no active ${artifactName} artifact from this run or a recent successful tuple job`);
+  }
+  console.log(`tuple_selection source=fallback run=${runId} artifact=${artifactId} platform=${platform} branch=${selectedBranch}`);
+  if (dryRun) process.exit(0);
+
+  const scratch = path.join(process.env.RUNNER_TEMP || process.env.TMPDIR || os.tmpdir(), `platform-ci-${platform}-tuple`);
+  await fs.mkdir(scratch, {recursive: true});
+  const archive = path.join(scratch, 'artifact.zip');
+  downloadArtifact(repo, artifactId, archive);
+
+  extracted = path.join(scratch, 'artifact');
+  await fs.rm(extracted, {recursive: true, force: true});
+  await fs.mkdir(extracted, {recursive: true});
+  if (process.platform === 'win32') {
+    const archiveCommandPath = toCommandPath(archive).replaceAll("'", "''");
+    const extractedCommandPath = toCommandPath(extracted).replaceAll("'", "''");
+    await $`pwsh -NoLogo -NoProfile -Command ${`Expand-Archive -LiteralPath '${archiveCommandPath}' -DestinationPath '${extractedCommandPath}' -Force`}`;
+  } else {
+    await $`unzip -q ${archive} -d ${extracted}`;
+  }
+  entries = await collectFiles(extracted);
+}
+if (dryRun) process.exit(0);
+const llcEntry = entries.find((entry) => /(^|[\\/])llc\.gz$/.test(entry));
+const optEntry = entries.find((entry) => /(^|[\\/])opt\.gz$/.test(entry));
+const lldTool = platform.startsWith('darwin_') ? 'ld64.lld' : 'ld.lld';
+const lldEntry = entries.find((entry) => path.basename(entry) === `${lldTool}.gz`);
+const toolsManifestEntry = entries.find((entry) => /(^|[\\/])llvm-tools\.manifest$/.test(entry));
+const shimEntry = entries.find((entry) => /(^|[\\/])cjselfhost_llvmshim\.o$/.test(entry));
+if (!llcEntry || !optEntry || !lldEntry || !toolsManifestEntry || !shimEntry) {
+  stopBlocked(`${artifactName} is incomplete (requires llc.gz + opt.gz + ${lldTool}.gz + llvm-tools.manifest + cjselfhost_llvmshim.o)`);
+}
+const staticManifestEntry = entries.find((entry) => /(^|[\\/])llvm-static-libs\.txt$/.test(entry));
+const systemManifestEntry = entries.find((entry) => /(^|[\\/])llvm-system-libs\.txt$/.test(entry));
+if (platform === 'windows_x86_64' && (!staticManifestEntry || !systemManifestEntry)) {
+  stopBlocked(`${artifactName} is incomplete (requires LLVM static library manifests)`);
+}
+
+const dest = path.join(root, 'fixed-toolchain', platform);
+await fs.mkdir(dest, {recursive: true});
+const llc = path.join(dest, 'llc.gz');
+const opt = path.join(dest, 'opt.gz');
+const lld = path.join(dest, `${lldTool}.gz`);
+const toolsManifest = path.join(dest, 'llvm-tools.manifest');
+const shim = path.join(dest, 'cjselfhost_llvmshim.o');
+await fs.copyFile(path.join(extracted, llcEntry), llc);
+await fs.copyFile(path.join(extracted, optEntry), opt);
+await fs.copyFile(path.join(extracted, lldEntry), lld);
+await fs.copyFile(path.join(extracted, toolsManifestEntry), toolsManifest);
+await fs.copyFile(path.join(extracted, shimEntry), shim);
+if (!(await fs.stat(llc)).size || !(await fs.stat(opt)).size || !(await fs.stat(lld)).size ||
+    !(await fs.stat(toolsManifest)).size || !(await fs.stat(shim)).size) {
+  throw new Error('tuple artifact contains an empty required file');
+}
+
+let llvmLinkRsp = '';
+if (platform === 'windows_x86_64') {
+  const manifestRoot = path.dirname(staticManifestEntry);
+  const staticNames = (await fs.readFile(path.join(extracted, staticManifestEntry), 'utf8'))
+    .split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!staticNames.length || new Set(staticNames).size !== staticNames.length) {
+    throw new Error('LLVM static library manifest is empty or contains duplicates');
+  }
+  for (const name of staticNames) {
+    if (!/^libLLVM[A-Za-z0-9_]+\.a$/.test(name) || path.basename(name) !== name) {
+      throw new Error(`unsafe LLVM static library name: ${name}`);
+    }
+  }
+
+  const staticDest = path.join(dest, 'llvm-static');
+  await fs.rm(staticDest, {recursive: true, force: true});
+  await fs.mkdir(staticDest, {recursive: true});
+  const responseArchives = [];
+  for (const name of staticNames) {
+    const source = path.join(extracted, manifestRoot, 'llvm-static', name);
+    const handle = await fs.open(source, 'r');
+    const header = Buffer.alloc(8);
+    try {
+      const {bytesRead} = await handle.read(header, 0, header.length, 0);
+      if (bytesRead !== header.length || header.toString('ascii') !== '!<arch>\n') {
+        throw new Error(`unexpected LLVM archive format: ${name}`);
+      }
+    } finally {
+      await handle.close();
+    }
+    const destination = path.join(staticDest, name);
+    await fs.copyFile(source, destination);
+    responseArchives.push(`"${path.resolve(destination).replaceAll('\\', '/')}"`);
+  }
+
+  const systemLibs = (await fs.readFile(path.join(extracted, systemManifestEntry), 'utf8'))
+    .split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const option of systemLibs) {
+    if (!/^-[A-Za-z0-9_:+.,/=-]+$/.test(option)) throw new Error(`unsafe LLVM system library option: ${option}`);
+  }
+  llvmLinkRsp = path.join(dest, 'llvm-static-link.rsp');
+  await fs.writeFile(llvmLinkRsp, ['--start-group', ...responseArchives, '--end-group', ...systemLibs, ''].join('\n'));
+  console.log(`LLVM static link response: archives=${responseArchives.length} system_libs=${systemLibs.length}`);
+}
+
+async function sha256(file) {
+  return crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
+}
+const descriptions = {
+  linux_x86_64: /ELF 64-bit.*x86[-_]64/i,
+  linux_aarch64: /ELF 64-bit.*(aarch64|ARM)/i,
+  darwin_aarch64: /Mach-O 64-bit.*(arm64|aarch64)/i,
+  darwin_x86_64: /Mach-O 64-bit.*x86_64/i,
+};
+if (platform === 'windows_x86_64') {
+  const header = await fs.readFile(shim);
+  if (header.length < 2 || header.readUInt16LE(0) !== 0x8664) throw new Error('unexpected shim format: not COFF AMD64');
+} else {
+  const description = (await $({stdio: 'pipe'})`file ${shim}`).stdout;
+  if (!descriptions[platform].test(description)) throw new Error(`unexpected shim format: ${description.trim()}`);
+}
+
+await fs.copyFile(shim, path.join('runtime_shim', 'cjselfhost_llvmshim.o'));
+const destAbs = path.resolve(dest);
+const githubEnv = process.env.GITHUB_ENV;
+if (!githubEnv) throw new Error('GITHUB_ENV is required');
+const environment = [
+  `FIXED_LLC_GZ=${path.join(destAbs, 'llc.gz')}`,
+  `FIXED_OPT_GZ=${path.join(destAbs, 'opt.gz')}`,
+  `FIXED_LLD_GZ=${path.join(destAbs, `${lldTool}.gz`)}`,
+  `FIXED_LLVM_MANIFEST=${path.join(destAbs, 'llvm-tools.manifest')}`,
+  `CJCJ_LLVM_SHIM_O=${path.join(destAbs, 'cjselfhost_llvmshim.o')}`,
+  `PLATFORM_TUPLE=${platform}`,
+];
+if (llvmLinkRsp) environment.push(`CJCJ_LLVM_LINK_RSP=${path.resolve(llvmLinkRsp)}`);
+await fs.appendFile(githubEnv, `${environment.join('\n')}\n`);
+console.log(`tuple_run=${runId}\ntuple_artifact=${artifactId}\ntuple_platform=${platform}`);
+console.log(`${await sha256(llc)}  ${llc}\n${await sha256(opt)}  ${opt}\n${await sha256(lld)}  ${lld}\n${await sha256(toolsManifest)}  ${toolsManifest}\n${await sha256(shim)}  ${shim}`);

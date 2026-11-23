@@ -31,7 +31,7 @@ test('source host producer exports one canonical root through first and repeated
    const output=work+'/'+phase+'.env',env={...process.env,CANGJIE_WORKSPACE:workspace,GITHUB_ENV:output,
     CJCJ_SRCBUILD_TARGET:'linux-x64',CJCJ_SRCBUILD_BOOTSTRAP_SDK:bootstrap,
     CJCJ_OFFICIAL_SDK_ROOT:work+'/stale-canonical',CJCJ_SRCBUILD_HOST_SDK:work+'/removed-alias'};
-   const r=run(phase,[process.env.ZX||'zx',new URL('../srcbuild/steps/prepare-source-host-sdk.mjs',import.meta.url).pathname],env);
+   const r=run(phase,[process.env.ZX||'zx',new URL('../../build/sdk/producers/srcbuild/steps/prepare-source-host-sdk.mjs',import.meta.url).pathname],env);
    assert.equal(r.status,0,r.stderr);
    const exported=Object.fromEntries((await fs.readFile(output,'utf8')).trim().split('\n').map(line=>{
     const at=line.indexOf('=');return[line.slice(0,at),line.slice(at+1)];}));

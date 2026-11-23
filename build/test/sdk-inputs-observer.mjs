@@ -5,7 +5,7 @@ export async function load(url, context, nextLoad) {
   const loaded = await nextLoad(url, context);
   if (loaded.format !== 'module' || !url.startsWith(new URL('../../', import.meta.url).href)) return loaded;
   let source = String(loaded.source);
-  if (url.endsWith('/ci/srcbuild/steps/verify.mjs') && process.env.SDK_INPUT_OBSERVE === 'ci-verify') {
+  if (url.endsWith('/build/sdk/producers/srcbuild/steps/verify.mjs') && process.env.SDK_INPUT_OBSERVE === 'ci-verify') {
     // Keep the real CI argv/env/target and lineage call. Bypass only preflight
     // shell probes; downstream lineage observation stops before smoke/compile.
     const start = source.indexOf('const self =');

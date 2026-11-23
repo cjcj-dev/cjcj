@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
-import {tuplePlatforms} from './release/tuple_platform.mjs';
+import {tuplePlatforms} from '../build/sdk/producers/release/tuple_platform.mjs';
 
 export async function publishFixedTupleToDepot(depotRoot, env = process.env) {
   depotRoot ||= env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot';

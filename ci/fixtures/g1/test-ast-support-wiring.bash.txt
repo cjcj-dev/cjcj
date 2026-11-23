@@ -6,7 +6,7 @@ work=${1:?empty evidence directory}
 mkdir "$work"
 work=$(cd "$work" && pwd)
 cd "$root"
-consumer=ci/release/prepare_bootstrap_inputs.mjs
+consumer=build/sdk/producers/release/prepare_bootstrap_inputs.mjs
 if test -n "$(git status --porcelain -- "$consumer")"; then
   echo 'consumer must be clean' >&2
   exit 1
@@ -30,7 +30,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 run() {
   local arm=$1 rc=0 start=$SECONDS
-  timeout -k 5 180 node --test --test-reporter=tap ci/release/prepare_bootstrap_inputs.test.mjs > "$work/$arm.log" 2>&1 || rc=$?
+  timeout -k 5 180 node --test --test-reporter=tap build/sdk/producers/release/prepare_bootstrap_inputs.test.mjs > "$work/$arm.log" 2>&1 || rc=$?
   echo "$rc" > "$work/$arm.rc"
   echo "wall=$((SECONDS-start))" > "$work/$arm.wall"
 }
@@ -95,13 +95,13 @@ if arm in ('green', 'restored'):
 print(f'{arm}: rc={rc} tests={len(names)} failures={failed}')
 TAP
 }
-sha256sum "$consumer" ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_bootstrap_fixture.mjs > "$work/inputs.sha256"
+sha256sum "$consumer" build/sdk/producers/release/prepare_bootstrap_inputs.test.mjs build/sdk/producers/release/prepare_bootstrap_fixture.mjs > "$work/inputs.sha256"
 sha256sum "$consumer" > "$work/green.sha256"
 run green
 check green
 python3 - <<'PY'
 from pathlib import Path
-p = Path('ci/release/prepare_bootstrap_inputs.mjs')
+p = Path('build/sdk/producers/release/prepare_bootstrap_inputs.mjs')
 s = p.read_text()
 line = 'pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT || process.env.CJCJ_BOOTSTRAP_AST_SUPPORT,'
 assert s.count(line) == 1, 'ANCHOR-MISMATCH selection'
@@ -116,7 +116,7 @@ sha256sum "$consumer" > "$work/selection-restored.sha256"
 # Bypass just the AST caller's reviewed pin, retaining tuple and full-package guards.
 python3 - <<'PY'
 from pathlib import Path
-p = Path('ci/release/prepare_bootstrap_inputs.mjs')
+p = Path('build/sdk/producers/release/prepare_bootstrap_inputs.mjs')
 s = p.read_text()
 line = "astFallbacks, '', process.env.AST_SUPPORT_SHA256, 'ast-support archive SHA256');"
 assert s.count(line) == 1, 'ANCHOR-MISMATCH digest'

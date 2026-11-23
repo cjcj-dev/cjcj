@@ -12,7 +12,7 @@ const work = path.resolve(process.argv[index + 1] || '');
 assert.ok(process.argv[index + 1], 'expected EMPTY_WORK_DIRECTORY');
 fs.mkdirSync(work);
 const producer = path.join(root, 'ci/llvm-tuple-layout.mjs');
-const consumer = path.join(root, 'ci/release/bootstrap_tuple.mjs');
+const consumer = path.join(root, 'build/sdk/producers/release/bootstrap_tuple.mjs');
 const saved = new Map([producer, consumer].map(file => [file, fs.readFileSync(file)]));
 for (const [file, bytes] of saved) fs.writeFileSync(path.join(work, `${path.basename(file)}.saved`), bytes);
 const restore = () => { for (const [file, bytes] of saved) fs.writeFileSync(file, bytes); };
@@ -27,7 +27,7 @@ function run(name, args) {
   return result;
 }
 const layout = name => run(name, ['node', '--test', '--test-reporter=tap', '--test-name-pattern=^real tuple publisher emits', 'ci/llvm-tuple-layout.test.mjs']);
-const consume = name => run(name, ['node', '--test', '--test-reporter=tap', `--test-name-pattern=${pattern}`, 'ci/release/prepare_bootstrap_inputs.test.mjs']);
+const consume = name => run(name, ['node', '--test', '--test-reporter=tap', `--test-name-pattern=${pattern}`, 'build/sdk/producers/release/prepare_bootstrap_inputs.test.mjs']);
 function cut(file, before, after, name) {
   const source = fs.readFileSync(file, 'utf8');
   assert.equal(source.split(before).length, 2, `unique cut: ${name}`);

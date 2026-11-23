@@ -64,7 +64,7 @@ jobs:
           cache-size: 1G
 
       - name: Runtime build
-        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/build_runtime.mjs
 
       - name: Download native fixed LLVM tuple
         env:
@@ -72,10 +72,10 @@ jobs:
         run: |
           set -euo pipefail
           echo "actions:read authorizes cross-run tuple lookup; tuple missing must exit 78; not swallowed"
-          npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
+          npx --yes zx@8 build/sdk/producers/platform_matrix/fetch_llvm_tuple.mjs
 
       - name: Build stage1
-        run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
+        run: npx --yes zx@8 build/sdk/producers/platform_matrix/build_cjcj.mjs
 
       - name: Compile and run ObjC fixture
         run: node ci/objc_darwin/run_e2e.mjs

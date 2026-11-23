@@ -9,7 +9,7 @@ import {configureGhaInputs} from './bootstrap/configure-gha-inputs.mjs';
 import {prepareBootstrapEnvironment} from './bootstrap/prepare-bootstrap-plans.mjs';
 import {atomicJson, privateRoot, readJson} from './bootstrap/sdk-flow.mjs';
 import {cleanSdkEnvironment, sdkPlatform} from './bootstrap/sdk-platform.mjs';
-import {installedStageOutput} from './srcbuild/lib/installed-stage-output.mjs';
+import {installedStageOutput} from '../build/sdk/producers/srcbuild/lib/installed-stage-output.mjs';
 import {hostPlatform} from './host-toolchain-pin.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

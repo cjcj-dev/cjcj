@@ -2,7 +2,7 @@
 # GitHub-hosted runners, through the same P01-P23 chain release.yml runs --
 # srcbuild.yml for the source SDK and final std, build-release-package.yml for
 # the package -- with the platform table read from build/lib/targets.mjs by
-# ci/release/platform-matrix.mjs and nowhere else.
+# build/sdk/producers/release/platform-matrix.mjs and nowhere else.
 #
 # release.yml remains the phased dry-run entry (ci/docs/dryrun-execution-policy.md
 # §3 orders the five native platforms by failure-prefix cost so a stop at phase
@@ -151,7 +151,7 @@ jobs:
         id: plan
         env:
           PLATFORMS: ${{ inputs.platforms }}
-        run: node ci/release/platform-matrix.mjs plan --platforms "$PLATFORMS" --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+        run: node build/sdk/producers/release/platform-matrix.mjs plan --platforms "$PLATFORMS" --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
   # SDK-input qualification only. Until the cross runtime/std producers and
   # package consumers exist, these jobs do not clear the blocked platform rows.
@@ -175,7 +175,7 @@ jobs:
         env:
           SDK_REQUIREMENT: ${{ matrix.requirement }}
         shell: bash
-        run: node ci/release/verify-runner-sdk.mjs "$SDK_REQUIREMENT" "$RUNNER_TEMP/sdk-probe-evidence"
+        run: node build/sdk/producers/release/verify-runner-sdk.mjs "$SDK_REQUIREMENT" "$RUNNER_TEMP/sdk-probe-evidence"
       - name: Preserve SDK input evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -202,7 +202,7 @@ jobs:
         shell: bash
         env:
           RELEASE_KEY: ${{ matrix.release_key }}
-        run: node ci/release/platform-matrix.mjs check --platform "$RELEASE_KEY" --summary "$GITHUB_STEP_SUMMARY"
+        run: node build/sdk/producers/release/platform-matrix.mjs check --platform "$RELEASE_KEY" --summary "$GITHUB_STEP_SUMMARY"
 
   source:
     name: ${{ matrix.target }} / source
@@ -324,7 +324,7 @@ jobs:
           # that names which platform is missing.
           mkdir -p dist
           ls -l dist
-          node ci/release/package_checksums.mjs aggregate --dist dist --version "$VERSION" --expect "$PACKAGE_KEYS"
+          node build/sdk/producers/release/package_checksums.mjs aggregate --dist dist --version "$VERSION" --expect "$PACKAGE_KEYS"
           {
             echo '### SHA256SUMS'
             echo

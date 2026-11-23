@@ -27,7 +27,7 @@ function run(label,argv,extra={}) {
 const shim=['npx','--yes','zx@8',path.join(consumer,'runtime_shim/build_shim.mjs')];
 const before=run('before',shim,{CANGJIE_CPP_SRC:cpp});assert.notEqual(before.status,0);
 assert.match(before.stderr,/selected shim header directory missing/);
-const prepared=run('prepare',[process.execPath,path.join(repo,'ci/release/prepare_bootstrap_inputs.mjs')]);
+const prepared=run('prepare',[process.execPath,path.join(repo,'build/sdk/producers/release/prepare_bootstrap_inputs.mjs')]);
 assert.equal(prepared.status,0,prepared.stderr);
 assert.ok(fs.readFileSync(env.GITHUB_ENV,'utf8').split('\n').includes('CJCJ_BOOTSTRAP_CPP_SRC='+cpp));
 const built=run('after',shim,{CANGJIE_CPP_SRC:cpp});assert.equal(built.status,0,built.stderr);

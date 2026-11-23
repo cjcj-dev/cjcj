@@ -38,7 +38,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 ci/release/publish_language_tuple.py fetch \
+          python3 build/sdk/producers/release/publish_language_tuple.py fetch \
             --pin ci/h48_language_tuple_pin.json --output "$RUNNER_TEMP/h48-download"
       - name: Download failed-gate evidence without changing its verdict
         uses: actions/download-artifact@v8
@@ -75,7 +75,7 @@ jobs:
           EXPECTED_RUNTIME: ${{ inputs.runtime_sha256 }}
           EXPECTED_BOUNDS: ${{ inputs.boundscheck_sha256 }}
         run: |
-          python3 ci/release/language_tuple.py activate \
+          python3 build/sdk/producers/release/language_tuple.py activate \
             --root "$RUNNER_TEMP/h48-download/installed/tuple" \
             --manifest-sha256 "$(jq -r .manifest_sha256 ci/h48_language_tuple_pin.json)" \
             --compiler-sha256 "$(jq -r .compiler_sha256 ci/h48_language_tuple_pin.json)" \
@@ -86,7 +86,7 @@ jobs:
       - name: Download verified prerelease input
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node ci/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.AST_SUPPORT_ARTIFACT_ID }}" "${{ runner.temp }}/ast-support"
+        run: node build/sdk/producers/release/download_pinned.mjs cjcj-dev/cjcj "${{ env.AST_SUPPORT_ARTIFACT_ID }}" "${{ runner.temp }}/ast-support"
       - name: Install native build dependencies
         run: |
           sudo apt-get update -qq
@@ -97,7 +97,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/std-evidence"
           grep -Fx "compiler=$COMPILER_REF" "$RUNNER_TEMP/ast-support/PROVENANCE"
           node ci/run-registered-tests.mjs scripts "$RUNNER_TEMP/std-resource-checks" ci/build-resources.test.mjs
-          bash ci/release/build_colour_std.sh runtime-source "$RUNNER_TEMP/std-active" \
+          bash build/sdk/producers/release/build_colour_std.sh runtime-source "$RUNNER_TEMP/std-active" \
             "$RUNNER_TEMP/ast-support" "$RUNNER_TEMP/std-evidence" 2>&1 | tee "$RUNNER_TEMP/std-evidence.log"
       - name: Upload evidence only
         if: always()

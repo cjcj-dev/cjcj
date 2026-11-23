@@ -1,0 +1,72 @@
+# Fixed LLVM artifacts
+
+`build-llvm-tools.yml` owns the only `fixed-llvm-tools-<platform>` upload job.
+`platform-tuples.yml` forwards its subset to that workflow, including calls from
+`platform-matrix.yml`, `release.yml`, and `release-matrix.yml`. Both paths use the
+same pin, cache key, payload recipe and upload definition for a given platform.
+Separate workflow runs still receive distinct GitHub artifact IDs.
+
+`build/lib/targets.mjs` owns the tool runner, LLVM targets, runner glibc version
+and portability cache tag. `ci/llvm-tools-matrix.mjs` writes this selection to
+`GITHUB_OUTPUT`; workflows do not maintain another runner table.
+
+The native `platforms` input keeps its existing meaning: empty or `all` selects
+four native tuples; an explicit comma-separated list can also select Windows.
+The `platform_set` input accepts `all` (five tuples), `windows-only`, or
+`darwin-windows`. Static tuple publication additionally selects Linux x64 once.
+Unknown selections fail before emitting a matrix.
+
+Both Linux tuples use Ubuntu 22.04 (glibc 2.35), retaining the lower of the former
+22.04 and 24.04 ARM builder baselines. This records the builder environment, not
+an ELF symbol-version measurement or a claim that the #518 portability floor has
+been reached. #518 retains ownership of the old sysroot/container and per-file
+official SDK comparisons. The upstream environment reference is
+`cangjie_build/docs/linux.md:49` (Ubuntu 22.04 example) and `:55-61` (optional
+Ubuntu 18.04 images).
+
+All platforms emit the same strict fifteen-field `tuple` manifest, binding the
+platform, three source pins, three tools' source/version/hash, linker name and
+shim hash. Partial legacy manifests are rejected. Windows can compute every
+field from the same pinned sources and its built shim; no field is exempt.
+Native dependency and shim checks remain. Windows uses `fetch_sources.mjs` and
+`build_tuple.mjs` under MSYS2, including its LLVM static archives. The unified
+cache identity includes both recipes and the target registry, preventing reuse
+of the former split recipes.
+
+Contract tests live in `build/sdk/producers/srcbuild/tests/platform-contract.test.mjs`: they execute
+the workflow plan command and assert the emitted matrix, caller subsets, and
+single upload definition. They do not claim to execute GitHub's scheduler or
+rebuild LLVM on every target.
+
+Private tool producers can explicitly pair a candidate LLVM with a runtime
+without changing the formal `ci/runtime_pin.env` default. Pass both selected refs
+to both `fetch_sources.mjs` and `build_tuple.mjs`:
+
+```sh
+export CJCJ_NATIVE_LLVM_REF=<reviewed-full-LLVM-commit>
+export CJCJ_NATIVE_RUNTIME_REF=<reviewed-full-runtime-commit>
+npx --yes zx@8 build/sdk/producers/platform_tuples/fetch_sources.mjs
+npx --yes zx@8 build/sdk/producers/platform_tuples/build_tuple.mjs
+```
+
+These are the only environment inputs for the selected pair; retired runtime
+mode/URL/SHA overrides do not select sources. A partial or malformed pair fails
+before any tuple fetch. A private checkout
+must be clean (including untracked files), and its actual HEAD is checked again
+before LLVM configure. Fetch errors never fall back to the formal pin. With
+both variables unset, the existing formal pin behavior is preserved. Repository
+URLs come from the selected source configuration and its ordinary Git pins.
+The existing source mirror transport policy remains available for isolated
+local Git fixtures. No release workflow or release pin opts into private mode.
+Consumers must bind the approved LLVM/runtime pair and the reviewed cjcj producer
+commit themselves; this interface does not authorize publication or runtime use.
+
+`node ci/test-llvm-runtime-input.mjs --work <new-lane-directory>
+--runtime-mirror <local-git-tree>` runs real fetch entries against local transports.
+The mirror must contain the formal pin and the explicit private commit above.
+The build-entry test records the real first CMake arguments and stops there;
+it does not claim to configure/build LLVM or run a native GitHub job.
+
+`npx --yes zx@8 ci/test-llvm-runtime-chain.mjs <new-lane-directory> <runtime-mirror>
+<other-source-mirror>` passes the same tuple directly from source fetch
+to the build entry and checks the runtime HEAD at the emitted CMake path.

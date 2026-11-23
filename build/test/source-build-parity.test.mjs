@@ -202,7 +202,7 @@ test('every source target declares one host, SDK name, and cross-build policy', 
 });
 
 test('assert-host-contract helper prints HOST_CONTRACT or exits 2 with required host', () => {
-  const helper = path.resolve(import.meta.dirname, '../../ci/srcbuild/steps/assert-host-contract.mjs');
+  const helper = path.resolve(import.meta.dirname, '../sdk/producers/srcbuild/steps/assert-host-contract.mjs');
   const ok = spawnSync(process.execPath, [helper, '--target', 'linux-x64', '--profile', 'kkk2'], {encoding: 'utf8'});
   assert.equal(ok.status, 0, ok.stderr);
   assert.match(ok.stdout, /HOST_CONTRACT target=linux-x64 .*sdk=linux-x64 cross=no profile=kkk2/);

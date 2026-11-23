@@ -132,7 +132,7 @@ jobs:
 
       - name: Resolve archive identity independently of host toolchain
         id: package-inputs
-        run: node ci/release/package-key.mjs
+        run: node build/sdk/producers/release/package-key.mjs
 
       - name: Load and validate runtime pin
         env:
@@ -193,7 +193,7 @@ jobs:
       # installed language/ordinary/macros -> cjdb/Python -> smoke -> same
       # directory archive -> original path hidden -> all consumers again.
       - name: Consume and rearchive complete native SDK
-        run: node ci/release/compose-package.mjs
+        run: node build/sdk/producers/release/compose-package.mjs
 
       - name: Retain installed and relocated Windows consumer evidence
         if: always() && runner.os == 'Windows'

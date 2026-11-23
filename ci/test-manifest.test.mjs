@@ -123,7 +123,7 @@ test('CI invokes registered script and native SDK Cangjie consumers', async () =
   const ci = (await workflows()).get('ci.yml');
   assert.match(ci, /node ci\/run-registered-tests\.mjs scripts/);
   const job = ci.slice(ci.indexOf('  package-tests:'), ci.indexOf('  fixed-llvm-tools:'));
-  assert.match(job, /node ci\/release\/receive_native_sdk\.mjs/);
+  assert.match(job, /node build\/sdk\/producers\/release\/receive_native_sdk\.mjs/);
   assert.match(job, /run: node ci\/load_runtime_pin\.mjs/);
   assert.doesNotMatch(job, /cat ci\/runtime_pin\.env >> "\$GITHUB_ENV"/);
   assert.match(job, /node ci\/run-native-package-tests\.mjs/);
@@ -239,7 +239,7 @@ test('no workflow runs a test file the manifest does not gate', async () => {
 test('candidate-source workflow registration rejects missing or drifting checkout and stays scoped', async () => {
   const name = 'darwin-input-consumers.yml';
   const text = (await workflows()).get(name);
-  assert.deepEqual(sourceGating(name, text), ['ci/release/darwin_consumer_boundary.test.mjs']);
+  assert.deepEqual(sourceGating(name, text), ['build/sdk/producers/release/darwin_consumer_boundary.test.mjs']);
   assert.deepEqual(sourceGating('other.yml', text), []);
   for (const withValue of [undefined, {ref: 'master'},
     {ref: '0'.repeat(40)}, {ref: WORKFLOW_TEST_SOURCES[0].source_ref, path: 'other-source'}]) {

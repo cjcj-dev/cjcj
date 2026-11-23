@@ -12,7 +12,7 @@ import {installEntries} from '../../ci/bootstrap/sdk-install-entries.mjs';
 import {copyOutputs,fileDigest} from '../../ci/bootstrap/sdk-flow.mjs';
 import {sdkEnvironment} from '../../ci/bootstrap/sdk-platform.mjs';
 import {getTarget} from '../lib/targets.mjs';
-import {installedInputs} from '../../ci/srcbuild/lib/installed-inputs.mjs';
+import {installedInputs} from '../sdk/producers/srcbuild/lib/installed-inputs.mjs';
 import {retainedToolPath,toolName} from '../srcbuild/tool-layout.mjs';
 import {collectContentFindings,listPackagedArtifacts,PACKAGED_TOOL_NAMES} from '../lib/package-lineage.mjs';
 const inputs=JSON.parse(await fs.readFile(process.env.SDK_MIGRATION_INPUTS,'utf8'));
