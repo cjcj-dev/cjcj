@@ -565,6 +565,25 @@ test('Linux fresh H1 command needs no retired private tools',()=>{
  assert.doesNotThrow(()=>validateBootstrapTargets(graph));
 });
 
+test('Darwin fresh H1 uses the public producer with the selected N shim and executes with N LLVM',()=>{
+ for(const platform of ['darwin_x86_64','darwin_aarch64']){
+  const input=inputs(platform);delete input.h1.product;delete input.tools.privateRoot;input.h1.shimInstall='/fixture/h1-shim';
+  const graph=createBootstrapTargets(input),command=graph.stages.find(s=>s.id==='stage0').commands[0].argv;
+  assert.equal(command.includes('--private-tools'),false);
+  assert.equal(command[command.indexOf('--host')+1],input.host.install);
+  assert.equal(command[command.indexOf('--sdk')+1],input.llvm.install);
+  assert.equal(command[command.indexOf('--shim-install')+1],input.h1.shimInstall);
+  for(const id of ['stage0-run','stage1-initial','stage1-std']){
+   const execution=graph.stages.find(s=>s.id===id).metadata.selection.compilerExecution;
+   console.log('DARWIN_H1_EXECUTION_ASSERT_REACHED '+platform+' '+id);
+   assert.equal(execution.role,'separate',platform+' '+id);
+   assert.equal(execution.llvm.install,input.llvm.install,platform+' '+id);
+   assert.equal(execution.runtime.install,input.host.install,platform+' '+id);
+  }
+  assert.doesNotThrow(()=>validateBootstrapTargets(graph));
+ }
+});
+
 test('independent compiler shim reaches C2 and C3 only; default retains native SDK selection',()=>{
  const input=inputs('linux_x86_64');
  for(const id of ['stage2','stage3'])assert.ok(!createBootstrapTargets(input).stages.find(s=>s.id===id).commands[0].argv.includes('--shim-install'));

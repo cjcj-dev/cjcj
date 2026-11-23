@@ -247,7 +247,10 @@ export function compilerSource(env = process.env) {
 // tree of the pinned tools dtsparser package.json (--ignore-scripts: its
 // postinstall download is replaced by the pinned cjbind below) and the public
 // cjbind-cangjie release that consumer accepts. That release has no darwin-x64
-// asset, so that host fails closed instead of carrying a foreign cjbind.
+// asset, so that host fails closed instead of carrying a foreign cjbind: the
+// tag commit's build matrix has no darwin-x64 cell and its four assets embed
+// four different Cangjie toolchains, none from that commit's own build, so no
+// darwin-x64 build can be verified as the same release.
 export const HLE_CJBIND = Object.freeze({version: 'v1.1.0-alpha.53.1',
   base: 'https://gitcode.com/Cangjie-SIG/cjbind-cangjie/releases/download/v1.1.0-alpha.53.1/',
   assets: Object.freeze({

@@ -25,7 +25,7 @@ import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.m
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {materializeNativeSource, nativeSourceOptions} from './sdk-source.mjs';
 import {visibleOptionsOnly,configureOptionVisibility} from './compiler-option-visibility.mjs';
-import {rewriteEffectiveLinkOptions} from './cjc-link-sections.mjs';
+import {rewriteEffectiveLinkOptions,effectiveLinkOptions} from './cjc-link-sections.mjs';
 export {acceptInstalledStd} from './sdk-std-resume.mjs';
 // Runtime inputs are a private build input snapshot, not an install overlay.
 // Re-entry may reuse equal bytes or publish a complete new snapshot. Keep the
@@ -55,6 +55,29 @@ export async function prepareRuntimeInputs({runtime, link, native, buildType = '
     if (!equal(await inventory(pending), expected)) throw new Error('STD_RUNTIME_INPUT_CHANGED_DURING_COPY');
   }, signal);
   console.log('STD_RUNTIME_INPUT_PUBLISHED '+link);
+}
+// H1 links with H's cjpm/cjc (CANGJIE_HOME=H) but loads N's LLVM, whose
+// entry points the selected N shim calls. Only [package] and this host's
+// [target.<triple>] link-option apply; other sections stay verbatim. The one
+// H LLVM library input becomes the link to N's library and an H LLVM
+// directory (the Mach-O -rpath value) becomes N's, so no effective token
+// leaves H1 resolving H's LLVM.
+export function h1PackageLinkOptions(text,{platform,source,linkFile,llvmLibraryFile,hostRuntimeSupportsConfigV1}) {
+  const native=sdkPlatform(platform);
+  const hostDirectory='${CANGJIE_HOME}/third_party/llvm/'+native.llvmDirectory;
+  const hostLibrary=hostDirectory+'/'+native.llvmLibrary, nativeDirectory=path.dirname(llvmLibraryFile);
+  if(!path.isAbsolute(nativeDirectory)||/\s/.test(nativeDirectory))throw Error('H1_PACKAGE_LLVM_DIRECTORY '+nativeDirectory);
+  let llvmInputs=0;
+  const result=rewriteEffectiveLinkOptions(text,platform,value=>value.split(/\s+/)
+    .filter(token=>hostRuntimeSupportsConfigV1||token!=='--wrap=CJ_MRT_CjRuntimeInitWithConfigV1')
+    .map(token=>{
+      if(token===hostLibrary){llvmInputs++;return path.relative(source,linkFile);}
+      return token===hostDirectory?nativeDirectory:token;
+    }).join(' '));
+  if(llvmInputs!==1)throw Error('H1_PACKAGE_LLVM_LINK_INPUT');
+  if(effectiveLinkOptions(result,platform).some(token=>token.includes('${CANGJIE_HOME}/third_party/llvm')))
+    throw Error('H1_PACKAGE_HOST_LLVM_REFERENCE');
+  return result;
 }
 function windowsCompilerEnvironment(env,shim,install) {
   const mingw=env.CJCJ_WINDOWS_TOOLCHAIN||env.MINGW_PATH;
@@ -214,13 +237,10 @@ export async function nativeStage(options, {signal} = {}) {
         await atomicJson(path.join(output,'bin/build-inputs.json'),{producer:'sdk-native-stage:windows-h1',
           host,native:sdk,nativeShim:shim,source:commit,sourceRoot:source,sourceChanges,visibleOptionsOnly:optionVisibility,sha256:await fileDigest(product)});
       } finally {await fs.writeFile(manifest,before);await atomicJson(output+'.commands.json',records);}
-    } else if(native.os!=='linux') {
-      // Keep the existing native producer for platforms without the ELF --wrap adapter.
-      if(!host||!options['private-tools'])throw new Error('H1_HOST_AND_NATIVE_ADAPTER_REQUIRED');
-      await command([process.execPath,path.join(options['private-tools'],'ts/src/sharedbuild/cjcj-stage1.mjs')],{
-        cwd:source,env:{...env,CANGJIE_HOME:host,SB_SOURCE:source,SB_OUTPUT:path.join(output,'bin'),SB_NATIVE_ROOT:sdk,
-          SB_SHA:commit,SB_PLATFORM:platform,SB_CC:options.cc,SB_OPTIMIZATION:'O1',SB_PARAMETERS_JSON:'{"compile_flags":""}'},records});
     } else {
+    // Linux and Darwin build H1 from the public CJPM workspace with H's
+    // cjpm/cjc; the packages/cjc [target.<triple>] section selects ELF or
+    // Mach-O link inputs. No private adapter takes part on any host.
     if(!host)throw new Error('H1_HOST_REQUIRED');
     const shimInstall=options['shim-install']||sdk;
     const shim=options['shim-install']?await compilerNativeShim({install:shimInstall,nativeInstall:sdk,compilerCommit:commit}):await readInstalledNativeShim({install:sdk});
@@ -239,13 +259,16 @@ export async function nativeStage(options, {signal} = {}) {
     let linkCreated=false;
     let packageCompiled=packageBefore;
     const lock=path.join(source,'cjpm.lock'),lockBefore=await fs.readFile(lock).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+    // The system C compiler loads its own libraries; H's loader path is for
+    // cjpm/cjc and is cleared for it under this platform's loader variable.
+    const toolEnvironment={LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:'',[native.loader]:''};
     const h1env={...cleanSdkEnvironment(host,platform,process.env,host),cjHeapSize:resources.heap,
       CANGJIE_BUILD_JOBS:jobs,CMAKE_BUILD_PARALLEL_LEVEL:jobs,CJCJ_COMMIT:commit,
       CJCJ_SUPERVISOR_WORK:env.CJCJ_SUPERVISOR_WORK};
     let compiled;
     try {
-      // The normal Linux producer owns these operations here. Its installed N
-      // shim is already validated; only H1's own runtime configuration is built.
+      // The public producer owns these operations here. Its installed N shim
+      // is already validated; only H1's own runtime configuration is built.
       const params=await fs.readFile(parameters,'utf8').then(JSON.parse);
       if(Object.keys(params).some(key=>key!=='compile_flags')||typeof params.compile_flags!=='string')throw Error('H1_PARAMETERS');
       const compileOption='-O1 '+(params.compile_flags+' --trimpath '+source).trim();
@@ -258,15 +281,8 @@ export async function nativeStage(options, {signal} = {}) {
       // same N library that stage0-run installs beside the native shim.
       try {await fs.symlink(llvmLibraryFile,linkFile);linkCreated=true;}
       catch(error){if(error.code!=='EEXIST'||await fs.readlink(linkFile)!==llvmLibraryFile)throw error;}
-      const hostLLVM='${CANGJIE_HOME}/third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary;
-      let llvmInputs=0;
-      // Only [package] and this host's [target.<triple>] link-option apply;
-      // the other platforms' sections are left verbatim.
-      packageCompiled=Buffer.from(rewriteEffectiveLinkOptions(packageBefore.toString(),platform,
-        value=>value.split(/\s+/)
-          .filter(token=>hostRuntimeSupportsConfigV1||token!=='--wrap=CJ_MRT_CjRuntimeInitWithConfigV1')
-          .map(token=>{if(token!==hostLLVM)return token;llvmInputs++;return path.relative(source,linkFile);}).join(' ')));
-      if(llvmInputs!==1)throw Error('H1_PACKAGE_LLVM_LINK_INPUT');
+      packageCompiled=Buffer.from(h1PackageLinkOptions(packageBefore.toString(),
+        {platform,source,linkFile,llvmLibraryFile,hostRuntimeSupportsConfigV1}));
       await fs.writeFile(packageManifest,packageCompiled);
       await fs.writeFile(manifest,text);
       await fs.copyFile(path.join(inputs,'llvm-shim.o'),path.join(source,'runtime_shim/cjselfhost_llvmshim.o'));
@@ -275,12 +291,12 @@ export async function nativeStage(options, {signal} = {}) {
         '-c',path.join(source,'runtime_shim/cjc_runtime_config.c'),'-o',path.join(source,'runtime_shim/cjc_runtime_config.o')],
         // The system C compiler loads its own LLVM. H's LLVM loader is for
         // cjpm/cjc and must not be injected into this native tool process.
-        {cwd:source,env:{...h1env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''},records});
+        {cwd:source,env:{...h1env,...toolEnvironment},records});
       await command([...(process.env.CMAKE_C_COMPILER_LAUNCHER?[process.env.CMAKE_C_COMPILER_LAUNCHER]:[]),options.cc||'cc',
         '-std=c11','-O2','-fPIC',...(!hostRuntimeSupportsConfigV1?['-DCJCJ_LEGACY_HOST_RUNTIME']:[]),
         '-c',path.join(source,'runtime_shim/cjc_heap_defaults.c'),
         '-o',path.join(source,'runtime_shim/cjc_heap_defaults.o')],
-        {cwd:source,env:{...h1env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''},records});
+        {cwd:source,env:{...h1env,...toolEnvironment},records});
       const target=await privateRoot(options['target-dir']||path.join(source,'target'));
       await command([path.join(host,'tools/bin/cjpm'),'build',...(options['target-dir']?['--target-dir',target]:[]),'-j'+jobs],{cwd:source,env:h1env,records});
       const built=await resolveProductBinary(path.join(target,'release/bin'),'h1');
@@ -358,7 +374,7 @@ export async function nativeStage(options, {signal} = {}) {
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies','std-ast-include','std-ast-library','visible-options-only'].map(k=>[k,{type:'string'}]));
+    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies','std-ast-include','std-ast-library','visible-options-only'].map(k=>[k,{type:'string'}]));
     spec['resume-installed']={type:'boolean'};spec['local-mode-api']={type:'boolean'};
     nativeSourceOptions(process.argv); // Reject duplicate identity flags before parseArgs.
     const {values}=parseArgs({options:spec});

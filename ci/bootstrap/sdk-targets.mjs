@@ -274,13 +274,14 @@ export function createBootstrapTargets(input) {
     ...(kind==='std' && input.stdLocalModeApi===true ? ['--local-mode-api'] : []),
     ...(kind==='std' && input.stdDependencies ? ['--std-dependencies',JSON.stringify(input.stdDependencies)] : []),
     ...(phase?['--phase',phase,'--std-input',phase==='stage3'?out('stage3-std'):path.join(work,'build/stage1-std/std')]:[]),...(compilerRuntime?['--compiler-runtime',compilerRuntime]:[]),
-    ...(kind==='h1'?['--host',host.install,...(native.os==='darwin'?['--private-tools',tools.privateRoot]:[]),...(tools.cc?['--cc',tools.cc]:[])]:[]),...(tools.zx?['--zx',tools.zx]:[])]});
+    ...(kind==='h1'?['--host',host.install,...(tools.cc?['--cc',tools.cc]:[])]:[]),...(tools.zx?['--zx',tools.zx]:[])]});
   const compilerName='bin/cjcj-stage1'+exe;
   function composed(id,depends,product,std,hostObjects=false,commands=[]) {
     const transitional=['stage0-run','stage1-initial','stage1-std'].includes(id);
     const executionSource=id==='stage2-target-sdk'?out('stage2'):transitional?host.install:null;
-    // H1 executes with H runtime/std, but its selected N shim requires N LLVM.
-    const separateH1=transitional&&native.os!=='darwin';
+    // H1 executes with H runtime/std, but its selected N shim requires N LLVM;
+    // that holds for every host's public H1 producer, Darwin included.
+    const separateH1=transitional;
     const execution={role:id==='stage2-target-sdk'||separateH1?'separate':transitional?'bootstrap-host':'target',stage:id,platform,
       ...Object.fromEntries(['compiler','runtime','std','llvm'].map(name=>[name,{install:separateH1&&name==='llvm'?llvm.install:
         executionSource||(name==='runtime'?runtime.install:name==='llvm'?llvm.install:std),platform}]))};

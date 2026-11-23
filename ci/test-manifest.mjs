@@ -161,6 +161,7 @@ export const GATING = Object.freeze([
   'ci/producer-evidence.test.mjs',
   'ci/bootstrap/sdk-flow.test.mjs',
   'ci/bootstrap/sdk-targets.test.mjs',
+  'ci/bootstrap/h1-package-link.test.mjs',
   'ci/bootstrap/sdk-resume.test.mjs',
   'ci/bootstrap/sdk-install-entries.test.mjs',
   'ci/bootstrap/sdk-installed-macros.test.mjs',

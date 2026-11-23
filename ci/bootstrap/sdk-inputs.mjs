@@ -174,6 +174,12 @@ async function validateInstalledInputs(input) {
   if(input.reuseFinalStd && !isDeepStrictEqual(await installedFinalStd(input.reuseFinalStd,input),input.reuseFinalStd))
     throw Error('FINAL_STD_REUSE_INPUT_CHANGED');
 }
+// Linux and Darwin build H1 with the public producer, which takes the
+// prepare-native shim when that shim was built from H1's own commit. Windows
+// H1 selects the compiler shim in the graph instead.
+export function h1ShimInstall(platform,{compilerCommit,h1Commit,shimInstall}) {
+  return sdkPlatform(platform).os!=='win32'&&compilerCommit===h1Commit?shimInstall:undefined;
+}
 async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,windowsShimInstall}) {
   if(!reused.product||!reused.buildInputs||!reused.buildResult)throw Error('H1_REUSE_LOCATIONS_REQUIRED');
   const native=sdkPlatform(platform), product=path.resolve(reused.product), buildResult=path.resolve(reused.buildResult);
@@ -254,7 +260,7 @@ async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,
     const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'h1-flatc-'));
     try {
       await execute(flatc,['--no-warnings','-c','-o',tmp,path.join(root,compilerChirSchema)],{cwd:root,
-        env:{...process.env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''}});
+        env:{...process.env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:'',[native.loader]:''}});
       if(!generated.equals(await fs.readFile(path.join(tmp,path.basename(compilerChirGenerated)))))
         mismatch(compilerChirGenerated);
     } finally {await fs.rm(tmp,{recursive:true,force:true});}
@@ -378,7 +384,8 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   if(installations.shim) {
     if(!installations.shim.install)throw Error('NATIVE_SHIM_INSTALL_REQUIRED');
     rows.compiler.shimInstall=await privateRoot(installations.shim.install);
-    if(native.os==='linux'&&compilerCommit===h1Commit)rows.h1.shimInstall=rows.compiler.shimInstall;
+    const h1Shim=h1ShimInstall(platform,{compilerCommit,h1Commit,shimInstall:rows.compiler.shimInstall});
+    if(h1Shim)rows.h1.shimInstall=h1Shim;
   }
   // Optional reuse is an original H1 producer, not a copied flow directory.
   // A new candidate/configuration gets a new work domain while retaining the
