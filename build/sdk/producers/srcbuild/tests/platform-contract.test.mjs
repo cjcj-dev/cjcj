@@ -860,7 +860,7 @@ test('final std install roots satisfy package_sdk layout (a) on every release ta
       await assertFinalStd(install, target, {dryRun: true});
     }
 
-    const consumer = await fs.readFile(path.join(root, 'scripts/package_sdk.mjs'), 'utf8');
+    const consumer = await fs.readFile(path.join(root, 'build/sdk/producers/package/package_sdk.mjs'), 'utf8');
     assert.ok(consumer.includes("modulesStd: path.join(root, 'modules', runtimeDir, 'std')"));
     assert.ok(consumer.includes("libDir: path.join(root, 'lib', runtimeDir)"));
   } finally {

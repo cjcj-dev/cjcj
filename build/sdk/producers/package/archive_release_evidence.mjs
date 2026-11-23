@@ -8,13 +8,13 @@ import {
   RELEASE_MANIFEST,
   validateReleaseManifestArtifact,
   validateReleaseManifestSource,
-} from '../build/lib/release-manifest.mjs';
+} from '../../../lib/release-manifest.mjs';
 import {
   GATE_APPARATUS_COMPONENT,
   validateGateApparatusManifestSection,
-} from '../build/lib/release-gate-apparatus.mjs';
+} from '../../../lib/release-gate-apparatus.mjs';
 
-import {allReleasePlatforms, releasePlatformReadiness} from '../build/lib/targets.mjs';
+import {allReleasePlatforms, releasePlatformReadiness} from '../../../lib/targets.mjs';
 
 const RELEASE_PLATFORMS = allReleasePlatforms().map(releasePlatformReadiness)
   // Source readiness blocks production; it cannot waive declared evidence.
@@ -71,8 +71,8 @@ const INDEX = 'ARCHIVE_INDEX.json';
 function usage() {
   return [
     'Usage:',
-    '  node scripts/archive_release_evidence.mjs collect --source DIR --destination DIR --version VERSION',
-    '  node scripts/archive_release_evidence.mjs verify --archive DIR [--version VERSION]',
+    '  node build/sdk/producers/package/archive_release_evidence.mjs collect --source DIR --destination DIR --version VERSION',
+    '  node build/sdk/producers/package/archive_release_evidence.mjs verify --archive DIR [--version VERSION]',
     '',
     'collect source layout:',
     '  run.json       GitHub REST workflow-run response',

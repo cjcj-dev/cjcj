@@ -164,7 +164,7 @@ dispatch 后第一项取证是 run JSON。`head_sha != FREEZE.json.head_sha`、`
 
 - sccache 诊断 artifact 现为 `sccache-<component>-<platform>-<attempt>`（stats json + error log），retention 7 天（cjcj#73 前是 `sccache-diagnostics-*`、1 天）；每个 C++ job 的命中率另写进 job summary。所有 raw log/API/diagnostic 仍应在 run 结束后尽快复制；source final std/diagnosis 多为 7 天，tuple/cjpm 多为 7–14 天，`pkg-*` 是 90 天。这些只是抢救窗口，不是政策保留期。
 - 持久根中每个成功、失败和重试 attempt 都保留到 0.0.2 正式发布或明确放弃之日起至少 365 天；安全事件或争议中的 campaign 不得按期删除。
-- `scripts/archive_release_evidence.mjs` 用于 completed 的纯 dry-run collect/verify，并生成 `EVIDENCE_SHA256SUMS`；脚本拒绝 `/tmp`。
+- `build/sdk/producers/package/archive_release_evidence.mjs` 用于 completed 的纯 dry-run collect/verify，并生成 `EVIDENCE_SHA256SUMS`；脚本拒绝 `/tmp`。
 
 并发卫生是硬门：一个 run/attempt/job ID 一个新目录和一个日志文件；先写该目录内临时文件，再原子改名。禁止多个进程用 `>` 写同一路径，禁止把 `run.log` 当共享追加管道。任何人不得删除 campaign root、别人的 run 目录或仍被进程持有的目录；到期清理由证据 owner 按 exact ledger 目标单独执行并留下删除记录。
 

@@ -5,7 +5,7 @@
 //
 //   write     --dist DIR --platform P --version V
 //             Hash the platform's archive(s) and manifest in DIR, cross-check
-//             the `.sha256` sidecar scripts/package_sdk.mjs wrote, and write
+//             the `.sha256` sidecar build/sdk/producers/package/package_sdk.mjs wrote, and write
 //             DIR/cjcj-V-P.SHA256SUMS in `sha256sum -c` format.
 //   aggregate --dist DIR --version V --expect P1,P2,... [--out FILE]
 //             Require one per-platform SHA256SUMS per expected platform, verify

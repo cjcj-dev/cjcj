@@ -10,7 +10,7 @@ import {aggregateSums, parseSums, sumsFileName, writePlatformSums} from './packa
 const script = path.resolve(import.meta.dirname, 'package_checksums.mjs');
 const sha = text => crypto.createHash('sha256').update(text).digest('hex');
 
-// One packaged platform as scripts/package_sdk.mjs leaves it in dist/.
+// One packaged platform as build/sdk/producers/package/package_sdk.mjs leaves it in dist/.
 function fakePackage(dist, version, platform, {archive = 'tar.gz', body = `archive ${platform}`} = {}) {
   const stem = `cjcj-${version}-${platform}`;
   fs.mkdirSync(dist, {recursive: true});

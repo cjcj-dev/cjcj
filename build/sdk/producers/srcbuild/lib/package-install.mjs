@@ -5,7 +5,7 @@ import {archiveInstall,atomicJson,command} from '../../../../../ci/bootstrap/sdk
 import {verifyInstall} from '../../../../../ci/bootstrap/sdk-verify-install.mjs';
 import {assertSdkCompilerRuntimeAbi} from '../../../../lib/runtime-split.mjs';
 import {assertSdkPathParity} from '../../../../lib/sdk-path-parity.mjs';
-import {assertNoVerifierReportArtifacts} from '../../../../../scripts/verifier_artifact_gate.mjs';
+import {assertNoVerifierReportArtifacts} from '../../package/verifier_artifact_gate.mjs';
 import {installedInputs} from './installed-inputs.mjs';
 import {writeInstalledReleaseManifest} from '../../../../lib/release-manifest.mjs';
 export function packageConsumption(target){

@@ -9,14 +9,14 @@ import {run} from '../lib/runner.mjs';
 import {baseEnv} from '../srcbuild/stages/common.mjs';
 import * as packageStage from '../srcbuild/stages/package.mjs';
 import {shouldRunGcUnitLanguageTests} from '../srcbuild/stages/stdlib.mjs';
-import {parseArguments, runSdkUsability, STATES} from '../../scripts/check_sdk_usable.mjs';
+import {parseArguments, runSdkUsability, STATES} from '../sdk/producers/package/check_sdk_usable.mjs';
 import {
   VERIFIER_DIAGNOSTIC_MARKER,
   assertNoVerifierReportArtifacts,
   markDiagnosticWorkspace,
   scanVerifierReportArtifacts,
   writeDiagnosticInventory,
-} from '../../scripts/verifier_artifact_gate.mjs';
+} from '../sdk/producers/package/verifier_artifact_gate.mjs';
 
 const repoRoot = path.resolve('.');
 const sdkFlowPath = path.join(repoRoot, 'ci', 'bootstrap', 'sdk-flow.mjs');
@@ -225,7 +225,7 @@ test('verifier tool selection consumes environment through every public wrapper 
     for (const args of [[], ['--llvm-dis', '']]) {
       for (const mode of ['gate', 'inventory']) {
         await selectionObservation(t, `CLI/${mode}/${args.length ? 'empty' : 'omitted'}`, observation => {
-          const result = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', 'verifier_artifact_gate.mjs'),
+          const result = spawnSync(process.execPath, [path.join(repoRoot, 'build', 'sdk', 'producers', 'package', 'verifier_artifact_gate.mjs'),
             '--root', artifacts, ...args,
             ...(mode === 'inventory' ? ['--write-inventory', '--report', report, '--inventory', inventory] : []),
           ], {encoding: 'utf8'});
@@ -267,7 +267,7 @@ test('verifier tool selection preserves explicit override and ordered root disco
       assert.deepEqual(observeScan(action), {llvmDis: explicit, matches: 0});
       fs.rmSync(path.join(root, VERIFIER_DIAGNOSTIC_MARKER), {force: true});
     }
-    const cli = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', 'verifier_artifact_gate.mjs'),
+    const cli = spawnSync(process.execPath, [path.join(repoRoot, 'build', 'sdk', 'producers', 'package', 'verifier_artifact_gate.mjs'),
       '--root', artifacts, '--llvm-dis', explicit], {encoding: 'utf8'});
     assert.equal(cli.status, 0, cli.stderr);
     // An invalid explicit path retains root discovery, without consulting the
@@ -329,7 +329,7 @@ test('verifier tool selection retains fail-closed and artifact controls', async 
   assert.equal(fs.readFileSync(inventory, 'utf8').trim().split('\n').length, 3);
   assert.throws(() => assertNoVerifierReportArtifacts([artifacts], {llvmDis: reportTool}), /workspace is not a formal artifact source/);
   fs.rmSync(result.marker);
-  const markerCli = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', 'verifier_artifact_gate.mjs'),
+  const markerCli = spawnSync(process.execPath, [path.join(repoRoot, 'build', 'sdk', 'producers', 'package', 'verifier_artifact_gate.mjs'),
     '--root', root, '--mark-running', '--report', reportPath(root), '--inventory', inventory], {encoding: 'utf8'});
   assert.equal(markerCli.status, 0, markerCli.stderr);
   assert.match(markerCli.stdout, /VERIFIER_DIAGNOSTIC_MARKER=/);
@@ -386,7 +386,7 @@ test('verifier tool selection qualifies real bitcode through environment and CLI
       observation.diagnostic(`REAL_INVENTORY_ASSERT ${JSON.stringify({llvmDis: listed.llvmDis, matches: listed.matches})}`);
       assert.deepEqual(listed.matches.map(match => match.path), [report]);
     });
-    const gate = path.join(repoRoot, 'scripts', 'verifier_artifact_gate.mjs');
+    const gate = path.join(repoRoot, 'build', 'sdk', 'producers', 'package', 'verifier_artifact_gate.mjs');
     for (const [input, status, output] of [[clean, 0, /pass candidates=1 matches=0/], [report, 1, /rejected 1 file.*cj\.verifier\.mode=report/]]) {
       await selectionObservation(t, `real CLI/${path.basename(input)}`, observation => {
         const cli = spawnSync(process.execPath, [gate, '--root', input, '--no-ancestor-markers'], {encoding: 'utf8'});
@@ -459,7 +459,7 @@ test('verifier tool selection reaches package, SDK usability and performance con
       'cjpm-source-repo': 'https://example.invalid/cjpm.git', 'cjpm-source-sha': 'a'.repeat(40),
     }).flatMap(([name, value]) => [`--${name}`, value]);
     await selectionObservation(t, 'consumer/release', observation => {
-      const release = spawnSync('zx', [path.join(repoRoot, 'scripts', 'package_sdk.mjs'), ...args], {encoding: 'utf8', timeout: 30_000});
+      const release = spawnSync('zx', [path.join(repoRoot, 'build', 'sdk', 'producers', 'package', 'package_sdk.mjs'), ...args], {encoding: 'utf8', timeout: 30_000});
       observation.diagnostic(`RELEASE_ENV_SELECTION_ASSERT status=${release.status} signal=${release.signal} error=${release.error?.code || 'none'} ${release.stderr?.trim()}`);
       assert.equal(release.status, 1, release.stdout + release.stderr);
       assert.match(release.stderr, /rejected 1 file.*cj\.verifier\.mode=report/);
@@ -501,7 +501,7 @@ test('release package entry rejects a diagnostic SDK before constructing its sta
   const zxProbe = spawnSync('sh', ['-c', 'command -v zx'], {encoding: 'utf8'});
   const command = zxProbe.status === 0 ? zxProbe.stdout.trim() : 'npx';
   const prefix = zxProbe.status === 0 ? [] : ['--yes', 'zx@8'];
-  const result = spawnSync(command, [...prefix, path.join(repoRoot, 'scripts', 'package_sdk.mjs'),
+  const result = spawnSync(command, [...prefix, path.join(repoRoot, 'build', 'sdk', 'producers', 'package', 'package_sdk.mjs'),
     '--sdk', sdk,
     '--binary', makeFile('cjc'),
     '--version', 'fixture',

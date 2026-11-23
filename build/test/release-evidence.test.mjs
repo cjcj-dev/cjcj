@@ -32,7 +32,7 @@ const hostFor = platform => CONTRACTS.find(p => p.archiveKey === platform).host;
 const COMPONENTS = [
   'base-sdk', GATE_APPARATUS_COMPONENT, 'cjcj', 'runtime', 'llvm-llc', 'llvm-opt', 'std', 'cjpm', 'python',
 ];
-const SCRIPT = path.resolve('scripts/archive_release_evidence.mjs');
+const SCRIPT = path.resolve('build/sdk/producers/package/archive_release_evidence.mjs');
 
 function persistentTestRoot() {
   const configured = process.env.RELEASE_EVIDENCE_TEST_ROOT;
@@ -390,7 +390,7 @@ test('G2 consumes declared archive admission before its independent identity gat
   git('-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '--allow-empty', '-qm', 'ancestry fixture');
   const ref = git('rev-parse', 'HEAD');
   await fs.writeFile(path.join(checkout, 'ci/runtime_pin.env'), `RUNTIME_REF=${ref}\nLOADERLIFE_MIN_REF=${ref}\n`);
-  for (const relative of ['ci/llvm_pin.env', 'ci/source_pin.env', 'ci/release-evidence', 'scripts/archive_release_evidence.mjs']) {
+  for (const relative of ['ci/llvm_pin.env', 'ci/source_pin.env', 'ci/release-evidence', 'build/sdk/producers/package/archive_release_evidence.mjs']) {
     await fs.symlink(path.resolve(relative), path.join(checkout, relative));
   }
   await fs.writeFile(path.join(work, 'G2_IDENTITY.json'), JSON.stringify({schema_version: 1, status: 'PENDING'}));

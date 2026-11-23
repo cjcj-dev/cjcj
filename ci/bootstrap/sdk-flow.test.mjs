@@ -452,7 +452,7 @@ test('first public install and same-install package receive repository scripts w
  const archive=(await fs.readdir(path.dirname(f.sdk))).find(n=>n.startsWith('cangjie-sdk-')&&n.endsWith('.tar.gz'));
  for(const name of ['check_sdk_usable.mjs','verifier_artifact_gate.mjs']) {
   const actual=await fs.readFile(f.sdk+'/tools/'+name,'utf8');
-  assert.equal(actual,await fs.readFile(new URL('../../scripts/'+name,import.meta.url),'utf8'));
+  assert.equal(actual,await fs.readFile(new URL('../../build/sdk/producers/package/'+name,import.meta.url),'utf8'));
   assert.equal(await fs.readFile(path.join(path.dirname(f.sdk),archive+'.unpacked/cangjie/tools/'+name),'utf8'),actual);
   assert.equal(await fs.stat(f.output+'/tools/'+name).catch(()=>null),null);
  }

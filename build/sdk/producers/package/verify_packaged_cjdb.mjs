@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import {getTarget} from '../build/lib/targets.mjs';
+import {getTarget} from '../../../lib/targets.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -9,11 +9,11 @@ import {
   RELEASE_PYTHON_VERSION,
   RELEASE_PYTHON_DIR,
   verifyPythonImports,
-} from '../build/lib/python-bundle.mjs';
+} from '../../../lib/python-bundle.mjs';
 import {
   RELEASE_MANIFEST,
   RELEASE_SIGNATURE_POLICY,
-} from '../build/lib/release-manifest.mjs';
+} from '../../../lib/release-manifest.mjs';
 
 const sdk = path.resolve(process.argv[2] || '');
 if (!process.argv[2]) throw new Error('usage: verify_packaged_cjdb.mjs <unpacked-sdk-root>');

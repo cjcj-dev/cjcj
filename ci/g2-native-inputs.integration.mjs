@@ -29,7 +29,7 @@ let pins=await fs.readFile(checkout+'/ci/runtime_pin.env','utf8');
 pins=pins.replace(/^RUNTIME_REF=.*$/m,'RUNTIME_REF='+'a'.repeat(40)).replace(/^LOADERLIFE_MIN_REF=.*$/m,'LOADERLIFE_MIN_REF='+input.commit);
 await write(checkout+'/ci/runtime_pin.env',pins);
 await write(checkout+'/ci/llvm_pin.env',(await fs.readFile(checkout+'/ci/llvm_pin.env','utf8')).replace(/^LLVM_SHA=.*$/m,'LLVM_SHA='+llvm));
-await write(checkout+'/scripts/archive_release_evidence.mjs',"if(process.argv[2]!=='verify')process.exit(9);console.log('CONTROLLED_ARCHIVE_BOUNDARY');\n");
+await write(checkout+'/build/sdk/producers/package/archive_release_evidence.mjs',"if(process.argv[2]!=='verify')process.exit(9);console.log('CONTROLLED_ARCHIVE_BOUNDARY');\n");
 for(const args of [['init','-q'],['remote','add','origin','https://github.com/cjcj-dev/cjcj.git'],['add','.'],
  ['-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','Finite G2 fixed source boundary']])
  assert.equal((await run('git', ['git','-C',checkout,...args])).status,0);

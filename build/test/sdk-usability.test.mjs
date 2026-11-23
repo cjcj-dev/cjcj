@@ -15,10 +15,10 @@ import {
   parseArguments,
   permissionsAndLinksCheck,
   summarizeResults,
-} from '../../scripts/check_sdk_usable.mjs';
+} from '../sdk/producers/package/check_sdk_usable.mjs';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
-const checker = path.join(root, 'scripts', 'check_sdk_usable.mjs');
+const checker = path.join(root, 'build', 'sdk', 'producers', 'package', 'check_sdk_usable.mjs');
 
 const IDENTITY_ARTIFACTS = Object.freeze([
   ['runtime', 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so', 'CJRT-COMMIT', '1'.repeat(40)],

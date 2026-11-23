@@ -670,7 +670,7 @@ async function evaluateG2(context) {
       'G2_IDENTITY.json.artifacts.{runtime_dynamic,runtime_static,llvm_llc,llvm_opt,cjcj,std}.' +
       '{artifact_path,sha256,provenance_stamp,source_commit,source_dirty}');
   }
-  const verifier = path.join(context.repo, 'scripts/archive_release_evidence.mjs');
+  const verifier = path.join(context.repo, 'build/sdk/producers/package/archive_release_evidence.mjs');
   const verified = spawn(process.execPath, [verifier, 'verify', '--archive', context.evidence], {cwd: context.repo});
   if (verified.error) return gateResult('G2', 'UNKNOWN', `evidence verifier unavailable: ${verified.error.message}`);
   if (verified.status !== 0) return gateResult('G2', 'NOT_MET', `evidence rejected: ${commandFailure(verified)}`);
@@ -778,7 +778,7 @@ function stepBlock(workflow, name) {
 
 async function evaluateG5(context) {
   const [checker, workflow] = await Promise.all([
-    readFile(context, 'scripts/check_packaged_std.mjs'),
+    readFile(context, 'build/sdk/producers/package/check_packaged_std.mjs'),
     readFile(context, '.github/workflows/build-release-package.yml'),
   ]);
   const [nativeConsumer, composer] = workflow.includes('run: node build/sdk/producers/release/compose-package.mjs')
@@ -786,12 +786,12 @@ async function evaluateG5(context) {
   const classes = checker.match(/const CLASS_NAMES\s*=\s*\[([^\]]+)\]/)?.[1]
     ?.match(/['"][^'"]+['"]/g)?.map(value => value.slice(1, -1)) || [];
   const expectedClasses = ['cjo', 'bc', 'static-ffi', 'shared', 'provenance'];
-  const invocationCount = workflow.match(/node scripts\/check_packaged_std\.mjs/g)?.length || 0;
+  const invocationCount = workflow.match(/node build\/sdk\/producers\/package\/check_packaged_std\.mjs/g)?.length || 0;
   const block = stepBlock(workflow, 'Verify packaged standard library');
   const native = workflow.includes('run: node build/sdk/producers/release/compose-package.mjs')
     && composer.includes('await verifyNativeRelease(options, env)') && composer.includes('await archiveInstall(')
     && composer.includes("new URL('./verify_native_release.mjs'")
-    && nativeConsumer.includes('scripts/check_packaged_std.mjs')
+    && nativeConsumer.includes('build/sdk/producers/package/check_packaged_std.mjs')
     && nativeConsumer.includes('signal: AbortSignal.timeout(120000)')
     && ['--sdk', '--std', '--platform'].every(value => nativeConsumer.includes(value));
   const staticPass = JSON.stringify(classes) === JSON.stringify(expectedClasses) && (native ||
@@ -1607,7 +1607,7 @@ async function evaluateG15(context) {
   const packageJobs = scope.jobs.length;
   const native = packageWorkflow.includes('run: node build/sdk/producers/release/compose-package.mjs')
     && composer.includes('await verifyNativeRelease(options, env)') && composer.includes('await archiveInstall(')
-    && nativeConsumer.includes('scripts/verify_packaged_cjdb.mjs');
+    && nativeConsumer.includes('build/sdk/producers/package/verify_packaged_cjdb.mjs');
   const structural = Boolean(version) && (native || bundleArgs === 2 && verifiers === 2) && scope.failures.length === 0;
   if (!structural) {
     return gateResult('G15', 'NOT_MET',

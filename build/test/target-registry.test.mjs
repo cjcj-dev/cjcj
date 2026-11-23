@@ -148,14 +148,14 @@ test('all audited spec consumers reference registry fields without independent t
   const consumers = [
     ['build/lib/release-component-provenance.mjs', ['spec.sdkName', 'spec.archiveFormat']],
     ['build/lib/release-gate-apparatus.mjs', ['spec.runtimeTuple', 'spec.runtimeLibrary']],
-    ['scripts/verify_packaged_cjdb.mjs', ['getTarget(platform).spec.runtimeTuple']],
+    ['build/sdk/producers/package/verify_packaged_cjdb.mjs', ['getTarget(platform).spec.runtimeTuple']],
     ['build/sdk/producers/release/prepare_python_bundle.mjs', ['getTarget(platform).spec.packageHost']],
     ['build/sdk/producers/platform_matrix/build_cjcj.mjs', ['targetForHost()?.spec.runtimeTuple']],
     ['build/sdk/producers/platform_matrix/fetch_llvm_tuple.mjs', ['targetForHost()?.spec.llvmPlatform']],
     ['ci/setup_sdk.mjs', ['targetForHost()?.spec.llvmPlatform']],
     ['build/sdk/producers/release/host_llvm.mjs', ['spec.llvmPlatform', 'spec.hostLlvmLibrary']],
     ['build/sdk/producers/release/prepare_bootstrap_fixture.mjs', ['getTarget(target).spec.llvmPlatform']],
-    ['scripts/package_sdk.mjs', ['getTarget(platform)', 'targetSpec.nativeFilePattern', 'targetSpec.requiredLlvmTools']],
+    ['build/sdk/producers/package/package_sdk.mjs', ['getTarget(platform)', 'targetSpec.nativeFilePattern', 'targetSpec.requiredLlvmTools']],
   ];
   for (const [file, fields] of consumers) {
     const text = fs.readFileSync(path.join(root, file), 'utf8');

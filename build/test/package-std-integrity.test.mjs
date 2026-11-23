@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {getTarget} from '../lib/targets.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const checker = path.join(root, 'scripts', 'check_packaged_std.mjs');
+const checker = path.join(root, 'build', 'sdk', 'producers', 'package', 'check_packaged_std.mjs');
 const evidenceDirectory = process.env.PKGSTD_EVIDENCE_DIR ? path.resolve(process.env.PKGSTD_EVIDENCE_DIR) : '';
 
 async function writeArtifact(installRoot, relative) {
@@ -58,7 +58,7 @@ async function cloneFixture(source, destination) {
 // Where it stops is not a mystery: with PKGSTD_EVIDENCE_DIR set, every hang had
 // written clean/missing-shared/byte-change and stopped in the baseline-mix
 // subtest. A standalone reproducer -- no node:test involved -- narrows it
-// further: the spawned scripts/check_packaged_std.mjs writes its complete output
+// further: the spawned build/sdk/producers/package/check_packaged_std.mjs writes its complete output
 // (same 1101 bytes, 11 lines, as a passing run) and then does not exit for the
 // next 30 seconds. Live capture of a hung child agrees and sharpens it: zero CPU
 // ticks over three seconds, no child of its own, and its main thread parked in

@@ -2,39 +2,39 @@
 // Repackage an official SDK with the self-host compiler and optional patched runtime into a relocatable release archive.
 
 import crypto from 'node:crypto';
-import {installCrossRuntime} from '../build/sdk/producers/release/cross-runtime.mjs';
-import {getReleasePlatform, getTarget} from '../build/lib/targets.mjs';
+import {installCrossRuntime} from '../release/cross-runtime.mjs';
+import {getReleasePlatform, getTarget} from '../../../lib/targets.mjs';
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {runRequiredProbe} from '../build/lib/fail-closed-probes.mjs';
-import {requirePrivateStage} from '../build/lib/package-safety.mjs';
+import {runRequiredProbe} from '../../../lib/fail-closed-probes.mjs';
+import {requirePrivateStage} from '../../../lib/package-safety.mjs';
 import {
   installPythonBundle,
   RELEASE_PYTHON_SOURCE,
-} from '../build/lib/python-bundle.mjs';
+} from '../../../lib/python-bundle.mjs';
 import {
   BASE_SDK_PROVENANCE,
   CJPM_PROVENANCE,
   verifyBaseSdkProvenance,
   verifyCjpmProvenance,
-} from '../build/lib/release-component-provenance.mjs';
+} from '../../../lib/release-component-provenance.mjs';
 import {
   GATE_APPARATUS_PROVENANCE,
   verifyGateApparatusProvenance,
-} from '../build/lib/release-gate-apparatus.mjs';
-import {consumeFinalCompiler, FINAL_COMPILER_PROVENANCE, fileSha256} from '../build/sdk/producers/srcbuild/lib/final-compiler.mjs';
-import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
-import {writeToolchainIdentity} from '../build/lib/toolchain-identity.mjs';
+} from '../../../lib/release-gate-apparatus.mjs';
+import {consumeFinalCompiler, FINAL_COMPILER_PROVENANCE, fileSha256} from '../srcbuild/lib/final-compiler.mjs';
+import {RELEASE_MANIFEST, writeReleaseManifest} from '../../../lib/release-manifest.mjs';
+import {writeToolchainIdentity} from '../../../lib/toolchain-identity.mjs';
 import {assertNoVerifierReportArtifacts} from './verifier_artifact_gate.mjs';
-import {assertPackagedLineage} from '../build/lib/package-lineage.mjs';
-import {installIsolatedLlvmTuple} from '../build/lib/isolated-llvm-tuple.mjs';
+import {assertPackagedLineage} from '../../../lib/package-lineage.mjs';
+import {installIsolatedLlvmTuple} from '../../../lib/isolated-llvm-tuple.mjs';
 import {
   PACKAGED_LLVM_TOOL_NAMES,
   formatPackagedLlvmToolsManifest,
   parseLlvmToolsManifest,
   parsePackagedLlvmToolsManifest,
-} from '../ci/llvm-tools-manifest.mjs';
+} from '../../../../ci/llvm-tools-manifest.mjs';
 
 const required = name => {
   const value = argv[name];

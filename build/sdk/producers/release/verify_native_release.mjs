@@ -18,7 +18,7 @@ import {readInstalledStdxInputs} from '../../../lib/installed-stdx-inputs.mjs';
 import {installedInputs} from '../srcbuild/lib/installed-inputs.mjs';
 import {verifyInstalledReleaseManifest} from '../../../lib/release-manifest.mjs';
 import {assertSdkCompilerRuntimeAbi} from '../../../lib/runtime-split.mjs';
-import {assertNoVerifierReportArtifacts} from '../../../../scripts/verifier_artifact_gate.mjs';
+import {assertNoVerifierReportArtifacts} from '../package/verifier_artifact_gate.mjs';
 
 async function compareSubtree(reference, sdk, relative) {
   const expected = await inventory(path.join(reference, relative));
@@ -82,7 +82,7 @@ export async function verifyNativeRelease(options, env = process.env) {
   await verifyInstalledReleaseManifest({stage:sdk,platform:target.spec.llvmPlatform,...await installedInputs(sdk,target.spec.llvmPlatform)});
   // The independently delivered final std remains the content/count oracle.
   if (!std) throw new Error('NATIVE_RELEASE_STD_REQUIRED');
-  await command([process.execPath, fileURLToPath(new URL('../../../../scripts/check_packaged_std.mjs', import.meta.url)),
+  await command([process.execPath, fileURLToPath(new URL('../package/check_packaged_std.mjs', import.meta.url)),
     '--sdk', sdk, '--std', std, '--platform', platform], {signal: AbortSignal.timeout(120000)});
   // crossStdArguments rejects duplicates; every delivered row belongs to this
   // release. Require the complete set alongside the mandatory host std.
@@ -91,7 +91,7 @@ export async function verifyNativeRelease(options, env = process.env) {
   await selectInstalledColourSdk(sdk, {...env, CJCJ_NATIVE_RUNTIME_REF: runtimeRef});
   const installedEnv = await colourEnvironment('run', {...env, CJCJ_NATIVE_RUNTIME_REF: runtimeRef});
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
-  await command([process.execPath, path.join(root, 'scripts/verify_packaged_cjdb.mjs'), sdk], {env: installedEnv});
+  await command([process.execPath, path.join(root, 'build/sdk/producers/package/verify_packaged_cjdb.mjs'), sdk], {env: installedEnv});
   await command([process.execPath, path.join(root, 'ci/smoke/run_smoke.mjs'),
     path.join(sdk, 'bin/cjc' + target.spec.exeSuffix), path.join(work, 'smoke')],
   {env: {...installedEnv, CJCJ_OFFICIAL_SDK_HOME: path.join(sdk, '.host')}});

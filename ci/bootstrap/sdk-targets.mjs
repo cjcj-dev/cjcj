@@ -192,7 +192,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     if(copy.to===''||copy.to==='tools')copy.exclude=[...(copy.exclude??[]),
       ...scripts.map(name=>(copy.to===''?'tools/':'')+name)];
   }
-  copies.push(...scripts.map(name=>({from:fileURLToPath(new URL('../../scripts/'+name,import.meta.url)),
+  copies.push(...scripts.map(name=>({from:fileURLToPath(new URL('../../build/sdk/producers/package/'+name,import.meta.url)),
     to:'tools/'+name,owner:'repository SDK tools'})));
   // The component path consumes the same original N/AST installations as
   // bootstrap, but does not run bootstrap's native-check stage. Transport the

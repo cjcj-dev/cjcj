@@ -83,14 +83,14 @@ test('G5 distinguishes an unwired checker from the same checker wired fail-close
   const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'release-gates-g5-'));
   t.after(() => fs.rm(fixture, {recursive: true, force: true}));
   git(fixture, 'init', '-q');
-  await write(fixture, 'scripts/check_packaged_std.mjs',
+  await write(fixture, 'build/sdk/producers/package/check_packaged_std.mjs',
     "const CLASS_NAMES = ['cjo', 'bc', 'static-ffi', 'shared', 'provenance'];\n");
   await write(fixture, '.github/workflows/build-release-package.yml', [
     'jobs:',
     '  package:',
     '    steps:',
     '      - name: Compose SDK package',
-    '        run: node scripts/package_sdk.mjs',
+    '        run: node build/sdk/producers/package/package_sdk.mjs',
     '',
   ].join('\n'));
   const before = commit(fixture, 'checker exists but has no consumer');
@@ -99,12 +99,12 @@ test('G5 distinguishes an unwired checker from the same checker wired fail-close
     '  package:',
     '    steps:',
     '      - name: Compose SDK package',
-    '        run: node scripts/package_sdk.mjs',
+    '        run: node build/sdk/producers/package/package_sdk.mjs',
     '      - name: Verify packaged standard library',
     '        if: inputs.verify',
     '        timeout-minutes: 2',
     '        run: |',
-    '          node scripts/check_packaged_std.mjs --sdk "$SDK" --std "$STD" --platform "$PLATFORM"',
+    '          node build/sdk/producers/package/check_packaged_std.mjs --sdk "$SDK" --std "$STD" --platform "$PLATFORM"',
     '      - name: Verify packaged SDK',
     '        run: node ci/smoke/run_smoke.mjs',
     '',

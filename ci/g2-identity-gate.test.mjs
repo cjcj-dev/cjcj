@@ -105,7 +105,7 @@ async function fixture(t) {
   await fs.mkdir(path.join(checkout, 'ci', 'release-evidence'), {recursive: true});
   await fs.copyFile(path.join(repo, 'ci', 'release-evidence', 'g2-identity.schema.json'),
     path.join(checkout, 'ci', 'release-evidence', 'g2-identity.schema.json'));
-  await write(checkout, 'scripts/archive_release_evidence.mjs', [
+  await write(checkout, 'build/sdk/producers/package/archive_release_evidence.mjs', [
     "if (process.argv[2] !== 'verify' || process.argv[3] !== '--archive') process.exit(9);",
     "console.log('ARCHIVE_EVIDENCE_OK synthetic fixture');",
     '',

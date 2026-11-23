@@ -117,7 +117,7 @@ API 404、`jq` 非 0、reviewer 为空或 `prevent_self_review != true` 都是 `
     └── EVIDENCE_SHA256SUMS
 ```
 
-严禁使用 `/tmp`。publish 等待 environment 时 run 尚未 completed，现有 `scripts/archive_release_evidence.mjs` 的 dry-run 校验器会正确拒绝这种状态；因此批准前先保留 raw capture、artifact API JSON、ID/digest TSV 和逐文件 SHA。run 完结后再补 run/jobs/log 与总 ledger。该脚本仍只用于 `dry_run=true + publish=skipped` 的演练归档，不得拿它的演练结论替代最终候选证据。
+严禁使用 `/tmp`。publish 等待 environment 时 run 尚未 completed，现有 `build/sdk/producers/package/archive_release_evidence.mjs` 的 dry-run 校验器会正确拒绝这种状态；因此批准前先保留 raw capture、artifact API JSON、ID/digest TSV 和逐文件 SHA。run 完结后再补 run/jobs/log 与总 ledger。该脚本仍只用于 `dry_run=true + publish=skipped` 的演练归档，不得拿它的演练结论替代最终候选证据。
 
 批准前命令形状：
 

@@ -313,7 +313,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     commit: CJPM_SHA,
   });
 
-  const packageArgs = [path.resolve('scripts/package_sdk.mjs'),
+  const packageArgs = [path.resolve('build/sdk/producers/package/package_sdk.mjs'),
     '--sdk', sdk,
     '--binary', binary,
     '--allow-stock-runtime',

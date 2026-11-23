@@ -45,7 +45,7 @@ class UsageError extends Error {}
 
 function usage() {
   return [
-    'usage: node scripts/check_sdk_usable.mjs --sdk <sdk> [options]',
+    'usage: node build/sdk/producers/package/check_sdk_usable.mjs --sdk <sdk> [options]',
     '',
     'options:',
     '  --gc-workload <e75cdefd binary>   exact natural_wave_notime load',

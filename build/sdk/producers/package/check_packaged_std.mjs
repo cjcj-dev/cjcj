@@ -5,13 +5,13 @@ import {createReadStream} from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {getTarget} from '../build/lib/targets.mjs';
+import {getTarget} from '../../../lib/targets.mjs';
 
 const CLASS_NAMES = ['cjo', 'bc', 'static-ffi', 'shared', 'provenance'];
 const MISSING_HASH = '<missing>';
 
 function usage() {
-  return 'usage: node scripts/check_packaged_std.mjs --sdk <unpacked-sdk> --std <final-std-root> --platform <release-platform>';
+  return 'usage: node build/sdk/producers/package/check_packaged_std.mjs --sdk <unpacked-sdk> --std <final-std-root> --platform <release-platform>';
 }
 
 function parseArguments(args) {
