@@ -61,7 +61,7 @@ private func CompileLocal(root: String, code: String, localMode: Bool, api: Stri
 public class LocalModeTargetGateTest {
     @TestCase
     public func StrippedWhenOnWasmPasses(): Unit {
-        let root = FSDirectory.createTemp(".").toString()
+        let root = FSDirectory.createTemp("/tmp").toString()
         let code = "package local_gate\n" +
             "@When[local_mode_api == \"on\"]\n" +
             "public func onlyInOn(v: Int64 @local!): Int64 @local! { v }\n" +
@@ -84,7 +84,7 @@ public class LocalModeTargetGateTest {
 
     @TestCase
     public func SurvivingLocalRejectedOnWasm(): Unit {
-        let root = FSDirectory.createTemp(".").toString()
+        let root = FSDirectory.createTemp("/tmp").toString()
         let code = "package local_gate\n" +
             "public func keep(v: Int64 @local!): Int64 @local! { v }\n" +
             "public func region(v: Int64): Int64 { exclave { v } }\n"
@@ -96,7 +96,7 @@ public class LocalModeTargetGateTest {
 
     @TestCase
     public func SurvivingLocalAcceptedOnLinux(): Unit {
-        let root = FSDirectory.createTemp(".").toString()
+        let root = FSDirectory.createTemp("/tmp").toString()
         let code = "package local_gate\n" +
             "public func keep(v: Int64 @local!): Int64 @local! { v }\n" +
             "public func region(v: Int64): Int64 { exclave { v } }\n"
@@ -108,7 +108,7 @@ public class LocalModeTargetGateTest {
 
     @TestCase
     public func DefaultModeStillRejectsLocalSyntax(): Unit {
-        let root = FSDirectory.createTemp(".").toString()
+        let root = FSDirectory.createTemp("/tmp").toString()
         let code = "package local_gate\npublic func keep(v: Int64 @local!): Int64 { v }\n"
         let ci = CompileLocal(root, code, false, "", true, CompileStage.PARSE)
         println("EXECUTED DefaultModeStillRejectsLocalSyntax errors=" + ci.diag.GetErrorCount().toString())
@@ -118,7 +118,7 @@ public class LocalModeTargetGateTest {
 
     @TestCase
     public func ExplicitNotLocalDoesNotNeedLowering(): Unit {
-        let root = FSDirectory.createTemp(".").toString()
+        let root = FSDirectory.createTemp("/tmp").toString()
         let code = "package local_gate\npublic func plain(v: Int64 @~local): Int64 { v }\n"
         let ci = CompileLocal(root, code, true, "off", false, CompileStage.CONDITION_COMPILE)
         println("EXECUTED ExplicitNotLocalDoesNotNeedLowering errors=" + ci.diag.GetErrorCount().toString())
