@@ -202,7 +202,7 @@ async function dispatch(config, command, args) {
     if(index<0||!args[index+1])throw new ConfigError('install --inputs FILE [--no-package] [--dry-run|--build-only]');
     const forwarded=[...args];forwarded[index]='--install-inputs';return main(forwarded);
   }
-  if(command==='sdk'){const {main}=await import('../ci/bootstrap/sdk-flow.mjs');return main(args);}
+  if(command==='sdk'){const {main}=await import('./sdk/cli.mjs');return main(args);}
   if (!COMMANDS.has(command)) throw new ConfigError(`unknown command: ${command}`);
   if (wantsHelp(args)) {
     process.stdout.write(`${commandUsage(command)}\n`);
