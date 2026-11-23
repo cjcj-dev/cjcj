@@ -491,10 +491,11 @@ private class ToCHIR {
             UpdateMemberVarPath(builder).RunOnPackage(current)
             let _ = NoSideEffectMarker().RunOnPackage(current)
             BoxRecursionValueType(current, builder).Run()
-            if (instance.invocation.globalOptions.IsLocalModeAnalysis()) {
-                SetMemRegion(builder).RunOnPackage(current)
-                DumpCHIRToFile("SetMemoryRegion")
-            }
+            // Run region lowering whether or not --enable-local-mode is set, as upstream does
+            // (src/CHIR/CHIR.cpp:1318 SetMemoryRegion @63bf237b): bodies deserialized from a std built with
+            // --local-mode-api carry exclave/region constructs even when this package has none.
+            SetMemRegion(builder).RunOnPackage(current)
+            DumpCHIRToFile("SetMemoryRegion")
             DumpCHIRToFile("Canonicalization")
         }
     }
