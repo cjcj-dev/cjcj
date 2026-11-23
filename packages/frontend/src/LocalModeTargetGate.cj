@@ -2,28 +2,47 @@ package cjcj::frontend
 
 import std.collection.*
 
-func ModalSurvives(modal: Option<ASTModalInfo>): Bool {
+func ModeNeedsLocalLowering(mode: ASTMode): Bool {
+    return mode == ASTMode.FULL
+}
+
+func ModalNeedsLocalLowering(modal: Option<ASTModalInfo>): Bool {
     if (let Some(info) <- modal) {
-        return info.local != ASTMode.NOT
+        return ModeNeedsLocalLowering(info.local)
+    }
+    return false
+}
+
+func HalfDefaultNeedsRegion(param: FuncParam): Bool {
+    if (param.assignment.isNone()) { return false }
+    if (param.resolvedMode == ASTMode.HALF) { return true }
+    if (let Some(ty) <- param.typeNode) {
+        if (ty.resolvedMode == ASTMode.HALF) { return true }
+        if (let Some(info) <- ty.modal) {
+            if (info.local == ASTMode.HALF) { return true }
+        }
     }
     return false
 }
 
 func NodeNeedsLocalLowering(node: Node): Bool {
-    if (node.resolvedMode != ASTMode.NOT) { return true }
+    if (ModeNeedsLocalLowering(node.resolvedMode)) { return true }
     if (node.astKind == ASTKind.EXCLAVE_EXPR) { return true }
+    if (let Some(param) <- (node as FuncParam)) {
+        if (HalfDefaultNeedsRegion(param)) { return true }
+    }
     if (let Some(ty) <- (node as Type)) {
-        if (ModalSurvives(ty.modal)) { return true }
+        if (ModalNeedsLocalLowering(ty.modal)) { return true }
     }
     if (let Some(call) <- (node as CallExpr)) {
-        if (ModalSurvives(call.modal)) { return true }
+        if (ModalNeedsLocalLowering(call.modal)) { return true }
     }
     if (let Some(list) <- (node as FuncParamList)) {
-        if (ModalSurvives(list.receiverModal)) { return true }
+        if (ModalNeedsLocalLowering(list.receiverModal)) { return true }
         if (let Some(thisParam) <- list.thisParam) {
-            if (thisParam.resolvedMode != ASTMode.NOT) { return true }
+            if (ModeNeedsLocalLowering(thisParam.resolvedMode) || HalfDefaultNeedsRegion(thisParam)) { return true }
             if (let Some(ty) <- thisParam.typeNode) {
-                if (ty.resolvedMode != ASTMode.NOT || ModalSurvives(ty.modal)) { return true }
+                if (ModeNeedsLocalLowering(ty.resolvedMode) || ModalNeedsLocalLowering(ty.modal)) { return true }
             }
         }
     }

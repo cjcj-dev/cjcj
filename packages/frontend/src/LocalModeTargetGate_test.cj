@@ -258,6 +258,37 @@ public class LocalModeTargetGateTest {
     }
 
     @TestCase
+    public func HalfReceiverPassesOnWasm(): Unit {
+        let root = FSDirectory.createTemp("/tmp").toString()
+        let code = "package local_gate\nclass Box {\n    private func max(this @local?, l: Int64, r: Int64): Int64 {\n        if (l >= r) { l } else { r }\n    }\n}\n"
+        let ci = CompileLocal(root, code, true, "off", false, CompileStage.CONDITION_COMPILE)
+        println("EXECUTED HalfReceiverPassesOnWasm errors=" + ci.diag.GetErrorCount().toString())
+        @Expect(ci.diag.GetErrorCount(), 0u64)
+        @Expect(HasMessage(ci.diag, LOCAL_TARGET_MESSAGE), false)
+        @Expect(CheckLocalModeLoweringTarget(ci), true)
+    }
+
+    @TestCase
+    public func FullReceiverStillRejectedOnWasm(): Unit {
+        let root = FSDirectory.createTemp("/tmp").toString()
+        let code = "package local_gate\nclass Box {\n    private func max(this @local!, l: Int64, r: Int64): Int64 { l }\n}\n"
+        let ci = CompileLocal(root, code, true, "off", false, CompileStage.CONDITION_COMPILE)
+        println("EXECUTED FullReceiverStillRejectedOnWasm")
+        @Expect(ci.diag.GetErrorCount() != 0, true)
+        @Expect(HasMessage(ci.diag, LOCAL_TARGET_MESSAGE), true)
+    }
+
+    @TestCase
+    public func HalfDefaultStillRejectedOnWasm(): Unit {
+        let root = FSDirectory.createTemp("/tmp").toString()
+        let code = "package local_gate\npublic func f(v: Int64 @local? = 0): Int64 { v }\n"
+        let ci = CompileLocal(root, code, true, "off", false, CompileStage.CONDITION_COMPILE)
+        println("EXECUTED HalfDefaultStillRejectedOnWasm")
+        @Expect(ci.diag.GetErrorCount() != 0, true)
+        @Expect(HasMessage(ci.diag, LOCAL_TARGET_MESSAGE), true)
+    }
+
+    @TestCase
     public func StandaloneExclaveAcceptedOnLinux(): Unit {
         let root = FSDirectory.createTemp("/tmp").toString()
         let code = "package local_gate\npublic func region(v: Int64): Int64 { exclave { v } }\n"
