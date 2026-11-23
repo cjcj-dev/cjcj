@@ -132,16 +132,28 @@ The source workflow requires `native_inputs_artifact` and its original
 `native_inputs_run_id`. The artifact contains complete N/R/AST native install
 roots. On Windows the job checks out the exact workflow SHA for both the H1
 seed and the next compiler stages; Node runs the job-installed zx CLI.
-Native Windows validation requires a private workflow repository with the selected cjcj commit,
-repository variable WINDOWS_TOOLS_REPOSITORY (owner/name) containing the paired tools commit,
-and a contents-read WINDOWS_TOOLS_READ_TOKEN for that repository. Neither a pin nor this
-workflow supplies those objects or grants that access.
-Do not put adapter sources or a tools.privateRoot in the Windows artifact.
-The Darwin adapter currently uses the two paired modules exported with
-`node ci/bootstrap/deploy-native-tools.mjs TOOLS_REPO COMMIT EMPTY_DESTINATION`.
-Its `locations.json` records `platform`, `installations` (each has relative
-`install`, original `buildResult`, and `configuration`) and
-`tools.privateRoot`. No removed receipt or SDK lock is a prerequisite.
+Native Windows builds the public `cjcj-dev/cjcj-tools` at the `TOOLS_REF` of
+`ci/source_pin.env` (`build/sdk/producers/srcbuild/source-selection.mjs`); no
+read token is needed. The repository variable WINDOWS_TOOLS_REPOSITORY can still
+name another owner/name, which must serve that same pinned commit.
+Do not put adapter sources or a tools.privateRoot in any native-inputs artifact;
+`configure-gha-inputs.mjs` rejects a `tools.privateRoot`. The Darwin H1 branch of
+`sdk-native-stage.mjs` still calls the retired private stage1 module, so a
+Darwin native-inputs artifact without it cannot complete H1 (open blocker).
+`locations.json` records `platform`, `host` (`install`, the original official
+`archive` file and `version`), `installations` (each has relative `install`,
+original `buildResult`, and `configuration`), `tools` and, for tools builds,
+`hleDependencies`. No removed receipt or SDK lock is a prerequisite.
+
+The release `phase=prepare` producer (`prepare_native_inputs.mjs`) uploads each
+native-inputs root and each runtime installation as one tar
+(`native-inputs.tar`, `runtime-install.tar`) because Actions artifacts drop
+POSIX modes; consumers run `ci/bootstrap/native-artifact-archive.mjs unpack`,
+which requires that single archive, before the host is executed. The host is
+the pinned official archive downloaded by `bootstrap_host_sdk.mjs` and kept
+under `host-archive/` with its original name; `HOST-INPUT.json` binds its size
+and SHA-256. That producer does not yet supply the HLE dependency package, the
+N shim object or cjdb, which the native consumer requires.
 `configure-gha-inputs.mjs` checks out the fixed LLVM, runtime, AST compiler and
 H1 repositories, reads the actual candidate checkout, selects execution-host H,
 and writes `CJCJ_SDK_INPUTS` into GITHUB_ENV. The artifact must contain genuine

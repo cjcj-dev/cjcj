@@ -9,6 +9,9 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 
 const product = path.resolve(import.meta.dirname, '../job-handoff.mjs');
+const VERSION_FILE = 'packages/basic/src/Version.cj';
+const VERSION_PINNED = 'package std.basic\npublic let CANGJIE_VERSION: String = "0.0.0"\n';
+const VERSION_INJECTED = 'package std.basic\npublic let CANGJIE_VERSION: String = "0.0.2"\n';
 const nested = '.srcbuild/workspace/compiler';
 const git = (cwd, ...args) => {
   const r = spawnSync('git', ['-C', cwd, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', ...args], {encoding: 'utf8'});
@@ -38,7 +41,7 @@ async function fixture(t) {
   git(upstream, 'config', 'uploadpack.allowAnySHA1InWant', 'true');
   const origin = path.join(dir, 'origin');
   const head = await repository(origin, {'cjpm.toml': 'version = "0.0.0"\n', 'packages/cjc/src/main.cj': 'main() {}\n',
-    'runtime_shim/cjc_runtime_config.c': 'int config;\n'});
+    'packages/basic/src/Version.cj': VERSION_PINNED, 'runtime_shim/cjc_runtime_config.c': 'int config;\n'});
   await write(path.join(origin, 'packages/cjc/src/main.cj'), 'main() { later }\n');
   git(origin, 'commit', '-qam', 'test: later workflow source');
   const laterHead = git(origin, 'rev-parse', 'HEAD');
@@ -147,4 +150,65 @@ test('consumer rejects a manifest without the pinned checkout policy', async t =
   await fs.writeFile(manifestFile, JSON.stringify(manifest));
   await f.checkout();
   assert.match(f.run('restore').output, /handoff manifest lacks pinned checkout policy/);
+});
+
+// The injected product version crosses as data and is re-derived on restore.
+test('the injected version crosses as data, never as Version.cj bytes', async t => {
+  const f = await fixture(t);
+  await write(path.join(f.root, VERSION_FILE), VERSION_INJECTED);
+  const packed = f.run('pack', 'stage0', {SOURCE_SDK_VERSION: '0.0.2'});
+  assert.equal(packed.rc, 0, packed.output);
+  const manifest = JSON.parse(await fs.readFile(path.join(f.archive, 'manifest.json'), 'utf8'));
+  assert.deepEqual(manifest.derivations.map(({path: rel, kind, version}) => ({rel, kind, version})),
+    [{rel: VERSION_FILE, kind: 'cangjie-version', version: '0.0.2'}]);
+  assert.ok(!members(path.join(f.archive, 'payload.tar')).includes(VERSION_FILE), 'Version.cj bytes crossed the job boundary');
+  await f.checkout();
+  const restored = f.run('restore');
+  assert.equal(restored.rc, 0, restored.output);
+  assert.equal(await fs.readFile(path.join(f.root, VERSION_FILE), 'utf8'), VERSION_INJECTED);
+});
+test('red cut: an edited tracked source file or a non-injection Version.cj edit fails the pack', async t => {
+  const f = await fixture(t);
+  await write(path.join(f.root, 'packages/cjc/src/main.cj'), 'main() { edited }\n');
+  const edited = f.run('pack');
+  assert.notEqual(edited.rc, 0);
+  assert.match(edited.output, /handoff modified tracked source: packages\/cjc\/src\/main\.cj/);
+  const g = await fixture(t);
+  await write(path.join(g.root, VERSION_FILE), VERSION_INJECTED + '// extra\n');
+  const extra = g.run('pack');
+  assert.notEqual(extra.rc, 0);
+  assert.match(extra.output, /handoff modified tracked source: packages\/basic\/src\/Version\.cj/);
+});
+test('red cut: restore re-checks each derivation and overlay and the exact edited set', async t => {
+  const f = await fixture(t);
+  await write(path.join(f.root, VERSION_FILE), VERSION_INJECTED);
+  assert.equal(f.run('pack', 'stage0', {SOURCE_SDK_VERSION: '0.0.2'}).rc, 0);
+  const wrongVersion = f.run('pack', 'stage0', {SOURCE_SDK_VERSION: '0.0.9'});
+  assert.match(wrongVersion.output, /handoff derivation version is not SOURCE_SDK_VERSION/);
+  assert.equal(f.run('pack', 'stage0', {SOURCE_SDK_VERSION: '0.0.2'}).rc, 0);
+  const manifestFile = path.join(f.archive, 'manifest.json');
+  const original = await fs.readFile(manifestFile, 'utf8');
+  const tampered = async (edit, expected) => {
+    const manifest = JSON.parse(original); edit(manifest);
+    await fs.writeFile(manifestFile, JSON.stringify(manifest));
+    await f.checkout();
+    const rejected = f.run('restore');
+    assert.notEqual(rejected.rc, 0, JSON.stringify(manifest.derivations));
+    assert.match(rejected.output, expected);
+  };
+  await tampered(m => { m.derivations[0].version = '0.0.3'; m.environment.SOURCE_SDK_VERSION = '0.0.3'; },
+    /handoff derivation digest mismatch: packages\/basic\/src\/Version\.cj/);
+  await tampered(m => { m.environment.SOURCE_SDK_VERSION = '0.0.3'; }, /handoff derivation version is not SOURCE_SDK_VERSION/);
+  await tampered(m => { m.overlay[0].sha256 = 'f'.repeat(64); }, /handoff overlay bytes mismatch: cjpm\.toml/);
+  // The restored checkout must differ from its pins in exactly the recorded paths.
+  await fs.writeFile(manifestFile, original);
+  await f.checkout();
+  await write(path.join(f.root, 'packages/cjc/src/main.cj'), 'main() { consumer edit }\n');
+  const dirty = f.run('restore');
+  assert.notEqual(dirty.rc, 0);
+  assert.match(dirty.output, /handoff restored checkout differs from its manifest: packages\/cjc\/src\/main\.cj/);
+  // Control: the untouched manifest restores.
+  await fs.writeFile(manifestFile, original);
+  await f.checkout();
+  assert.equal(f.run('restore').rc, 0);
 });

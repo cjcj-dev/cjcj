@@ -11,6 +11,7 @@ import {stageSdkHandoff} from './stage-sdk-handoff.mjs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {checkoutExactSource} from '../../../lib/git.mjs';
+import {VERSION_SOURCE, applyCangjieVersion, injectedCangjieVersion, injectCangjieVersion} from './steps/inject-version-lib.mjs';
 
 const [mode, phase, directory] = process.argv.slice(2);
 if (!['pack', 'restore'].includes(mode) || !/^[a-z0-9-]+$/.test(phase || '') || !directory) {
@@ -94,15 +95,32 @@ const posix = rel => rel.split(path.sep).join('/');
 async function exists(file) {
   try { await fs.lstat(file); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
 }
+// Edited tracked files: the injected product version crosses as data (the
+// value and the digest of the re-derived file), never as Version.cj bytes;
+// only build manifests (cjpm.toml/cjpm.lock) may cross as digest-bound bytes.
+// Any other edited tracked file is source and fails the pack.
+const OVERLAY_MANIFEST = /(^|\/)cjpm\.(toml|lock)$/;
+const headBlob = (dir, rel) => {
+  const r = spawnSync('git', ['-C', dir, 'show', `HEAD:${rel}`], {encoding: 'utf8', maxBuffer: 1 << 30});
+  if (r.status !== 0) throw new Error(`handoff cannot read pinned ${rel}`);
+  return r.stdout;
+};
 async function payloadPlan(root, entries, excluded) {
   const head = checkoutHead(root);
   if (!head || !SHA40.test(head)) throw new Error('handoff workspace is not a pinned Git checkout');
   const repos = [{prefix: '', tracked: trackedPaths(root)}];
-  const checkouts = [], files = [], overlay = new Map();
+  const checkouts = [], files = [], overlay = new Map(), derivations = [];
   const addOverlay = async (prefix, dir) => {
     for (const rel of modifiedPaths(dir)) {
       const full = prefix ? prefix + '/' + rel : rel;
-      if (await exists(path.join(root, full))) overlay.set(full, await hash(path.join(root, full)));
+      if (!await exists(path.join(root, full))) continue;
+      if (full === VERSION_SOURCE) {
+        const current = await fs.readFile(path.join(root, full), 'utf8'), version = injectedCangjieVersion(current);
+        if (!version || applyCangjieVersion(headBlob(dir, rel), version) !== current)
+          throw new Error(`handoff modified tracked source: ${full}`);
+        derivations.push({path: full, kind: 'cangjie-version', version, sha256: await hash(path.join(root, full))});
+      } else if (OVERLAY_MANIFEST.test(full)) overlay.set(full, await hash(path.join(root, full)));
+      else throw new Error(`handoff modified tracked source: ${full}`);
     }
   };
   await addOverlay('', root);
@@ -132,8 +150,36 @@ async function payloadPlan(root, entries, excluded) {
   for (const entry of entries) await walk(entry);
   const kept = files.filter(rel => !tracked(rel));
   const included = new Set(kept);
-  return {commit: head, checkouts, files: kept,
+  return {commit: head, checkouts, files: kept, derivations,
     overlay: [...overlay].filter(([rel]) => included.has(rel)).map(([rel, sha256]) => ({path: rel, sha256}))};
+}
+// After extraction the checkout must differ from its pinned commits in
+// exactly the recorded overlay and derivation paths: overlay bytes match their
+// digests, and each derivation is re-applied to the clean pinned file.
+async function restoreEdits(root, record) {
+  if (!Array.isArray(record.derivations)) throw new Error('handoff manifest lacks derivation rows');
+  for (const row of record.overlay) {
+    if (!OVERLAY_MANIFEST.test(String(row?.path || ''))) throw new Error(`handoff overlay is not a build manifest: ${row?.path}`);
+    if (!await exists(path.join(root, row.path)) || await hash(path.join(root, row.path)) !== row.sha256)
+      throw new Error(`handoff overlay bytes mismatch: ${row.path}`);
+  }
+  for (const row of record.derivations) {
+    if (row?.path !== VERSION_SOURCE || row.kind !== 'cangjie-version' || !/^[a-f0-9]{64}$/.test(row.sha256 || ''))
+      throw new Error(`handoff derivation row invalid: ${row?.path}`);
+    if (row.version !== record.environment?.SOURCE_SDK_VERSION) throw new Error(`handoff derivation version is not SOURCE_SDK_VERSION: ${row.path}`);
+    if (modifiedPaths(root).includes(row.path)) throw new Error(`handoff derivation target is not the pinned file: ${row.path}`);
+    await injectCangjieVersion(root, row.version);
+    if (await hash(path.join(root, row.path)) !== row.sha256) throw new Error(`handoff derivation digest mismatch: ${row.path}`);
+  }
+  // MinGW is restored over an already restored stage3 workspace and archives
+  // only its toolchain tree; the checkout-wide comparison belongs to the
+  // phase that owns the workspace.
+  if (phase === 'mingw') return;
+  const expected = new Set([...record.overlay.map(row => row.path), ...record.derivations.map(row => row.path)]);
+  const actual = new Set([...modifiedPaths(root),
+    ...record.checkouts.flatMap(row => modifiedPaths(path.join(root, row.path)).map(rel => row.path + '/' + rel))]);
+  const differs = [...new Set([...expected, ...actual])].filter(rel => expected.has(rel) !== actual.has(rel)).sort();
+  if (differs.length) throw new Error(`handoff restored checkout differs from its manifest: ${differs.join(',')}`);
 }
 async function assertNoSourcePayload(members, root, checkouts, overlay) {
   if (!Array.isArray(overlay)) throw new Error('handoff manifest lacks overlay rows');
@@ -195,12 +241,14 @@ if (mode === 'pack') {
     ...(separateSdk ? [new RegExp('^' + sdkRel.replace(/[.]/g, '\\.') + '$')] : [])];
   const plan = await payloadPlan(root, entries, excluded);
   if (plan.commit !== identity.commit) throw new Error('handoff checkout SHA mismatch: workspace');
+  for (const row of plan.derivations)
+    if (row.version !== environment.SOURCE_SDK_VERSION) throw new Error(`handoff derivation version is not SOURCE_SDK_VERSION: ${row.path}`);
   const list = path.join(dir, 'payload.list');
   await fs.writeFile(list, plan.files.map(rel => rel + '\0').join(''));
   try { tar(['-cf', archive, '--null', '--no-recursion', '-C', root, '-T', list]); }
   finally { await fs.rm(list, {force: true}); }
   const record = {...identity, environment, entries, sourcePolicy: 'pinned-git-checkout', checkouts: plan.checkouts, overlay: plan.overlay,
-    sdkSha256, sha256: await hash(archive)};
+    derivations: plan.derivations, sdkSha256, sha256: await hash(archive)};
   await fs.writeFile(manifest, `${JSON.stringify(record, null, 2)}\n`);
   console.log(`BOOTSTRAP_HANDOFF phase=${phase} sha256=${record.sha256}`);
 } else {
@@ -225,6 +273,7 @@ if (mode === 'pack') {
   if (listed.error || listed.status !== 0) throw new Error('handoff payload listing failed');
   await assertNoSourcePayload(listed.stdout.split('\n').filter(Boolean), root, record.checkouts, record.overlay);
   tar(['-xf', archive, '-C', root]);
+  await restoreEdits(root, record);
   if(separateSdk)await stageSdkHandoff('restore',path.join(root,sdkRel),dir);
   if (phase !== 'mingw') { await verifyRuntimeHandoff(record.environment); await verifyHleHandoff(record.environment); await verifyNativeToolHandoff({root,environment:record.environment}); }
   await fs.appendFile(required('GITHUB_ENV'), Object.entries(record.environment)
