@@ -100,12 +100,17 @@ export function stdFreeView(from, to, tuple) {
 // Every std of the chain is built from the same source checkout, whose stdlib/build tree (git-ignored
 // build output) would otherwise let ninja keep objects compiled by the previous step's compiler. The
 // H1 chain gets this from one checkout per std step; here each std step starts from an empty tree.
+// The staged std dependencies (stdlib/third_party/{boundscheck-v1.1.16,pcre2}) are copies of the pinned
+// roots that prepareStdDependencies (ci/bootstrap/stdlib-build.mjs:23-41) only accepts again when the same
+// std output recorded them, so they are cleared with the build tree and staged afresh for each std step.
+export const STD_BUILD_OUTPUTS = Object.freeze(['stdlib/build', 'stdlib/third_party/boundscheck-v1.1.16', 'stdlib/third_party/pcre2']);
 export function freshStdBuildTree(runtimeSource) {
-  const tree = path.join(runtimeSource, 'stdlib', 'build');
-  const ignored = spawnSync('git', ['-C', runtimeSource, 'check-ignore', '-q', 'stdlib/build/build'], {encoding: 'utf8'});
-  if (ignored.status !== 0) throw new Error(`STD_BUILD_TREE_NOT_IGNORED ${tree}`);
-  fs.rmSync(tree, {recursive: true, force: true});
-  return tree;
+  for (const rel of STD_BUILD_OUTPUTS) {
+    const ignored = spawnSync('git', ['-C', runtimeSource, 'check-ignore', '-q', `${rel}/x`], {encoding: 'utf8'});
+    if (ignored.status !== 0) throw new Error(`STD_BUILD_TREE_NOT_IGNORED ${path.join(runtimeSource, rel)}`);
+  }
+  for (const rel of STD_BUILD_OUTPUTS) fs.rmSync(path.join(runtimeSource, rel), {recursive: true, force: true});
+  return STD_BUILD_OUTPUTS.map(rel => path.join(runtimeSource, rel));
 }
 
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
