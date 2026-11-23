@@ -10,6 +10,7 @@ import {nativeConfig, nativeSteps} from './native.mjs';
 import {checkTools, stdxArgs, toolsArgs} from './tools.mjs';
 import {verifySdk} from './verify.mjs';
 import {packArchive, relocateAndVerify, writeSums} from './archive.mjs';
+import {checkProductionWiring} from './producers.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CLI = path.join(repo, 'build/cli.mjs');
@@ -17,7 +18,8 @@ const STEPS = Object.freeze(['native', 'sources', 'bootstrap', 'stdx', 'tools'])
 const USAGE = `usage: node build/cli.mjs sdk plan [--asset KEY]
        node build/cli.mjs sdk build --config FILE [--step ${STEPS.join('|')}|all]
        node build/cli.mjs sdk package --config FILE --asset KEY
-       node build/cli.mjs sdk verify --sdk DIR --asset KEY [--work DIR] [--java-home DIR]`;
+       node build/cli.mjs sdk verify --sdk DIR --asset KEY [--work DIR] [--java-home DIR]
+       node build/cli.mjs sdk wiring`;
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv, options = {};
@@ -26,7 +28,7 @@ export function parseArgs(argv) {
     if (!/^--[a-z-]+$/.test(key ?? '') || rest[i + 1] === undefined || rest[i + 1].startsWith('--')) throw new Error(`SDK_ARGS ${key}\n${USAGE}`);
     options[key.slice(2)] = rest[i + 1];
   }
-  if (!['plan', 'build', 'package', 'verify'].includes(command)) throw new Error(`SDK_COMMAND ${command}\n${USAGE}`);
+  if (!['plan', 'build', 'package', 'verify', 'wiring'].includes(command)) throw new Error(`SDK_COMMAND ${command}\n${USAGE}`);
   return {command, options};
 }
 
@@ -116,6 +118,7 @@ async function pack(config, assetKey) {
 export async function main(argv) {
   const {command, options} = parseArgs(argv);
   if (command === 'plan') { process.stdout.write(JSON.stringify(plan(options.asset), null, 2) + '\n'); return; }
+  if (command === 'wiring') { process.stdout.write(JSON.stringify(checkProductionWiring(), null, 2) + '\n'); return; }
   if (command === 'verify') {
     if (!options.sdk || !options.asset) throw new Error(USAGE);
     const result = await verifySdk({sdk: options.sdk, asset: options.asset, work: options.work ?? path.join(path.dirname(path.resolve(options.sdk)), 'verify-work'),
