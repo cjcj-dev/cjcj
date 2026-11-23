@@ -15,6 +15,8 @@ import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {sdkPlatform, stdxChirMembers} from '../../../../ci/bootstrap/sdk-platform.mjs';
 import {readHostToolchainPin} from '../../../../ci/host-toolchain-pin.mjs';
+import {readSourcePins} from '../../../../ci/native-llvm-inputs.mjs';
+import {PREPARE_PYTHON, PREPARE_PYTHON_MEMBERS, PREPARE_LLDB_PYTHON_PACKAGE} from './build_prepare_llvm.mjs';
 import {workflowSourceSelection} from '../srcbuild/source-selection.mjs';
 import {baseSdkDownload} from '../../../lib/release-component-provenance.mjs';
 import {allTargets, getTarget} from '../../../lib/targets.mjs';
@@ -141,6 +143,11 @@ export function installLlvm({root, target, from, commits, producer, shimCommit})
     const rel = `tools/${native.os === 'win32' ? 'bin' : 'lib'}/${name}`;
     libraries[rel] = copyMember(from, `lldb-lib/${name}`, install, rel);
   }
+  // cjdb's Python (build_prepare_llvm.mjs preparePython): the prefix the LLDB
+  // build was configured with is installed at third_party/llvm, where the
+  // relocated consumer (sdk-cjdb-python.mjs verifyRelocatedCjdbPython) runs it,
+  // with its original producer record and the observed CMake configuration.
+  const python = installPython({from, install, platform, lldbNames});
   const facts = {schema: 'cjcj-prepare-llvm-v1', platform, commits: {...commits, shim: shimCommit},
     configuration: {producer, library: file, targets: 'X86;ARM;AArch64', tools: PREPARE_LLVM_TOOLS, projects: 'clang;lldb'},
     llvmLibrary: {file, sha256: row.sha256}, tools,
@@ -148,11 +155,69 @@ export function installLlvm({root, target, from, commits, producer, shimCommit})
       compiler: {commit: commits.compiler, schema: 'schema/CjoFormat.fbs'}, llvm: {commit: commits.llvm},
       object: {path: PREPARE_SHIM_OBJECT, ...shim}, symbols: shimRecord.symbols,
       configuration: {producer: 'build/sdk/producers/release/build_prepare_llvm.mjs shim', argv: shimRecord.argv}},
-    cjdb: {file: cjdbFile, ...cjdb, libraries, configuration: {projects: 'clang;lldb', target: 'lldb'}}};
+    cjdb: {file: cjdbFile, ...cjdb, libraries, configuration: {projects: 'clang;lldb', target: 'lldb'}},
+    ...python};
   fs.writeFileSync(path.join(install, 'BUILD-INPUTS.json'), JSON.stringify(facts, null, 2) + '\n');
   return facts;
 }
+export const PREPARE_PYTHON_RECORD = 'third_party/llvm/PYTHON-BUILD-INPUTS.json';
+function installPython({from, install, platform, lldbNames}) {
+  const record = path.join(from, 'PYTHON-BUILD-INPUTS.json'), configuredFile = path.join(from, 'PYTHON-CONFIGURED.json');
+  if (!PREPARE_PYTHON[platform]) {
+    if (fs.existsSync(path.join(from, 'python'))) throw new Error('NATIVE_INPUTS_PYTHON_UNPINNED ' + platform);
+    return {};
+  }
+  for (const file of [record, configuredFile, path.join(from, 'python')])
+    if (!fs.existsSync(file)) throw new Error('NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING ' + path.relative(from, file));
+  const facts = JSON.parse(fs.readFileSync(record, 'utf8')), pin = PREPARE_PYTHON[platform];
+  if (facts.rc !== 0 || facts.target !== platform || facts.source?.url !== pin.url || facts.source?.sha256 !== pin.sha256
+    || facts.source?.version !== pin.version || !Object.keys(facts.files || {}).length) throw new Error('PREPARE_PYTHON_RECORD');
+  const configured = JSON.parse(fs.readFileSync(configuredFile, 'utf8'));
+  for (const key of ['executable', 'include', 'library', 'suffix'])
+    if (!configured.selected?.[key] || !configured.actual?.[key]) throw new Error('PREPARE_PYTHON_CONFIGURED ' + key);
+  const nativeRoot = path.join(install, 'third_party/llvm');
+  for (const name of PREPARE_PYTHON_MEMBERS) {
+    const source = path.join(from, 'python', name);
+    if (fs.existsSync(source)) fs.cpSync(source, path.join(nativeRoot, name), {recursive: true, verbatimSymlinks: true,
+      errorOnExist: true, force: false});
+  }
+  for (const [rel, row] of Object.entries(facts.files))
+    if (sha256(path.join(nativeRoot, rel)) !== row.sha256) throw new Error('PREPARE_PYTHON_PRODUCT_BYTES ' + rel);
+  // The lldb package's _lldb binding is the same build's liblldb; both live in
+  // the native root the relocated consumer imports from (PYTHONHOME there).
+  const pkg = path.join(from, 'lldb-python/lldb');
+  if (!fs.existsSync(pkg)) throw new Error('NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING lldb-python/lldb');
+  for (const name of lldbNames) fs.copyFileSync(path.join(from, 'lldb-lib', name), path.join(nativeRoot, 'lib', name));
+  const installedPackage = path.join(nativeRoot, PREPARE_LLDB_PYTHON_PACKAGE);
+  fs.cpSync(pkg, installedPackage, {recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false});
+  const binding = fs.readdirSync(installedPackage).find(name => name.startsWith('_lldb'));
+  const real = binding && fs.existsSync(path.join(installedPackage, binding)) && fs.realpathSync(path.join(installedPackage, binding));
+  if (!real || !real.startsWith(fs.realpathSync(nativeRoot) + path.sep) || !lldbNames.includes(path.basename(real)))
+    throw new Error('PREPARE_LLDB_PYTHON_BINDING ' + (binding || 'missing'));
+  fs.copyFileSync(record, path.join(install, PREPARE_PYTHON_RECORD));
+  return {python: {configured}, pythonInstallationInput: {record: PREPARE_PYTHON_RECORD, sha256: sha256(path.join(install, PREPARE_PYTHON_RECORD))}};
+}
 
+// std reads the AST installation's include root (ci/bootstrap/sdk-std-resume.mjs
+// selectedStdAst) and requires these headers there (sdk-native-stage.mjs
+// STD_AST_HEADER); Parse/Parser.h includes the rest of the public tree, so the
+// complete include/cangjie tree of the same build (ci/build_ast_support.sh) is installed.
+export const PREPARE_AST_HEADER_ROOT = 'include/cangjie';
+export const PREPARE_AST_STD_HEADERS = Object.freeze(['include/cangjie/Parse/Parser.h', 'include/cangjie/CHIR/IR/AttributeInfo.h']);
+function copyTree(from, rel, install) {
+  const source = path.join(from, rel), rows = {};
+  if (!fs.existsSync(source) || !fs.lstatSync(source).isDirectory()) throw new Error(`NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING ${rel}`);
+  const walk = dir => {
+    for (const name of fs.readdirSync(path.join(from, dir)).sort()) {
+      const member = `${dir}/${name}`, stat = fs.lstatSync(path.join(from, member));
+      if (stat.isDirectory()) walk(member);
+      else if (stat.isFile()) rows[member] = copyMember(from, member, install);
+      else throw new Error(`NATIVE_INPUTS_PRODUCER_OUTPUT_TYPE ${member}`);
+    }
+  };
+  walk(rel);
+  return rows;
+}
 // Install the ci/build_ast_support.sh output (cangjie-ast-support, std
 // support ON) in the shape readInstalledNativeAst consumes after transport.
 export function installAst({root, target, from, commits}) {
@@ -160,13 +225,21 @@ export function installAst({root, target, from, commits}) {
   const install = freshComponent(root, 'ast');
   const library = `lib/${native.tuple}/libcangjie-ast-support.a`;
   const flatc = `third_party/flatbuffers/bin/flatc${native.exe}`;
-  const files = {[library]: copyMember(from, 'libcangjie-ast-support.a', install, library)};
+  const libraryRow = copyMember(from, 'libcangjie-ast-support.a', install, library);
+  for (const rel of PREPARE_AST_STD_HEADERS)
+    if (!fs.existsSync(path.join(from, rel)) || !fs.statSync(path.join(from, rel)).isFile())
+      throw new Error(`NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING ${rel}`);
+  const headerRows = copyTree(from, PREPARE_AST_HEADER_ROOT, install);
+  const headers = {root: PREPARE_AST_HEADER_ROOT, files: Object.keys(headerRows).length,
+    sha256: crypto.createHash('sha256').update(Object.entries(headerRows).map(([rel, row]) => `${row.sha256}  ${rel}\n`).join('')).digest('hex'),
+    std: Object.fromEntries(PREPARE_AST_STD_HEADERS.map(rel => [rel, headerRows[rel]]))};
+  const files = {[library]: libraryRow};
   for (const rel of ['schema/StdAstFormat.fbs', 'include/flatbuffers/StdAstFormat_generated.h', ...stdxChirMembers, flatc])
     files[rel] = copyMember(from, rel, install);
   const build = {target: 'cangjie-ast-support', configuration: {stdSupport: 'ON', producer: 'ci/build_ast_support.sh'}};
   const facts = {schema: 'cjcj-prepare-ast-v1', platform, commits: {compiler: commits.compiler, llvm: commits.llvm},
     configuration: build.configuration,
-    astInstallation: {platform, source: {commit: commits.compiler}, library, files, build}};
+    astInstallation: {platform, source: {commit: commits.compiler}, library, files, headers, build}};
   fs.writeFileSync(path.join(install, 'BUILD-INPUTS.json'), JSON.stringify(facts, null, 2) + '\n');
   return facts;
 }
@@ -177,11 +250,26 @@ export function installAst({root, target, from, commits}) {
 // of an installed toolchain. The pair rule is the consumer's nativePair rule:
 // an explicit LLVM/runtime pair needs an explicit host; an empty selection uses
 // the checked-in pin. Only the pinned identity can be prepared here.
+// The prepare job's pin step (ci/native-llvm-inputs.mjs) writes the pair it
+// resolved into GITHUB_ENV, so a non-empty pair alone does not mean the caller
+// chose it: CJCJ_NATIVE_PAIR_SELECTION says which, and 'pinned' is honoured only
+// for exactly the checked-in pair. Without the marker a non-empty pair is explicit.
+export function nativePairSelection(env = process.env) {
+  const marker = env.CJCJ_NATIVE_PAIR_SELECTION || '';
+  const llvmRef = env.CJCJ_NATIVE_LLVM_REF || '', runtimeRef = env.CJCJ_NATIVE_RUNTIME_REF || '';
+  if (!marker) return llvmRef || runtimeRef ? 'explicit' : 'pinned';
+  if (marker === 'explicit') return 'explicit';
+  if (marker !== 'pinned') throw new Error(`NATIVE_PAIR_SELECTION_INVALID ${marker}`);
+  const {llvm, runtime} = readSourcePins();
+  if ((llvmRef && llvmRef !== llvm.LLVM_SHA) || (runtimeRef && runtimeRef !== runtime.RUNTIME_REF))
+    throw new Error('NATIVE_PAIR_SELECTION_NOT_PINNED');
+  return 'pinned';
+}
 export function prepareHostVersion(target, env = process.env) {
   const platform = prepareHost(target).llvm_platform;
   const pinned = readHostToolchainPin(platform).replace(/^nightly-/, '');
   const requested = env.CJCJ_NATIVE_HOST_VERSION || '';
-  if ((env.CJCJ_NATIVE_LLVM_REF || env.CJCJ_NATIVE_RUNTIME_REF) && !requested)
+  if ((env.CJCJ_NATIVE_LLVM_REF || env.CJCJ_NATIVE_RUNTIME_REF) && !requested && nativePairSelection(env) === 'explicit')
     throw new Error('NATIVE_RUNTIME_EXPLICIT_HOST_REQUIRED');
   const version = requested || pinned;
   if (version !== pinned) throw new Error(`PREPARE_HOST_VERSION_UNPINNED ${version} != ${pinned}`);
@@ -507,6 +595,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (command === 'provenance') console.log(JSON.stringify(prepareProvenance()));
     else if (command === 'assemble') console.log(JSON.stringify(assembleNativeInputs({root: path.resolve(option('root') || ''),
       target: option('target'), hostVersion: option('host-version') || undefined}).record));
+    else if (command === 'host-version') console.log(prepareHostVersion(option('target')));
     else if (command === 'install-host') console.log(JSON.stringify(await installHost({root: path.resolve(option('root') || ''),
       target: option('target')})));
     else if (command === 'compiler-source') {
@@ -527,7 +616,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     else if (command === 'install-ast') console.log(JSON.stringify(installAst({root: path.resolve(option('root') || ''),
       target: option('target'), from: path.resolve(option('from') || ''), commits: componentCommits()})));
-    else throw new Error('usage: prepare_native_inputs.mjs provenance | install-host --root DIR --target T'
+    else throw new Error('usage: prepare_native_inputs.mjs provenance | host-version --target T | install-host --root DIR --target T'
       + ' | assemble --root DIR --target T [--host-version V] | install-llvm|install-ast --root DIR --target T --from DIR'
       + ' | compiler-source | cjbind-source --target T | pack --root DIR --out FILE');
   } catch (error) { console.error(error.message); process.exitCode = 1; }

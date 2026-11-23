@@ -2998,7 +2998,9 @@ jobs:
           ulimit -c 0
           if [ "$RUNNER_OS" = Linux ]; then
             sudo apt-get update -qq
-            sudo apt-get install -y -qq clang cmake ninja-build
+            # swig generates the lldb Python binding (LLDB_ENABLE_PYTHON=ON with
+            # the pinned Python prefix build_prepare_llvm.mjs fetches on Linux).
+            sudo apt-get install -y -qq clang cmake ninja-build swig
           else
             brew install ninja
           fi

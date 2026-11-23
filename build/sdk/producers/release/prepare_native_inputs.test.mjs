@@ -8,12 +8,16 @@ import test from 'node:test';
 import crypto from 'node:crypto';
 import {PREPARE_HOSTS, PROVENANCE_KEYS, assembleNativeInputs, prepareProvenance, prepareWorkflowProblems,
   installLlvm, installAst, componentCommits, prepareComponentProblems, installHost, prepareHostVersion,
-  packNativeInputs, compilerSource, PREPARE_LLVM_TOOLS, installHle, hleCjbindAsset, HLE_CJBIND, HLE_CJBIND_SOURCE_BUILD, hleCjbindSource, PREPARE_SHIM_OBJECT} from './prepare_native_inputs.mjs';
+  packNativeInputs, compilerSource, PREPARE_LLVM_TOOLS, PREPARE_AST_STD_HEADERS, PREPARE_PYTHON_RECORD, nativePairSelection, installHle, hleCjbindAsset, HLE_CJBIND, HLE_CJBIND_SOURCE_BUILD, hleCjbindSource, PREPARE_SHIM_OBJECT} from './prepare_native_inputs.mjs';
 import {configureHleInput, readHleDependencies} from '../../../../ci/bootstrap/hle-input.mjs';
 import {installHleDependencies} from '../../../srcbuild/hle-dependencies.mjs';
 import {readInstalledNativeShim} from '../../../../ci/bootstrap/native-shim-inputs.mjs';
 import {unpackNativeArtifact} from '../../../../ci/bootstrap/native-artifact-archive.mjs';
-import {buildPrepareLlvm, llvmConfigureArgs, buildPrepareShim, shimRequiredSymbols, shimSymbolProblems, PREPARE_LLVM_TARGETS} from './build_prepare_llvm.mjs';
+import {buildPrepareLlvm, llvmConfigureArgs, buildPrepareShim, shimRequiredSymbols, shimSymbolProblems, PREPARE_LLVM_TARGETS,
+  llvmLibrarySymbolProblems, lldbPythonArgs, PREPARE_PYTHON, pythonCacheConfiguration} from './build_prepare_llvm.mjs';
+import {selectedStdAst} from '../../../../ci/bootstrap/sdk-std-resume.mjs';
+import {createBootstrapTargets, FIXED_INPUTS} from '../../../../ci/bootstrap/sdk-targets.mjs';
+import {spawnSync} from 'node:child_process';
 import {nativeInstallationLocations} from '../../../../ci/bootstrap/native-installation-locations.mjs';
 import {readInstalledNativeAst} from '../../../../ci/bootstrap/installed-native-ast.mjs';
 import {sdkPlatform, stdxChirMembers} from '../../../../ci/bootstrap/sdk-platform.mjs';
@@ -180,17 +184,40 @@ function putShimCjdb(out, native, label) {
   put(`bin/lldb${native.exe}`, 'lldb ' + label);
   put(native.os === 'win32' ? 'lldb-lib/liblldb.dll' : native.os === 'darwin' ? 'lldb-lib/liblldb.15.dylib' : 'lldb-lib/liblldb.so.15', 'liblldb');
 }
+function putPython(out, platform) {
+  if (!PREPARE_PYTHON[platform]) return;
+  const put = (rel, body) => { fs.mkdirSync(path.dirname(path.join(out, rel)), {recursive: true}); fs.writeFileSync(path.join(out, rel), body); };
+  const products = {'bin/python3.11': 'python interpreter', 'include/python3.11/Python.h': 'python header',
+    'lib/libpython3.11.so.1.0': 'python library'};
+  for (const [rel, body] of Object.entries(products)) put('python/' + rel, body);
+  put('python/lib/python3.11/os.py', 'stdlib');
+  // the same build's lldb package: _lldb is a link to its liblldb (LLDB_ENABLE_PYTHON=ON)
+  put('lldb-python/lldb/__init__.py', 'import _lldb');
+  if (!fs.existsSync(path.join(out, 'lldb-lib/liblldb.so.15'))) put('lldb-lib/liblldb.so.15', 'liblldb');
+  fs.symlinkSync('../../../liblldb.so.15', path.join(out, 'lldb-python/lldb/_lldb.cpython-311-x86_64-linux-gnu.so'));
+  const files = Object.fromEntries(Object.entries(products).map(([rel, body]) => [rel, {sha256: crypto.createHash('sha256').update(body).digest('hex')}]));
+  const pin = PREPARE_PYTHON[platform];
+  put('PYTHON-BUILD-INPUTS.json', JSON.stringify({schema: 'cjcj-prepare-python-v1', rc: 0, target: platform, host: platform,
+    producer: 'build/sdk/producers/release/build_prepare_llvm.mjs python', source: {url: pin.url, version: pin.version, sha256: pin.sha256}, files}));
+  const selected = {executable: out + '/python/bin/python3.11', include: out + '/python/include/python3.11',
+    library: out + '/python/lib/libpython3.11.so.1.0', suffix: '.cpython-311-x86_64-linux-gnu.so', version: pin.version + ' (main)'};
+  put('PYTHON-CONFIGURED.json', JSON.stringify({selected, actual: selected, cacheSha256: 'c'.repeat(64)}));
+}
 function produced(t, target) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-e2e-'));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
   const native = sdkPlatform(PREPARE_HOSTS.find(h => h.target === target).llvm_platform);
   const put = (rel, body) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), {recursive: true}); fs.writeFileSync(path.join(dir, rel), body); };
-  put('llvm-out/' + native.llvmLibrary, 'llvm bytes ' + target);
+  // An ELF64 x86-64 header and the source stamp, as the real library carries them.
+  const elf = Buffer.alloc(64); elf.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]); elf.writeUInt16LE(62, 18);
+  put('llvm-out/' + native.llvmLibrary, Buffer.concat([elf, Buffer.from(`llvm bytes ${target} CJLLVM-COMMIT:${LLVM}\n`)]));
+  putPython(path.join(dir, 'llvm-out'), native.platform ?? PREPARE_HOSTS.find(h => h.target === target).llvm_platform);
   for (const tool of PREPARE_LLVM_TOOLS) put(`llvm-out/bin/${tool}${native.exe}`, `${tool} ${target}`);
   putShimCjdb(path.join(dir, 'llvm-out'), native, target);
   put('root/hle/hle-dependencies.json', '{}');
   for (const rel of ['libcangjie-ast-support.a', 'schema/StdAstFormat.fbs', 'include/flatbuffers/StdAstFormat_generated.h',
-    ...stdxChirMembers, 'third_party/flatbuffers/bin/flatc' + native.exe]) put('ast-out/' + rel, 'ast ' + rel);
+    ...stdxChirMembers, ...PREPARE_AST_STD_HEADERS, 'include/cangjie/AST/Node.h', 'third_party/flatbuffers/bin/flatc' + native.exe])
+    put('ast-out/' + rel, 'ast ' + rel);
   putHost(path.join(dir, 'root'), PREPARE_HOSTS.find(h => h.target === target).llvm_platform);
   put('root/runtime/NATIVE-INPUTS.json', JSON.stringify({configuration: {runtime: RUNTIME}}));
   const root = path.join(dir, 'root'), commits = {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER};
@@ -337,7 +364,15 @@ test('every native-inputs consumer unpacks the tar before the host or runtime is
 // ---- N/LLVM producer: the same dylib build with its tools on all hosts ----
 test('the N/LLVM producer configures the dylib build and installs library and tools', async t => {
   const args = llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'win32', compiler: 'c'});
-  for (const flag of ['-DLLVM_BUILD_LLVM_DYLIB=ON', '-DLLVM_LINK_LLVM_DYLIB=OFF', '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', '-DLLVM_ENABLE_ZLIB=OFF',
+  // Unix readers link the installed N library; Windows keeps the static tools.
+  const unix = llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'linux', compiler: 'c',
+    python: {executable: 'e', include: 'i', library: 'l'}});
+  for (const flag of ['-DLLVM_LINK_LLVM_DYLIB=ON', '-DLLDB_ENABLE_PYTHON=ON', '-DPython3_EXECUTABLE=e', '-DPython3_INCLUDE_DIR=i', '-DPython3_LIBRARY=l'])
+    assert.ok(unix.includes(flag), flag);
+  assert.ok(!unix.includes('-DLLVM_LINK_LLVM_DYLIB=OFF') && !unix.includes('-DLLDB_ENABLE_PYTHON=OFF'));
+  assert.throws(() => lldbPythonArgs({executable: 'e', include: 'i'}), /PREPARE_LLDB_PYTHON_SELECTION library/);
+  assert.deepEqual(Object.keys(PREPARE_PYTHON).sort(), ['linux_aarch64', 'linux_x86_64']);
+  for (const flag of ['-DLLVM_BUILD_LLVM_DYLIB=ON', '-DLLVM_LINK_LLVM_DYLIB=OFF', '-DLLDB_ENABLE_PYTHON=OFF', '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', '-DLLVM_ENABLE_ZLIB=OFF',
     '-DLLVM_ENABLE_PROJECTS=clang;lldb', '-DCANGJIE_ROOT=c', '-DLLDB_INCLUDE_TESTS=OFF'])
     assert.ok(args.includes(flag), flag);
   assert.ok(!args.includes('-DLLVM_ENABLE_PROJECTS='), 'the LLVM build enables lldb');
@@ -359,15 +394,30 @@ test('the N/LLVM producer configures the dylib build and installs library and to
         for (const tool of ['llc', 'llvm-as', 'llvm-dis', 'llvm-nm', 'lldb']) fs.writeFileSync(path.join(build, 'bin', tool + native.exe), tool);
         fs.mkdirSync(path.join(build, 'lib'), {recursive: true});
         fs.writeFileSync(path.join(build, native.os === 'win32' ? 'bin' : 'lib', native.os === 'win32' ? 'liblldb.dll' : 'liblldb.so.15'), 'liblldb');
+        if (all.includes('lldb-python')) {
+          fs.mkdirSync(path.join(build, 'lib/python3.11/site-packages/lldb'), {recursive: true});
+          fs.writeFileSync(path.join(build, 'lib/python3.11/site-packages/lldb/__init__.py'), 'import _lldb');
+          fs.symlinkSync('../../../liblldb.so.15', path.join(build, 'lib/python3.11/site-packages/lldb/_lldb.cpython-311-x86_64-linux-gnu.so'));
+        }
       }
-      if (all[0].endsWith('llvm-nm' + native.exe)) return {status: 0, stdout: '0000 T LLVMInitializeX86TargetInfo\n'};
+      // llvm-nm --defined-only as each format prints it: ELF versioned, Mach-O with '_'.
+      if (all[0].endsWith('llvm-nm' + native.exe)) return {status: 0, stdout: native.os === 'darwin'
+        ? '0000 T _LLVMInitializeX86TargetInfo\n' : native.os === 'linux' ? '0000 T LLVMInitializeX86TargetInfo@@LLVM_15\n'
+          : '0000 T LLVMInitializeX86TargetInfo\n'};
       return {status: 0, stdout: ''};
     };
+    const python = PREPARE_PYTHON[platform] ? {executable: '/p/bin/python3.11', include: '/p/include/python3.11', library: '/p/lib/libpython3.11.so'} : undefined;
     const out = path.join(work, 'out');
     const compiler = path.join(work, 'compiler'); fs.mkdirSync(path.join(compiler, 'schema'), {recursive: true});
     fs.writeFileSync(path.join(compiler, 'schema/CjoFormat.fbs'), 'schema');
     assert.throws(() => buildPrepareLlvm({platform, sha: LLVM, out, work, env: {}, run}), /PREPARE_LLVM_COMPILER_SOURCE/);
-    buildPrepareLlvm({platform, sha: LLVM, out, work, env: {}, run, compiler});
+    if (python) assert.throws(() => buildPrepareLlvm({platform, sha: LLVM, out, work, env: {}, run, compiler}), /PREPARE_LLDB_PYTHON_REQUIRED/);
+    buildPrepareLlvm({platform, sha: LLVM, out, work, env: {}, run, compiler, python});
+    if (python) assert.ok(fs.lstatSync(path.join(out, 'lldb-python/lldb/_lldb.cpython-311-x86_64-linux-gnu.so')).isSymbolicLink());
+    if (python) fs.rmSync(path.join(out, 'lldb-python'), {recursive: true});
+    putPython(out, platform);
+    assert.ok(seen.some(line => line.startsWith('cmake -G') && line.includes(python ? '-DLLDB_ENABLE_PYTHON=ON -DPython3_EXECUTABLE=/p/bin/python3.11'
+      : '-DLLDB_ENABLE_PYTHON=OFF')), platform);
     assert.ok(seen.some(line => line.startsWith('cmake --build') && line.includes('LLVM llc llvm-as llvm-dis llvm-nm lldb')), platform);
     assert.ok(seen.some(line => line.startsWith('cmake -G') && line.includes('-DLLVM_ENABLE_PROJECTS=clang;lldb') && line.includes('-DCANGJIE_ROOT=')), platform);
     assert.ok(fs.existsSync(path.join(out, 'bin', 'lldb' + native.exe)));
@@ -401,6 +451,26 @@ test('the N/LLVM producer configures the dylib build and installs library and to
     assert.equal(facts.nativeShim.object.path, PREPARE_SHIM_OBJECT);
     assert.equal(facts.cjdb.file, 'tools/bin/cjdb' + native.exe);
     await readInstalledNativeShim({install: path.join(root, 'llvm')});
+    if (python) {
+      assert.equal(facts.pythonInstallationInput.record, PREPARE_PYTHON_RECORD);
+      assert.ok(fs.existsSync(path.join(root, 'llvm/third_party/llvm/bin/python3.11')));
+      assert.ok(facts.python.configured.selected.executable);
+      const binding = path.join(root, 'llvm/third_party/llvm/lib/python3.11/site-packages/lldb/_lldb.cpython-311-x86_64-linux-gnu.so');
+      assert.equal(fs.realpathSync(binding), fs.realpathSync(path.join(root, 'llvm/third_party/llvm/lib/liblldb.so.15')));
+      assert.ok(seen.some(line => line.startsWith('cmake --build') && line.includes(' lldb lldb-python --parallel')), 'lldb-python target');
+      // red cut: a Python LLDB build without its lldb package is not installed
+      const nopkg = path.join(work, 'out-nopkg'); fs.cpSync(out, nopkg, {recursive: true, verbatimSymlinks: true}); fs.rmSync(path.join(nopkg, 'lldb-python'), {recursive: true});
+      assert.throws(() => installLlvm({root: path.join(work, 'root-nopkg'), target, from: nopkg, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER},
+        producer: 'x', shimCommit: SHIM}), /NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING lldb-python\/lldb/);
+      // red cuts: no Python output, or a Python product that is not the recorded one
+      const bare = path.join(work, 'out-nopython'); fs.cpSync(out, bare, {recursive: true}); fs.rmSync(path.join(bare, 'PYTHON-BUILD-INPUTS.json'));
+      assert.throws(() => installLlvm({root: path.join(work, 'root-nopython'), target, from: bare, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER},
+        producer: 'x', shimCommit: SHIM}), /NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING PYTHON-BUILD-INPUTS\.json/);
+      const swapped = path.join(work, 'out-swapped'); fs.cpSync(out, swapped, {recursive: true});
+      fs.writeFileSync(path.join(swapped, 'python/lib/libpython3.11.so.1.0'), 'another python');
+      assert.throws(() => installLlvm({root: path.join(work, 'root-swapped'), target, from: swapped, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER},
+        producer: 'x', shimCommit: SHIM}), /PREPARE_PYTHON_PRODUCT_BYTES lib\/libpython3\.11\.so\.1\.0/);
+    } else assert.equal(facts.pythonInstallationInput, undefined);
     // red cuts: no shim object or no lldb executable means no N install
     for (const [rel, message] of [['fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/cjselfhost_llvmshim\\.o'], [`bin/lldb${native.exe}`, `bin/lldb${native.exe.replace('.', '\\.')}`]]) {
       const copy = path.join(work, 'out-' + path.basename(rel)); fs.cpSync(out, copy, {recursive: true}); fs.rmSync(path.join(copy, rel));
@@ -602,4 +672,141 @@ test('prepare-native builds the darwin-x64 source cjbind on its own host and han
     console.log('PREPARE_CJBIND_WIRING_CUT_REACHED ' + problem);
     assert.ok(prepareWorkflowProblems({...real(), target: once(read('sdk-build-target'), from, to)}).includes(problem), from);
   }
+});
+
+// ---- default prepare pair, Mach-O symbols, std AST headers, the formal nativeN check ----
+const pinStep = path.join(root, 'ci/native-llvm-inputs.mjs');
+const prepareCli = path.join(root, 'build/sdk/producers/release/prepare_native_inputs.mjs');
+const cli = (file, args, environment) => spawnSync(process.execPath, [file, ...args], {encoding: 'utf8', env: environment});
+const jobEnv = inputs => ({...Object.fromEntries(Object.entries(process.env)
+  .filter(([key]) => !key.startsWith('CJCJ_NATIVE_') && !['GITHUB_ENV', 'GITHUB_OUTPUT'].includes(key))), ...inputs});
+// prepare-native: job env from the form inputs; step 1 is the real pin step
+// (writes GITHUB_ENV); step 2 inherits the job env overlaid with what step 1 wrote.
+function chained(t, inputs) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-pin-'));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const githubEnv = path.join(dir, 'github-env');
+  fs.writeFileSync(githubEnv, '');
+  const pin = cli(pinStep, [], {...jobEnv(inputs), GITHUB_ENV: githubEnv});
+  assert.equal(pin.status, 0, pin.stderr);
+  const written = Object.fromEntries(fs.readFileSync(githubEnv, 'utf8').split('\n').filter(Boolean)
+    .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+  return {dir, written, step: {...jobEnv(inputs), ...written}};
+}
+const formDefault = {CJCJ_NATIVE_LLVM_REF: '', CJCJ_NATIVE_RUNTIME_REF: '', CJCJ_NATIVE_HOST_VERSION: ''};
+test('default prepare: the pin step and install-host chained through GITHUB_ENV select the pinned host on all five hosts', t => {
+  for (const host of PREPARE_HOSTS) {
+    const {written, step} = chained(t, formDefault);
+    assert.match(written.CJCJ_NATIVE_LLVM_REF, /^[0-9a-f]{40}$/);
+    assert.equal(written.CJCJ_NATIVE_PAIR_SELECTION, 'pinned');
+    const selected = cli(prepareCli, ['host-version', '--target', host.target], step);
+    assert.equal(selected.status, 0, `${host.target}: ${selected.stderr}`);
+    assert.equal(selected.stdout.trim(), prepareHostVersion(host.target, {}));
+  }
+});
+test('red cut: an explicit pair without a host version is refused after the pin step; a forged pinned marker is refused', t => {
+  const llvmPin = readSourcePinsForTest('llvm_pin.env').LLVM_SHA, runtimePin = readSourcePinsForTest('runtime_pin.env').RUNTIME_REF;
+  const {dir, written, step} = chained(t, {CJCJ_NATIVE_LLVM_REF: llvmPin, CJCJ_NATIVE_RUNTIME_REF: runtimePin, CJCJ_NATIVE_HOST_VERSION: ''});
+  assert.equal(written.CJCJ_NATIVE_PAIR_SELECTION, 'explicit');
+  for (const command of ['host-version', 'install-host']) {
+    const refused = cli(prepareCli, [command, '--root', path.join(dir, 'root'), '--target', 'linux-x64'], step);
+    assert.equal(refused.status, 1, command);
+    assert.match(refused.stderr, /NATIVE_RUNTIME_EXPLICIT_HOST_REQUIRED/, command);
+  }
+  assert.ok(!fs.existsSync(path.join(dir, 'root')), 'refused before any host download');
+  const withHost = cli(prepareCli, ['host-version', '--target', 'linux-x64'], {...step, CJCJ_NATIVE_HOST_VERSION: prepareHostVersion('linux-x64', {})});
+  assert.equal(withHost.status, 0, withHost.stderr);
+  const forged = cli(prepareCli, ['host-version', '--target', 'linux-x64'], {...step, CJCJ_NATIVE_PAIR_SELECTION: 'pinned', CJCJ_NATIVE_LLVM_REF: LLVM});
+  assert.equal(forged.status, 1);
+  assert.match(forged.stderr, /NATIVE_PAIR_SELECTION_NOT_PINNED/);
+  assert.throws(() => nativePairSelection({CJCJ_NATIVE_PAIR_SELECTION: 'maybe'}), /NATIVE_PAIR_SELECTION_INVALID maybe/);
+  // a second pin step in the same job keeps the pinned selection it exported
+  const again = cli(pinStep, [], {...chained(t, formDefault).step});
+  assert.match(again.stdout, /CJCJ_NATIVE_PAIR_SELECTION=pinned/);
+});
+function readSourcePinsForTest(file) {
+  return Object.fromEntries(fs.readFileSync(path.join(root, 'ci', file), 'utf8').split(/\r?\n/).filter(line => /^[A-Z][A-Z0-9_]*=/.test(line))
+    .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+}
+test('the LLVM library symbol check accepts the ELF and Mach-O names of the C symbol and nothing else', () => {
+  assert.deepEqual(llvmLibrarySymbolProblems('00000000012a4560 T LLVMInitializeX86TargetInfo@@LLVM_15\n'), []);
+  assert.deepEqual(llvmLibrarySymbolProblems('0000000000a1c000 T _LLVMInitializeX86TargetInfo\n'), []);
+  assert.deepEqual(llvmLibrarySymbolProblems('0000000000a1c000 T LLVMInitializeX86TargetInfo\r\n'), []);
+  for (const nm of ['', '0000 T _LLVMInitializeX86TargetInfoX\n', '0000 T XLLVMInitializeX86TargetInfo\n',
+    '0000 T __LLVMInitializeX86TargetInfo\n', '0000 T _LLVMInitializeARMTargetInfo\n'])
+    assert.deepEqual(llvmLibrarySymbolProblems(nm), ['LLVMInitializeX86TargetInfo'], JSON.stringify(nm));
+});
+test('install-ast installs Parse/Parser.h and the header tree std reads from the AST include root', t => {
+  const {dir, root: prepared} = produced(t, 'linux-x64');
+  const facts = JSON.parse(fs.readFileSync(path.join(prepared, 'ast/BUILD-INPUTS.json'), 'utf8'));
+  const std = selectedStdAst({ast: {install: path.join(prepared, 'ast'), astInstallation: facts.astInstallation}, compiler: {}});
+  // sdk-native-stage.mjs STD_AST_HEADER reads these under the same include root.
+  for (const rel of ['cangjie/Parse/Parser.h', 'cangjie/CHIR/IR/AttributeInfo.h', 'cangjie/AST/Node.h'])
+    assert.ok(fs.statSync(path.join(std.include, rel)).isFile(), rel);
+  assert.equal(facts.astInstallation.headers.root, 'include/cangjie');
+  assert.equal(facts.astInstallation.headers.files, 3);
+  const without = path.join(dir, 'ast-out-no-parser');
+  fs.cpSync(path.join(dir, 'ast-out'), without, {recursive: true});
+  fs.rmSync(path.join(without, 'include/cangjie/Parse/Parser.h'));
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-ast-'));
+  t.after(() => fs.rmSync(empty, {recursive: true, force: true}));
+  assert.throws(() => installAst({root: empty, target: 'linux-x64', from: without, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER}}),
+    /NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING include\/cangjie\/Parse\/Parser\.h/);
+});
+test('the LLDB build Python identity must be the selected prefix', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-python-')); t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const file = rel => { fs.mkdirSync(path.dirname(path.join(dir, rel)), {recursive: true}); fs.writeFileSync(path.join(dir, rel), rel); return path.join(dir, rel); };
+  const selected = {executable: file('p/bin/python3.11'), include: path.dirname(file('p/include/python3.11/Python.h')),
+    library: file('p/lib/libpython3.11.so.1.0'), suffix: '.cpython-311-x86_64-linux-gnu.so'};
+  const cache = (executable, suffix = selected.suffix) => { fs.mkdirSync(path.join(dir, 'build'), {recursive: true});
+    fs.writeFileSync(path.join(dir, 'build/CMakeCache.txt'), `Python3_EXECUTABLE:FILEPATH=${executable}\nPython3_INCLUDE_DIR:PATH=${selected.include}\n`
+      + `Python3_LIBRARY:FILEPATH=${selected.library}\nLLDB_PYTHON_EXT_SUFFIX:STRING=${suffix}\n`); return path.join(dir, 'build'); };
+  assert.deepEqual(pythonCacheConfiguration({selected, build: cache(selected.executable)}).actual.executable, selected.executable);
+  assert.throws(() => pythonCacheConfiguration({selected, build: cache(file('other/bin/python3.11'))}), /PREPARE_LLDB_PYTHON_IDENTITY executable/);
+  assert.throws(() => pythonCacheConfiguration({selected, build: cache(selected.executable, '.so')}), /PREPARE_LLDB_PYTHON_IDENTITY suffix/);
+});
+test('prepare N reaches the formal nativeN check with its library digest, verifier tools and Python input',
+  {skip: process.platform !== 'linux' || process.arch !== 'x64'}, async t => {
+  const {dir, root: prepared} = produced(t, 'linux-x64');
+  const native = sdkPlatform('linux_x86_64');
+  const {locations} = assembleNativeInputs({root: prepared, target: 'linux-x64', hostVersion: '1.1.0', env, pins});
+  // This runner's verifier tools, found on PATH (sdk-native-capi.mjs: cmake, clang++, ninja).
+  const bin = path.join(dir, 'verifier-bin'); fs.mkdirSync(bin);
+  for (const name of ['cmake', 'clang++', 'ninja'])
+    fs.writeFileSync(path.join(bin, name), `#!/bin/sh\necho NATIVE_VERIFIER_${name}_REACHED >&2\nexit 7\n`, {mode: 0o755});
+  const resolved = await nativeInstallationLocations(prepared, locations, {PATH: bin});
+  assert.deepEqual(Object.keys(resolved.llvm.verification.tools), ['cmake', 'clang++', 'ninja']);
+  const facts = JSON.parse(fs.readFileSync(resolved.llvm.buildResult, 'utf8'));
+  // sdk-inputs.mjs carries the library digest and the Python record from the N facts.
+  const carried = {...resolved.llvm.verification, librarySha256: facts.llvmLibrary.sha256,
+    python: {record: path.join(resolved.llvm.install, facts.pythonInstallationInput.record), sha256: facts.pythonInstallationInput.sha256}};
+  const row = (sha, name) => ({commit: sha, tree: 'a'.repeat(40), repository: path.join(prepared, name), install: path.join(prepared, name),
+    configuration: {}, buildResult: path.join(prepared, name, 'BUILD-INPUTS.json'), sourceRoot: path.join(prepared, name)});
+  const nativeN = verification => {
+    const runtimeRow = row(RUNTIME, 'runtime');
+    const graph = createBootstrapTargets({platform: 'linux_x86_64', work: path.join(dir, 'work'), install: path.join(dir, 'stage'),
+      llvmCommit: LLVM, runtimeCommit: RUNTIME, astCommit: COMPILER,
+      host: {version: FIXED_INPUTS.host, install: path.join(prepared, 'host')}, llvm: {...row(LLVM, 'llvm'), ...resolved.llvm, verification},
+      runtime: runtimeRow, ast: row(COMPILER, 'ast'), h1: row(FIXED_INPUTS.h1, 'h1'), compiler: row('b'.repeat(40), 'compiler'),
+      stdlib: runtimeRow, tools: {cc: 'clang', cxx: 'clang++', launcher: 'sccache', zx: 'zx'}});
+    const argv = graph.stages.find(stage => stage.id === 'nativeN').test.commands[0].argv;
+    const run = spawnSync(argv[0], argv.slice(1), {encoding: 'utf8'});
+    return {request: JSON.parse(argv[2]), status: run.status, output: `${run.stdout}${run.stderr}`};
+  };
+  const reached = nativeN(carried);
+  for (const key of ['librarySha256', 'tools', 'python']) assert.ok(reached.request[key], key);
+  // The check ran this runner's cmake for the C API probe: rc is that tool's 7.
+  assert.equal(reached.status, 7, reached.output);
+  assert.doesNotMatch(reached.output, /NATIVE_LLVM_ORIGINAL_INPUT_REQUIRED|LLVM_DYLIB_SHA256|LLVM_DYLIB_STAMP|ENTRY_FORMAT|TOOL_IDENTITY/);
+  assert.match(reached.output, /NATIVE_VERIFIER_cmake_REACHED/);
+  // red cut: the same N row without its verification inputs (the 268c1df locations)
+  const missing = nativeN({librarySha256: facts.llvmLibrary.sha256});
+  assert.equal(missing.status, 1);
+  assert.match(missing.output, /NATIVE_LLVM_ORIGINAL_INPUT_REQUIRED/);
+  // red cut: a library that is not the recorded original input never reaches the probe
+  fs.appendFileSync(path.join(resolved.llvm.install, 'third_party/llvm', native.llvmDirectory, native.llvmLibrary), 'x');
+  const changed = nativeN(carried);
+  assert.equal(changed.status, 1);
+  assert.match(changed.output, /LLVM_DYLIB_SHA256/);
+  assert.doesNotMatch(changed.output, /NATIVE_VERIFIER_cmake_REACHED/);
 });

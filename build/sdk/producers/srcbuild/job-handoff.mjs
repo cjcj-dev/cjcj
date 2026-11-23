@@ -100,6 +100,16 @@ async function exists(file) {
 // only build manifests (cjpm.toml/cjpm.lock) may cross as digest-bound bytes.
 // Any other edited tracked file is source and fails the pack.
 const OVERLAY_MANIFEST = /(^|\/)cjpm\.(toml|lock)$/;
+// A new untracked source file inside a tracked directory of the workflow
+// checkout (workspace root, packages/, runtime_shim/) is source the pinned
+// commit does not have; build outputs live in untracked directories or are not
+// source files (objects, .cjo, libraries).
+const SOURCE_FILE = /\.(cj|c|cc|cpp|cxx|h|hh|hpp|hxx)$/i;
+const trackedDirectories = tracked => {
+  const dirs = new Set(['']);
+  for (const rel of tracked) for (let dir = path.posix.dirname(rel); dir !== '.' && !dirs.has(dir); dir = path.posix.dirname(dir)) dirs.add(dir);
+  return dirs;
+};
 const headBlob = (dir, rel) => {
   const r = spawnSync('git', ['-C', dir, 'show', `HEAD:${rel}`], {encoding: 'utf8', maxBuffer: 1 << 30});
   if (r.status !== 0) throw new Error(`handoff cannot read pinned ${rel}`);
@@ -109,11 +119,14 @@ async function payloadPlan(root, entries, excluded) {
   const head = checkoutHead(root);
   if (!head || !SHA40.test(head)) throw new Error('handoff workspace is not a pinned Git checkout');
   const repos = [{prefix: '', tracked: trackedPaths(root)}];
+  const workflowDirectories = trackedDirectories(repos[0].tracked);
   const checkouts = [], files = [], overlay = new Map(), derivations = [];
   const addOverlay = async (prefix, dir) => {
     for (const rel of modifiedPaths(dir)) {
       const full = prefix ? prefix + '/' + rel : rel;
-      if (!await exists(path.join(root, full))) continue;
+      // A deleted tracked file would silently reappear from the pinned checkout
+      // on the consumer, so the producer's tree could not be reproduced.
+      if (!await exists(path.join(root, full))) throw new Error(`handoff deleted tracked source: ${full}`);
       if (full === VERSION_SOURCE) {
         const current = await fs.readFile(path.join(root, full), 'utf8'), version = injectedCangjieVersion(current);
         if (!version || applyCangjieVersion(headBlob(dir, rel), version) !== current)
@@ -131,7 +144,15 @@ async function payloadPlan(root, entries, excluded) {
     if (skip(rel)) return;
     const file = path.join(root, rel);
     const stat = await fs.lstat(file);
-    if (!stat.isDirectory()) { if (!tracked(rel)) files.push(rel); return; }
+    if (!stat.isDirectory()) {
+      if (tracked(rel)) return;
+      const owner = repos.filter(repo => repo.prefix === '' || rel.startsWith(repo.prefix + '/'))
+        .sort((a, b) => b.prefix.length - a.prefix.length)[0];
+      if (owner?.prefix === '' && SOURCE_FILE.test(rel) && workflowDirectories.has(path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel)))
+        throw new Error(`handoff untracked source: ${rel}`);
+      files.push(rel);
+      return;
+    }
     if (path.basename(rel) === '.git') return;
     if (rel !== '' && await exists(path.join(file, '.git'))) {
       const commit = checkoutHead(file);

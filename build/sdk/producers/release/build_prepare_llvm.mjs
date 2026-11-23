@@ -14,16 +14,44 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {sdkPlatform} from '../../../../ci/bootstrap/sdk-platform.mjs';
 import {nativeLlvmInputs} from '../../../../ci/native-llvm-inputs.mjs';
+import {pythonConfiguration} from '../../../../ci/bootstrap/sdk-cjdb-python.mjs';
+import {execute} from '../../../../ci/bootstrap/sdk-io.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 export const PREPARE_LLVM_TARGETS = Object.freeze(['LLVM', 'llc', 'llvm-as', 'llvm-dis', 'llvm-nm', 'lldb']);
 // cjdb is LLDB of the same tree (upstream compiler third_party/cmake/BuildCJDB.cmake
-// enables lldb with CANGJIE_ROOT=<compiler source>); Python/libedit stay off.
+// enables lldb with CANGJIE_ROOT=<compiler source>); libedit/curses stay off.
 export const PREPARE_LLDB_ARGS = Object.freeze(['-DLLVM_ENABLE_PROJECTS=clang;lldb', '-DLLDB_INCLUDE_TESTS=OFF',
-  '-DCLANG_INCLUDE_TESTS=OFF', '-DLLDB_ENABLE_PYTHON=OFF', '-DLLDB_ENABLE_LIBEDIT=OFF', '-DLLDB_ENABLE_CURSES=OFF',
+  '-DCLANG_INCLUDE_TESTS=OFF', '-DLLDB_ENABLE_LIBEDIT=OFF', '-DLLDB_ENABLE_CURSES=OFF',
   '-DLLDB_ENABLE_LZMA=OFF', '-DLLDB_ENABLE_LIBXML2=OFF', '-DLLVM_ENABLE_TERMINFO=OFF']);
-export function llvmConfigureArgs({source, build, runtime, sha, jobs, os, compiler}) {
+// The formal nativeN check (ci/bootstrap/sdk-native-input-check.mjs) requires
+// cjdb's Python input: the relocated CPython 3.11 its LLDB was configured with
+// (sdk-cjdb-python.mjs verifyRelocatedCjdbPython). It is a fixed archive whose
+// prefix is relocatable (bin/python3.11, include/python3.11, lib/libpython3.11.so).
+// The darwin/windows python-versions archives are .pkg/.exe installers, not a
+// prefix; those hosts keep LLDB Python off until a prefix producer exists.
+export const PREPARE_PYTHON = Object.freeze({
+  linux_x86_64: Object.freeze({version: '3.11.9', size: 118991790,
+    url: 'https://github.com/actions/python-versions/releases/download/3.11.9-9947079978/python-3.11.9-linux-22.04-x64.tar.gz',
+    sha256: '6f32bd7be4a7ec53a419afc41e14237c42bcdf654a4397fde5bd66290ba92718'}),
+  linux_aarch64: Object.freeze({version: '3.11.9', size: 117137740,
+    url: 'https://github.com/actions/python-versions/releases/download/3.11.9-9947079978/python-3.11.9-linux-24.04-arm64.tar.gz',
+    sha256: '3681d081b289bc53eecacb306442b530c25456dc6268d37ac60c201fa67073be'}),
+});
+export const PREPARE_PYTHON_MEMBERS = Object.freeze(['bin', 'lib', 'include', 'share']);
+// With Python on, the same build tree's lldb Python package (target lldb-python,
+// lib/python3.11/site-packages/lldb with its _lldb binding) is what cjdb imports.
+export const PREPARE_LLDB_PYTHON_TARGET = 'lldb-python';
+export const PREPARE_LLDB_PYTHON_PACKAGE = 'lib/python3.11/site-packages/lldb';
+export function lldbPythonArgs(python) {
+  if (!python) return ['-DLLDB_ENABLE_PYTHON=OFF'];
+  for (const key of ['executable', 'include', 'library'])
+    if (!python[key]) throw new Error('PREPARE_LLDB_PYTHON_SELECTION ' + key);
+  return ['-DLLDB_ENABLE_PYTHON=ON', `-DPython3_EXECUTABLE=${python.executable}`, `-DPython3_INCLUDE_DIR=${python.include}`,
+    `-DPython3_LIBRARY=${python.library}`, '-DLLDB_EMBED_PYTHON_HOME=OFF'];
+}
+export function llvmConfigureArgs({source, build, runtime, sha, jobs, os, compiler, python}) {
   if (!compiler) throw new Error('PREPARE_LLVM_COMPILER_SOURCE');
   return ['-G', 'Ninja', '-S', source, '-B', build,
     `-DCANGJIE_RUNTIME_SOURCE_DIR=${runtime}`, `-DCJ_LLVM_COMMIT=${sha}`,
@@ -31,15 +59,27 @@ export function llvmConfigureArgs({source, build, runtime, sha, jobs, os, compil
     '-DCMAKE_C_FLAGS_RELWITHDEBINFO=-O2 -g1 -DNDEBUG', '-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -g1 -DNDEBUG',
     '-DLLVM_ENABLE_ASSERTIONS=OFF', '-DLLVM_ENABLE_RTTI=OFF',
     `-DLLVM_PARALLEL_COMPILE_JOBS=${jobs}`, '-DLLVM_PARALLEL_LINK_JOBS=1',
-    '-DBUILD_SHARED_LIBS=OFF', '-DLLVM_BUILD_LLVM_DYLIB=ON', '-DLLVM_LINK_LLVM_DYLIB=OFF',
-    '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', ...PREPARE_LLDB_ARGS, `-DCANGJIE_ROOT=${compiler}`,
+    // On Unix llc/llvm-as/llvm-dis link the in-process library itself, so the
+    // installed readers load the installed N (sdk-native-input-check.mjs ldd domain).
+    '-DBUILD_SHARED_LIBS=OFF', '-DLLVM_BUILD_LLVM_DYLIB=ON', `-DLLVM_LINK_LLVM_DYLIB=${os === 'win32' ? 'OFF' : 'ON'}`,
+    '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', ...PREPARE_LLDB_ARGS, ...lldbPythonArgs(python), `-DCANGJIE_ROOT=${compiler}`,
     ...(os === 'win32' ? ['-DLLVM_ENABLE_ZLIB=OFF', '-DLLVM_ENABLE_LIBXML2=OFF'] : []),
     '-DCMAKE_CXX_FLAGS=-include cstdint -include unordered_map -include map -include vector -include string'];
 }
-export function buildPrepareLlvm({platform, sha, out, compiler, work = process.cwd(), env = process.env, run = spawnSync}) {
+// llvm-nm --defined-only prints a Mach-O C symbol with its leading '_' and an ELF
+// dynamic symbol with its version (LLVMInitializeX86TargetInfo@@LLVM_15); compare
+// the C name, as ci/bootstrap/std-runtime-colour.mjs nativeSymbol does.
+export const PREPARE_LLVM_LIBRARY_SYMBOLS = Object.freeze(['LLVMInitializeX86TargetInfo']);
+export function llvmLibrarySymbolProblems(nm, required = PREPARE_LLVM_LIBRARY_SYMBOLS) {
+  const names = new Set(String(nm).split(/\r?\n/).map(line => line.trim().split(/\s+/).pop()).filter(Boolean)
+    .map(name => name.split('@', 1)[0].replace(/^_/, '')));
+  return required.filter(want => !names.has(want));
+}
+export function buildPrepareLlvm({platform, sha, out, compiler, python, work = process.cwd(), env = process.env, run = spawnSync}) {
   const native = sdkPlatform(platform);
   if (!/^[0-9a-f]{40}$/.test(sha || '')) throw new Error('PREPARE_LLVM_SHA');
   if (!compiler || !fs.existsSync(path.join(compiler, 'schema/CjoFormat.fbs'))) throw new Error('PREPARE_LLVM_COMPILER_SOURCE');
+  if (PREPARE_PYTHON[platform] && !python) throw new Error('PREPARE_LLDB_PYTHON_REQUIRED ' + platform);
   const url = nativeLlvmInputs(env).LLVM_URL;
   const records = [];
   const command = (argv, options = {}) => {
@@ -67,11 +107,11 @@ export function buildPrepareLlvm({platform, sha, out, compiler, work = process.c
     command(['npx', '--yes', 'zx@8', 'ci/fetch-llvm-runtime.mjs', runtime]);
     const jobs = command([process.execPath, 'ci/build-resources.mjs', '--jobs-only'], {capture: true}).trim();
     if (!/^[1-9][0-9]*$/.test(jobs)) throw new Error('PREPARE_LLVM_JOBS');
-    command(['cmake', ...llvmConfigureArgs({source: path.join(source, 'llvm'), build, runtime, sha, jobs, os: native.os, compiler: slash(path.resolve(compiler))})]);
-    command(['cmake', '--build', build, '--target', ...PREPARE_LLVM_TARGETS, '--parallel', jobs]);
+    command(['cmake', ...llvmConfigureArgs({source: path.join(source, 'llvm'), build, runtime, sha, jobs, os: native.os, compiler: slash(path.resolve(compiler)), python})]);
+    command(['cmake', '--build', build, '--target', ...PREPARE_LLVM_TARGETS, ...(python ? [PREPARE_LLDB_PYTHON_TARGET] : []), '--parallel', jobs]);
     const library = path.join(build, native.llvmDirectory, native.llvmLibrary);
     const symbols = command([path.join(build, 'bin', 'llvm-nm' + native.exe), '--defined-only', library], {capture: true});
-    if (!/\bLLVMInitializeX86TargetInfo\b/.test(symbols)) throw new Error('PREPARE_LLVM_LIBRARY_SYMBOLS');
+    if (llvmLibrarySymbolProblems(symbols).length) throw new Error('PREPARE_LLVM_LIBRARY_SYMBOLS');
     fs.copyFileSync(library, path.join(out, native.llvmLibrary)); // copyFile follows the versioned symlink
     fs.mkdirSync(path.join(out, 'bin'), {recursive: true});
     for (const tool of ['llc', 'llvm-as', 'llvm-dis']) {
@@ -86,10 +126,73 @@ export function buildPrepareLlvm({platform, sha, out, compiler, work = process.c
     if (!lldbLibraries.length) throw new Error('PREPARE_LLDB_LIBRARY_MISSING');
     fs.mkdirSync(path.join(out, 'lldb-lib'), {recursive: true});
     for (const name of lldbLibraries) fs.copyFileSync(path.join(libDir, name), path.join(out, 'lldb-lib', name));
-    return {platform, sha, library: native.llvmLibrary, tools: ['llc', 'llvm-as', 'llvm-dis'], cjdb: 'bin/lldb' + native.exe, lldbLibraries};
+    if (python) {
+      const pkg = path.join(build, PREPARE_LLDB_PYTHON_PACKAGE);
+      if (!fs.existsSync(pkg) || !fs.readdirSync(pkg).some(name => name.startsWith('_lldb')))
+        throw new Error('PREPARE_LLDB_PYTHON_PACKAGE_MISSING ' + PREPARE_LLDB_PYTHON_PACKAGE);
+      fs.cpSync(pkg, path.join(out, 'lldb-python/lldb'), {recursive: true, verbatimSymlinks: true});
+    }
+    return {platform, sha, library: native.llvmLibrary, tools: ['llc', 'llvm-as', 'llvm-dis'], cjdb: 'bin/lldb' + native.exe, lldbLibraries, build};
   } finally {
     fs.writeFileSync(path.join(out, 'BUILD-COMMANDS.json'), JSON.stringify(records, null, 2) + '\n');
   }
+}
+
+// Fetch the fixed Python archive into OUT/python and record its source and the
+// three products the consumer re-checks (pythonSourceInputs: interpreter, header,
+// library), with the selection the LLDB configure step uses.
+const sha256File = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+export async function preparePython({platform, out, download = async (url, file) => {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`PREPARE_PYTHON_DOWNLOAD ${response.status}`);
+  fs.writeFileSync(file, Buffer.from(await response.arrayBuffer()));
+}, run = spawnSync, configure = pythonConfiguration}) {
+  const pin = PREPARE_PYTHON[platform];
+  if (!pin) throw new Error('PREPARE_PYTHON_UNAVAILABLE ' + platform);
+  const root = path.join(out, 'python'), archive = path.join(out, path.basename(new URL(pin.url).pathname));
+  if (fs.existsSync(root)) throw new Error('PREPARE_PYTHON_FRESH_PREFIX_REQUIRED');
+  fs.mkdirSync(root, {recursive: true});
+  await download(pin.url, archive);
+  if (fs.statSync(archive).size !== pin.size || sha256File(archive) !== pin.sha256) throw new Error('PREPARE_PYTHON_ARCHIVE_IDENTITY');
+  const extracted = run('tar', ['-xzf', archive, '-C', root, ...PREPARE_PYTHON_MEMBERS.map(name => './' + name)], {stdio: 'inherit'});
+  if (extracted.error || extracted.status !== 0) throw new Error('PREPARE_PYTHON_EXTRACT');
+  fs.rmSync(archive);
+  // The archive's sysconfig LIBDIR names its build prefix; select by the
+  // running prefix, as the relocated consumer does (installed=true).
+  const selected = await configure(root, platform, execute, undefined, true);
+  if (selected.version.split(/\s/)[0] !== pin.version) throw new Error('PREPARE_PYTHON_VERSION');
+  const files = {};
+  for (const file of [selected.executable, path.join(selected.include, 'Python.h'), selected.library]) {
+    const real = fs.realpathSync(file), rel = path.relative(fs.realpathSync(root), real).split(path.sep).join('/');
+    if (rel.startsWith('../') || path.isAbsolute(rel)) throw new Error('PREPARE_PYTHON_PRODUCT_OUTSIDE ' + file);
+    files[rel] = {sha256: sha256File(real)};
+  }
+  const record = {schema: 'cjcj-prepare-python-v1', rc: 0, target: platform, host: platform,
+    producer: 'build/sdk/producers/release/build_prepare_llvm.mjs python',
+    source: {url: pin.url, version: pin.version, sha256: pin.sha256}, files};
+  fs.writeFileSync(path.join(out, 'PYTHON-BUILD-INPUTS.json'), JSON.stringify(record, null, 2) + '\n');
+  fs.writeFileSync(path.join(out, 'PYTHON-SELECTED.json'), JSON.stringify(selected, null, 2) + '\n');
+  return {root, selected, record};
+}
+// After the LLDB configure+build: the actual CMakeCache Python identity must be
+// the selected prefix (the relationship verifyRelocatedCjdbPython re-reads).
+export function pythonCacheConfiguration({selected, build}) {
+  const cacheFile = path.join(build, 'CMakeCache.txt'), cache = fs.readFileSync(cacheFile, 'utf8');
+  const value = name => cache.match(new RegExp(`^${name}:[^=]+=([^\\n]*)$`, 'm'))?.[1];
+  const actual = {executable: value('_Python3_EXECUTABLE') || value('Python3_EXECUTABLE'),
+    include: value('_Python3_INCLUDE_DIR') || value('Python3_INCLUDE_DIR'),
+    library: value('_Python3_LIBRARY_RELEASE') || value('Python3_LIBRARY'), suffix: value('LLDB_PYTHON_EXT_SUFFIX')};
+  for (const name of ['executable', 'include', 'library'])
+    if (!actual[name] || !fs.existsSync(actual[name]) || fs.realpathSync(actual[name]) !== fs.realpathSync(selected[name]))
+      throw new Error(`PREPARE_LLDB_PYTHON_IDENTITY ${name}: ${actual[name]} != ${selected[name]}`);
+  if (actual.suffix !== selected.suffix) throw new Error(`PREPARE_LLDB_PYTHON_IDENTITY suffix: ${actual.suffix} != ${selected.suffix}`);
+  return {selected, actual, cacheSha256: sha256File(cacheFile)};
+}
+export function recordPreparePython({out, build}) {
+  const selected = JSON.parse(fs.readFileSync(path.join(out, 'PYTHON-SELECTED.json'), 'utf8'));
+  const configured = pythonCacheConfiguration({selected, build});
+  fs.writeFileSync(path.join(out, 'PYTHON-CONFIGURED.json'), JSON.stringify(configured, null, 2) + '\n');
+  return configured;
 }
 
 // Compile the compiler-owned LLVM FFI shim (runtime_shim/cjselfhost_llvmshim.cpp,
@@ -148,7 +251,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (rest[0] === 'shim') console.log(JSON.stringify(buildPrepareShim({platform: option('platform'),
       compiler: path.resolve(option('compiler') || ''), flatc: option('flatc') && path.resolve(option('flatc')),
       out: path.resolve(option('out') || '')})));
-    else console.log(JSON.stringify(buildPrepareLlvm({platform: option('platform'), sha: option('sha'),
-      compiler: option('compiler') && path.resolve(option('compiler')), out: path.resolve(option('out') || '')})));
+    else {
+      const platform = option('platform'), out = path.resolve(option('out') || '');
+      const python = PREPARE_PYTHON[platform] ? (await preparePython({platform, out})).selected : undefined;
+      const built = buildPrepareLlvm({platform, sha: option('sha'), python,
+        compiler: option('compiler') && path.resolve(option('compiler')), out});
+      if (python) recordPreparePython({out, build: built.build});
+      console.log(JSON.stringify(built));
+    }
   } catch (error) { console.error(error.message); process.exitCode = error.rc || 1; }
 }

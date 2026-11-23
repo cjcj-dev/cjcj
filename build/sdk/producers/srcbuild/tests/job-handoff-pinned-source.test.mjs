@@ -179,6 +179,33 @@ test('red cut: an edited tracked source file or a non-injection Version.cj edit 
   assert.notEqual(extra.rc, 0);
   assert.match(extra.output, /handoff modified tracked source: packages\/basic\/src\/Version\.cj/);
 });
+test('red cut: an edited, a new untracked or a deleted source file fails the pack; build outputs still cross', async t => {
+  const f = await fixture(t);
+  await write(path.join(f.root, 'packages/cjc/src/main.cj'), 'main() { edited }\n');
+  const edited = f.run('pack');
+  assert.equal(edited.rc, 1, edited.output);
+  assert.match(edited.output, /handoff modified tracked source: packages\/cjc\/src\/main\.cj/);
+  for (const rel of ['packages/cjc/src/extra.cj', 'runtime_shim/extra_shim.c', 'packages/cjc/src/extra.h']) {
+    const g = await fixture(t);
+    await write(path.join(g.root, rel), 'untracked source\n');
+    const added = g.run('pack');
+    assert.equal(added.rc, 1, `${rel}: ${added.output}`);
+    assert.match(added.output, new RegExp(`handoff untracked source: ${rel.replace(/[./]/g, '\\$&')}`));
+  }
+  const h = await fixture(t);
+  await fs.rm(path.join(h.root, 'packages/cjc/src/main.cj'));
+  const deleted = h.run('pack');
+  assert.equal(deleted.rc, 1, deleted.output);
+  assert.match(deleted.output, /handoff deleted tracked source: packages\/cjc\/src\/main\.cj/);
+  // control: a generated source inside an untracked build directory and an object
+  // next to tracked sources are build outputs and still cross
+  const k = await fixture(t);
+  await write(path.join(k.root, 'packages/cjc/target/gen/generated.cj'), 'generated\n');
+  const built = k.run('pack');
+  assert.equal(built.rc, 0, built.output);
+  const crossed = members(path.join(k.archive, 'payload.tar'));
+  for (const rel of ['packages/cjc/target/gen/generated.cj', 'runtime_shim/cjc_runtime_config.o']) assert.ok(crossed.includes(rel), rel);
+});
 test('red cut: restore re-checks each derivation and overlay and the exact edited set', async t => {
   const f = await fixture(t);
   await write(path.join(f.root, VERSION_FILE), VERSION_INJECTED);
