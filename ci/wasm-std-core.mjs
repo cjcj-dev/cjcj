@@ -5,6 +5,9 @@ import path from 'node:path';
 import {SYSROOT_DIR} from './wasi-toolchain.mjs';
 
 const target = '--target=wasm32-wasi';
+export const WASM_LOCAL_MODE_CJC_ARGS = Object.freeze([
+  '--experimental', '--enable-local-mode', '--cfg', 'local_mode_api=off',
+]);
 const cSources = dir => fs.readdirSync(dir).filter(name => name.endsWith('.c')).sort();
 
 export function wasmStdInputs({stdlibSource, boundscheckSource, clang, llvmAr}) {
@@ -47,7 +50,7 @@ export function buildWasmStdCore(sdk, work, inputs, {cjcArgs = []} = {}) {
   }
 
   const output = path.join(work, 'std.core');
-  run(path.join(sdk, 'bin', process.platform === 'win32' ? 'cjc.exe' : 'cjc'), [target, ...cjcArgs, '--no-prelude', '--no-sub-pkg', '-p', core, '--output-type=staticlib',
+  run(path.join(sdk, 'bin', process.platform === 'win32' ? 'cjc.exe' : 'cjc'), [target, ...WASM_LOCAL_MODE_CJC_ARGS, ...cjcArgs, '--no-prelude', '--no-sub-pkg', '-p', core, '--output-type=staticlib',
     '--disable-reflection', `--output=${output}`, '-V']);
   const module = output + '.cjo';
   if (!fs.statSync(module).size || !fs.statSync(output).size) throw new Error('cjc did not produce both std.core outputs');

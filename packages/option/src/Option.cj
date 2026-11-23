@@ -1320,11 +1320,10 @@ public open class GlobalOptions <: Option {
     }
 
     protected open func PerformPostActions(): Bool {
-        if (enableLocalMode && (backend != BackendType.CJNATIVE || target.os != OSType.LINUX ||
-            target.arch != ArchType.X86_64 || target.env != EnvironmentType.GNU || interpreter ||
+        if (enableLocalMode && (backend != BackendType.CJNATIVE || interpreter ||
             enIncrementalCompilation || compileCjd || !commonPartChirs.isEmpty() ||
             IsEmitCHIREnable())) {
-            Errorln("local mode requires a Linux x86_64 GNU native source compilation")
+            Errorln("local mode requires CJNATIVE source compilation without interpreter, incremental compilation, declaration files, common-part CHIR, or CHIR emission")
             return false
         }
         if (outputMode == OutputMode.CJO && (backend != BackendType.CJNATIVE || target.os != OSType.LINUX ||
