@@ -7,13 +7,46 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {h1PackageLinkOptions} from './sdk-native-stage.mjs';
+import {createHash} from 'node:crypto';
+import {h1PackageLinkOptions, h1HeapDefaultsBuild} from './sdk-native-stage.mjs';
+import {FIXED_INPUTS} from './sdk-targets.mjs';
 import {h1ShimInstall} from './sdk-inputs.mjs';
 import {effectiveLinkOptions, linkOptionLines, effectiveSections, DARWIN_CJC_LINK, LEGACY_LINUX_CJC_LINK} from './cjc-link-sections.mjs';
 
 const manifest = await fs.readFile(new URL('../../packages/cjc/cjpm.toml', import.meta.url), 'utf8');
 const source = '/work/h1-source', nativeLlvm = '/work/N/third_party/llvm/lib';
 const sorted = list => [...list].sort();
+// The managed Unix H1 is built from FIXED_INPUTS.h1. Its packages/cjc
+// manifest is kept here byte for byte (sha256 bound) so the producer is
+// tested on the source it actually reads, not only on candidate HEAD: it has
+// the ELF link in [package] alone and no [target.<triple>] section.
+const H1_SOURCE = '83901791548856f0458f3e3e38c4c1ab7ac496c5';
+const H1_MANIFEST_SHA256 = 'ff3df7623e3415e82a65025318a01e45e66d2d73b205a71c5e6e04785801d68b';
+const h1Manifest = [
+"[package]",
+"  cjc-version = \"1.1.0\"",
+"  name = \"cjc\"",
+"  organization = \"cjcj\"",
+"  description = \"Self-hosted Cangjie compiler executable entry\"",
+"  version = \"0.1.0\"",
+"  target-dir = \"\"",
+"  script-dir = \"\"",
+"  src-dir = \"src\"",
+"  output-type = \"executable\"",
+"  compile-option = \"\"",
+"  override-compile-option = \"\"",
+"  link-option = \"--export-dynamic runtime_shim/cjselfhost_llvmshim.o runtime_shim/cjc_runtime_config.o ${CANGJIE_HOME}/third_party/llvm/lib/libLLVM-15.so -lstdc++\"",
+"  package-configuration = {}",
+"",
+"[dependencies]",
+"  \"cjcj::driver\" = { path = \"../driver\" }",
+"  \"cjcj::utils\" = { path = \"../utils\" }",
+"  \"cjcj::frontend\" = { path = \"../frontend\" }",
+"  \"cjcj::chir\" = { path = \"../chir\" }",
+"  \"cjcj::basic\" = { path = \"../basic\" }",
+""
+].join('\n');
+const UNIX = ['linux_x86_64', 'linux_aarch64', 'darwin_aarch64', 'darwin_x86_64'];
 function rewrite(platform, text = manifest, supports = true, llvmLibrary) {
   const darwin = platform.startsWith('darwin');
   const library = darwin ? 'libLLVM.dylib' : 'libLLVM-15.so';
@@ -80,4 +113,83 @@ test('every public H1 host takes the prepare-native shim of its own commit; Wind
     assert.equal(h1ShimInstall(platform, {...same, h1Commit: 'd'.repeat(40)}), undefined, platform);
   }
   assert.equal(h1ShimInstall('windows_x86_64', same), undefined);
+});
+
+test('the H1 manifest under test is the exact FIXED_INPUTS.h1 packages/cjc/cjpm.toml', () => {
+  assert.equal(FIXED_INPUTS.h1, H1_SOURCE);
+  assert.equal(createHash('sha256').update(h1Manifest).digest('hex'), H1_MANIFEST_SHA256);
+  // Where the object is present (full local clone), it is the same bytes.
+  const git = spawnSync('git', ['show', `${H1_SOURCE}:packages/cjc/cjpm.toml`], {encoding: 'utf8'});
+  if (git.status === 0) assert.equal(git.stdout, h1Manifest);
+  assert.equal(linkOptionLines(h1Manifest).some(row => row.section.startsWith('target.')), false);
+});
+
+for (const platform of UNIX) for (const supports of [true, false]) {
+  test(`${platform} H1 from FIXED_INPUTS.h1 links N's LLVM with no H LLVM or ELF residue (ConfigV1=${supports})`, () => {
+    const darwin = platform.startsWith('darwin');
+    const out = rewrite(platform, h1Manifest, supports), actual = effectiveLinkOptions(out, platform);
+    console.log(`H1_FIXED_SOURCE_LINK_ASSERT_REACHED platform=${platform}`);
+    const expected = darwin
+      ? ['-export_dynamic', 'runtime_shim/cjselfhost_llvmshim.o', 'runtime_shim/cjc_runtime_config.o',
+        '-headerpad_max_install_names', 'runtime_shim/h1-libLLVM.dylib', '-rpath', nativeLlvm, '-lc++']
+      : ['--export-dynamic', 'runtime_shim/cjselfhost_llvmshim.o', 'runtime_shim/cjc_runtime_config.o',
+        'runtime_shim/h1-libLLVM-15.so', '-lstdc++'];
+    assert.deepEqual(actual, expected);
+    assert.equal(actual.some(token => token.includes('${CANGJIE_HOME}/third_party/llvm')), false);
+    if (darwin) {
+      for (const elf of ['--export-dynamic', '-lstdc++']) assert.equal(actual.includes(elf), false, elf);
+      assert.equal(actual.some(token => token.includes('libLLVM-15.so')), false);
+      // Same Mach-O contract as candidate HEAD's [target.<triple>] link; the
+      // fixed source carries cjc_runtime_config.o in [package] instead of the
+      // workspace line.
+      assert.deepEqual(sorted(actual), sorted([...effectiveLinkOptions(rewrite(platform, manifest, supports), platform),
+        'runtime_shim/cjc_runtime_config.o']));
+    }
+    assert.deepEqual(linkOptionLines(out).filter(row => row.section !== 'package'), linkOptionLines(h1Manifest).filter(row => row.section !== 'package'));
+  });
+}
+
+test('candidate HEAD keeps its own [target.<triple>] link on all four Unix hosts', () => {
+  for (const platform of UNIX) {
+    const actual = effectiveLinkOptions(rewrite(platform), platform);
+    assert.equal(actual.some(token => token.includes('${CANGJIE_HOME}/third_party/llvm')), false, platform);
+    if (platform.startsWith('darwin')) {
+      for (const elf of ['--export-dynamic', '-lstdc++']) assert.equal(actual.includes(elf), false, platform);
+      assert.equal(actual.some(token => token.includes('libLLVM-15.so')), false, platform);
+    } else assert.ok(actual.includes('runtime_shim/h1-libLLVM-15.so'), platform);
+  }
+});
+
+test('a Darwin H1 from an ELF-only [package] rejects ELF tokens with no Mach-O meaning', () => {
+  const line = '-lstdc++"';
+  assert.ok(h1Manifest.includes(line));
+  for (const token of ['--wrap=CJ_MRT_CjRuntimeInit', '-Wl,--gc-sections', '/opt/lib/libextra.so'])
+    assert.throws(() => rewrite('darwin_x86_64', h1Manifest.replace(line, `-lstdc++ ${token}"`)), /H1_PACKAGE_DARWIN_ELF_TOKEN/, token);
+  assert.throws(() => rewrite('darwin_aarch64', h1Manifest.replace(line, `-lstdc++ ${'${CANGJIE_HOME}'}/third_party/llvm/lib/libLLVM-15.so"`)),
+    /H1_PACKAGE_LLVM_LINK_INPUT/);
+});
+
+test('H1 compiles cjc_heap_defaults.c only where a manifest names its object, and fails closed if that source is absent', () => {
+  const workspace = '[workspace]\n  link-option = "runtime_shim/cjc_runtime_config.o"\n';
+  for (const platform of UNIX) {
+    console.log(`H1_HEAP_DEFAULTS_ASSERT_REACHED platform=${platform}`);
+    // FIXED_INPUTS.h1: no runtime_shim/cjc_heap_defaults.c, no reference.
+    assert.equal(h1HeapDefaultsBuild({workspaceText: workspace, packageText: h1Manifest, platform, sourcePresent: false}), false);
+    const linux = platform.startsWith('linux');
+    assert.equal(h1HeapDefaultsBuild({workspaceText: workspace, packageText: manifest, platform, sourcePresent: true}), linux);
+    if (linux) assert.throws(() => h1HeapDefaultsBuild({workspaceText: workspace, packageText: manifest, platform, sourcePresent: false}),
+      /H1_HEAP_DEFAULTS_SOURCE_MISSING runtime_shim\/cjc_heap_defaults\.c/);
+    else assert.equal(h1HeapDefaultsBuild({workspaceText: workspace, packageText: manifest, platform, sourcePresent: false}), false);
+    // A workspace line naming the object binds every host the same way.
+    assert.throws(() => h1HeapDefaultsBuild({workspaceText: workspace.replace('config.o', 'config.o runtime_shim/cjc_heap_defaults.o'),
+      packageText: h1Manifest, platform, sourcePresent: false}), /H1_HEAP_DEFAULTS_SOURCE_MISSING/);
+  }
+});
+
+test('the Unix H1 producer gates the heap-defaults compile on that decision', async () => {
+  const stage = await fs.readFile(new URL('./sdk-native-stage.mjs', import.meta.url), 'utf8');
+  const unix = stage.slice(stage.indexOf("// Linux and Darwin build H1 from the public CJPM workspace"), stage.indexOf("} else if(kind==='compiler')"));
+  assert.match(unix, /const heapDefaults=h1HeapDefaultsBuild\(\{workspaceText:before\.toString\(\),packageText:packageBefore\.toString\(\),platform,/);
+  assert.match(unix, /if\(heapDefaults\)await command\(/);
+  assert.equal((unix.match(/cjc_heap_defaults\.c/g) || []).length, 1);
 });

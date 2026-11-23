@@ -25,7 +25,7 @@ import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.m
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {materializeNativeSource, nativeSourceOptions} from './sdk-source.mjs';
 import {visibleOptionsOnly,configureOptionVisibility} from './compiler-option-visibility.mjs';
-import {rewriteEffectiveLinkOptions,effectiveLinkOptions} from './cjc-link-sections.mjs';
+import {rewriteEffectiveLinkOptions,effectiveLinkOptions,linkOptionLines,HOST_TRIPLES} from './cjc-link-sections.mjs';
 export {acceptInstalledStd} from './sdk-std-resume.mjs';
 // Runtime inputs are a private build input snapshot, not an install overlay.
 // Re-entry may reuse equal bytes or publish a complete new snapshot. Keep the
@@ -62,22 +62,58 @@ export async function prepareRuntimeInputs({runtime, link, native, buildType = '
 // H LLVM library input becomes the link to N's library and an H LLVM
 // directory (the Mach-O -rpath value) becomes N's, so no effective token
 // leaves H1 resolving H's LLVM.
+//
+// The fixed H1 source (FIXED_INPUTS.h1) predates [target.<triple>] sections:
+// its [package] line is the ELF link alone. On a Darwin host without its own
+// section that line is translated item for item into the Mach-O contract of
+// DARWIN_CJC_LINK (cjc-link-sections.mjs): --export-dynamic -> -export_dynamic,
+// libLLVM-15.so -> -headerpad_max_install_names <N link> -rpath <N lib>,
+// -lstdc++ -> -lc++. cjc hands these to ld64 directly, hence -rpath <dir>.
+// Any other ELF-only token has no Mach-O meaning and fails closed.
+const H1_ELF_LLVM='${CANGJIE_HOME}/third_party/llvm/lib/libLLVM-15.so';
+function h1DarwinFromElf(token,{link,nativeDirectory,count}) {
+  if(token==='--export-dynamic')return ['-export_dynamic'];
+  if(token==='-lstdc++')return ['-lc++'];
+  if(token===H1_ELF_LLVM){count();return ['-headerpad_max_install_names',link,'-rpath',nativeDirectory];}
+  if(token.startsWith('--wrap=')||token.startsWith('-Wl,')||/\.so(\.|$)/.test(token))throw Error('H1_PACKAGE_DARWIN_ELF_TOKEN '+token);
+  return [token];
+}
 export function h1PackageLinkOptions(text,{platform,source,linkFile,llvmLibraryFile,hostRuntimeSupportsConfigV1}) {
   const native=sdkPlatform(platform);
   const hostDirectory='${CANGJIE_HOME}/third_party/llvm/'+native.llvmDirectory;
   const hostLibrary=hostDirectory+'/'+native.llvmLibrary, nativeDirectory=path.dirname(llvmLibraryFile);
   if(!path.isAbsolute(nativeDirectory)||/\s/.test(nativeDirectory))throw Error('H1_PACKAGE_LLVM_DIRECTORY '+nativeDirectory);
+  const darwin=native.os==='darwin', link=path.relative(source,linkFile);
+  const fromElf=darwin&&!linkOptionLines(text).some(row=>row.section==='target.'+HOST_TRIPLES[platform]);
   let llvmInputs=0;
+  const count=()=>{llvmInputs++;};
   const result=rewriteEffectiveLinkOptions(text,platform,value=>value.split(/\s+/)
     .filter(token=>hostRuntimeSupportsConfigV1||token!=='--wrap=CJ_MRT_CjRuntimeInitWithConfigV1')
-    .map(token=>{
-      if(token===hostLibrary){llvmInputs++;return path.relative(source,linkFile);}
-      return token===hostDirectory?nativeDirectory:token;
+    .flatMap(token=>{
+      if(fromElf)return h1DarwinFromElf(token,{link,nativeDirectory,count});
+      if(token===hostLibrary){count();return [link];}
+      return [token===hostDirectory?nativeDirectory:token];
     }).join(' '));
   if(llvmInputs!==1)throw Error('H1_PACKAGE_LLVM_LINK_INPUT');
-  if(effectiveLinkOptions(result,platform).some(token=>token.includes('${CANGJIE_HOME}/third_party/llvm')))
+  const effective=effectiveLinkOptions(result,platform);
+  if(effective.some(token=>token.includes('${CANGJIE_HOME}/third_party/llvm')))
     throw Error('H1_PACKAGE_HOST_LLVM_REFERENCE');
+  // Either Darwin shape: nothing of the ELF link survives into ld64.
+  if(darwin&&effective.some(token=>token==='--export-dynamic'||token==='-lstdc++'||token.includes('libLLVM-15.so')))
+    throw Error('H1_PACKAGE_DARWIN_ELF_REFERENCE');
   return result;
+}
+// H1's own heap-default object is a link input only where the effective
+// package link (or the workspace link) names it: the Linux sections of later
+// sources. A source without runtime_shim/cjc_heap_defaults.c (FIXED_INPUTS.h1)
+// whose manifests do not name the object skips that compile; a manifest that
+// names the object while its source is absent fails closed.
+export const H1_HEAP_DEFAULTS_OBJECT='runtime_shim/cjc_heap_defaults.o';
+export function h1HeapDefaultsBuild({workspaceText,packageText,platform,sourcePresent}) {
+  const named=effectiveLinkOptions(packageText,platform).includes(H1_HEAP_DEFAULTS_OBJECT)
+    ||linkOptionLines(workspaceText).some(row=>row.value.split(/\s+/).includes(H1_HEAP_DEFAULTS_OBJECT));
+  if(named&&!sourcePresent)throw Error('H1_HEAP_DEFAULTS_SOURCE_MISSING runtime_shim/cjc_heap_defaults.c');
+  return named;
 }
 function windowsCompilerEnvironment(env,shim,install) {
   const mingw=env.CJCJ_WINDOWS_TOOLCHAIN||env.MINGW_PATH;
@@ -256,6 +292,9 @@ export async function nativeStage(options, {signal} = {}) {
     await fs.access(llvmLibraryFile,fs.constants.R_OK);
     const startupConfiguration={hostRuntimeFile,hostRuntimeSupportsConfigV1,llvmLibraryFile};
     const linkFile=path.join(source,'runtime_shim','h1-'+native.llvmLibrary);
+    const heapDefaultsSource=path.join(source,'runtime_shim/cjc_heap_defaults.c');
+    const heapDefaults=h1HeapDefaultsBuild({workspaceText:before.toString(),packageText:packageBefore.toString(),platform,
+      sourcePresent:await fs.access(heapDefaultsSource).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;})});
     let linkCreated=false;
     let packageCompiled=packageBefore;
     const lock=path.join(source,'cjpm.lock'),lockBefore=await fs.readFile(lock).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
@@ -292,10 +331,10 @@ export async function nativeStage(options, {signal} = {}) {
         // The system C compiler loads its own LLVM. H's LLVM loader is for
         // cjpm/cjc and must not be injected into this native tool process.
         {cwd:source,env:{...h1env,...toolEnvironment},records});
-      await command([...(process.env.CMAKE_C_COMPILER_LAUNCHER?[process.env.CMAKE_C_COMPILER_LAUNCHER]:[]),options.cc||'cc',
+      if(heapDefaults)await command([...(process.env.CMAKE_C_COMPILER_LAUNCHER?[process.env.CMAKE_C_COMPILER_LAUNCHER]:[]),options.cc||'cc',
         '-std=c11','-O2','-fPIC',...(!hostRuntimeSupportsConfigV1?['-DCJCJ_LEGACY_HOST_RUNTIME']:[]),
-        '-c',path.join(source,'runtime_shim/cjc_heap_defaults.c'),
-        '-o',path.join(source,'runtime_shim/cjc_heap_defaults.o')],
+        '-c',heapDefaultsSource,
+        '-o',path.join(source,H1_HEAP_DEFAULTS_OBJECT)],
         {cwd:source,env:{...h1env,...toolEnvironment},records});
       const target=await privateRoot(options['target-dir']||path.join(source,'target'));
       await command([path.join(host,'tools/bin/cjpm'),'build',...(options['target-dir']?['--target-dir',target]:[]),'-j'+jobs],{cwd:source,env:h1env,records});
