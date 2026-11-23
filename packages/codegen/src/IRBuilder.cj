@@ -4250,7 +4250,7 @@ public class IRBuilder2 <: Resource {
     // The callee name of a direct call instruction, or "" for any other value.
     private func DirectCalleeName(value: LLVMValueRef): String {
         if (value.isNull() || unsafe { LLVMIsAInstruction(value) }.isNull() ||
-            unsafe { LLVMGetInstructionOpcode(value) } != 34) { return "" } // 34: LLVMCall
+            unsafe { LLVMGetInstructionOpcode(value) } != 45) { return "" } // 45: LLVMCall
         let callee = unsafe { LLVMGetCalledValue(value) }
         if (callee.isNull()) { return "" }
         return LLVMCStringToString(unsafe { LLVMGetValueName(callee) }) ?? ""
