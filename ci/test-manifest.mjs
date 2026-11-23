@@ -208,6 +208,9 @@ export const GATING = Object.freeze([
   'build/sdk/producers/release/windows-source-package.test.mjs',
   'build/sdk/producers/srcbuild/tests/android-install.test.mjs',
   'build/sdk/producers/srcbuild/tests/ohos-split-sdk.test.mjs',
+  // Release publication contract and the G4 source-phase graph.
+  'ci/release-publish.test.mjs',
+  'ci/release-gates-g4.test.mjs',
 ]);
 
 // Registered, not executed. `needs` is what CI would have to provide; `verified`

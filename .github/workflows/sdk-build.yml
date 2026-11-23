@@ -5,8 +5,6 @@ on:
     secrets:
       GITCODE_API_KEY:
         required: false
-      WINDOWS_TOOLS_READ_TOKEN:
-        required: false
     outputs:
       std_artifact:
         description: Native final std name for a single runnable source target
@@ -350,8 +348,6 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     uses: ./.github/workflows/sdk-build-target.yml
-    secrets:
-      WINDOWS_TOOLS_READ_TOKEN: ${{ github.event.repository.private && matrix.target == 'windows-x64' && secrets.WINDOWS_TOOLS_READ_TOKEN || '' }}
     with:
       native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
       native_build_inputs_run_id: ${{ inputs.native_build_inputs_run_id }}
@@ -479,11 +475,9 @@ jobs:
         if: inputs.validation_run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          PRIVATE: ${{ github.event.repository.private }}
           SOURCE_RUN_ID: ${{ inputs.validation_run_id }}
         shell: pwsh
         run: |
-          if ($env:PRIVATE -ne 'true') { throw 'private validation repository required' }
           if ($env:SOURCE_RUN_ID -notmatch '^[1-9][0-9]*$') { throw 'invalid producer run id' }
           $run = Invoke-RestMethod "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID" -Headers @{Authorization="Bearer $env:GH_TOKEN"}
           if ($run.path -ne '.github/workflows/sdk-build.yml' -or $run.head_sha -ne $env:GITHUB_SHA -or $run.head_repository.full_name -ne $env:GITHUB_REPOSITORY -or $run.conclusion -ne 'success') { throw 'producer commit, repository or conclusion differs' }

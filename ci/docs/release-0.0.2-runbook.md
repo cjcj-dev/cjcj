@@ -1,5 +1,46 @@
 # cjcj 0.0.2 release runbook
 
+## Current flow (four workflows): `phase=prepare` -> `ci.yml` -> `phase=publish`
+
+`release.yml` takes a restricted `phase` choice (`prepare` | `publish`, default `prepare`, so an
+accidental dispatch never publishes) and an optional `ci_run_id`.
+
+1. **`phase=prepare`** must produce, from fixed Git sources only, the five-host inputs
+   `native-inputs-{linux-x64,linux-aarch64,windows-x64,darwin-arm64,darwin-x64}` and
+   `native-runtime-install-{linux_x86_64,linux_aarch64,windows_x86_64,darwin_aarch64,darwin_x86_64}`.
+   In this phase `plan`, every `source-p*`/`package-*` job and `publish` are skipped; no
+   `native_inputs_*` / `native_runtime_*` input is required.
+   **Status (impl_gha_002_prerelease_opus_1124): the prepare producer jobs are NOT wired yet** --
+   see that lane report. Do not dispatch `phase=prepare` expecting these artifacts.
+2. **`ci.yml`** on the same commit, consuming the same generation; record its run id.
+3. **`phase=publish`** with `version=0.0.2 prerelease=true draft=false dry_run=false`, the
+   prepare run's `native_inputs_artifact`/`native_inputs_run_id`/`native_runtime_artifact`
+   (the `plan` job fails closed when any is missing), the explicit pair
+   `native_llvm_ref=eb7ad0120f43f802fbc60615e6c6f068183fffe3`,
+   `native_runtime_ref=495052d6505a5d57dc172d605b5aa8ef14bb0027`,
+   `native_host_version=1.3.0-alpha.20261025001053`, and `ci_run_id` from step 2.
+
+`publish` runs only when `inputs.phase == 'publish' && !inputs.dry_run` (no `always()`), and
+before `gh release create` it fails closed unless (all in `ci/release-publish.mjs`):
+
+- all 20 direct `needs` (`source-p1..5`, `package-p1..5`, ten derived packages) are `success`;
+- the `ci_run_id` run, when given, is a completed successful `ci.yml` run whose `head_sha`
+  equals `GITHUB_SHA`;
+- the merged `pkg-*` download is exactly the 15 distinct archiveKeys of `build/lib/targets.mjs`
+  (excluded and cross-compiled-host entries are not packaged), 4 files each, 60 in total, with no
+  `pkg-diagnosis-*` or stray file; every `.sha256` and `.SHA256SUMS` matches the archive and the
+  sidecar `.RELEASE-MANIFEST.jsonl` is byte-identical to the manifest packed inside the archive;
+- neither release `v<version>` nor tag `v<version>` exists (lookup errors other than 404 also fail).
+
+The release is created with `--target "$GITHUB_SHA"` (never the default branch) and, for a
+prerelease, `--prerelease --latest=false`. `node ci/release-publish.mjs check-workflow` checks
+this contract statically; `ci/release-publish.test.mjs` holds its red cuts.
+
+Windows x64 builds from the public `cjcj-dev/cjcj` and public `cjcj-dev/cjcj-tools` at the
+product tools pin `TOOLS_REF` of `ci/source_pin.env`; no private repository, no
+`WINDOWS_TOOLS_READ_TOKEN`, and no hard-coded `7ed73323` tools commit remain.
+
+
 状态：`WORKFLOW_WIRED_ENVIRONMENT_NOT_CONFIGURED`。release DAG 已采用“甲：一次构建、两段消费”：同一个候选 run 先完成 producer/package，人工复核该 run 的全部已声明（packageDeclared） 平台的不可变 `pkg-*` artifact；publish job 在 `release-draft` environment 等待批准，批准后仍从该 `github.run_id` 下载并发布同一批 artifact，不再 dispatch 第二个 run。
 
 仓库外还有一个启动前硬门：`release-draft` 必须先由仓库管理员配置 required reviewers，并开启 prevent self-review。2026-08-09 的只读现场结果是 `gh api repos/cjcj-dev/cjcj/environments` 返回 `{"total_count":0,"environments":[]}`。GitHub 对不存在的 environment 会自动创建一个**没有 protection rules** 的 environment，所以只写 workflow 名称不能冒充人工审批。完成 §1.2 的环境配置与机械检查前，禁止触发 0.0.2 候选 run。

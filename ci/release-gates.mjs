@@ -752,21 +752,70 @@ function runTests(context, files) {
   return {status: 'MET', detail: `tests pass=${pass} fail=${fail}`};
 }
 
+// G4 counts source phases from the job graph, not from `uses:` lines: release.yml calls
+// sdk-build.yml for five source phases and fifteen package jobs, so the call count alone
+// can never equal the phase count. A source phase is a sdk-build.yml call without
+// `mode: package` named source-pN-*; its chain is plan -> source-p1 -> package-p1 ->
+// source-p2 -> ... -> package-p5, and each package-pN must need its own source-pN.
+function asList(value) {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
+export function g4SourcePhases(releaseText, expectedPhases = 5) {
+  const document = loadYaml(releaseText) || {};
+  const jobs = document.jobs && typeof document.jobs === 'object' ? document.jobs : {};
+  const problems = [];
+  const sdkCalls = Object.entries(jobs).filter(([, job]) => job?.uses === './.github/workflows/sdk-build.yml');
+  const mode = job => String(job?.with?.mode ?? 'build');
+  const source = sdkCalls.filter(([, job]) => mode(job) === 'build');
+  const packages = sdkCalls.filter(([, job]) => mode(job) === 'package');
+  for (const [name, job] of sdkCalls) {
+    if (!['build', 'package'].includes(mode(job))) problems.push(`${name}: unexpected sdk-build mode ${mode(job)}`);
+  }
+  const phaseOf = (name, kind) => Number(new RegExp(`^${kind}-p(\\d+)-`).exec(name)?.[1] || 0);
+  const phases = new Map();
+  for (const [name] of source) {
+    const phase = phaseOf(name, 'source');
+    if (!phase) { problems.push(`${name}: source call is not named source-pN-*`); continue; }
+    if (phases.has(phase)) problems.push(`source phase ${phase} declared twice (${phases.get(phase)}, ${name})`);
+    phases.set(phase, name);
+  }
+  const packageByPhase = new Map(packages.map(([name]) => [phaseOf(name, 'package'), name]).filter(([phase]) => phase));
+  for (let phase = 1; phase <= expectedPhases; phase += 1) {
+    const sourceName = phases.get(phase);
+    if (!sourceName) { problems.push(`missing source phase ${phase}`); continue; }
+    const needs = asList(jobs[sourceName].needs);
+    const upstream = phase === 1 ? 'plan' : packageByPhase.get(phase - 1);
+    if (!upstream || !needs.includes(upstream)) problems.push(`${sourceName} does not need ${upstream || `package-p${phase - 1}`}`);
+    const packageName = packageByPhase.get(phase);
+    if (!packageName) problems.push(`missing package phase ${phase}`);
+    else if (!asList(jobs[packageName].needs).includes(sourceName)) problems.push(`${packageName} does not need ${sourceName}`);
+  }
+  for (const phase of phases.keys()) if (phase < 1 || phase > expectedPhases) problems.push(`unexpected source phase ${phase}`);
+  return {sdkCalls: sdkCalls.length, sourcePhases: source.length, uniquePhases: phases.size,
+    packageCalls: packages.length, problems, ok: problems.length === 0 && phases.size === expectedPhases};
+}
+
 async function evaluateG4(context) {
   const release = await readFile(context, '.github/workflows/release.yml');
-  const sourceCalls = release.match(/uses:\s*\.\/\.github\/workflows\/sdk-build\.yml/g)?.length || 0;
-  const phases = [...release.matchAll(/^  source-p(\d+)-[^:]+:\s*$/gm)].map(match => Number(match[1]));
-  const uniquePhases = new Set(phases);
+  let graph;
+  try {
+    graph = g4SourcePhases(release);
+  } catch (error) {
+    return gateResult('G4', 'NOT_MET', `release.yml is not parseable YAML: ${error.message}`);
+  }
   const tests = runTests(context, [
     'build/sdk/producers/srcbuild/tests/phase-control.test.mjs',
     'build/sdk/producers/srcbuild/tests/release-wire.test.mjs',
     'build/sdk/producers/srcbuild/tests/workflow-inputs.test.mjs',
     'build/sdk/producers/srcbuild/tests/platform-contract.test.mjs',
   ]);
-  const structural = sourceCalls > 0 && sourceCalls === phases.length && phases.length === uniquePhases.size;
-  const status = structural && tests.status === 'MET' ? 'MET' : 'NOT_MET';
+  const status = graph.ok && tests.status === 'MET' ? 'MET' : 'NOT_MET';
   return gateResult('G4', status,
-    `判据 0811 已更新；srcbuild_calls=${sourceCalls} source_phases=${phases.length} unique_source_phases=${uniquePhases.size}; ${tests.detail}`);
+    `判据 1124 按 job 图核源阶段；srcbuild_calls=${graph.sdkCalls} source_phases=${graph.sourcePhases} ` +
+    `unique_source_phases=${graph.uniquePhases} package_calls=${graph.packageCalls}` +
+    `${graph.problems.length ? `; problems=${graph.problems.join(';')}` : ''}; ${tests.detail}`);
 }
 
 function stepBlock(workflow, name) {

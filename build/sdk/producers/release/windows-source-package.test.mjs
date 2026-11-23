@@ -10,7 +10,7 @@ import {zipCommand} from '../../../../ci/bootstrap/sdk-archive.mjs';
 import {unpackNativeSdk} from './receive_native_sdk.mjs';
 import {cleanSdkEnvironment} from '../../../../ci/bootstrap/sdk-platform.mjs';
 import {windowsJobSeed} from '../../../../ci/bootstrap/configure-gha-inputs.mjs';
-import {windowsToolsSource} from '../srcbuild/source-selection.mjs';
+import {windowsToolsSource,windowsToolsCommit} from '../srcbuild/source-selection.mjs';
 import {shimCommand} from '../../../../ci/bootstrap/zx-cli.mjs';
 import {withWindowsCompilerLinks} from '../../../../ci/bootstrap/windows-compiler-links.mjs';
 
@@ -88,7 +88,9 @@ test('job selects the seed from its actual checkout; artifact code, missing tool
   await assert.rejects(windowsJobSeed(root,{tools:{privateRoot:'source/from/artifact'}},env),/WINDOWS_H1_ARTIFACT_SOURCE/);
   await assert.rejects(windowsJobSeed(root,{},{...env,GITHUB_SHA:'0'.repeat(40)}),/WINDOWS_BOOTSTRAP_JOB_CHECKOUT/);
   await assert.rejects(windowsJobSeed(root,{},{...env,CJCJ_ZX_CLI:'zx'}),/WINDOWS_BOOTSTRAP_ZX_CLI/);
-  assert.throws(()=>windowsToolsSource({}),/WINDOWS_TOOLS_READ_REPOSITORY_REQUIRED/);
+  assert.deepEqual(windowsToolsSource({}),{url:'https://github.com/cjcj-dev/cjcj-tools',tag:windowsToolsCommit});
+  assert.match(windowsToolsCommit,/^[0-9a-f]{40}$/);assert.notEqual(windowsToolsCommit,'7ed733230e9997a0bcfa3e1b9822d8a0ce0b7e32');
+  assert.throws(()=>windowsToolsSource({WINDOWS_TOOLS_REPOSITORY:'../tools'}),/WINDOWS_TOOLS_REPOSITORY_INVALID/);
 });
 test('stage shim uses Node with distinct CLI and script path arguments',async()=>{
   const root=await fs.mkdtemp(path.join(parent,'shim & paths '));

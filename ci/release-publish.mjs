@@ -1,0 +1,163 @@
+#!/usr/bin/env node
+// Fail-closed release publication contract for .github/workflows/release.yml.
+//
+//   verify-assets: the merged pkg-* download must be exactly the 15 distinct archiveKeys
+//     of build/lib/targets.mjs, four files each (archive, .sha256, .RELEASE-MANIFEST.jsonl,
+//     .SHA256SUMS), 60 in total, no pkg-diagnosis-* or other stray file; every digest and
+//     the sidecar manifest must match the archive and the manifest packed inside it.
+//   verify-needs: every direct `needs` of publish concluded `success`.
+//   verify-ci-run: an optional ci_run_id must be a successful ci.yml run of GITHUB_SHA.
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {allReleasePlatforms, getReleasePlatform} from '../build/lib/targets.mjs';
+import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
+
+export const EXPECTED_ARCHIVE_COUNT = 15;
+export const FILES_PER_ARCHIVE = 4;
+export const EXPECTED_NEEDS = 20;
+
+export function expectedArchiveKeys() {
+  const keys = [...new Set(allReleasePlatforms().map(getReleasePlatform)
+    .filter(platform => !platform.excluded && !platform.crossCompiledHost).map(platform => platform.archiveKey))].sort();
+  if (keys.length !== EXPECTED_ARCHIVE_COUNT) throw new Error(`PUBLISH_ARCHIVE_KEYS ${keys.length} != ${EXPECTED_ARCHIVE_COUNT}: ${keys.join(',')}`);
+  return keys;
+}
+
+const sha256 = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+
+function run(command, args) {
+  const result = spawnSync(command, args, {encoding: 'buffer', maxBuffer: 1 << 30});
+  if (result.error || result.status !== 0) {
+    throw new Error(`PUBLISH_ARCHIVE_READ ${command} ${args.join(' ')}: ${result.error?.message || result.stderr.toString().trim()}`);
+  }
+  return result.stdout;
+}
+
+// The manifest that the package step packed into the archive; exactly one is allowed.
+export function internalManifest(archive) {
+  const zip = archive.endsWith('.zip');
+  const members = run(zip ? 'unzip' : 'tar', zip ? ['-Z1', archive] : ['-tzf', archive]).toString('utf8')
+    .split('\n').map(line => line.trim()).filter(Boolean)
+    .filter(member => member === 'RELEASE-MANIFEST.jsonl' || member.endsWith('/RELEASE-MANIFEST.jsonl'));
+  if (members.length !== 1) throw new Error(`PUBLISH_INTERNAL_MANIFEST ${path.basename(archive)} has ${members.length} RELEASE-MANIFEST.jsonl`);
+  return run(zip ? 'unzip' : 'tar', zip ? ['-p', archive, members[0]] : ['-xOzf', archive, members[0]]);
+}
+
+export function verifyAssets({dist, version, keys = expectedArchiveKeys(), readInternal = internalManifest}) {
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(version || '')) throw new Error(`PUBLISH_VERSION ${version}`);
+  const present = fs.readdirSync(dist, {recursive: true, withFileTypes: true})
+    .filter(entry => entry.isFile()).map(entry => path.relative(dist, path.join(entry.parentPath ?? entry.path, entry.name))).sort();
+  const diagnosis = present.filter(file => /(^|\/)pkg-diagnosis-/.test(file));
+  if (diagnosis.length) throw new Error(`PUBLISH_DIAGNOSIS_ASSET ${diagnosis.join(',')}`);
+  const expected = [];
+  for (const key of keys) {
+    const stem = `cjcj-${version}-${key}`;
+    const archives = present.filter(file => file === `${stem}.tar.gz` || file === `${stem}.zip`);
+    if (archives.length !== 1) throw new Error(`PUBLISH_ARCHIVE_CELL ${key} has ${archives.length} archives`);
+    const archive = archives[0];
+    const cell = [archive, `${archive}.sha256`, `${stem}.RELEASE-MANIFEST.jsonl`, `${stem}.SHA256SUMS`];
+    for (const file of cell) if (!present.includes(file)) throw new Error(`PUBLISH_CELL_FILE ${key} missing ${file}`);
+    const digest = sha256(path.join(dist, archive));
+    const sidecar = fs.readFileSync(path.join(dist, `${archive}.sha256`), 'utf8').trim().split(/\s+/);
+    if (sidecar[0] !== digest || (sidecar[1] && path.basename(sidecar[1].replace(/^\*/, '')) !== archive)) {
+      throw new Error(`PUBLISH_SHA256 ${archive}`);
+    }
+    const sums = fs.readFileSync(path.join(dist, `${stem}.SHA256SUMS`), 'utf8').split('\n').filter(Boolean)
+      .map(line => line.trim().split(/\s+/)).filter(([, name]) => name && path.basename(name.replace(/^\*/, '')) === archive);
+    if (sums.length !== 1 || sums[0][0] !== digest) throw new Error(`PUBLISH_SHA256SUMS ${archive}`);
+    const manifest = fs.readFileSync(path.join(dist, `${stem}.RELEASE-MANIFEST.jsonl`));
+    if (!Buffer.from(readInternal(path.join(dist, archive))).equals(manifest)) throw new Error(`PUBLISH_MANIFEST_MISMATCH ${key}`);
+    expected.push(...cell);
+  }
+  const stray = present.filter(file => !expected.includes(file));
+  if (stray.length) throw new Error(`PUBLISH_STRAY_ASSET ${stray.join(',')}`);
+  if (expected.length !== keys.length * FILES_PER_ARCHIVE) throw new Error(`PUBLISH_ASSET_COUNT ${expected.length}`);
+  return expected.map(file => path.join(dist, file));
+}
+
+export function verifyNeeds(needs) {
+  const entries = Object.entries(needs || {});
+  if (entries.length !== EXPECTED_NEEDS) throw new Error(`PUBLISH_NEEDS_COUNT ${entries.length} != ${EXPECTED_NEEDS}`);
+  const failed = entries.filter(([, value]) => value?.result !== 'success').map(([name, value]) => `${name}=${value?.result}`);
+  if (failed.length) throw new Error(`PUBLISH_NEEDS_NOT_SUCCESS ${failed.join(',')}`);
+  return entries.length;
+}
+
+export function verifyCiRun(run, sha) {
+  if (!/^[0-9a-f]{40}$/.test(sha || '')) throw new Error(`PUBLISH_CI_SHA ${sha}`);
+  if (run?.head_sha !== sha) throw new Error(`PUBLISH_CI_HEAD_SHA ${run?.head_sha} != ${sha}`);
+  if (run?.status !== 'completed' || run?.conclusion !== 'success') throw new Error(`PUBLISH_CI_CONCLUSION ${run?.status}/${run?.conclusion}`);
+  if (run?.path && run.path !== '.github/workflows/ci.yml') throw new Error(`PUBLISH_CI_WORKFLOW ${run.path}`);
+  return run.id;
+}
+
+// Static contract of release.yml, used by ci/release-publish.test.mjs and its red cuts.
+export function releaseWorkflowProblems(text) {
+  const workflow = loadYaml(text);
+  const problems = [];
+  const inputs = workflow?.on?.workflow_dispatch?.inputs || {};
+  if (inputs.phase?.type !== 'choice' || JSON.stringify(inputs.phase?.options) !== '["prepare","publish"]' || inputs.phase?.default !== 'prepare') {
+    problems.push('phase must be a choice of prepare|publish defaulting to prepare');
+  }
+  if (inputs.ci_run_id?.type !== 'string' || inputs.ci_run_id?.required) problems.push('ci_run_id must be an optional string');
+  const jobs = workflow?.jobs || {};
+  const publish = jobs.publish;
+  if (!publish) return [...problems, 'publish job missing'];
+  const condition = String(publish.if || '');
+  if (/always\(\)|cancelled\(\)|failure\(\)/.test(condition)) problems.push('publish must not use always()/cancelled()/failure()');
+  if (!condition.includes("inputs.phase == 'publish'") || !condition.includes('!inputs.dry_run')) problems.push("publish must require inputs.phase == 'publish' && !inputs.dry_run");
+  const upstream = Object.keys(jobs).filter(name => /^(?:source|package)-/.test(name)).sort();
+  const needs = [...(publish.needs || [])].sort();
+  if (upstream.length !== EXPECTED_NEEDS || JSON.stringify(needs) !== JSON.stringify(upstream)) problems.push(`publish needs ${needs.length} jobs, expected all ${upstream.length} source/package jobs`);
+  const script = (publish.steps || []).map(step => step.run || '').join('\n');
+  for (const [needle, label] of [
+    ['node ci/release-publish.mjs verify-needs', 'explicit needs success check'],
+    ['node ci/release-publish.mjs verify-assets', 'asset verification'],
+    ['node ci/release-publish.mjs verify-ci-run', 'ci_run_id verification'],
+    ['--target "$GITHUB_SHA"', '--target "$GITHUB_SHA"'],
+    ['--prerelease --latest=false', '--prerelease --latest=false'],
+    ['RELEASE_ALREADY_EXISTS', 'fail-closed existing release check'],
+    ['TAG_ALREADY_EXISTS', 'fail-closed existing tag check'],
+  ]) if (!script.includes(needle)) problems.push(`publish lacks ${label}`);
+  if (/pattern:\s*pkg-\*/.test(text) === false) problems.push('publish must download pkg-*');
+  for (const [name, job] of Object.entries(jobs).filter(([name]) => /^(?:source|package)-/.test(name))) {
+    for (const key of ['native_runtime_artifact', 'native_llvm_ref', 'native_runtime_ref', 'native_host_version']) {
+      if (job.with?.[key] !== `\${{ inputs.${key} }}`) problems.push(`${name} does not pass ${key}`);
+    }
+  }
+  if (jobs.plan && !String(jobs.plan.if || '').includes("inputs.phase == 'publish'")) problems.push('plan must only run in phase=publish');
+  return problems;
+}
+
+function option(argv, name) {
+  const index = argv.indexOf(`--${name}`);
+  return index >= 0 ? argv[index + 1] : undefined;
+}
+
+function main(argv) {
+  const command = argv[0];
+  if (command === 'verify-assets') {
+    const assets = verifyAssets({dist: option(argv, 'dist'), version: option(argv, 'version')});
+    fs.writeFileSync(option(argv, 'output'), assets.join('\n') + '\n');
+    console.log(`PUBLISH_ASSETS_VERIFIED archives=${assets.length / FILES_PER_ARCHIVE} files=${assets.length}`);
+  } else if (command === 'verify-needs') {
+    console.log(`PUBLISH_NEEDS_VERIFIED ${verifyNeeds(JSON.parse(process.env.PUBLISH_NEEDS_JSON || 'null'))}`);
+  } else if (command === 'verify-ci-run') {
+    const run = JSON.parse(fs.readFileSync(option(argv, 'run-json'), 'utf8'));
+    console.log(`PUBLISH_CI_RUN_VERIFIED ${verifyCiRun(run, option(argv, 'sha'))}`);
+  } else if (command === 'check-workflow') {
+    const problems = releaseWorkflowProblems(fs.readFileSync(option(argv, 'workflow') || '.github/workflows/release.yml', 'utf8'));
+    for (const problem of problems) console.error(`RELEASE_WORKFLOW ${problem}`);
+    return problems.length ? 1 : 0;
+  } else {
+    console.error('usage: release-publish.mjs verify-assets|verify-needs|verify-ci-run|check-workflow');
+    return 2;
+  }
+  return 0;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
+  try { process.exitCode = main(process.argv.slice(2)); } catch (error) { console.error(`FATAL: ${error.message}`); process.exitCode = 1; }
+}

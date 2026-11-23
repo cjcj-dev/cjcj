@@ -2,9 +2,6 @@ name: One source target / verified SDK phases
 
 on:
   workflow_call:
-    secrets:
-      WINDOWS_TOOLS_READ_TOKEN:
-        required: false
     inputs:
       native_runtime_artifact:
         description: Existing native-runtime-install artifact prefix
@@ -2720,11 +2717,6 @@ jobs:
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     env: *source-environment
     steps:
-      - name: Require private Windows source job
-        shell: bash
-        env:
-          PRIVATE: ${{ github.event.repository.private }}
-        run: test "$PRIVATE" = true
       - *checkout-cjcj
       - *actions-setup-node-v7-1-0
       - uses: ./.github/actions/native-windows-tools
@@ -2755,9 +2747,8 @@ jobs:
       - name: Checkout paired tools in the ordinary fetch workspace
         uses: actions/checkout@v7
         with:
-          repository: ${{ vars.WINDOWS_TOOLS_REPOSITORY }}
+          repository: ${{ vars.WINDOWS_TOOLS_REPOSITORY || 'cjcj-dev/cjcj-tools' }}
           ref: ${{ env.TOOLS_REF }}
-          token: ${{ secrets.WINDOWS_TOOLS_READ_TOKEN }}
           path: .srcbuild/workspace/cjcj-tools
           persist-credentials: false
       - *download-pinned-source

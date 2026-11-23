@@ -2,14 +2,22 @@
 // Export the ordinary source options used by public fetch/build. The fetch
 // command persists these same options through buildConfig/saveSourceSelection.
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {makeRepos,REPO_NAMES} from '../../../lib/config.mjs';
-export const windowsToolsCommit='7ed733230e9997a0bcfa3e1b9822d8a0ce0b7e32';
+// The native Windows SDK builds the same public tools commit as every other host:
+// the product tools pin of ci/source_pin.env (no private repository, no read token).
+export const windowsToolsDefaultRepository='cjcj-dev/cjcj-tools';
+export const windowsToolsCommit=(()=>{
+  const match=/^TOOLS_REF=([0-9a-f]{40})$/m.exec(fsSync.readFileSync(new URL('../../../../ci/source_pin.env',import.meta.url),'utf8'));
+  if(!match)throw Error('WINDOWS_TOOLS_PIN ci/source_pin.env TOOLS_REF');
+  return match[1];
+})();
 export function windowsToolsSource(env) {
-  const repo=env.WINDOWS_TOOLS_REPOSITORY;
-  if(!/^[\w.-]+\/[\w.-]+$/.test(repo||'')||repo.split('/').some(s=>s==='.'||s==='..'))throw Error('WINDOWS_TOOLS_READ_REPOSITORY_REQUIRED');
-  return {url:new URL(repo,env.GITHUB_SERVER_URL+'/').href,tag:windowsToolsCommit};
+  const repo=env.WINDOWS_TOOLS_REPOSITORY||windowsToolsDefaultRepository;
+  if(!/^[\w.-]+\/[\w.-]+$/.test(repo)||repo.split('/').some(s=>s==='.'||s==='..'))throw Error('WINDOWS_TOOLS_REPOSITORY_INVALID');
+  return {url:new URL(repo,(env.GITHUB_SERVER_URL||'https://github.com')+'/').href,tag:windowsToolsCommit};
 }
 export function workflowSourceSelection(env=process.env) {
   const overrides=JSON.parse(env.CJCJ_SOURCE_SELECTION||'{}');
