@@ -47,6 +47,7 @@ import cjcj::chir.MergeEffectMap
 import cjcj::chir.NoHeapAllocChecker
 import cjcj::chir.LocalLoweringTargetChecker
 import cjcj::chir.LocalLoweringUnsupportedException
+import cjcj::chir.LocalLoweringReport
 import cjcj::chir.NoSideEffectMarker
 import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.OptFuncRetType
@@ -1244,12 +1245,8 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
         CodegenGenPackageModules(codegenData, codegenOptions, enableIncrement,
             noHeapAllocChecker, noWriteBarrierRecChecker, cachedMangleMap: cachedMangleMap,
             localLoweringChecker: localLoweringChecker)
-    } catch (_: LocalLoweringUnsupportedException) {
-        for (report in localLoweringChecker.GetReports()) {
-            let position = if (report.position[0]) { report.position[1].begin } else { DEFAULT_POSITION }
-            instance.diag.Diagnose(DiagCategory.CHIR, position, report.Message())
-        }
-        instance.diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
+    } catch (e: LocalLoweringUnsupportedException) {
+        DiagnoseLocalLoweringReports(instance.diag, localLoweringChecker.GetReports(), e.message)
         return llvmModules
     }
     var transferred = false
@@ -1275,6 +1272,31 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
             }
         }
     }
+}
+
+func HasLocalLoweringSourcePosition(report: LocalLoweringReport): Bool {
+    let begin = report.position[1].begin
+    return report.position[0] && begin != DEFAULT_POSITION && !begin.IsZero()
+}
+
+// Reports every Local Mode target rejection through the registered diagnostic handler, all as CHIR so
+// they share one sorted flush and one error-count category (GetErrorCount counts only the first error
+// category). A report without a source position (module-level or generated code with no debug location)
+// goes through DiagnoseWithoutLocation, because a CHIR diagnostic at DEFAULT_POSITION is counted but never
+// printed. If the exception arrives without any recorded report, its own message is reported.
+func DiagnoseLocalLoweringReports(diag: DiagnosticEngine, reports: ArrayList<LocalLoweringReport>,
+    fallback: String): Unit {
+    for (report in reports) {
+        if (HasLocalLoweringSourcePosition(report)) {
+            diag.Diagnose(DiagCategory.CHIR, report.position[1].begin, report.Message())
+        } else {
+            diag.DiagnoseWithoutLocation(DiagCategory.CHIR, report.Message())
+        }
+    }
+    if (reports.isEmpty()) {
+        diag.DiagnoseWithoutLocation(DiagCategory.CHIR, fallback)
+    }
+    diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
 }
 
 // C++: FrontendTool/DefaultCompilerInstance.cpp:252-299.

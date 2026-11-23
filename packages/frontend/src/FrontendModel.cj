@@ -107,6 +107,17 @@ public class DiagnosticEngine <: Resource {
         emitFrontendDiagnostic(this, category, position, message, DiagSeverity.DS_ERROR)
     }
 
+    // Reports an error that has no source location but belongs to a deferred category (CHIR). The
+    // CompilerDiagnosticHandler prints a deferred category only from its per-category store, and that store
+    // rejects a default range (DiagnosticEngine.cj HandleDiagnose; C++ DiagnosticEngine.cpp:957-982), so
+    // Diagnose(category, DEFAULT_POSITION, ...) would be counted but never printed. The range keeps
+    // begin = DEFAULT_POSITION, which DiagnosticEmitter.Render and the JSON formatter treat as "no location",
+    // and only its end differs from the default so the store keeps it for EmitCategoryDiagnostics.
+    public func DiagnoseWithoutLocation(category: DiagCategory, message: String): Unit {
+        emitFrontendDiagnosticInRange(this, category, MakeRange(DEFAULT_POSITION, PositionlessDiagnosticEnd()), message,
+            DiagSeverity.DS_ERROR)
+    }
+
     public func DiagnoseRefactor(kind: DiagKindRefactor, position: Position,
         arguments!: Array<String> = Array<String>()): Unit {
         impl.DiagnoseRefactor(kind, position, arguments: arguments).Emit()
@@ -145,10 +156,25 @@ public class DiagnosticEngine <: Resource {
     }
 }
 
+// Not DEFAULT_POSITION and not IsZero(), so the range is neither Range.IsDefault() nor HasZero().
+private func PositionlessDiagnosticEnd(): Position {
+    return Position(0, -1, 0)
+}
+
 private func emitFrontendDiagnostic(
     diag: DiagnosticEngine,
     category: DiagCategory,
     position: Position,
+    message: String,
+    severity: DiagSeverity
+): Unit {
+    emitFrontendDiagnosticInRange(diag, category, frontendDiagnosticRange(position), message, severity)
+}
+
+private func emitFrontendDiagnosticInRange(
+    diag: DiagnosticEngine,
+    category: DiagCategory,
+    range: BasicRange,
     message: String,
     severity: DiagSeverity
 ): Unit {
@@ -159,7 +185,7 @@ private func emitFrontendDiagnostic(
     diagnostic.errorMessage = message
     diagnostic.start = INVALID_POSITION
     diagnostic.end = INVALID_POSITION
-    diagnostic.mainHint = IntegratedString(frontendDiagnosticRange(position), "", frontendDiagnosticColor(severity))
+    diagnostic.mainHint = IntegratedString(range, "", frontendDiagnosticColor(severity))
     diag.HandleDiagnostic(diagnostic)
 }
 
