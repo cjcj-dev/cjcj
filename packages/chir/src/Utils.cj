@@ -717,7 +717,31 @@ private func GetInstParentType(candidate: ArrayList<ClassType>, callee: Function
         }
     }
     CJC_ABORT()
-    throw IllegalStateException("instantiated parent type of callee is not available")
+    throw IllegalStateException("instantiated parent type of callee is not available: " +
+        DescribeInstParentMismatch(candidate, callee, argTypes, paramTypes, builder))
+}
+
+// Names every operand of the failed match so the failing call can be identified from the message alone.
+private func DescribeInstParentMismatch(candidate: ArrayList<ClassType>, callee: Function, argTypes: ArrayList<Type>,
+    paramTypes: ArrayList<Type>, builder: CHIRBuilder): String {
+    var text = "callee=${callee.GetIdentifier()} type=${callee.GetFuncType().getOrThrow().ToString()} args=["
+    var idx: Int64 = 0
+    while (idx < argTypes.size) {
+        text += (if (idx == 0) { "" } else { ", " }) + argTypes[idx].ToString()
+        idx++
+    }
+    text += "]"
+    for (parentTy in candidate) {
+        let res = parentTy.GetClassDef().GetType().getOrThrow().CalculateGenericTyMapping(parentTy)
+        text += " candidate=${parentTy.ToString()} params=["
+        idx = 0
+        while (idx < paramTypes.size) {
+            text += (if (idx == 0) { "" } else { ", " }) + ReplaceRawGenericArgType(paramTypes[idx], res[1], builder).ToString()
+            idx++
+        }
+        text += "]"
+    }
+    return text
 }
 
 public func GetInstParentType(instSubType: Type, genericParentType: Type, builder: CHIRBuilder): Type {
