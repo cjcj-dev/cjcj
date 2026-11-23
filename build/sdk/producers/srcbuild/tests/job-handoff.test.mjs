@@ -8,6 +8,23 @@ import test from 'node:test';
 
 const product = path.resolve(import.meta.dirname, '../job-handoff.mjs');
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+const gitRun = (cwd, ...args) => {
+  const r = spawnSync('git', ['-C', cwd, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', ...args], {encoding: 'utf8'});
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout.trim();
+};
+// The workflow checkout is a real pinned Git checkout; tracked files are source.
+async function pinnedCheckout(root, files) {
+  await fs.mkdir(root, {recursive: true});
+  gitRun(root, 'init', '-q');
+  for (const [rel, body] of Object.entries(files)) {
+    await fs.mkdir(path.dirname(path.join(root, rel)), {recursive: true});
+    await fs.writeFile(path.join(root, rel), body);
+  }
+  gitRun(root, 'add', '--', ...Object.keys(files));
+  gitRun(root, 'commit', '-qm', 'test: pinned source');
+  return gitRun(root, 'rev-parse', 'HEAD');
+}
 async function fixture(t, phase = 'stage1-compiler') {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'source-handoff-'));
   t.after(() => fs.rm(dir, {recursive: true, force: true}));
@@ -19,11 +36,14 @@ async function fixture(t, phase = 'stage1-compiler') {
   await fs.writeFile(binary, '#!/bin/sh\nprintf "handoff-compiler-result\\n"\n', {mode: 0o755});
   await fs.symlink('cjcj-stage2', path.join(path.dirname(binary), 'cjc'));
   await fs.writeFile(path.join(root, 'runtime_shim/config.o'), 'producer-object-bytes');
-  await fs.writeFile(path.join(root, 'cjpm.toml'), 'fixture');
+  const head = await pinnedCheckout(root, {'cjpm.toml': 'fixture', 'runtime_shim/config.c': 'int source;\n',
+    'packages/cjc/src/main.cj': 'main() {}\n'});
+  const origin = path.join(dir, 'origin.git');
+  gitRun(dir, 'clone', '-q', '--bare', root, origin);
   await fs.mkdir(path.join(root, '.srcbuild/buildtools/llvm-mingw-w64/bin'), {recursive: true});
   await fs.writeFile(path.join(root, '.srcbuild/buildtools/llvm-mingw-w64/bin/clang'), 'mingw-producer');
   const archive = path.join(dir, 'artifact');
-  const env = {...process.env, GITHUB_WORKSPACE: root, GITHUB_SHA: '1'.repeat(40),
+  const env = {...process.env, GITHUB_WORKSPACE: root, GITHUB_SHA: head,
     GITHUB_RUN_ID: '702', CJCJ_SRCBUILD_TARGET: 'linux-x64',
     GITHUB_ENV: path.join(dir, 'env'), GITHUB_PATH: path.join(dir, 'path'),
     CANGJIE_HOME: path.join(root, '.srcbuild/host-sdk'), SOURCE_SDK_VERSION: '0.0.2',
@@ -33,16 +53,22 @@ async function fixture(t, phase = 'stage1-compiler') {
       {env: {...env, ...overrides}, encoding: 'utf8'});
     return {rc: r.status, output: `${r.stdout}${r.stderr}`};
   };
+  // A fresh consuming runner: pinned checkout of the same commit, nothing else.
+  const fresh = async () => {
+    await fs.rm(root, {recursive: true, force: true});
+    gitRun(dir, 'clone', '-q', origin, root);
+    gitRun(root, 'checkout', '-q', '--detach', head);
+  };
   const packed = run('pack');
   assert.equal(packed.rc, 0, packed.output);
-  return {dir, root, binary, archive, env, run};
+  return {dir, root, binary, archive, env, run, fresh, head, origin};
 }
 
 test('producer archive restores executable compiler, symlink, shim and environment on a fresh job', async t => {
   const f = await fixture(t);
   const manifest = JSON.parse(await fs.readFile(path.join(f.archive, 'manifest.json')));
   assert.equal(manifest.sha256, digest(await fs.readFile(path.join(f.archive, 'payload.tar'))));
-  await fs.rm(f.root, {recursive: true});
+  await f.fresh();
   await fs.mkdir(path.join(f.root, 'runtime_shim'), {recursive: true});
   await fs.writeFile(path.join(f.root, 'runtime_shim/config.o'), 'unrestored');
   const restored = f.run('restore');
@@ -119,7 +145,7 @@ test('same-run handoff retains and revalidates explicit runtime authorization an
     COLOUR_RT_MANIFEST_SHA256: 'e'.repeat(64)});
   const packed = f.run('pack');
   assert.equal(packed.rc, 0, packed.output);
-  await fs.rm(f.root, {recursive: true}); await fs.mkdir(f.root);
+  await f.fresh();
   const restored = f.run('restore');
   assert.equal(restored.rc, 0, restored.output);
   assert.match(await fs.readFile(f.env.GITHUB_ENV, 'utf8'), /CJCJ_ALLOW_RUNTIME_OVERRIDE=true/);
@@ -158,7 +184,7 @@ test('native HLE locations and relative component paths survive the public job h
   assert.equal(selected,descriptor);
   f.env.CJCJ_HLE_DEPENDENCIES=selected;
   assert.equal(f.run('pack').rc,0);
-  await fs.rename(f.root,f.root+'.producer');await fs.mkdir(f.root);
+  await fs.rename(f.root,f.root+'.producer');await f.fresh();
   assert.equal(f.run('restore').rc,0);
   const {readHleDependencies}=await import('../../../../../ci/bootstrap/hle-input.mjs');
   const resolved=await readHleDependencies(descriptor,input.platform);
@@ -196,7 +222,7 @@ test('public handoff carries native tool dependency locations and rejects an una
  await fs.writeFile(sourceDescriptor,JSON.stringify(relativeSelection));
  await configure();f.env.CJCJ_NATIVE_TOOL_DEPENDENCIES=descriptor;
  assert.equal(f.run('pack').rc,0);
- await fs.rm(f.root,{recursive:true});await fs.mkdir(f.root);
+ await f.fresh();
  const restored=f.run('restore');assert.equal(restored.rc,0,restored.output);
  assert((await fs.readFile(f.env.GITHUB_ENV,'utf8')).includes('CJCJ_NATIVE_TOOL_DEPENDENCIES='+descriptor));
  assert.deepEqual(JSON.parse(await fs.readFile(descriptor)),selection);

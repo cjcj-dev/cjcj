@@ -111,6 +111,11 @@ on:
         required: false
         type: boolean
         default: false
+      prepare_native:
+        description: phase=prepare only. Build native-runtime-install-<llvm_platform> and native-inputs-<target> on the five native hosts from fixed Git sources; every source target job is skipped.
+        required: false
+        type: boolean
+        default: false
       llvm_tools_only:
         description: Run only the fixed LLVM tools jobs (ci.yml); every source target job is skipped.
         required: false
@@ -150,7 +155,7 @@ jobs:
       llvm_platforms: ${{ steps.select.outputs.llvm_platforms }}
       ohos_matrix: ${{ steps.select.outputs.ohos_matrix }}
       ios_matrix: ${{ steps.select.outputs.ios_matrix }}
-    if: inputs.llvm_tools_only != true
+    if: inputs.llvm_tools_only != true && inputs.prepare_native != true
     steps:
       - name: Require the fixed native input artifact
         env:
@@ -2822,3 +2827,145 @@ jobs:
           component: srcbuild-stage0
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
+
+  # phase=prepare. Each of the five native hosts builds, from the fixed Git
+  # sources selected by ci/native-llvm-inputs.mjs and ci/source_pin.env, its own
+  # paired runtime/boundscheck installation (the build-native-runtime.yml producer
+  # retired in b2701d39) and then assembles native-inputs-<target> from the
+  # installations on this same runner. The host set is PREPARE_HOSTS in
+  # build/sdk/producers/release/prepare_native_inputs.mjs. Nothing here
+  # publishes; a missing N/AST installation or public Darwin adapter fails closed.
+  prepare-native:
+    name: ${{ matrix.target }} / prepare native inputs
+    if: inputs.prepare_native
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            llvm_platform: linux_x86_64
+            runner: ubuntu-22.04
+          - target: linux-aarch64
+            llvm_platform: linux_aarch64
+            runner: ubuntu-24.04-arm
+          - target: windows-x64
+            llvm_platform: windows_x86_64
+            runner: windows-2025
+          - target: darwin-arm64
+            llvm_platform: darwin_aarch64
+            runner: macos-15
+          - target: darwin-x64
+            llvm_platform: darwin_x86_64
+            runner: macos-15-intel
+    defaults:
+      run:
+        shell: bash
+    env:
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+      CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+      CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.1'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
+      - name: Load native source pair
+        id: pin
+        run: node ci/native-llvm-inputs.mjs
+      - name: Check out the fixed runtime source
+        uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ steps.pin.outputs.runtime_sha }}
+          path: runtime-source
+          persist-credentials: false
+      - name: Prepare fixed bounds source through normal Git inputs
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import {darwinCommand as run} from './build/sdk/producers/release/darwin_commands.mjs';
+          import {readSourcePins} from './ci/native-llvm-inputs.mjs';
+          const logs='.platform-ci/logs/native-prepare', pin=readSourcePins().source;
+          const destination=path.resolve('runtime-source/runtime/third_party/third_party_bounds_checking_function');
+          if(fs.existsSync(destination))throw Error('fresh bounds source required');
+          run(logs,'bounds-init','git',['init',destination]);
+          run(logs,'bounds-fetch','git',['-C',destination,'fetch','--depth=1',pin.BOUNDS_SRC_URL,pin.BOUNDS_REF]);
+          run(logs,'bounds-checkout','git',['-C',destination,'checkout','--detach','FETCH_HEAD']);
+          const actual=run(logs,'bounds-ref','git',['-C',destination,'rev-parse','HEAD']).stdout.trim();
+          if(actual!==pin.BOUNDS_REF)throw Error('bounds fixed source mismatch');
+          JS
+      - uses: ./.github/actions/sccache
+        with:
+          component: native-runtime
+          platform: ${{ matrix.llvm_platform }}
+          pin: ${{ steps.pin.outputs.runtime_sha }}
+      - name: Build and install the exact native runtime and bounds
+        env:
+          RUNTIME_NATIVE_PAIR: '1'
+          GC_UNIT_GATE_LANGUAGE_TESTS: ${{ runner.os == 'Linux' && 'defer' || 'all' }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ steps.pin.outputs.runtime_sha }}
+          RUNTIME_TARGET: native
+          RUNTIME_BUILD_TYPE: release
+          NATIVE_RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+          MATRIX_RUNNER: ${{ matrix.runner }}
+        run: |
+          set -euo pipefail
+          ulimit -S -c 0
+          ulimit -H -c 0
+          CANGJIE_BUILD_JOBS=$(node ci/build-resources.mjs --jobs-only)
+          export CANGJIE_BUILD_JOBS
+          npx --yes zx@8 build/sdk/producers/platform_matrix/build_runtime.mjs
+      - name: Consume the installation and the same package on this native host
+        env:
+          NATIVE_RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+        run: node build/sdk/producers/platform_matrix/native_runtime_package.mjs
+      - name: Upload native runtime installation
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-runtime-install-${{ matrix.llvm_platform }}
+          path: .platform-ci/runtime-install
+          if-no-files-found: error
+      - name: Provision the fixed host SDK into the native input root
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/native-inputs"
+          mkdir -p "$root/host-archive"
+          npx --yes zx@8 ci/load_runtime_pin.mjs
+          export CJCJ_SDK_STOCK_LLC=1
+          npx --yes zx@8 ci/setup_sdk.mjs
+          host_sdk="$HOME/.cjv/toolchains/$(sed -n 's/^CJCJ_TOOLCHAIN=//p' "$GITHUB_ENV" | tail -n 1)"
+          test -d "$host_sdk"
+          cp -a "$host_sdk" "$root/host"
+          tar -cf "$root/host-archive/host-sdk.tar" -C "$host_sdk" .
+          cp -a .platform-ci/runtime-install "$root/runtime"
+      - name: Deploy the public Darwin H1 adapter at the pinned tools commit
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          tools_url=$(sed -n 's/^TOOLS_SRC_URL=//p' ci/source_pin.env)
+          tools_ref=$(sed -n 's/^TOOLS_REF=//p' ci/source_pin.env)
+          source="$RUNNER_TEMP/tools-adapter-source"
+          git init -q "$source"
+          git -C "$source" remote add origin "$tools_url"
+          git -C "$source" fetch -q --depth 1 origin "$tools_ref"
+          node ci/bootstrap/deploy-native-tools.mjs "$source" "$tools_ref" "$RUNNER_TEMP/native-inputs/adapter"
+      - name: Assemble native inputs and bind their provenance
+        run: >-
+          node build/sdk/producers/release/prepare_native_inputs.mjs assemble
+          --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}"
+          --host-version "${CJCJ_NATIVE_HOST_VERSION:-$(sed -n 's/^CJCJ_NATIVE_HOST_VERSION=//p' "$GITHUB_ENV" | tail -n 1)}"
+      - name: Upload native inputs
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-inputs-${{ matrix.target }}
+          path: ${{ runner.temp }}/native-inputs
+          if-no-files-found: error

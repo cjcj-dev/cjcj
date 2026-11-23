@@ -1,5 +1,6 @@
 #!/usr/bin/env zx
 import {embeddedStamp} from '../../build/lib/toolchain-identity.mjs';
+import {NATIVE_TOOLS_ADAPTER_FILES} from './deploy-native-tools.mjs';
 import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {visibleOptionsOnly,requireOptionVisibility} from './compiler-option-visibility.mjs';
@@ -395,8 +396,8 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   if(native.os==='darwin'&&!installations.stage2) {
     if(!tools.privateRoot)throw Error('NATIVE_H1_PRIVATE_PRODUCER_REQUIRED');
     tools.privateRoot=path.resolve(tools.privateRoot);
-    for(const rel of ['cjcj-stage1.mjs','stage1-transform.mjs'])
-      await fs.stat(path.join(tools.privateRoot,'ts/src/sharedbuild',rel));
+    for(const rel of NATIVE_TOOLS_ADAPTER_FILES)
+      await fs.stat(path.join(tools.privateRoot,rel));
   }
   const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,visibleOptionsOnly:optionVisibility,
     ...(descriptor.stdLocalModeApi!==undefined?{stdLocalModeApi:descriptor.stdLocalModeApi}:{}),

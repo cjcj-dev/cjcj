@@ -37,3 +37,24 @@ test('G4 red cut: a package job detached from its source phase is NOT_MET', () =
   const graph = g4SourcePhases(mutated);
   assert.ok(graph.problems.includes('package-p2-linux-aarch64 does not need source-p2-linux-aarch64'), JSON.stringify(graph.problems));
 });
+
+test('G4 checks the phase=prepare path separately from the five publish source phases', () => {
+  const graph = g4SourcePhases(release);
+  assert.equal(graph.prepareCalls, 2);
+  assert.equal(graph.sourcePhases, 5);
+});
+
+test('G4 red cut: a prepare source build not bound to the same-run inputs is NOT_MET', () => {
+  const mutated = release.replace('    needs: prepare-native\n', '    needs: plan\n');
+  assert.notEqual(mutated, release);
+  const graph = g4SourcePhases(mutated);
+  assert.equal(graph.ok, false);
+  assert.ok(graph.problems.includes('prepare-srcbuild-linux-x64 does not need prepare-native'), JSON.stringify(graph.problems));
+});
+
+test('G4 red cut: a publish-path job that depends on prepare is NOT_MET', () => {
+  const mutated = release.replace('  source-p1-linux-x64:\n    needs: plan\n', '  source-p1-linux-x64:\n    needs: [plan, prepare-native]\n');
+  assert.notEqual(mutated, release);
+  const graph = g4SourcePhases(mutated);
+  assert.ok(graph.problems.includes('source-p1-linux-x64 depends on prepare job prepare-native'), JSON.stringify(graph.problems));
+});

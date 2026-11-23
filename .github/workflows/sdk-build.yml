@@ -11,7 +11,7 @@ on:
         value: ${{ jobs.plan.outputs.std_artifact }}
     inputs:
       mode:
-        description: build (default) runs the source SDK plan and fan-out; package builds one release package from a finished build.
+        description: build (default) runs the source SDK plan and fan-out; package builds one release package from a finished build; prepare builds the five-host native inputs (release.yml phase=prepare).
         required: false
         type: string
         default: build
@@ -299,9 +299,24 @@ jobs:
   # of them before phase 1 has reported anything is what the phase policy exists
   # to prevent. Selecting here lets each phase call this workflow for its own
   # target; the tuple list stays in one place.
+  # phase=prepare: the five native hosts build native-inputs-<target> and
+  # native-runtime-install-<llvm_platform> from fixed Git sources. No source
+  # target, package or publication job runs in this mode.
+  prepare:
+    name: Prepare five-host native inputs
+    if: inputs.mode == 'prepare'
+    uses: ./.github/workflows/sdk-build-target.yml
+    with:
+      prepare_native: true
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
+      source_selection: ${{ inputs.source_selection }}
+      cangjie_ref: ${{ inputs.cangjie_ref }}
+
   plan:
     name: Select targets
-    if: inputs.mode != 'package'
+    if: inputs.mode != 'package' && inputs.mode != 'prepare'
     runs-on: ubuntu-24.04
     env:
       CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}

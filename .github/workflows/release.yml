@@ -140,6 +140,42 @@ jobs:
       - name: Check release source targets
         run: node build/sdk/producers/srcbuild/target-matrix.mjs --targets all --require-ready
 
+  # phase=prepare never reaches plan, source, package or publish. It builds the
+  # five-host native inputs from fixed Git sources, then the Linux x64 source SDK
+  # (cjcj-srcbuild-linux-x64-<version>) from those same-run inputs for ci.yml.
+  prepare-native:
+    if: inputs.phase == 'prepare'
+    name: prepare · five-host native inputs and runtime installations
+    uses: ./.github/workflows/sdk-build.yml
+    with:
+      mode: prepare
+      cangjie_ref: ${{ inputs.version }}
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
+      source_selection: ${{ inputs.source_selection }}
+
+  prepare-srcbuild-linux-x64:
+    needs: prepare-native
+    if: inputs.phase == 'prepare'
+    name: prepare · linux-x64 source SDK from the same-run native inputs
+    uses: ./.github/workflows/sdk-build.yml
+    with:
+      cangjie_ref: ${{ inputs.version }}
+      source_selection: ${{ inputs.source_selection }}
+      shim_source_selection: ${{ inputs.shim_source_selection }}
+      native_inputs_artifact: native-inputs
+      native_inputs_run_id: ${{ github.run_id }}
+      native_runtime_artifact: native-runtime-install
+      native_runtime_run_id: ${{ github.run_id }}
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
+      build_type: relwithdebinfo
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+      targets: linux-x64
+
   # Each phase produces its own native SDK and consumes that same installation.
   # Linux retains its separate cross std artifact for Linux's FFI payload.
   source-p1-linux-x64:

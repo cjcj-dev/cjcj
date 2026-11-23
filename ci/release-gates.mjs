@@ -766,7 +766,13 @@ export function g4SourcePhases(releaseText, expectedPhases = 5) {
   const document = loadYaml(releaseText) || {};
   const jobs = document.jobs && typeof document.jobs === 'object' ? document.jobs : {};
   const problems = [];
-  const sdkCalls = Object.entries(jobs).filter(([, job]) => job?.uses === './.github/workflows/sdk-build.yml');
+  // G4's five source phases are the phase=publish path. phase=prepare jobs are a
+  // separate, publication-free path checked by g4PreparePath; they never count
+  // as (or replace) a source phase.
+  const isPrepare = job => /inputs\.phase\s*==\s*'prepare'/.test(String(job?.if ?? ''));
+  const allCalls = Object.entries(jobs).filter(([, job]) => job?.uses === './.github/workflows/sdk-build.yml');
+  const sdkCalls = allCalls.filter(([, job]) => !isPrepare(job));
+  const prepare = g4PreparePath(jobs, allCalls.filter(([, job]) => isPrepare(job)));
   const mode = job => String(job?.with?.mode ?? 'build');
   const source = sdkCalls.filter(([, job]) => mode(job) === 'build');
   const packages = sdkCalls.filter(([, job]) => mode(job) === 'package');
@@ -793,8 +799,42 @@ export function g4SourcePhases(releaseText, expectedPhases = 5) {
     else if (!asList(jobs[packageName].needs).includes(sourceName)) problems.push(`${packageName} does not need ${sourceName}`);
   }
   for (const phase of phases.keys()) if (phase < 1 || phase > expectedPhases) problems.push(`unexpected source phase ${phase}`);
+  problems.push(...prepare.problems);
   return {sdkCalls: sdkCalls.length, sourcePhases: source.length, uniquePhases: phases.size,
-    packageCalls: packages.length, problems, ok: problems.length === 0 && phases.size === expectedPhases};
+    packageCalls: packages.length, prepareCalls: prepare.calls, problems, ok: problems.length === 0 && phases.size === expectedPhases};
+}
+
+// phase=prepare: one mode=prepare call (five-host native inputs) and one Linux x64
+// source build that consumes exactly those same-run inputs. The publish path is
+// unreachable from prepare: plan/publish are gated on phase=publish and publish
+// never needs a prepare job.
+export function g4PreparePath(jobs, calls) {
+  const problems = [];
+  const mode = job => String(job?.with?.mode ?? 'build');
+  const producers = calls.filter(([, job]) => mode(job) === 'prepare');
+  const consumers = calls.filter(([, job]) => mode(job) === 'build');
+  for (const [name, job] of calls) if (!['prepare', 'build'].includes(mode(job))) problems.push(`${name}: unexpected prepare mode ${mode(job)}`);
+  if (producers.length !== 1) problems.push(`prepare path needs exactly one mode=prepare call, found ${producers.length}`);
+  if (consumers.length !== 1) problems.push(`prepare path needs exactly one same-run linux-x64 source build, found ${consumers.length}`);
+  const [producer] = producers[0] || [];
+  for (const [name, job] of consumers) {
+    const w = job.with || {};
+    if (String(w.targets) !== 'linux-x64') problems.push(`${name} must build only linux-x64`);
+    if (!producer || !asList(job.needs).includes(producer)) problems.push(`${name} does not need ${producer || 'the prepare producer'}`);
+    for (const [key, value] of [['native_inputs_artifact', 'native-inputs'], ['native_runtime_artifact', 'native-runtime-install'],
+      ['native_inputs_run_id', '${{ github.run_id }}'], ['native_runtime_run_id', '${{ github.run_id }}']])
+      if (String(w[key] ?? '') !== value) problems.push(`${name} ${key} must be ${value}`);
+  }
+  const prepareNames = new Set(calls.map(([name]) => name));
+  for (const name of ['plan', 'publish']) {
+    if (!/inputs\.phase\s*==\s*'publish'/.test(String(jobs[name]?.if ?? ''))) problems.push(`${name} is not gated on phase=publish`);
+  }
+  for (const [name, job] of Object.entries(jobs)) {
+    if (prepareNames.has(name)) continue;
+    const reached = asList(job?.needs).filter(need => prepareNames.has(need));
+    if (reached.length) problems.push(`${name} depends on prepare job ${reached.join(', ')}`);
+  }
+  return {calls: calls.length, problems};
 }
 
 async function evaluateG4(context) {

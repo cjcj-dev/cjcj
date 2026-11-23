@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import {stageSdkHandoff} from './stage-sdk-handoff.mjs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {checkoutExactSource} from '../../../lib/git.mjs';
 
 const [mode, phase, directory] = process.argv.slice(2);
 if (!['pack', 'restore'].includes(mode) || !/^[a-z0-9-]+$/.test(phase || '') || !directory) {
@@ -65,6 +66,109 @@ async function verifyRuntimeHandoff(environment) {
     }
   }
 }
+
+// Source never crosses a job boundary. The workflow checkout and every nested
+// source checkout under .srcbuild are identified by a 40-hex commit (and the
+// nested origin URL); the consuming runner obtains them by pinned Git checkout.
+// The payload holds only paths Git does not track: build outputs, installs,
+// .cjo/libraries and manifests. A tracked file edited by an earlier build step
+// (for example the injected product version) crosses only as a digest-bound
+// overlay row; a verbatim tracked file is source and is always rejected.
+const SHA40 = /^[0-9a-f]{40}$/;
+const git = (cwd, args) => spawnSync('git', ['-C', cwd, ...args], {encoding: 'utf8', maxBuffer: 1 << 30});
+const checkoutHead = dir => {
+  const r = git(dir, ['rev-parse', '--verify', 'HEAD^{commit}']);
+  return r.status === 0 ? r.stdout.trim() : null;
+};
+const trackedPaths = dir => {
+  const r = git(dir, ['ls-files', '-z']);
+  if (r.status !== 0) throw new Error(`handoff cannot list tracked source in ${dir}`);
+  return new Set(r.stdout.split('\0').filter(Boolean));
+};
+const modifiedPaths = dir => {
+  const r = git(dir, ['diff', '--name-only', '-z', 'HEAD']);
+  if (r.status !== 0) throw new Error(`handoff cannot compare checkout with HEAD: ${dir}`);
+  return r.stdout.split('\0').filter(Boolean);
+};
+const posix = rel => rel.split(path.sep).join('/');
+async function exists(file) {
+  try { await fs.lstat(file); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+}
+async function payloadPlan(root, entries, excluded) {
+  const head = checkoutHead(root);
+  if (!head || !SHA40.test(head)) throw new Error('handoff workspace is not a pinned Git checkout');
+  const repos = [{prefix: '', tracked: trackedPaths(root)}];
+  const checkouts = [], files = [], overlay = new Map();
+  const addOverlay = async (prefix, dir) => {
+    for (const rel of modifiedPaths(dir)) {
+      const full = prefix ? prefix + '/' + rel : rel;
+      if (await exists(path.join(root, full))) overlay.set(full, await hash(path.join(root, full)));
+    }
+  };
+  await addOverlay('', root);
+  const tracked = rel => !overlay.has(rel) && repos.some(repo => (repo.prefix === '' || rel.startsWith(repo.prefix + '/'))
+    && repo.tracked.has(repo.prefix === '' ? rel : rel.slice(repo.prefix.length + 1)));
+  const skip = rel => excluded.some(pattern => pattern.test(rel));
+  async function walk(rel) {
+    if (skip(rel)) return;
+    const file = path.join(root, rel);
+    const stat = await fs.lstat(file);
+    if (!stat.isDirectory()) { if (!tracked(rel)) files.push(rel); return; }
+    if (path.basename(rel) === '.git') return;
+    if (rel !== '' && await exists(path.join(file, '.git'))) {
+      const commit = checkoutHead(file);
+      const url = git(file, ['remote', 'get-url', 'origin']);
+      if (!commit || !SHA40.test(commit)) throw new Error(`handoff nested checkout has no commit: ${rel}`);
+      if (url.status !== 0 || !url.stdout.trim()) throw new Error(`handoff nested checkout has no origin: ${rel}`);
+      checkouts.push({path: rel, commit, url: url.stdout.trim()});
+      repos.push({prefix: rel, tracked: trackedPaths(file)});
+      await addOverlay(rel, file);
+    } else if (rel !== '' && tracked(rel)) {
+      return;
+    }
+    files.push(rel);
+    for (const name of (await fs.readdir(file)).sort()) await walk(posix(path.join(rel, name)));
+  }
+  for (const entry of entries) await walk(entry);
+  const kept = files.filter(rel => !tracked(rel));
+  const included = new Set(kept);
+  return {commit: head, checkouts, files: kept,
+    overlay: [...overlay].filter(([rel]) => included.has(rel)).map(([rel, sha256]) => ({path: rel, sha256}))};
+}
+async function assertNoSourcePayload(members, root, checkouts, overlay) {
+  if (!Array.isArray(overlay)) throw new Error('handoff manifest lacks overlay rows');
+  const edited = new Map(overlay.map(row => [String(row?.path || ''), row?.sha256]));
+  for (const [rel, sha256] of edited) {
+    // An overlay row must differ from the pinned checkout; equal bytes would be source.
+    if (!/^[a-f0-9]{64}$/.test(sha256 || '') || (await exists(path.join(root, rel)) && await hash(path.join(root, rel)) === sha256))
+      throw new Error(`handoff payload carries source: ${rel}`);
+  }
+  const repos = [{prefix: '', tracked: trackedPaths(root)},
+    ...checkouts.map(row => ({prefix: row.path, tracked: trackedPaths(path.join(root, row.path))}))];
+  for (const raw of members) {
+    const rel = raw.replace(/^\.\//, '').replace(/\/$/, '');
+    if (!rel) continue;
+    if (rel.split('/').includes('.git')) throw new Error(`handoff payload carries source: ${rel}`);
+    for (const repo of repos) {
+      const inside = repo.prefix === '' ? rel : rel.startsWith(repo.prefix + '/') ? rel.slice(repo.prefix.length + 1) : null;
+      if (inside !== null && repo.tracked.has(inside) && !edited.has(rel)) throw new Error(`handoff payload carries source: ${rel}`);
+    }
+  }
+}
+async function restoreCheckouts(root, record) {
+  if (!SHA40.test(record.commit || '') || checkoutHead(root) !== record.commit)
+    throw new Error('handoff checkout SHA mismatch: workspace');
+  if (!Array.isArray(record.checkouts)) throw new Error('handoff manifest lacks pinned checkouts');
+  for (const row of record.checkouts) {
+    const rel = String(row?.path || '');
+    if (!rel.startsWith('.srcbuild/') || rel.split('/').includes('..') || path.isAbsolute(rel)
+      || !SHA40.test(row.commit || '') || typeof row.url !== 'string' || !row.url)
+      throw new Error(`handoff checkout row invalid: ${rel}`);
+    const dest = path.join(root, rel);
+    if (!await exists(path.join(dest, '.git'))) await checkoutExactSource(row.url, dest, row.commit);
+    if (checkoutHead(dest) !== row.commit) throw new Error(`handoff checkout SHA mismatch: ${rel}`);
+  }
+}
 const sdkRel='.srcbuild/workspace/software/cangjie';
 const separateSdk=phase==='stage3'&&identity.target==='linux-x64';
 if (mode === 'pack') {
@@ -87,10 +191,16 @@ if (mode === 'pack') {
   // A checkout copied by bootstrap may contain Git's credential-bearing config;
   // retain its object identity, never that config or Actions command files.
   const sdkSha256=separateSdk?await stageSdkHandoff('pack',path.join(root,sdkRel),dir):undefined;
-  tar(['-cf', archive,...(separateSdk?['--exclude='+sdkRel]:[]), '--exclude=.git/config', '--exclude=*/.git/config',
-    '--exclude=*/cjcj-src-stage0/target', '--exclude=*/cjcj-src-stage1/target',
-    '--exclude=*/stage0depot', '-C', root, ...entries]);
-  const record = {...identity, environment, entries, sdkSha256, sha256: await hash(archive)};
+  const excluded = [/(^|\/)cjcj-src-stage[01]\/target$/, /(^|\/)stage0depot$/,
+    ...(separateSdk ? [new RegExp('^' + sdkRel.replace(/[.]/g, '\\.') + '$')] : [])];
+  const plan = await payloadPlan(root, entries, excluded);
+  if (plan.commit !== identity.commit) throw new Error('handoff checkout SHA mismatch: workspace');
+  const list = path.join(dir, 'payload.list');
+  await fs.writeFile(list, plan.files.map(rel => rel + '\0').join(''));
+  try { tar(['-cf', archive, '--null', '--no-recursion', '-C', root, '-T', list]); }
+  finally { await fs.rm(list, {force: true}); }
+  const record = {...identity, environment, entries, sourcePolicy: 'pinned-git-checkout', checkouts: plan.checkouts, overlay: plan.overlay,
+    sdkSha256, sha256: await hash(archive)};
   await fs.writeFile(manifest, `${JSON.stringify(record, null, 2)}\n`);
   console.log(`BOOTSTRAP_HANDOFF phase=${phase} sha256=${record.sha256}`);
 } else {
@@ -109,6 +219,11 @@ if (mode === 'pack') {
   // also rejects accidental cross-target or stale-run selection before unpack.
   if (phase !== 'mingw') await resolveRuntimeSource(record.environment, null);
   if(separateSdk&&(!record.sdkSha256||record.sdkSha256!==(await fs.readFile(path.join(dir,'stage3-sdk.tar.sha256'),'utf8')).trim()))throw Error('STAGE_SDK_HANDOFF_HASH');
+  if (record.sourcePolicy !== 'pinned-git-checkout') throw new Error('handoff manifest lacks pinned checkout policy');
+  await restoreCheckouts(root, record);
+  const listed = spawnSync('tar', ['-tf', archive], {encoding: 'utf8', maxBuffer: 1 << 30});
+  if (listed.error || listed.status !== 0) throw new Error('handoff payload listing failed');
+  await assertNoSourcePayload(listed.stdout.split('\n').filter(Boolean), root, record.checkouts, record.overlay);
   tar(['-xf', archive, '-C', root]);
   if(separateSdk)await stageSdkHandoff('restore',path.join(root,sdkRel),dir);
   if (phase !== 'mingw') { await verifyRuntimeHandoff(record.environment); await verifyHleHandoff(record.environment); await verifyNativeToolHandoff({root,environment:record.environment}); }
