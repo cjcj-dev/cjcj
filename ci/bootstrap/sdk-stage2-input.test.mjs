@@ -88,8 +88,9 @@ test('ordinary CJPM source-build is an explicit C2 input without fabricated comp
 test('explicit final std reuse retains completed native commands and rejects failed production',async()=>{
  const f=await stage2Fixture(),install=path.join(f.root,'std');
  await f.write('std/modules/linux_x86_64_cjnative/std/std.core.cjo','module');
+ await f.write('std/lib/linux_x86_64_cjnative/libcangjie-std-core.a','archive');
  await f.write('std/PROVENANCE.txt',`STD_SOURCE_COMMIT = ${f.facts.commit}\nBUILT_BY_CJC = ${f.facts.commit}\nCOLOURED = true\n`);
- const rows=[{argv:['python3','-I','build.py','build'],cwd:f.root,rc:0,signal:null},
+ const rows=[{argv:['python3','-I','build.py','build','-t','relwithdebinfo'],cwd:f.root,rc:0,signal:null},
   {argv:['python3','-I','build.py','install','--prefix',install],cwd:f.root,rc:0,signal:null}];
  const commands=await f.write('std.commands.json',JSON.stringify(rows));
  const input={...f.input,stdlib:f.input.runtime,stage2:{compilerCommit:f.facts.commit}};
