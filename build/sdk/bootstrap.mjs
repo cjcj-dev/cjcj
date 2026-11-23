@@ -113,6 +113,17 @@ export function freshStdBuildTree(runtimeSource) {
   return STD_BUILD_OUTPUTS.map(rel => path.join(runtimeSource, rel));
 }
 
+// A chain std is accepted only when it names the pinned runtime source, was
+// built by a compiler stamped with the pinned cjcj commit, and is coloured.
+// writeStdProvenance (build/lib/provenance.mjs) writes `BUILT_BY_CJC = <sha>`
+// only for a clean stamp; a `-dirty` or absent stamp is written as
+// `unresolved: ...` and is refused here.
+export function assertStdProvenance(text, {runtime, cjcj}, id) {
+  const lines = new Set(text.split('\n').map(line => line.trim()));
+  if (!lines.has(`STD_SOURCE_COMMIT = ${runtime}`) || !lines.has(`BUILT_BY_CJC = ${cjcj}`) || !lines.has('COLOURED = true'))
+    throw new Error(`STD_PROVENANCE ${id}`);
+}
+
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const git = (dir, ...argv) => {
@@ -208,9 +219,7 @@ export async function runBootstrap({config, runner, cli}) {
       if (!fs.existsSync(`${step.output}/PROVENANCE.txt`)) runner.run(step.id, [node, st, '--kind', 'std', '--source', src.runtime, '--commit', k.runtime,
         '--sdk', step.sdk, '--runtime', config.runtimeInstall, '--output', step.output, '--compiler-runtime', 'target', '--build-type', 'release',
         '--std-dependencies', JSON.stringify(deps.std), ...stdProducerArgs(tuple, {localModeApi: config.localModeApi === true}), ...stdArgs], {cwd: work});
-      const prov = fs.readFileSync(`${step.output}/PROVENANCE.txt`, 'utf8');
-      if (!prov.includes(`STD_SOURCE_COMMIT = ${k.runtime}`) || !prov.includes(`BUILT_BY_CJC = ${k.cjcj}`) || !prov.includes('COLOURED = true'))
-        throw new Error(`STD_PROVENANCE ${step.id}`);
+      assertStdProvenance(fs.readFileSync(`${step.output}/PROVENANCE.txt`, 'utf8'), {runtime: k.runtime, cjcj: k.cjcj}, step.id);
     }
   }
   const p1 = facts.get(L.c1), p2 = facts.get(L.c2), p3 = facts.get(L.product);
@@ -221,10 +230,12 @@ export async function runBootstrap({config, runner, cli}) {
   if (installed.compilerCommit !== k.cjcj || installed.selection.targetComponents.llvm.commit !== k.llvm
     || installed.selection.targetComponents.runtime.commit !== k.runtime || digest(`${L.sdk}/${installed.compilerFile}`) !== p3.compilerSha256)
     throw new Error('FINAL_INSTALL_IDENTITY');
+  // Every compiler stage gives back the files its build wrote
+  // (ci/bootstrap/source-isolation.mjs), so a tracked change left here is a
+  // source modification, cjpm.lock included; it is reported, not restored.
   for (const dir of [src.stage2, src.stage3]) {
     const changed = git(dir, 'diff', '--name-only', 'HEAD', '--');
-    if (changed && changed !== 'cjpm.lock') throw new Error(`COMPILER_SOURCE_MODIFIED ${dir}: ${changed}`);
-    if (changed) git(dir, 'restore', '--source=HEAD', '--', 'cjpm.lock');
+    if (changed) throw new Error(`COMPILER_SOURCE_MODIFIED ${dir}: ${changed}`);
   }
   const summary = {sdk: L.sdk, compiler: k.cjcj, compilerSha256: p3.compilerSha256, stage2CompilerSha256: p2.compilerSha256,
     llvm: k.llvm, llvmSha256: nf.llvmLibrary.sha256, runtime: k.runtime, runtimeSha256: digest(`${L.sdk}/${rt}`), std: k.runtime,

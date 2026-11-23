@@ -15,6 +15,7 @@ import {compilerProducer} from './compiler_identity.mjs';
 import {verifyStdBuildInputs, prepareStdDependencies} from './stdlib-build.mjs';
 import {injectCangjieVersion} from '../../build/sdk/producers/srcbuild/steps/inject-version-lib.mjs';
 import {prepareTrimpath} from '../../build/sdk/producers/release/trimpath.mjs';
+import {COMPILER_BUILD_FILES,withBuildFilesRestored} from './source-isolation.mjs';
 import {assertFinalStdInput} from './sdk-final-std.mjs';
 import {writeStdProvenance} from '../../build/lib/provenance.mjs';
 import {stdIdentity} from '../../build/sdk/producers/srcbuild/lib/final-compiler.mjs';
@@ -317,7 +318,9 @@ export async function nativeStage(options, {signal} = {}) {
     if(native.os==='win32')Object.assign(env,windowsCompilerEnvironment(env,shim,shimInstall));
     const shimScript=path.join(source,'runtime_shim/build_shim.mjs');
     await command(await shimCommand(shimScript,env,options.zx),{cwd:source,env,records});
-    try {
+    // cjpm.toml (trimpath) and cjpm.lock (cjpm itself) are written by this
+    // build and must not reach the next stage that stamps this checkout.
+    await withBuildFilesRestored(source,COMPILER_BUILD_FILES,async()=>{
       await prepareTrimpath(source);
       // A completed user installation need not contain the bootstrap .host
       // tree. The existing explicit host option selects the package manager
@@ -325,7 +328,7 @@ export async function nativeStage(options, {signal} = {}) {
       const packageManagerSdk=host??path.join(sdk,'.host');
       const build=()=>command([path.join(packageManagerSdk,'tools/bin/cjpm'+native.exe),'build',...(options['target-dir']?['--target-dir',target]:[]),'-j',jobs],{cwd:source,env:cleanSdkEnvironment(sdk,platform,env,packageManagerSdk),records});
       if(native.os==='win32')await withWindowsCompilerLinks(source,sdk,env.MINGW_PATH,build);else await build();
-    } finally { await fs.writeFile(path.join(source,'cjpm.toml'), before); }
+    });
     const product=await resolveProductBinary(path.join(target,'release/bin'),options.phase||'stage2',{windows:native.os==='win32'});
     await assembleDirectory(output, async destination => {
     await copyOutputs(destination,[{from:product,to:'bin/cjcj-stage1'+native.exe},
