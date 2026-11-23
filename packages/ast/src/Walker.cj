@@ -522,6 +522,10 @@ public class Walker {
                         if (stopIf(WalkNode(lambda))) { return VisitAction.STOP_NOW }
                     }
                 }
+            case ASTKind.EXCLAVE_EXPR =>
+                if ((let Some(ex) <- (curNode as ExclaveExpr)) && (let Some(block) <- ex.body)) {
+                    if (stopIf(WalkNode(block))) { return VisitAction.STOP_NOW }
+                }
             case ASTKind.THROW_EXPR =>
                 if (let Some(throwExpr) <- (curNode as ThrowExpr)) {
                     if (stopIf(walkExprOption(throwExpr.expr))) { return VisitAction.STOP_NOW }

@@ -18,7 +18,11 @@ test('public H1 stage selects actual bytes on first build and stale-false defaul
  const root=await fixture('stage'),source=root+'/source',sdk=root+'/sdk',host=root+'/host';
  const option=source+'/packages/option/cjpm.toml';
  await write(source+'/cjpm.toml','[workspace]\ncompile-option = "-O1"\n');
- await write(source+'/packages/cjc/cjpm.toml','[package]\nlink-option = ""\n');
+ const pkg=source+'/packages/cjc/cjpm.toml';
+ const lib='third_party/llvm/lib/libLLVM-15.so';
+ const packageManifest='[package]\nlink-option = "${CANGJIE_HOME}/'+lib+'"\n';
+ await write(pkg,packageManifest);
+ await write(sdk+'/'+lib,'N library path; never loaded by the observer');
  await write(source+'/runtime_shim/keep','fixture');
  await write(source+'/target/release/cache-control','keep existing cache');
  const object='third_party/llvm/fixed-llc/cjselfhost_llvmshim.o',bytes=Buffer.from('fixture shim');
@@ -37,6 +41,8 @@ test('public H1 stage selects actual bytes on first build and stale-false defaul
   assert.equal(r.status,73,r.stderr);assert.equal(r.signal,null);
   const actual=await fs.readFile(observed,'utf8');
   assert.equal(await fs.readFile(option,'utf8'),original,'exception restores exact incoming bytes');
+  assert.equal(await fs.readFile(pkg,'utf8'),packageManifest);
+  await assert.rejects(fs.lstat(source+'/runtime_shim/h1-libLLVM-15.so'),{code:'ENOENT'});
   assert.equal(await fs.readFile(source+'/target/release/cache-control','utf8'),'keep existing cache');
   console.log('STAGE_OPTION_BYTES '+name+' '+JSON.stringify(actual));
   assert.match(actual,new RegExp('CANGJIE_VISIBLE_OPTIONS_ONLY='+expected+'"'),'actual compiler-command input must match requested/default policy');

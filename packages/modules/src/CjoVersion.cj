@@ -6,7 +6,9 @@ package cjcj::modules
 // ABI 1 current-receiver constructor return convention. Neither ABI 0 nor 1
 // target CJO/objects may be mixed with this ABI; regenerate them together.
 public const CJO_MAJOR_VERSION: UInt8 = 2u8
-public const CJO_MINOR_VERSION: UInt8 = 0u8
+// 2.1 appends checked function-slot modes. A 2.0 reader must reject a
+// 2.1 interface before treating local signatures as ordinary functions.
+public const CJO_MINOR_VERSION: UInt8 = 1u8
 public const CJO_PATCH_VERSION: UInt8 = 0u8
 
 public enum CjoVersionCompat {

@@ -562,6 +562,11 @@ const MF_FUNC_TY_INFO_VT_RETTYPE: UInt16 = 4u16
 const MF_FUNC_TY_INFO_VT_ISC: UInt16 = 6u16
 const MF_FUNC_TY_INFO_VT_HASVARIABLELENARG: UInt16 = 8u16
 
+// 63bf237b CjoFormat.fbs: FuncTyInfo appends [Mode] and Mode.
+const MF_FUNC_TY_INFO_VT_TYPEARGSMODE: UInt16 = 10u16
+const MF_FUNC_TY_INFO_VT_RETTYMODE: UInt16 = 12u16
+const MF_MODE_VT_LOCAL: UInt16 = 4u16
+
 // CompositeTyInfo. ModuleFormat_generated.h:5879-5880.
 const MF_COMPOSITE_TY_INFO_VT_DECLPTR: UInt16 = 4u16
 const MF_COMPOSITE_TY_INFO_VT_ISTHISTY: UInt16 = 6u16

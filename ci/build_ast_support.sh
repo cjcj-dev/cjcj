@@ -38,8 +38,8 @@ cp "$build/lib/libcangjie-ast-support.a" "$out/"
 # Keep archive, public headers and generated schema from one compiler build.
 mkdir -p "$out/include/flatbuffers" "$out/schema" "$out/third_party"
 cp -RL "$src/include/cangjie" "$out/include/"
-cp "$build/schema/flatbuffers/StdAstFormat_generated.h" "$out/include/flatbuffers/"
-cp "$src/schema/StdAstFormat.fbs" "$out/schema/"
+cp "$build/schema/flatbuffers/"{StdAst,StdxChir}Format_generated.h "$out/include/flatbuffers/"
+cp "$src/schema/"{StdAst,StdxChir}Format.fbs "$out/schema/"
 # The official nightly supplies the Cangjie flatbuffers module as well as flatc.
 cp -RL "$nightly/third_party/flatbuffers" "$out/third_party/"
 python3 - "$out" <<'PYHASH'

@@ -531,7 +531,7 @@ public func LookupCoreIntrinsicKind(name: String): Option<IntrinsicKind> {
         case "futureNotifyAll" => IntrinsicKind.FUTURE_NOTIFYALL
         case "intrinsicRefEq" => IntrinsicKind.OBJECT_REFEQ
         case "intrinsicRefEqRawArray" => IntrinsicKind.RAW_ARRAY_REFEQ
-        case "zeroValue" => IntrinsicKind.OBJECT_ZERO_VALUE
+        case "zeroValue" | "zeroValue2" => IntrinsicKind.OBJECT_ZERO_VALUE
         case "sourceFile" => IntrinsicKind.SOURCE_FILE
         case "sourceLine" => IntrinsicKind.SOURCE_LINE
         case "identityHashCodeForRefType" => IntrinsicKind.IDENTITY_HASHCODE

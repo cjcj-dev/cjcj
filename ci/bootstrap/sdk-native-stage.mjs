@@ -19,7 +19,8 @@ import {assertFinalStdInput} from './sdk-final-std.mjs';
 import {writeStdProvenance} from '../../build/lib/provenance.mjs';
 import {stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
 import {resolveProductBinary} from '../srcbuild/lib/product-binary.mjs';
-import {acceptInstalledStd, flag, stdBuildType} from './sdk-std-resume.mjs';
+import {acceptInstalledStd, checkStdAstOutput, flag, stdBuildType} from './sdk-std-resume.mjs';
+import {installCompilerChirInterface} from './compiler-chir-interface.mjs';
 import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {materializeNativeSource, nativeSourceOptions} from './sdk-source.mjs';
@@ -68,6 +69,12 @@ export async function nativeStage(options, {signal} = {}) {
   if(kind!=='h1'&&kind!=='compiler'&&options['visible-options-only']!==undefined)
     throw Error('COMPILER_OPTION_CONFIGURATION_KIND');
   const optionVisibility=visibleOptionsOnly(options['visible-options-only']);
+  const astInclude=options['std-ast-include'], astLibrary=options['std-ast-library'];
+  if ((astInclude!==undefined || astLibrary!==undefined) &&
+      (kind!=='std' || !path.isAbsolute(astInclude||'') || !path.isAbsolute(astLibrary||'')))
+    throw Error('STD_AST_SELECTION');
+  const localModeApi=options['local-mode-api']===true;
+  if(localModeApi&&kind!=='std')throw Error('STD_LOCAL_MODE_API_KIND');
   if (kind !== 'std' && options['build-type'] !== undefined) throw new Error('STD_BUILD_TYPE_KIND');
   const buildType = kind === 'std' ? stdBuildType(options['build-type']) : undefined;
   const commit = await materializeNativeSource(options,command,{signal});
@@ -75,8 +82,27 @@ export async function nativeStage(options, {signal} = {}) {
   try {resources=await selectBuildResources({heap:options.heap,jobs:options.jobs});}
   catch(error){if(error.message.startsWith('BUILD_JOBS'))throw Error('NATIVE_STAGE_JOBS '+error.message);throw error;}
   const native=sdkPlatform(platform), jobs=String(resources.jobs),records=[];
+  if(astInclude){
+    const root=path.dirname(astInclude);
+    if(path.basename(astInclude)!=='include' || ![path.join(root,'libcangjie-ast-support.a'),
+        path.join(root,'lib',native.tuple,'libcangjie-ast-support.a')].includes(astLibrary))
+      throw Error('STD_AST_SELECTION');
+  }
   if(process.platform!==native.os||process.arch!==native.arch)throw new Error('NATIVE_RUNNER_REQUIRED');
-  const hostRuntime=kind==='compiler'||options['compiler-runtime']==='target'?sdk:path.join(sdk,'.host');
+  // A directly installed official compiler owns bin/cjc and its loader paths.
+  // A selfhost stage still uses its recorded producer and execution runtime.
+  let officialStdCompiler;
+  if(kind==='std' && options['compiler-runtime']==='host') {
+    const present=file=>fs.lstat(file).then(()=>true,e=>{if(e.code==='ENOENT')return false;throw e;});
+    if(!await present(path.join(sdk,'STAGE-INPUTS.json'))) {
+      const staged=path.join(sdk,'bin','cjcj-stage1'+native.exe);
+      if(await present(staged)||await present(staged+'.entry')||await present(path.join(sdk,'libexec','compiler','cjcj-stage1'+native.exe)))
+        throw Error('STD_BOOTSTRAP_STAGED_COMPILER_MISSING_INPUTS');
+      officialStdCompiler=path.join(sdk,'bin','cjc'+native.exe);
+      await fs.access(officialStdCompiler,fs.constants.X_OK);
+    }
+  }
+  const hostRuntime=officialStdCompiler||kind==='compiler'||options['compiler-runtime']==='target'?sdk:path.join(sdk,'.host');
   const env={...cleanSdkEnvironment(sdk,platform,process.env,hostRuntime),cjHeapSize:resources.heap,
     CMAKE_BUILD_PARALLEL_LEVEL:jobs,CANGJIE_BUILD_JOBS:jobs,CJCJ_COMMIT:commit,
     CJCJ_SUPERVISOR_WORK:process.env.CJCJ_SUPERVISOR_WORK||output+'.supervision'};
@@ -89,8 +115,10 @@ export async function nativeStage(options, {signal} = {}) {
       && flag(row.argv, '--output') === output && flag(row.argv, '--kind') === 'std').at(-1);
     const expected = last?.argv.includes('--resume-installed') ? last.resumeOf : last;
     if (expected?.cwd !== path.join(path.dirname(options['resume-state']), 'build', options['resume-stage'])) throw new Error('STD_RESUME_STAGE state');
+    if(flag(expected.argv,'--std-ast-include')!==astInclude || flag(expected.argv,'--std-ast-library')!==astLibrary)
+      throw Error('STD_RESUME_RECORD AST selection');
     accepted = await acceptInstalledStd({file:options['accept-records'], source, output, commit, sdk, runtime,
-      link:output+'.runtime-input', platform, compilerRuntime:options['compiler-runtime'], heap:options.heap, previous, expected, buildType});
+      link:output+'.runtime-input', platform, compilerRuntime:options['compiler-runtime'], heap:options.heap, previous, expected, buildType, localModeApi, astInclude, astLibrary});
   }
   await fs.mkdir(output,{recursive:true});
   const restoreOptionVisibility=kind==='h1'||kind==='compiler'
@@ -105,6 +133,12 @@ export async function nativeStage(options, {signal} = {}) {
         .catch(error=>{if(error.code!=='ENOENT')throw error;});
     }
     await verifyStdBuildInputs(sdk,platform);
+    if(astInclude){
+      for(const rel of ['cangjie/Parse/Parser.h','cangjie/CHIR/IR/AttributeInfo.h'])
+        if(!(await fs.stat(path.join(astInclude,rel))).isFile())throw Error('STD_AST_HEADER '+rel);
+      const support=path.join(sdk,'lib',native.tuple,'libcangjie-ast-support.a');
+      if(await fileDigest(astLibrary)!==await fileDigest(support))throw Error('STD_AST_SUPPORT_MISMATCH');
+    }
     if(!options['resume-installed']) {
       const previous=await fs.readFile(output+'.commands.json','utf8').then(JSON.parse).catch(error=>{if(error.code==='ENOENT')return [];throw error;});
       await prepareStdDependencies({source,dependencies:options['std-dependencies']?JSON.parse(options['std-dependencies']):undefined,previous,records});
@@ -120,8 +154,11 @@ export async function nativeStage(options, {signal} = {}) {
       if(error.code==='ENOENT')return null;throw error;
     });
     const cached = name => cache?.match(new RegExp('^'+name+':[^=]+=(.*)$','m'))?.[1];
-    const reconfigure = cache !== null && (cached('CMAKE_BUILD_TYPE') !== cmakeType || cached('CANGJIE_TARGET_LIB') !== targetLibraries.join(';'));
-    if(options['resume-installed'] && reconfigure)throw new Error('STD_RESUME_BUILD_CONFIGURATION');
+    const selectedInclude=astInclude??'';
+    const includeChanged=cache!==null && (cached('CANGJIE_INCLUDE')??'')!==selectedInclude;
+    const reconfigure = cache !== null && (includeChanged || cached('CMAKE_BUILD_TYPE') !== cmakeType || cached('CANGJIE_TARGET_LIB') !== targetLibraries.join(';') ||
+      (cached('CANGJIE_ENABLE_LOCAL_MODE_API')==='ON')!==localModeApi);
+    if(options['resume-installed'] && (reconfigure || (astInclude && cache===null)))throw new Error('STD_RESUME_BUILD_CONFIGURATION');
     await prepareRuntimeInputs({runtime, link, native, buildType, resume:!!options['resume-installed'], signal});
     if (options['resume-installed']) {
       const acceptedRow = {event: 'target-result', argv: ['resume-accepted', options['accept-records']], cwd: stdlib, rc: 0, signal: null,
@@ -132,19 +169,28 @@ export async function nativeStage(options, {signal} = {}) {
       // build.py only configures a missing native build directory. Reconfigure
       // an existing cache with the requested type/input while retaining its
       // toolchain, platform and other legitimate cached options.
-      if(reconfigure)await command(['cmake','-S',stdlib,'-B',build,'-DCMAKE_BUILD_TYPE='+cmakeType,
-        '-DCANGJIE_TARGET_LIB='+targetLibraries.join(';'),'-U','RUNTIME_COMMON_LIB_DIR'],{cwd:stdlib,env,records});
+      // R expands CANGJIE_HOME when generating the archive copy rule. A reused
+      // cache can have the same header root but still name a previous SDK.
+      if(reconfigure || (astInclude && cache!==null))await command(['cmake','-S',stdlib,'-B',build,'-DCMAKE_BUILD_TYPE='+cmakeType,
+        '-DCANGJIE_TARGET_LIB='+targetLibraries.join(';'),
+        ...(astInclude||includeChanged?['-DCANGJIE_INCLUDE='+selectedInclude]:[]),
+        ...(localModeApi||cached('CANGJIE_ENABLE_LOCAL_MODE_API')!==undefined?['-DCANGJIE_ENABLE_LOCAL_MODE_API='+(localModeApi?'ON':'OFF')]:[]),'-U','RUNTIME_COMMON_LIB_DIR'],{cwd:stdlib,env,records});
+      // R's AST_SUPPORT archive copies the selected support library and appends
+      // ast_api.o, but its Ninja edge only orders the object target. Regenerate
+      // this derived archive on paired builds and when leaving a paired cache.
+      if(astInclude || includeChanged)await fs.rm(path.join(build,'libcangjie-std-astFFI.a'),{force:true});
       await command(['python3','-I','build.py','build','-t',buildType,'--jobs',jobs,
-        ...targetLibraries.map(directory=>'--target-lib='+directory)],{cwd:stdlib,env,records});
+        ...targetLibraries.map(directory=>'--target-lib='+directory),...(astInclude?['--include='+astInclude]:[]),...(localModeApi?['--local_mode_api']:[])],{cwd:stdlib,env,records});
       await command(['python3','-I','build.py','install','--prefix',output],{cwd:stdlib,env,records});
     }
     for(const rel of stdInstallFiles(platform))
       if(!(await fs.stat(path.join(output,rel))).isFile())throw new Error('STD_INSTALL_SHAPE '+rel);
+    if(astInclude && !options['resume-installed'])await checkStdAstOutput({source,output,platform});
     if(options['compiler-runtime']==='target')await assertFinalStdInput({sdk,std:output,runtime,
       host:JSON.parse(await fs.readFile(path.join(sdk,'STAGE-INPUTS.json'),'utf8')).selection.bootstrapHost.install,platform,work:output+'.consumers',signal});
     // Use the revision checked against the consumed source before target startup.
     // The legacy writer's trusted environment default is not a native CLI identity.
-    await writeStdProvenance({sourceDir:stdlib,sourceRoot:source,sourceRevision:commit,installPrefix:output,compiler:await compilerProducer(sdk),buildSdk:sdk,
+    await writeStdProvenance({sourceDir:stdlib,sourceRoot:source,sourceRevision:commit,installPrefix:output,compiler:officialStdCompiler??await compilerProducer(sdk),buildSdk:sdk,
       coloured:options['compiler-runtime']==='target'?'true':'bootstrap',preflightC2:options['compiler-runtime']==='target'?'stage2':'not-applicable',
       note:'native target/install '+commit});
     } finally { await atomicJson(output+'.commands.json',records); }
@@ -175,16 +221,21 @@ export async function nativeStage(options, {signal} = {}) {
           SB_SHA:commit,SB_PLATFORM:platform,SB_CC:options.cc,SB_OPTIMIZATION:'O1',SB_PARAMETERS_JSON:'{"compile_flags":""}'},records});
     } else {
     if(!host)throw new Error('H1_HOST_REQUIRED');
-    const shim=await readInstalledNativeShim({install:sdk});
+    const shimInstall=options['shim-install']||sdk;
+    const shim=options['shim-install']?await compilerNativeShim({install:shimInstall,nativeInstall:sdk,compilerCommit:commit}):await readInstalledNativeShim({install:sdk});
     const work=output+'.h1',inputs=path.join(work,'inputs'),productRoot=path.join(work,'out');
     await fs.mkdir(inputs,{recursive:true});await fs.mkdir(productRoot,{recursive:true});
-    await fs.copyFile(path.join(sdk,shim.object.path),path.join(inputs,'llvm-shim.o'));
+    await fs.copyFile(path.join(shimInstall,shim.object.path),path.join(inputs,'llvm-shim.o'));
     const parameters=path.join(work,'parameters.json');await atomicJson(parameters,{compile_flags:''});
     const manifest=path.join(source,'cjpm.toml'),before=await fs.readFile(manifest);
     const packageManifest=path.join(source,'packages/cjc/cjpm.toml'),packageBefore=await fs.readFile(packageManifest);
     const hostRuntimeFile=path.join(host,'runtime/lib',native.tuple,'libcangjie-runtime'+native.shared);
     const hostRuntimeSupportsConfigV1=(await nativeSymbolRows(hostRuntimeFile,{platform,runtime:true,defined:true})).includes('CJ_MRT_CjRuntimeInitWithConfigV1');
-    const startupConfiguration={hostRuntimeFile,hostRuntimeSupportsConfigV1};
+    const llvmLibraryFile=path.join(sdk,'third_party/llvm',native.llvmDirectory,native.llvmLibrary);
+    await fs.access(llvmLibraryFile,fs.constants.R_OK);
+    const startupConfiguration={hostRuntimeFile,hostRuntimeSupportsConfigV1,llvmLibraryFile};
+    const linkFile=path.join(source,'runtime_shim','h1-'+native.llvmLibrary);
+    let linkCreated=false;
     let packageCompiled=packageBefore;
     const lock=path.join(source,'cjpm.lock'),lockBefore=await fs.readFile(lock).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
     const h1env={...cleanSdkEnvironment(host,platform,process.env,host),cjHeapSize:resources.heap,
@@ -202,12 +253,17 @@ export async function nativeStage(options, {signal} = {}) {
         replacements++;return prefix+JSON.stringify(compileOption);
       });
       if(replacements!==1)throw Error('H1_WORKSPACE_COMPILE_OPTION');
-      if(!hostRuntimeSupportsConfigV1) {
-        // Legacy official hosts still need the compiler-only heap policy.
-        const hostOnly=new Set(['--wrap=CJ_MRT_CjRuntimeInitWithConfigV1']);
-        packageCompiled=Buffer.from(packageBefore.toString().replace(/^(\s*link-option\s*=\s*)"([^"\n]*)"/gm,
-          (_,prefix,value)=>prefix+JSON.stringify(value.split(/\s+/).filter(token=>!hostOnly.has(token)).join(' '))));
-      }
+      // cjpm and its compiler run on H. The executable built here links the
+      // same N library that stage0-run installs beside the native shim.
+      try {await fs.symlink(llvmLibraryFile,linkFile);linkCreated=true;}
+      catch(error){if(error.code!=='EEXIST'||await fs.readlink(linkFile)!==llvmLibraryFile)throw error;}
+      const hostLLVM='${CANGJIE_HOME}/third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary;
+      let llvmInputs=0;
+      packageCompiled=Buffer.from(packageBefore.toString().replace(/^(\s*link-option\s*=\s*)"([^"\n]*)"/gm,
+        (_,prefix,value)=>prefix+JSON.stringify(value.split(/\s+/)
+          .filter(token=>hostRuntimeSupportsConfigV1||token!=='--wrap=CJ_MRT_CjRuntimeInitWithConfigV1')
+          .map(token=>{if(token!==hostLLVM)return token;llvmInputs++;return path.relative(source,linkFile);}).join(' '))));
+      if(llvmInputs!==1)throw Error('H1_PACKAGE_LLVM_LINK_INPUT');
       await fs.writeFile(packageManifest,packageCompiled);
       await fs.writeFile(manifest,text);
       await fs.copyFile(path.join(inputs,'llvm-shim.o'),path.join(source,'runtime_shim/cjselfhost_llvmshim.o'));
@@ -222,14 +278,16 @@ export async function nativeStage(options, {signal} = {}) {
         '-c',path.join(source,'runtime_shim/cjc_heap_defaults.c'),
         '-o',path.join(source,'runtime_shim/cjc_heap_defaults.o')],
         {cwd:source,env:{...h1env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''},records});
-      await command([path.join(host,'tools/bin/cjpm'),'build','-j'+jobs],{cwd:source,env:h1env,records});
-      const built=await resolveProductBinary(path.join(source,'target/release/bin'),'h1');
+      const target=await privateRoot(options['target-dir']||path.join(source,'target'));
+      await command([path.join(host,'tools/bin/cjpm'),'build',...(options['target-dir']?['--target-dir',target]:[]),'-j'+jobs],{cwd:source,env:h1env,records});
+      const built=await resolveProductBinary(path.join(target,'release/bin'),'h1');
       await fs.copyFile(built,path.join(productRoot,'cjcj-stage1'));
-      await fs.cp(path.join(source,'target/release'),path.join(productRoot,'release'),{recursive:true,dereference:true});
+      await fs.cp(path.join(target,'release'),path.join(productRoot,'release'),{recursive:true,dereference:true});
       compiled=await fs.readFile(manifest);
     } finally {
       await fs.writeFile(manifest,before);
       await fs.writeFile(packageManifest,packageBefore);
+      if(linkCreated)await fs.unlink(linkFile);
       const {sha256}=await import('./sdk-io.mjs');
       await atomicJson(path.join(work,'startup-configuration.json'),{...startupConfiguration,sourceChanges:{
         'packages/cjc/cjpm.toml':{beforeSha256:sha256(packageBefore),buildSha256:sha256(packageCompiled)}}});
@@ -239,7 +297,10 @@ export async function nativeStage(options, {signal} = {}) {
     const bin=path.join(output,'bin');await fs.mkdir(bin,{recursive:true});
     const product=path.join(bin,'cjcj-stage1');
     await fs.copyFile(path.join(productRoot,'cjcj-stage1'),product);
+    await fs.mkdir(path.join(output,'tools/bin'),{recursive:true});
+    await fs.copyFile(product,path.join(output,'tools/bin/chir-dis'));
     const {sha256}=await import('./sdk-io.mjs');
+    await installCompilerChirInterface({source,destination:output,sdk,shim,records,env});
     await atomicJson(path.join(bin,'build-inputs.json'),{producer:'sdk-native-stage:h1',source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,startupConfiguration,visibleOptionsOnly:optionVisibility,
       sourceChanges:{'cjpm.toml':{beforeSha256:sha256(before),buildSha256:sha256(compiled)},
         'packages/cjc/cjpm.toml':{beforeSha256:sha256(packageBefore),buildSha256:sha256(packageCompiled)}},sha256:await fileDigest(product)});
@@ -268,6 +329,7 @@ export async function nativeStage(options, {signal} = {}) {
     const product=await resolveProductBinary(path.join(target,'release/bin'),options.phase||'stage2',{windows:native.os==='win32'});
     await assembleDirectory(output, async destination => {
     await copyOutputs(destination,[{from:product,to:'bin/cjcj-stage1'+native.exe},
+      {from:product,to:'tools/bin/chir-dis'+native.exe},
       // These are the new compiler's link inputs. The package manager's host
       // execution libraries can belong to an older compiler and must not travel
       // with this output. Carry dependencies as normal producer artifacts so an
@@ -281,6 +343,7 @@ export async function nativeStage(options, {signal} = {}) {
       // absolute path out of the tree, which the install guard rejects as escape.
       {from:path.join(target,'release'),to:'share/cjcj/cjo',exclude:['bin','runtime']},
       ...['cjselfhost_llvmshim.o','cjc_runtime_config.o','cjc_heap_defaults.o'].map(name=>({from:path.join(source,'runtime_shim',name),to:'share/cjcj/runtime_shim/'+name}))]);
+    await installCompilerChirInterface({source,destination,sdk,shim,records,env});
     await atomicJson(path.join(destination,'compiler-inputs.json'),{commit,nativeShim:shim,visibleOptionsOnly:optionVisibility,version:process.env.SOURCE_SDK_VERSION,parentSha256:await fileDigest(await compilerProducer(sdk)),
       stdSha256:await stdIdentity(options['std-input']||sdk, options['std-input']||sdk, {sourceSdk:sdk}),
       stdCoreSha256:await fileDigest(path.join(sdk,'lib',native.tuple,'libcangjie-std-core.a')),
@@ -292,8 +355,8 @@ export async function nativeStage(options, {signal} = {}) {
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies','visible-options-only'].map(k=>[k,{type:'string'}]));
-    spec['resume-installed']={type:'boolean'};
+    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','private-tools','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies','std-ast-include','std-ast-library','visible-options-only'].map(k=>[k,{type:'string'}]));
+    spec['resume-installed']={type:'boolean'};spec['local-mode-api']={type:'boolean'};
     nativeSourceOptions(process.argv); // Reject duplicate identity flags before parseArgs.
     const {values}=parseArgs({options:spec});
     if(!values.kind||!values.source||!values.sdk||!values.output||!values.platform)throw new Error('native stage needs kind/source/sdk/output/platform');

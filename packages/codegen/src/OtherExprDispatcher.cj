@@ -1,5 +1,6 @@
 package cjcj::codegen
 
+import std.collection.ArrayList
 import cjcj::chir.SpawnBase
 
 import cjcj::chir.RawArrayAllocateBase
@@ -27,6 +28,13 @@ public func HandleStructedControlFlowExpression(irBuilder: IRBuilder2, chirExpr:
 
 public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let kind = chirExpr.GetExprKind()
+    if (kind == ExprKind.START_REGION || kind == ExprKind.END_REGION) {
+        let name = if (kind == ExprKind.START_REGION) { "CJ_MCC_StartLocalRegion" } else { "CJ_MCC_EndLocalRegion" }
+        let call = irBuilder.CallIntrinsicFunction(unsafe { LLVMVoidTypeInContext(irBuilder.GetLLVMContext().raw) },
+            name, ArrayList<CGValue>(), ArrayList<String>())
+        if (kind == ExprKind.END_REGION) { unsafe { LLVMSelfhostMarkNoTail(call) } }
+        return LLVMNullValue()
+    }
     if (kind == ExprKind.LAMBDA) {
         if (let Some(lambdaExpr) <- (chirExpr as Lambda)) {
             return GenerateLambdaExpression(irBuilder, lambdaExpr)

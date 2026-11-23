@@ -326,8 +326,15 @@ private func preCheckCollectDeclMapAndCheckRedefinitionForOneSymbol(
         return
     }
     let found = ctx.GetDeclsByName(names)
-    if (!found.isEmpty()) {
-        let previous = found[0]
+    for (previous in found) {
+        if ((let Some(pd) <- (decl as PropDecl)) && (let Some(prev) <- (previous as PropDecl)) &&
+            !pd.TestAttr(Attribute.STATIC) && !prev.TestAttr(Attribute.STATIC) &&
+            PropertyMode(pd) != PropertyMode(prev)) {
+            let a = pd.typeNode.flatMap({ t => t.GetTy() })
+            let b = prev.typeNode.flatMap({ t => t.GetTy() })
+            if (Ty.IsTyCorrect(a) && Ty.IsTyCorrect(b) && refEq(a.getOrThrow(), b.getOrThrow())) { continue }
+            if (!Ty.IsTyCorrect(a) && !Ty.IsTyCorrect(b)) { continue }
+        }
         let privateGlobalInDifferentFile = decl.TestAttr(Attribute.GLOBAL) && decl.TestAttr(Attribute.PRIVATE) &&
             previous.TestAttr(Attribute.GLOBAL) && previous.TestAttr(Attribute.PRIVATE) &&
             decl.curFile != previous.curFile
@@ -339,6 +346,7 @@ private func preCheckCollectDeclMapAndCheckRedefinitionForOneSymbol(
             previous.TestAttr(Attribute.COMMON))
         if (!privateGlobalInDifferentFile && !multiPlat) {
             DiagRedefinitionWithFoundNode(diag, decl, previous)
+            break
         }
     }
     ctx.AddDeclName(names, decl)
@@ -870,7 +878,7 @@ private func preCheckFuncSameSignature(typeManager: TypeManager, left: FuncDecl,
             }
         }
     }
-    return visibilityMatch &&
+    return visibilityMatch && SameModalInputs(left, fd) &&
         typeManager.IsFuncParameterTypesIdentical(paramTys1, paramTys2, typeMapping: substituteMap) &&
         fd.TestAttr(Attribute.STATIC) == left.TestAttr(Attribute.STATIC) &&
         fd.TestAttr(Attribute.CONSTRUCTOR) == left.TestAttr(Attribute.CONSTRUCTOR) &&

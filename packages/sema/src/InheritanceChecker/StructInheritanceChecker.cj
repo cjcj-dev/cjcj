@@ -1396,7 +1396,7 @@ public class StructInheritanceChecker {
                 continue
             }
             let parentDecl = parent.decl.getOrThrow()
-            if (parentDecl.astKind != childDecl.astKind) {
+            if (parentDecl.astKind != childDecl.astKind || !SameModalInputs(parentDecl, childDecl)) {
                 continue
             }
             var shouldUpdate = true
@@ -1875,14 +1875,18 @@ public class StructInheritanceChecker {
     private func DiagnoseForConflictInheritance(decl: InheritableDecl, members: MemberMap): Unit {
         for (name in members.Names()) {
             let found = members.Get(name)
+            // Only functions and properties allow overloading; properties overload by receiver mode.
             var allFunc = true
+            var allProp = true
             for (member in found) {
                 if (!member.IsFunc()) {
                     allFunc = false
-                    break
+                }
+                if (!member.IsProp()) {
+                    allProp = false
                 }
             }
-            if (found.size > 1 && !allFunc) {
+            if (found.size > 1 && !allFunc && !allProp) {
                 let builder = DiagnoseRefactor(
                     diag,
                     DiagKindRefactor.sema_inherit_super_member_kind_inconsistent,
@@ -2115,7 +2119,8 @@ public class StructInheritanceChecker {
                 }
                 if (let Some(parentFuncTy) <- FuncTyFromOption(parentTy)) {
                     if (let Some(childFuncTy) <- FuncTyFromOption(child.ty)) {
-                        let sameSignature = typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)
+                        let sameSignature = SameModalInputs(parentFunc, childFunc) &&
+                            typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)
                         if (sameSignature) {
                             let inheritedByExtension = typeManager.HasExtensionRelation(childFuncTy.retTy, parentFuncTy.retTy)
                             let isParamListCorrect = HasParamListForParameterNameCheck(parentFunc) &&
@@ -2259,6 +2264,7 @@ public class StructInheritanceChecker {
 
     private func IsExtendedDefaultImpl(parent: MemberSignature, child: Decl): Bool {
         if (let Some(parentDecl) <- parent.decl) {
+            if (!SameModalInputs(child, parentDecl)) { return false }
             if ((parentDecl.astKind != ASTKind.FUNC_DECL && parentDecl.astKind != ASTKind.PROP_DECL) ||
                 !parentDecl.TestAttr(Attribute.DEFAULT)) {
                 return false

@@ -118,6 +118,10 @@ public class Lexer {
         return impl.GetCurrentToken()
     }
 
+    public func HasTokenInput(): Bool {
+        return impl.HasTokenInput()
+    }
+
     public func GetLastTokenStart(): Int64 {
         return impl.GetLastTokenStart()
     }

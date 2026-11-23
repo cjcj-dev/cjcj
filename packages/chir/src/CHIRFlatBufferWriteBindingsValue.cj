@@ -270,7 +270,7 @@ class ParameterBuilder {
 
     public init(builder: FlatBufferBuilder) {
         this.builder = builder
-        builder.StartTable(5)
+        builder.StartTable(6)
     }
 
     public func add_base(base: FlatBufferOffset): Unit {
@@ -293,13 +293,16 @@ class ParameterBuilder {
         builder.AddOffset(4, annoInfo)
     }
 
+    public func add_paramDftValFunc(id: UInt32): Unit { builder.AddU32(5, id) }
+
     public func Finish(): FlatBufferOffset {
         return builder.EndTable()
     }
 }
 
-func CreateParameter(builder: FlatBufferBuilder, base: FlatBufferOffset, ownedFunc: UInt32, ownedLambda: UInt32, srcCodeIdentifier: FlatBufferOffset, annoInfo: FlatBufferOffset): FlatBufferOffset {
+func CreateParameter(builder: FlatBufferBuilder, base: FlatBufferOffset, ownedFunc: UInt32, ownedLambda: UInt32, srcCodeIdentifier: FlatBufferOffset, annoInfo: FlatBufferOffset, defaultId: UInt32): FlatBufferOffset {
     let tableBuilder = ParameterBuilder(builder)
+    tableBuilder.add_paramDftValFunc(defaultId)
     tableBuilder.add_annoInfo(annoInfo)
     tableBuilder.add_srcCodeIdentifier(srcCodeIdentifier)
     tableBuilder.add_ownedLambda(ownedLambda)
@@ -308,9 +311,9 @@ func CreateParameter(builder: FlatBufferBuilder, base: FlatBufferOffset, ownedFu
     return tableBuilder.Finish()
 }
 
-func CreateParameterDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, ownedFunc: UInt32, ownedLambda: UInt32, srcCodeIdentifier: Option<String>, annoInfo: FlatBufferOffset): FlatBufferOffset {
+func CreateParameterDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, ownedFunc: UInt32, ownedLambda: UInt32, srcCodeIdentifier: Option<String>, annoInfo: FlatBufferOffset, defaultId: UInt32): FlatBufferOffset {
     let srcCodeIdentifierOffset = if (let Some(value) <- srcCodeIdentifier) { builder.CreateSharedString(value) } else { 0u32 }
-    return CreateParameter(builder, base, ownedFunc, ownedLambda, srcCodeIdentifierOffset, annoInfo)
+    return CreateParameter(builder, base, ownedFunc, ownedLambda, srcCodeIdentifierOffset, annoInfo, defaultId)
 }
 
 class LocalVarBuilder {
@@ -520,8 +523,8 @@ class FunctionBuilder {
         builder.AddOffset(6, genericTypeParams)
     }
 
-    public func add_paramDftValHostFunc(paramDftValHostFunc: UInt32): Unit {
-        builder.AddU32(7, paramDftValHostFunc, defaultValue: 0u32)
+    public func add_paramDftValHostParam(paramDftValHostParam: UInt32): Unit {
+        builder.AddU32(7, paramDftValHostParam, defaultValue: 0u32)
     }
 
     public func add_body(body: UInt32): Unit {
@@ -557,7 +560,7 @@ class FunctionBuilder {
     }
 }
 
-func CreateFunction(builder: FlatBufferBuilder, base: FlatBufferOffset, genericDecl: UInt32, funcKind: UInt8, isFastNative: Bool, isCFFIWrapper: Bool, originalLambdaInfo: FlatBufferOffset, genericTypeParams: FlatBufferOffset, paramDftValHostFunc: UInt32, body: UInt32, params: FlatBufferOffset, retVal: UInt32, propLoc: FlatBufferOffset, localId: UInt64, blockId: UInt64, blockGroupId: UInt64): FlatBufferOffset {
+func CreateFunction(builder: FlatBufferBuilder, base: FlatBufferOffset, genericDecl: UInt32, funcKind: UInt8, isFastNative: Bool, isCFFIWrapper: Bool, originalLambdaInfo: FlatBufferOffset, genericTypeParams: FlatBufferOffset, paramDftValHostParam: UInt32, body: UInt32, params: FlatBufferOffset, retVal: UInt32, propLoc: FlatBufferOffset, localId: UInt64, blockId: UInt64, blockGroupId: UInt64): FlatBufferOffset {
     let tableBuilder = FunctionBuilder(builder)
     tableBuilder.add_blockGroupId(blockGroupId)
     tableBuilder.add_blockId(blockId)
@@ -566,7 +569,7 @@ func CreateFunction(builder: FlatBufferBuilder, base: FlatBufferOffset, genericD
     tableBuilder.add_retVal(retVal)
     tableBuilder.add_params(params)
     tableBuilder.add_body(body)
-    tableBuilder.add_paramDftValHostFunc(paramDftValHostFunc)
+    tableBuilder.add_paramDftValHostParam(paramDftValHostParam)
     tableBuilder.add_genericTypeParams(genericTypeParams)
     tableBuilder.add_originalLambdaInfo(originalLambdaInfo)
     tableBuilder.add_genericDecl(genericDecl)
@@ -577,10 +580,10 @@ func CreateFunction(builder: FlatBufferBuilder, base: FlatBufferOffset, genericD
     return tableBuilder.Finish()
 }
 
-func CreateFunctionDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, genericDecl: UInt32, funcKind: UInt8, isFastNative: Bool, isCFFIWrapper: Bool, originalLambdaInfo: FlatBufferOffset, genericTypeParams: Option<ArrayList<UInt32>>, paramDftValHostFunc: UInt32, body: UInt32, params: Option<ArrayList<UInt32>>, retVal: UInt32, propLoc: FlatBufferOffset, localId: UInt64, blockId: UInt64, blockGroupId: UInt64): FlatBufferOffset {
+func CreateFunctionDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, genericDecl: UInt32, funcKind: UInt8, isFastNative: Bool, isCFFIWrapper: Bool, originalLambdaInfo: FlatBufferOffset, genericTypeParams: Option<ArrayList<UInt32>>, paramDftValHostParam: UInt32, body: UInt32, params: Option<ArrayList<UInt32>>, retVal: UInt32, propLoc: FlatBufferOffset, localId: UInt64, blockId: UInt64, blockGroupId: UInt64): FlatBufferOffset {
     let genericTypeParamsOffset = if (let Some(value) <- genericTypeParams) { builder.CreateVectorU32(value) } else { 0u32 }
     let paramsOffset = if (let Some(value) <- params) { builder.CreateVectorU32(value) } else { 0u32 }
-    return CreateFunction(builder, base, genericDecl, funcKind, isFastNative, isCFFIWrapper, originalLambdaInfo, genericTypeParamsOffset, paramDftValHostFunc, body, paramsOffset, retVal, propLoc, localId, blockId, blockGroupId)
+    return CreateFunction(builder, base, genericDecl, funcKind, isFastNative, isCFFIWrapper, originalLambdaInfo, genericTypeParamsOffset, paramDftValHostParam, body, paramsOffset, retVal, propLoc, localId, blockId, blockGroupId)
 }
 
 class BlockBuilder {

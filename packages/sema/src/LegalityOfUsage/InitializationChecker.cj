@@ -1887,6 +1887,8 @@ public class InitializationChecker {
                     CheckBlockOption(sync.body)
                     result
                 } else { true }
+            case ASTKind.EXCLAVE_EXPR =>
+                CheckBlockOption((expr as ExclaveExpr).getOrThrow().body)
             case ASTKind.IS_EXPR =>
                 if (let Some(isExpr) <- (expr as IsExpr)) { CheckExprOption(isExpr.leftExpr) } else { true }
             case ASTKind.AS_EXPR =>

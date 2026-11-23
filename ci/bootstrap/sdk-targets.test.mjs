@@ -1,7 +1,66 @@
 import test from'node:test';import assert from'node:assert/strict';import {createBootstrapTargets,validateBootstrapTargets,FIXED_INPUTS,BOOTSTRAP_PHASES}from'./sdk-targets.mjs';import {targetOrder}from'./sdk-flow.mjs';import {PLATFORMS}from'./sdk-io.mjs';import{readHostToolchainPin}from'../host-toolchain-pin.mjs';
 import path from 'node:path';
 import {bootstrap} from './bootstrap.mjs';
+test('the H1 install CLI rejects a conflicting cross setting before opening producer inputs', {skip:process.platform!=='linux'}, async t=>{
+ const fs=await import('node:fs/promises'),path=await import('node:path'),os=await import('node:os');
+ const {spawnSync}=await import('node:child_process'),{fileURLToPath}=await import('node:url');
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'h1-install-config-'));
+ t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const input=path.join(root,'descriptor.json'),install=path.join(root,'sdk'),work=path.join(root,'work');
+ const entry=fileURLToPath(new URL('./sdk-build.mjs',import.meta.url));
+ const {hostPlatform}=await import('../host-toolchain-pin.mjs');
+ for(const platform of [undefined,hostPlatform()]){
+  await fs.writeFile(input,JSON.stringify({layout:'h1-frontend',platform,cross:true,work,install}));
+  const result=spawnSync(process.execPath,[entry,'--install-inputs',input,'--no-package','--dry-run'],{encoding:'utf8'});
+  assert.equal(result.status,1,result.stderr);
+  assert.match(result.stderr,/^Error: INSTALL_CROSS_PLATFORM_CONFLICT$/m);
+  assert.deepEqual(await fs.readdir(root),['descriptor.json']);
+ }
+});
 function inputs(platform){const row=(commit,name)=>({commit,tree:'a'.repeat(40),repository:'/fixture/'+name+'.git',install:'/fixture/'+name,configuration:{fixture:true},buildResult:'/fixture/'+name+'/result.json',sourceRoot:'/fixture/'+name+'-producer'});const runtime=row(FIXED_INPUTS.runtime,'R');return{platform,work:'/fixture/work',install:'/fixture/install',host:{version:readHostToolchainPin(platform).replace(/^nightly-/, ''),install:'/fixture/H'},llvm:row(FIXED_INPUTS.llvm,'N'),runtime,ast:row(FIXED_INPUTS.compiler,'AST'),h1:{...row(FIXED_INPUTS.h1,'H1'),product:'/fixture/H1/compiler'},compiler:row('b'.repeat(40),'C'),stdlib:{...runtime,install:'/fixture/std',buildResult:'/fixture/std/result.json',sourceRoot:'/fixture/std-producer'},tools:{privateRoot:'/fixture/tools'}};}
+test('std uses the selected native AST archive and headers through build and resume',async t=>{
+ const {flag,acceptInstalledStd}=await import('./sdk-std-resume.mjs');
+ const fs=await import('node:fs/promises'), os=await import('node:os'), path=await import('node:path');
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'paired-ast-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const input=inputs('linux_x86_64'),lib='lib/linux_x86_64_cjnative/libcangjie-ast-support.a';
+ input.ast={...input.ast,install:path.join(root,'native ast'),astInstallation:{library:lib}};
+ input.stdLocalModeApi=true;
+ const graph=createBootstrapTargets(input);
+ const include=path.join(input.ast.install,'include');
+ for(const id of ['std-bootstrap','stage1-std','stage3-std']){
+  const argv=graph.stages.find(s=>s.id===id).commands[0].argv;
+  assert.equal(flag(argv,'--std-ast-include'),include);
+  assert.equal(flag(argv,'--std-ast-library'),path.join(input.ast.install,lib));
+ }
+ const argv=graph.stages.find(s=>s.id==='stage3-std').commands[0].argv,cwd=root;
+ const source=path.join(root,'R'),output=path.join(root,'std'),link=output+'.runtime-input';
+ argv[argv.indexOf('--source')+1]=source;argv[argv.indexOf('--output')+1]=output;
+ const put=async(file,data)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,data);};
+ const ffi=path.join(output,'lib/linux_x86_64_cjnative/libcangjie-std-astFFI.a');
+ await put(path.join(source,'stdlib/build/build/libcangjie-std-astFFI.a'),'fixture FFI');
+ await put(ffi,'fixture FFI');
+ await put(path.join(output,'modules/linux_x86_64_cjnative/std/std.ast.cjo'),'fixture module');
+ const expected={argv,cwd},terminal={event:'target-result',...expected,rc:0,wall:1};
+ const previous={commands:[terminal]},file=path.join(root,'events');
+ const build=['python3','-I','build.py','build','-t','relwithdebinfo','--jobs','2',
+  '--target-lib='+path.join(source,'stdlib/build/build/lib'),'--target-lib='+link,'--include='+include,'--local_mode_api'];
+ async function accept(inner){
+  const rows=[{event:'target-command',...expected}];
+  for(const args of [inner,['python3','-I','build.py','install','--prefix',output]]){
+   for(const event of ['target-command','target-result'])rows.push({event,argv:args,cwd:path.join(source,'stdlib'),rc:0});
+  }
+  await fs.writeFile(file,[...rows,terminal].map(row=>JSON.stringify(row)).join('\n'));
+  return acceptInstalledStd({file,previous,expected,source,output,link,commit:flag(argv,'--commit'),sdk:flag(argv,'--sdk'),
+   runtime:flag(argv,'--runtime'),platform:input.platform,compilerRuntime:'target'});
+ }
+ assert.deepEqual((await accept(build)).build.argv,build);
+ await assert.rejects(()=>accept(build.map(a=>a.startsWith('--include=')?'--include=/mixed/wire':a)),/STD_RESUME_RECORD build/);
+ await assert.rejects(()=>accept(build.filter(a=>!a.startsWith('--include='))),/STD_RESUME_RECORD build/);
+ await put(ffi,'older FFI');
+ await assert.rejects(()=>accept(build),/STD_AST_FFI_INSTALL_MISMATCH/);
+ const ordinary=inputs('linux_x86_64');ordinary.compiler.install=ordinary.ast.install;
+ assert.equal(flag(createBootstrapTargets(ordinary).stages.find(s=>s.id==='stage3-std').commands[0].argv,'--std-ast-include'),undefined);
+});
 test('the public bootstrap graph forwards one option policy to H1 and both compiler stages',()=>{
  for(const setting of [undefined,true,false]) {
   const input=inputs('linux_x86_64');delete input.h1.product;
@@ -122,6 +181,20 @@ test('target SDKs overlay the std-built flatbuffers cjo after the AST toolchain 
   assert.deepEqual(copies[ast].exclude,['modules']);
   assert.equal(c.stages.find(s=>s.id==='stage0-run').copies.find(copy=>copy.to==='third_party/flatbuffers/modules'),undefined);
   assert.equal(c.stages.find(s=>s.id==='stage0-run').copies.find(copy=>copy.owner==='AST'&&copy.to==='third_party/flatbuffers').exclude,undefined);
+});
+test('first modal std uses H1 to build for R before target modules exist',()=>{
+  const input=inputs('linux_x86_64');input.stdLocalModeApi=true;
+  const config=createBootstrapTargets(input);
+  const stage=id=>config.stages.find(s=>s.id===id);
+  const first=stage('stage0-run');
+  const hostRoot=first.copies.find(row=>row.owner==='H'&&row.to==='');
+  for(const rel of ['lib','runtime','modules'])assert.ok(hostRoot.exclude.includes(rel));
+  assert.ok(first.copies.some(row=>row.owner==='R'&&row.from===input.runtime.install&&row.to===''));
+  assert.ok(first.copies.some(row=>row.owner==='compiler execution runtime'&&row.from===input.host.install+'/runtime'));
+  assert.deepEqual(first.copies.filter(row=>row.owner==='std'),[]);
+  assert.equal(first.metadata.sources.std.status,'not-built');
+  assert.ok(stage('std-bootstrap').commands[0].argv.includes('--local-mode-api'));
+  assert.ok(stage('stage1-initial').copies.some(row=>row.owner==='std'&&row.from==='${output.std-bootstrap}'&&row.to===''));
 });
 test('macro runtime link follows the compiler process runtime, not a second image',()=>{
   const c=createBootstrapTargets(inputs('linux_x86_64'));

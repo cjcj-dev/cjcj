@@ -11,6 +11,7 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::incremental_compilation.IncreKind
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
 import cjcj::ast.ASTKind
+import cjcj::ast.GetReceiverMode
 import cjcj::ast.IsInstanceConstructor as AstIsInstanceConstructor
 import cjcj::ast.IsValidCFuncConstructorCall
 import cjcj::ast.IsCondition as AstIsCondition
@@ -91,6 +92,7 @@ import cjcj::ast.TupleTy as AstTupleTy
 import cjcj::ast.TryExpr as AstTryExpr
 import cjcj::ast.TypePattern as AstTypePattern
 import cjcj::ast.TypeConvExpr as AstTypeConvExpr
+import cjcj::ast.ExclaveExpr as AstExclaveExpr
 import cjcj::ast.ThrowExpr as AstThrowExpr
 import cjcj::ast.UnaryExpr as AstUnaryExpr
 import cjcj::ast.VarDecl as AstVarDecl
@@ -956,6 +958,7 @@ public class Translator {
             case ASTKind.LAMBDA_EXPR => trans.Visit(RequireNodeAsLambdaExpr(nodePtr))
             case ASTKind.MATCH_EXPR => trans.Visit(RequireNodeAsMatchExpr(nodePtr))
             case ASTKind.TRY_EXPR => trans.Visit(RequireNodeAsTryExpr(nodePtr))
+            case ASTKind.EXCLAVE_EXPR => trans.Visit((nodePtr as AstExclaveExpr).getOrThrow())
             case ASTKind.THROW_EXPR => trans.Visit(RequireNodeAsThrowExpr(nodePtr))
             case ASTKind.ARRAY_LIT => trans.Visit(RequireNodeAsArrayLit(nodePtr))
             case ASTKind.ARRAY_EXPR => trans.Visit(RequireNodeAsArrayExpr(nodePtr))
@@ -1543,7 +1546,7 @@ public class Translator {
         let def = RequireExtendDef(chirTy.GetGlobalNominalCache(extendDecl))
         let extendedType = extendDecl.extendedType ??
             throw IllegalStateException("faithful AST2CHIR ExtendDecl has no extendedType")
-        let translated = chirTy.TranslateType(RequireAstTy(extendedType))
+        let translated = chirTy.TranslateType(extendedType)
         let extendedTy = if (let Some(refTy) <- (translated as RefType)) {
             refTy.GetBaseType()
         } else {
@@ -1593,7 +1596,7 @@ public class Translator {
     private func TranslateLeftValueOfVarDecl(decl: AstVarDecl, rValueIsEmpty: Bool, isLocalVar: Bool): Option<Value> {
         var leftValue: Option<Value> = None
         let varPos = TranslateLocation(decl)
-        let leftType = chirTy.TranslateType(RequireAstTy(decl))
+        let leftType = chirTy.TranslateType(decl)
         if (isLocalVar) {
             if (ShouldCreateAlloc(decl, opts, rValueIsEmpty)) {
                 let allocate = builder.CreateAllocate(builder.context.GetRefTy(leftType), leftType, CurrentBlock())
@@ -1620,7 +1623,7 @@ public class Translator {
     }
 
     private func StoreRValueToLValue(decl: AstVarDecl, rVal: Value, lVal: Option<Value>): Value {
-        let leftType = chirTy.TranslateType(RequireAstTy(decl))
+        let leftType = chirTy.TranslateType(decl)
         let varPos = TranslateLocation(decl)
         if (let Some(leftValue) <- lVal) {
             CreateAndAppendWrappedStore(rVal, leftValue, varPos)
@@ -1691,7 +1694,7 @@ public class Translator {
     }
 
     public func Visit(expr: AstLitConstExpr): Option<Value> {
-        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let resultTy = chirTy.TranslateType(expr)
         if (resultTy.IsUnit()) {
             return None
         }
@@ -1720,7 +1723,7 @@ public class Translator {
                 if (IsInstanceMember(varDecl)) {
                     let leftValueInfo = TranslateInstanceFieldRefAsLeftValue(varDecl)
                     // C++ TranslateVarRef creates the member read at the RefExpr location.
-                    return LoadLeftValue(leftValueInfo, chirTy.TranslateType(RequireAstTy(expr)),
+                    return LoadLeftValue(leftValueInfo, chirTy.TranslateType(expr),
                         loc: TranslateLocation(expr))
                 }
             }
@@ -1790,7 +1793,7 @@ public class Translator {
             return originalFunc
         }
         let getInstantiateValue = builder.CreateGetInstantiateValue(
-            chirTy.TranslateType(RequireAstTy(refExpr)), originalFunc, instArgs, CurrentBlock())
+            chirTy.TranslateType(refExpr), originalFunc, instArgs, CurrentBlock())
         CurrentBlock().AppendExpression(getInstantiateValue)
         getInstantiateValue.SetDebugLocation(TranslateLocation(refExpr))
         return RequireResult(getInstantiateValue)
@@ -1873,7 +1876,7 @@ public class Translator {
     }
 
     private func ProcessBinaryExpr(expr: AstBinaryExpr): Option<Value> {
-        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let resultTy = chirTy.TranslateType(expr)
         let loc = TranslateLocation(expr)
         let binaryKind = ToCHIRBinaryOp(expr.op)
         let leftExpr = RequireExpr(expr.leftExpr, "binary lhs")
@@ -1919,7 +1922,7 @@ public class Translator {
 
     public func Visit(expr: AstUnaryExpr): Option<Value> {
         let astTy = RequireAstTy(expr)
-        let resultTy = chirTy.TranslateType(astTy)
+        let resultTy = chirTy.TranslateType(expr)
         let kind = if (expr.op == AstTokenKind.NOT) {
             if (astTy.IsBoolean()) { ExprKind.NOT } else { ExprKind.BITNOT }
         } else if (expr.op == AstTokenKind.SUB) {
@@ -1964,7 +1967,7 @@ public class Translator {
     }
 
     public func Visit(expr: AstPointerExpr): Option<Value> {
-        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let resultTy = chirTy.TranslateType(expr)
         var intrinsicKind = IntrinsicKind.CPOINTER_INIT0
         let args = ArrayList<Value>()
         if (let Some(arg) <- expr.arg) {
@@ -1991,7 +1994,7 @@ public class Translator {
                 }
                 let inoutArgs = ArrayList<Value>()
                 inoutArgs.add(argValue)
-                let createdIntrinsic1914 = builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(arg)),
+                let createdIntrinsic1914 = builder.CreateIntrinsic(chirTy.TranslateType(arg),
                     IntrisicCallContext(kind: IntrinsicKind.INOUT_PARAM, args: inoutArgs), CurrentBlock())
                 CurrentBlock().AppendExpression(createdIntrinsic1914)
                 argValue = RequireResult(createdIntrinsic1914)
@@ -2018,7 +2021,7 @@ public class Translator {
                 spawnArg = Translator.TranslateASTNode(desugar, this)
             }
         }
-        CreateSpawnMaybeWithException(chirTy.TranslateType(RequireAstTy(expr)), futureObj, spawnArg)
+        CreateSpawnMaybeWithException(chirTy.TranslateType(expr), futureObj, spawnArg)
         return futureObj
     }
 
@@ -2164,7 +2167,7 @@ public class Translator {
         let astBody = funcBody.body ??
             throw IllegalStateException("faithful AST2CHIR LambdaExpr FuncBody has no body")
         let lambdaTrans = SetupContextForLambda(astBody)
-        let funcTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(expr)))
+        let funcTy = RequireFuncType(chirTy.TranslateType(expr))
         let parentFunc = CurrentFunction()
         let body = builder.CreateBlockGroup(parentFunc)
         var mangledName = LambdaIdentifier(expr)
@@ -2803,7 +2806,7 @@ public class Translator {
     }
 
     private func Translate(expr: AstIfExpr, impl: TranslateIfExpr): Option<Value> {
-        let ifType = chirTy.TranslateType(RequireAstTy(expr))
+        let ifType = chirTy.TranslateType(expr)
         let forceGenerateUnit = opts.enableCompileDebug && IsEmptyIf(expr)
         if ((!HasTypeOfNothing(expr) && !ifType.IsUnit()) || forceGenerateUnit) {
             let allocate = builder.CreateAllocate(builder.context.GetRefTy(ifType), ifType, CurrentBlock())
@@ -2958,7 +2961,7 @@ public class Translator {
     private func GetInstCalleeInfoFromMemberAccess(member: AstMemberAccess,
         funcDecl: AstFuncDecl): FaithfulInstCalleeInfo {
         let baseExpr = RequireExpr(member.baseExpr, "member function reference base")
-        var thisType = chirTy.TranslateType(RequireAstTy(baseExpr))
+        var thisType = chirTy.TranslateType(baseExpr)
         thisType = AddRefIfFuncIsMutOrClass(thisType, funcDecl)
 
         let thisDerefTy = thisType.StripAllRefs()
@@ -2985,7 +2988,7 @@ public class Translator {
 
     private func GetInstCalleeInfoFromVarInit(expr: AstRefExpr, calleeDecl: AstFuncDecl): FaithfulInstCalleeInfo {
         let thisType = TranslateMemberOwnerType(calleeDecl)
-        let funcType = RequireFuncType(chirTy.TranslateType(RequireAstTy(expr)))
+        let funcType = RequireFuncType(chirTy.TranslateType(expr))
         let paramTys = ArrayList<Type>()
         for (paramTy in funcType.GetParamTypes()) {
             paramTys.add(paramTy)
@@ -3012,14 +3015,20 @@ public class Translator {
 
     private func GetInstCalleeInfoInGeneral(expr: AstNameReferenceExpr, resolvedFuncDecl: AstFuncDecl, thisType: Type,
         isVirtualFuncCall: Bool): FaithfulInstCalleeInfo {
-        let translatedFuncType = RequireFuncType(chirTy.TranslateType(RequireAstTy(expr)))
+        var virtualCall = isVirtualFuncCall
+        var originalFuncDecl = if (virtualCall) {
+            TopOverriddenDecl(resolvedFuncDecl)
+        } else {
+            resolvedFuncDecl
+        }
+        let translatedFuncType = RequireFuncType(chirTy.TranslateType(expr))
         let paramTys = ArrayList<Type>()
         for (paramTy in translatedFuncType.GetParamTypes()) {
             paramTys.add(paramTy)
         }
         var calleeFuncTy = translatedFuncType
         if (!resolvedFuncDecl.TestAttr(AstAttribute.STATIC)) {
-            paramTys.add(thisType, at: 0)
+            paramTys.add(GetThisTypeWithModal(thisType, originalFuncDecl), at: 0)
             let retTy = if (ConstructorReturnsReceiver(resolvedFuncDecl)) {
                 thisType
             } else {
@@ -3032,12 +3041,6 @@ public class Translator {
             funcInstArgs.add(chirTy.TranslateType(instTy))
         }
         let thisDerefTy = thisType.StripAllRefs()
-        var virtualCall = isVirtualFuncCall
-        var originalFuncDecl = if (virtualCall) {
-            TopOverriddenDecl(resolvedFuncDecl)
-        } else {
-            resolvedFuncDecl
-        }
         var parentTypeOpt = GetExactParentType(thisDerefTy, originalFuncDecl, calleeFuncTy, funcInstArgs, virtualCall)
         if (parentTypeOpt.isNone()) {
             CJC_ASSERT(!virtualCall)
@@ -3051,23 +3054,17 @@ public class Translator {
                 "virtual=${virtualCall}, isStatic=${originalFuncDecl.TestAttr(AstAttribute.STATIC)}")
         }
         let parentType = parentTypeOpt.getOrThrow()
-        if (!originalFuncDecl.TestAttr(AstAttribute.STATIC)) {
-            CJC_ASSERT(!paramTys.isEmpty())
-            if (thisDerefTy.IsStruct() && parentType != thisDerefTy && originalFuncDecl.TestAttr(AstAttribute.MUT)) {
-                paramTys[0] = thisType
-            } else if (parentType.IsClass()) {
-                paramTys[0] = AddRefIfFuncIsMutOrClass(parentType, originalFuncDecl)
-                let retTy = if (ConstructorReturnsReceiver(originalFuncDecl)) {
-                    paramTys[0]
-                } else {
-                    calleeFuncTy.GetReturnType()
-                }
-                calleeFuncTy = builder.context.GetFuncTy(paramTys, retTy)
-            }
+        if (!originalFuncDecl.TestAttr(AstAttribute.STATIC) &&
+            !(thisDerefTy.IsStruct() && originalFuncDecl.TestAttr(AstAttribute.MUT))) {
+            paramTys[0] = GetThisTypeWithModal(parentType, originalFuncDecl)
+            let retTy = if (ConstructorReturnsReceiver(originalFuncDecl)) {
+                paramTys[0]
+            } else { calleeFuncTy.GetReturnType() }
+            calleeFuncTy = builder.context.GetFuncTy(paramTys, retTy)
         }
         var instThisType = thisType
         if (virtualCall && (expr as AstRefExpr).isSome()) {
-            instThisType = builder.context.GetRefTy(builder.context.GetThisTy())
+            instThisType = GetThisTypeWithModal(builder.context.GetRefTy(builder.context.GetThisTy()), resolvedFuncDecl)
         }
         return FaithfulInstCalleeInfo(parentType, instThisType, paramTys, calleeFuncTy.GetReturnType(),
             funcInstArgs, virtualCall, originalFuncDecl)
@@ -3081,7 +3078,7 @@ public class Translator {
 
         let thisType = currentFunc.GetParentCustomTypeOrExtendedType() ??
             throw IllegalStateException("faithful AST2CHIR expected parent custom/extended type when translating member call")
-        let thisTypeRef = AddRefIfFuncIsMutOrClass(thisType, calleeDecl)
+        let thisTypeRef = GetThisTypeWithModal(thisType, calleeDecl)
         var caller = currentFunc.GetParentCustomTypeDef() ??
             throw IllegalStateException("faithful AST2CHIR member call has no parent custom type def")
         if (let Some(customTy) <- (thisType as CustomType)) {
@@ -3112,6 +3109,17 @@ public class Translator {
         return SubstituteGenericType(ownerTy, genericParams, replacements).StripAllRefs()
     }
 
+    // The receiver mode is part of a method's identity (BaseMangler.MangleReceiverMode, and the vtable
+    // slot key FuncSigIsMatched compares it), so it is kept even when this package is compiled without
+    // --enable-local-mode: a std built with --local-mode-api declares `!=`, `!=(this @local!)` and
+    // `!=(this @local?)` side by side, and erasing the mode here made all three one signature.
+    // Upstream translates the mode unconditionally (src/CHIR/IR/Type/CHIRType.cpp:280,
+    // src/CHIR/AST2CHIR/TranslateASTNode/TranslateMemberAccess.cpp:54 @63bf237b). NOT is a no-op.
+    private func GetThisTypeWithModal(thisType: Type, decl: AstFuncDecl): Type {
+        let ty = AddRefIfFuncIsMutOrClass(thisType, decl)
+        return builder.WithModal(ty, ASTModal2CHIRModal(GetReceiverMode(decl)))
+    }
+
     private func AddRefIfFuncIsMutOrClass(thisType: Type, funcDecl: AstFuncDecl): Type {
         if (thisType.IsRef()) {
             return thisType
@@ -3129,7 +3137,7 @@ public class Translator {
                     return false
                 }
             }
-            let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr)).StripAllRefs()
+            let baseTy = chirTy.TranslateType(baseExpr).StripAllRefs()
             if (baseTy.IsCustomType() && funcDecl.TestAttr(AstAttribute.STATIC)) {
                 return false
             }
@@ -3289,7 +3297,7 @@ public class Translator {
             return false
         }
         return IsOverflowOperator(funcDecl.identifier.Val(),
-            RequireFuncType(chirTy.TranslateType(RequireAstTy(funcDecl))))
+            RequireFuncType(chirTy.TranslateType(funcDecl)))
     }
 
     private func TransformThisType(rawThis: Value, expectedTy: Type, curLambda: Lambda): Value {
@@ -3335,9 +3343,9 @@ public class Translator {
             let parentTy = if (outerDecl.astKind == ASTKind.EXTEND_DECL) {
                 let extendDecl = (outerDecl as AstExtendDecl).getOrThrow()
                 let extendedType = extendDecl.extendedType.getOrThrow()
-                chirTy.TranslateType(RequireAstTy(extendedType))
+                chirTy.TranslateType(extendedType)
             } else {
-                chirTy.TranslateType(RequireAstTy(outerDecl))
+                chirTy.TranslateType(outerDecl)
             }
             return parentTy.StripAllRefs()
         }
@@ -3503,7 +3511,7 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR property has no getter: ${propDecl.identifier.Val()}")
         }
         let getter = propDecl.getters[0]
-        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let resultTy = chirTy.TranslateType(expr)
         let callee = GetSymbolTable(getter)
         if (getter.TestAttr(AstAttribute.STATIC) || propDecl.TestAttr(AstAttribute.STATIC)) {
             let instTypeArgs = TranslateMemberAccessInstArgs(expr)
@@ -3520,7 +3528,7 @@ public class Translator {
     private func TranslatePropertyGetterThisObject(expr: AstMemberAccess, getter: AstFuncDecl, callee: Value): Value {
         var thisObj: Value
         if (let Some(baseExpr) <- expr.baseExpr) {
-            let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr))
+            let baseTy = chirTy.TranslateType(baseExpr)
             if (PropertyGetterNeedsAddress(callee)) {
                 thisObj = AddressOfLeftValue(TranslateExprAsLeftValue(baseExpr), baseTy)
             } else {
@@ -3694,7 +3702,7 @@ public class Translator {
     }
 
     public func Visit(expr: AstMatchExpr): Option<Value> {
-        let matchTy = chirTy.TranslateType(RequireAstTy(expr))
+        let matchTy = chirTy.TranslateType(expr)
         let resultLoc: Option<Value> = if (HasTypeOfNothing(expr) || matchTy.IsUnit() || matchTy.IsNothing()) {
             None
         } else {
@@ -3736,7 +3744,7 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR TryExpr has neither catch nor finally")
         }
         let group = RequireParentBlockGroup(CurrentBlock(), "try")
-        let tryTy = chirTy.TranslateType(RequireAstTy(expr))
+        let tryTy = chirTy.TranslateType(expr)
         let resultLoc: Option<Value> = if (tryTy.IsUnit() || tryTy.IsNothing()) {
             None
         } else {
@@ -3831,6 +3839,34 @@ public class Translator {
         return None
     }
 
+    public func Visit(expr: AstExclaveExpr): Option<Value> {
+        let outer = CurrentBlock()
+        let owner = outer.GetFuncOrLambdaBody().getOrThrow()
+        let dest = if (let Some(fn) <- owner.GetOwnerFunc()) { fn.GetReturnValue() }
+            else { (owner.GetOwnerExpression().getOrThrow() as Lambda).getOrThrow().GetReturnValue() }
+        let subgroup = builder.CreateBlockGroup(CurrentFunction())
+        let ex = builder.CreateExclave(outer)
+        outer.AppendExpression(ex)
+        ex.AppendBlockGroup(subgroup)
+        let loc = TranslateLocation(expr)
+        ex.SetDebugLocation(loc)
+        blockGroupStack.add(subgroup)
+        let entry = builder.CreateBlock(subgroup)
+        subgroup.SetEntryBlock(entry)
+        let body = expr.body.getOrThrow()
+        let ret = Visit(body)
+        CreateGoto(GetBlockByAST(body), entry)
+        if ((let Some(value) <- ret) && (let Some(slot) <- dest)) { CreateAndAppendWrappedStore(value, slot, loc) }
+        let exit = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(exit)
+        exit.SetDebugLocation(loc)
+        exit.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+        blockGroupStack.remove(at: blockGroupStack.size - 1)
+        currentBlock = CreateBlock()
+        maybeUnreachable[CurrentBlock()] = ex
+        return None
+    }
+
     public func Visit(expr: AstThrowExpr): Option<Value> {
         let loc = TranslateLocation(expr)
         let thrownExpr = RequireExpr(expr.expr, "throw operand")
@@ -3854,7 +3890,7 @@ public class Translator {
     }
 
     public func Visit(expr: AstArrayLit): Option<Value> {
-        let arrayTy = chirTy.TranslateType(RequireAstTy(expr))
+        let arrayTy = chirTy.TranslateType(expr)
         if (arrayTy.IsVArray()) {
             let varrayTy = RequireVArrayType(arrayTy)
             let elements = ArrayList<Value>()
@@ -3874,7 +3910,7 @@ public class Translator {
     }
 
     public func Visit(expr: AstArrayExpr): Option<Value> {
-        let arrayTy = chirTy.TranslateType(RequireAstTy(expr))
+        let arrayTy = chirTy.TranslateType(expr)
         if (expr.isValueArray) {
             CJC_ASSERT(expr.args.size == 1)
             CJC_ASSERT(!arrayTy.GetTypeArgs().isEmpty())
@@ -3923,11 +3959,11 @@ public class Translator {
         let tupleType = (RequireAstTy(expr) as AstTupleTy).getOrThrow()
         var idx: Int64 = 0
         while (idx < expr.children.size) {
-            let value = TranslateExprArg(expr.children[idx], chirTy.TranslateType(tupleType.typeArgs[idx]))
+            let value = TranslateExprArg(expr.children[idx], chirTy.TranslateType(tupleType.typeArgs[idx], expr.resolvedMode))
             values.add(value)
             idx++
         }
-        let tuple = builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), values, CurrentBlock())
+        let tuple = builder.CreateTuple(chirTy.TranslateType(expr), values, CurrentBlock())
         CurrentBlock().AppendExpression(tuple)
         tuple.SetDebugLocation(TranslateLocation(expr))
         return RequireResult(tuple)
@@ -3949,7 +3985,7 @@ public class Translator {
 
     public func Visit(expr: AstTypeConvExpr): Option<Value> {
         let loc = TranslateLocation(expr)
-        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let resultTy = chirTy.TranslateType(expr)
         let operandExpr = RequireExpr(expr.expr, "type conversion operand")
         let operand = TranslateExprArg(operandExpr)
         let sourceTy = RequireAstTy(operandExpr)
@@ -4038,13 +4074,13 @@ public class Translator {
         if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
             TranslateFunctionGenericUpperBounds(funcDecl)
         }
-        let funcTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(funcDecl)))
+        let funcTy = RequireFuncType(chirTy.TranslateType(funcDecl))
         let body = builder.CreateBlockGroup(CurrentFunction())
         let genericTys = ArrayList<GenericType>()
         if (let Some(generic) <- funcBody.generic) {
             if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
                 for (typeParam in generic.typeParameters) {
-                    genericTys.add((chirTy.TranslateType(RequireAstTy(typeParam)) as GenericType).getOrThrow())
+                    genericTys.add((chirTy.TranslateType(typeParam) as GenericType).getOrThrow())
                 }
             }
         }
@@ -4064,15 +4100,23 @@ public class Translator {
         let lambdaValue = lambda.GetResult() ??
             throw IllegalStateException("faithful AST2CHIR nested FuncDecl lambda has no result")
         localValSymbolTable.Set(funcDecl, lambdaValue)
+        if (funcDecl.TestAttr(AstAttribute.GENERIC) && (let Some(manager) <- gim)) {
+            for (inst in manager.GetInstantiatedDecls(funcDecl)) {
+                let expr = GetSymbolTable(inst).AsLocalVar().getOrThrow().GetExpr().getOrThrow()
+                (expr as Lambda).getOrThrow().SetGenericDecl(lambda)
+            }
+        }
         lambdaTrans.BindLambdaParams(funcBody, lambda, funcTy)
-        for (param in funcBody.paramLists[0].params) {
+        let hostParams = funcBody.paramLists[0].params
+        for (i in 0..hostParams.size) {
+            let param = hostParams[i]
             if (let Some(desugarDecl) <- param.desugarDecl) {
                 // C++ Translator::TranslateNestedFunc recursively translates a local function's default-parameter
                 // functions and records their host lambda (TranslateFuncDecl.cpp:505-514).
                 let defaultArgFunc = TranslateNestedFunc(desugarDecl).getOrThrow()
                 let defaultArgLambda = (defaultArgFunc.AsLocalVar().getOrThrow().GetExpr().getOrThrow() as Lambda)
                     .getOrThrow()
-                defaultArgLambda.SetParamDftValHostFunc(lambda)
+                defaultArgLambda.SetParamDftValHostParam(lambda.GetParam(i))
                 lambdaTrans.SetSymbolTable(desugarDecl, defaultArgFunc)
             }
         }
@@ -4086,7 +4130,7 @@ public class Translator {
             throw IllegalStateException("faithful generic function has no body")
         if (let Some(generic) <- funcBody.generic) {
             for (typeParam in generic.typeParameters) {
-                let _ = chirTy.TranslateType(RequireAstTy(typeParam))
+                let _ = chirTy.TranslateType(typeParam)
             }
             for (typeParam in generic.typeParameters) {
                 chirTy.FillGenericArgType((RequireAstTy(typeParam) as AstGenericsTy).getOrThrow())
@@ -4322,7 +4366,7 @@ public class Translator {
             }
             return
         }
-        let memberTy = chirTy.TranslateType(RequireAstTy(decl))
+        let memberTy = chirTy.TranslateType(decl)
         let memberInfo = MemberVarInfo(decl.identifier.Val(), memberTy, isStatic: false,
             isReadOnly: decl.IsConst(), rawMangledName: decl.rawMangleName)
         memberInfo.attributeInfo = BuildVarDeclAttr(decl)
@@ -4646,7 +4690,7 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR for-in iterator induction var produced no value")
         let matchExpr = (inExpression.body[1] as AstMatchExpr) ??
             throw IllegalStateException("faithful AST2CHIR iterator ForInExpr expects MatchExpr as second node")
-        let matchTy = chirTy.TranslateType(RequireAstTy(matchExpr))
+        let matchTy = chirTy.TranslateType(matchExpr)
         let condLoc = TranslateLocation(inExpression.body[1])
         let createdAllocate4454 = builder.CreateAllocate(builder.context.GetRefTy(matchTy), matchTy,
             CurrentBlock())
@@ -4737,7 +4781,7 @@ public class Translator {
         let bodyBlockGroup = builder.CreateBlockGroup(parentFunc)
         let latchBlockGroup = builder.CreateBlockGroup(parentFunc)
         let condBlockGroup = builder.CreateBlockGroup(parentFunc)
-        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let resultTy = chirTy.TranslateType(expr)
         let forIn = if (isIter) {
             let createdForInIter4534 = builder.CreateForInIter(resultTy, inductiveVar, condVar, CurrentBlock())
             CurrentBlock().AppendExpression(createdForInIter4534)
@@ -4768,7 +4812,7 @@ public class Translator {
         let bodyBlockGroup = builder.CreateBlockGroup(parentFunc)
         let latchBlockGroup = builder.CreateBlockGroup(parentFunc)
         let condBlockGroup = builder.CreateBlockGroup(parentFunc)
-        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let resultTy = chirTy.TranslateType(expr)
         let forIn = builder.CreateForInClosedRange(resultTy, inductiveVar, condVar, CurrentBlock())
         CurrentBlock().AppendExpression(forIn)
         forIn.InitBlockGroups(bodyBlockGroup, latchBlockGroup, condBlockGroup)
@@ -5563,23 +5607,26 @@ public class Translator {
             }
             idx--
         }
-        if (blockGroupStack.isEmpty()) {
-            return None
-        }
-        let group = blockGroupStack[blockGroupStack.size - 1]
-        if (let Some(fn) <- group.GetOwnerFunc()) {
-            if (let Some(returnValue) <- fn.GetReturnValue()) {
-                return Some(returnValue)
+        // Upstream GetReturnValueFromBlockGroup (TranslateReturnExpr.cpp:40-53): a block group owned by
+        // anything but a function or a lambda (e.g. an `exclave { }` body) returns through the enclosing
+        // one, so walk outwards instead of dropping the store of the returned value.
+        var level = blockGroupStack.size - 1
+        while (level >= 0) {
+            let group = blockGroupStack[level]
+            if (let Some(fn) <- group.GetOwnerFunc()) {
+                if (let Some(returnValue) <- fn.GetReturnValue()) {
+                    return Some(returnValue)
+                }
+                return None
             }
-            return None
-        }
-        if (let Some(owner) <- group.GetOwnerExpression()) {
+            let owner = if (let Some(o) <- group.GetOwnerExpression()) { o } else { return None }
             if (let Some(lambda) <- (owner as Lambda)) {
                 if (let Some(returnValue) <- lambda.GetReturnValue()) {
                     return Some(returnValue)
                 }
                 return None
             }
+            level--
         }
         return None
     }
@@ -6665,7 +6712,7 @@ public class Translator {
         let backupBlock = CurrentBlock()
         currentBlock = trueBlock
         var val = if (varPattern.desugarExpr.isSome()) { GetDerefedValue(value) } else { value }
-        let varType = chirTy.TranslateType(RequireAstTy(varPattern))
+        let varType = chirTy.TranslateType(varPattern)
         let loc = TranslateLocation(varPattern)
         let varDecl = varPattern.varDecl ??
             throw IllegalStateException("faithful AST2CHIR VarPattern has no VarDecl")
@@ -6775,7 +6822,7 @@ public class Translator {
         }
         let typeNode = typePattern.typeNode ??
             throw IllegalStateException("faithful AST2CHIR type pattern has no type node")
-        let targetTy = chirTy.TranslateType(RequireAstTy(typeNode))
+        let targetTy = chirTy.TranslateType(typeNode)
         queue.add((innerPattern, value))
         if (typePattern.needRuntimeTypeCheck) {
             let createdInstanceOf6279 = builder.CreateInstanceOf(builder.context.GetBoolTy(), value, targetTy, CurrentBlock())
@@ -7138,7 +7185,7 @@ public class Translator {
             let firstPattern = enumPattern.patterns[0]
             PrintDebugMessage(opts.chirDebugOptimizer, enumPattern)
             CJC_ASSERT(RequireAstTy(firstPattern).IsInteger() || RequireAstTy(firstPattern).IsRune())
-            let selectorTy = chirTy.TranslateType(RequireAstTy(firstPattern))
+            let selectorTy = chirTy.TranslateType(firstPattern)
             let enumValueTuple = CastEnumValueToConstructorTupleType(enumVal, enumPattern)
             let secondPath = ArrayList<UInt64>()
             secondPath.add(1u64)
@@ -7418,7 +7465,7 @@ public class Translator {
         if (let Some(tuplePattern) <- (pattern as AstTuplePattern)) {
             var idx: Int64 = 0
             for (subPattern in tuplePattern.patterns) {
-                let fieldValue = ExtractPatternField(selector, idx, chirTy.TranslateType(RequireAstTy(subPattern)))
+                let fieldValue = ExtractPatternField(selector, idx, chirTy.TranslateType(subPattern))
                 BindPatternValues(subPattern, fieldValue, block)
                 idx++
             }
@@ -7432,7 +7479,7 @@ public class Translator {
                 let fieldTy = if (idx < payloadTypes.size) {
                     payloadTypes[idx]
                 } else {
-                    chirTy.TranslateType(RequireAstTy(subPattern))
+                    chirTy.TranslateType(subPattern)
                 }
                 let payloadValue = ExtractPatternField(enumSelector, idx + 1, fieldTy)
                 BindPatternValues(subPattern, payloadValue, block)
@@ -7527,7 +7574,7 @@ public class Translator {
         }
         if (pattern.needRuntimeTypeCheck) {
             let createdInstanceOf6949 = builder.CreateInstanceOf(builder.context.GetBoolTy(), selector,
-                chirTy.TranslateType(RequireAstTy(pattern)), CurrentBlock())
+                chirTy.TranslateType(pattern), CurrentBlock())
             CurrentBlock().AppendExpression(createdInstanceOf6949)
             let typeCond = RequireResult(createdInstanceOf6949)
             if (let Some(inner) <- pattern.pattern) {
@@ -7570,7 +7617,7 @@ public class Translator {
             let fieldTy = if (idx < fieldTys.size) {
                 fieldTys[idx]
             } else {
-                chirTy.TranslateType(RequireAstTy(subPattern))
+                chirTy.TranslateType(subPattern)
             }
             let fieldValue = ExtractPatternField(selector, idx + fieldOffset, fieldTy)
             TranslateSinglePatternBranch(subPattern, fieldValue, nextBlock, falseBlock)
@@ -7636,7 +7683,7 @@ public class Translator {
 
     private func TranslateEnumPatternPayloadType(pattern: AstEnumPattern, paramTy: AstTy): Type {
         let translated = chirTy.TranslateType(paramTy)
-        if (let Some(enumTy) <- (chirTy.TranslateType(RequireAstTy(pattern)) as EnumType)) {
+        if (let Some(enumTy) <- (chirTy.TranslateType(pattern) as EnumType)) {
             return SubstituteGenericType(translated, enumTy.GetEnumDef().GetGenericTypeParams(),
                 enumTy.GetGenericArgs())
         }
@@ -7977,7 +8024,7 @@ public class Translator {
         }
         let base = TranslateExprArg(RequireExpr(baseExpr, "tuple access base"))
         let baseValue = GetDerefedValue(base, loc)
-        let field = builder.CreateField(chirTy.TranslateType(RequireAstTy(expr)), baseValue, path, CurrentBlock())
+        let field = builder.CreateField(chirTy.TranslateType(expr), baseValue, path, CurrentBlock())
         CurrentBlock().AppendExpression(field)
         field.SetDebugLocation(loc)
         if (expr.TestAttr(AstAttribute.IMPLICIT_ADD)) {
@@ -8011,7 +8058,7 @@ public class Translator {
             args.add(GetDerefedValue(indexValue))
         }
         let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_GET, args: args)
-        let intrinsic = builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(expr)), callContext, CurrentBlock())
+        let intrinsic = builder.CreateIntrinsic(chirTy.TranslateType(expr), callContext, CurrentBlock())
         CurrentBlock().AppendExpression(intrinsic)
         intrinsic.SetDebugLocation(TranslateLocation(expr))
         return RequireResult(intrinsic)
@@ -8035,7 +8082,7 @@ public class Translator {
         args.add(RequireResult(selector))
         let expectedParamTys = FuncParamTypes(expr, calleeDecl)
         AppendTranslatedCallArgs(expr, calleeDecl, args, expectedParamTys, ArrayList<Value>())
-        let tuple = builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), args, CurrentBlock())
+        let tuple = builder.CreateTuple(chirTy.TranslateType(expr), args, CurrentBlock())
         CurrentBlock().AppendExpression(tuple)
         tuple.SetDebugLocation(loc)
         return RequireResult(tuple)
@@ -8219,7 +8266,7 @@ public class Translator {
         let target = base.GetTarget() ??
             throw IllegalStateException("faithful AST2CHIR intrinsic call base has no target")
         let identifier = target.identifier.Val()
-        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
+        let resultTy = chirTy.TranslateType(expr)
 
         // Get the intrinsic kind. Determine the package the intrinsic was declared in, mirroring
         // the C++ ordering: generic decl's package, else outer decl's generic package, else the
@@ -8234,6 +8281,33 @@ public class Translator {
             }
         } else {
             target.fullPackageName
+        }
+        // These std.core declarations are CHIR array operations, not runtime intrinsic IDs.
+        if (packageName == "std.core") {
+            if (identifier == "rawArrayAllocate" || identifier == "rawArrayAllocate2" ||
+                identifier == "rawArrayAllocate3") {
+                CJC_ASSERT(expr.args.size == 1)
+                let element = (resultTy.StripAllRefs() as RawArrayType).getOrThrow().GetElementType()
+                let size = TranslateExprArg(RequireFuncArgExpr(expr.args[0], "raw array allocation size"))
+                return RequireResult(TryCreate(CurrentBlock(), TranslateLocation(expr), resultTy, element, size))
+            }
+            if (identifier == "rawArrayInitByValue") {
+                let loc = TranslateLocation(expr)
+                let types = RequireFuncType(chirTy.TranslateType(base)).GetParamTypes()
+                CJC_ASSERT(expr.args.size == 3 && types.size == 3)
+                let values = ArrayList<Value>()
+                for (i in 0..3) {
+                    let arg = TranslateExprArg(RequireFuncArgExpr(expr.args[i], "raw array initialization argument"))
+                    values.add(TypeCastOrBoxIfNeeded(arg, types[i], loc))
+                }
+                let unit = builder.context.GetUnitTy()
+                let initArray = builder.CreateRawArrayInitByValue(unit, values[0], values[1], values[2], CurrentBlock())
+                CurrentBlock().AppendExpression(initArray)
+                initArray.SetDebugLocation(loc)
+                let result = builder.CreateConstant(unit, UnitLiteral(), CurrentBlock())
+                CurrentBlock().AppendExpression(result)
+                return RequireResult(result)
+            }
         }
         let intrinsicKind = LookupPackageIntrinsicKind(packageName, identifier) ?? IntrinsicKind.NOT_INTRINSIC
 
@@ -8369,10 +8443,10 @@ public class Translator {
     private func TranslateTrivialArgWithNoSugar(arg: AstFuncArg, expectedTy: Option<Type>): Value {
         let argExpr = RequireFuncArgExpr(arg, "call argument")
         var value = if (arg.withInout) {
-            let argVal = GenerateLeftValue(TranslateExprAsLeftValue(argExpr), chirTy.TranslateType(RequireAstTy(arg)))
+            let argVal = GenerateLeftValue(TranslateExprAsLeftValue(argExpr), chirTy.TranslateType(arg))
             let inoutArgs = ArrayList<Value>()
             inoutArgs.add(argVal)
-            let createdIntrinsic7716 = builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(arg)),
+            let createdIntrinsic7716 = builder.CreateIntrinsic(chirTy.TranslateType(arg),
                 IntrisicCallContext(kind: IntrinsicKind.INOUT_PARAM, args: inoutArgs), CurrentBlock())
             CurrentBlock().AppendExpression(createdIntrinsic7716)
             RequireResult(createdIntrinsic7716)
@@ -8510,7 +8584,7 @@ public class Translator {
         let resolvedFunction = expr.resolvedFunction.getOrThrow()
         let paramInstTys = funcType.GetParamTypes()
         let retInstTy = if (ConstructorReturnsReceiver(resolvedFunction)) {
-            builder.context.GetRefTy(chirTy.TranslateType(RequireAstTy(expr)).StripAllRefs())
+            builder.context.GetRefTy(chirTy.TranslateType(expr).StripAllRefs())
         } else if (resolvedFunction.TestAttr(AstAttribute.CONSTRUCTOR) || resolvedFunction.IsFinalizer()) {
             builder.context.GetUnitTy()
         } else {
@@ -8525,12 +8599,12 @@ public class Translator {
             if (let Some(memAccess) <- (base as AstMemberAccess)) {
                 if (!IsPackageMemberAccess(memAccess)) {
                     let baseExpr = RequireExpr(memAccess.baseExpr, "member function caller base")
-                    callerType = Some(chirTy.TranslateType(RequireAstTy(baseExpr)))
+                    callerType = Some(chirTy.TranslateType(baseExpr))
                 } else if (IsCallingConstructor(expr)) {
-                    callerType = Some(chirTy.TranslateType(RequireAstTy(expr)))
+                    callerType = Some(chirTy.TranslateType(expr))
                 }
             } else if (IsCallingConstructor(expr)) {
-                callerType = Some(chirTy.TranslateType(RequireAstTy(expr)))
+                callerType = Some(chirTy.TranslateType(expr))
             } else if (let Some(resolvedFunction) <- expr.resolvedFunction) {
                 if (let Some(outerDecl) <- resolvedFunction.outerDecl) {
                     if (outerDecl.IsNominalDecl()) {
@@ -8548,13 +8622,13 @@ public class Translator {
                         } else if (IsStaticInit(resolvedFunction)) {
                             callerType = None
                         } else {
-                            callerType = Some(chirTy.TranslateType(RequireAstTy(outerDecl)))
+                            callerType = Some(chirTy.TranslateType(outerDecl))
                         }
                     }
                 }
             }
         } else if (IsCallingConstructor(expr)) {
-            callerType = Some(chirTy.TranslateType(RequireAstTy(expr)))
+            callerType = Some(chirTy.TranslateType(expr))
         }
 
         if (needExactTy) {
@@ -8605,7 +8679,7 @@ public class Translator {
         expectedTy: Option<Type>, previousDefaultArgs: ArrayList<Value>): Value {
         if (arg.TestAttr(AstAttribute.HAS_INITIAL)) {
             let defaultFunc = GetSymbolTable(DefaultValueFuncDecl(calleeDecl, idx))
-            let retTy = chirTy.TranslateType(RequireAstTy(arg))
+            let retTy = chirTy.TranslateType(arg)
             let instArgs = if (calleeDecl.TestAttr(AstAttribute.CONSTRUCTOR)) {
                 ArrayList<Type>()
             } else {
@@ -8650,7 +8724,7 @@ public class Translator {
             return None
         }
         let arg = RequireFuncArgExpr(expr.args[0], "CFunc constructor argument")
-        let targetTy = chirTy.TranslateType(RequireAstTy(expr))
+        let targetTy = chirTy.TranslateType(expr)
         let value = TranslateExprArg(arg, targetTy, deref: true)
         return Some(value)
     }
@@ -8664,7 +8738,7 @@ public class Translator {
             if (let Some(target) <- base.GetTarget()) {
                 if (let Some(builtinDecl) <- (target as BuiltInDecl)) {
                     if (builtinDecl.IsType(BuiltInType.CSTRING)) {
-                        let ty = chirTy.TranslateType(RequireAstTy(expr))
+                        let ty = chirTy.TranslateType(expr)
                         let arg = RequireFuncArgExpr(expr.args[0], "CString constructor argument")
                         let args = ArrayList<Value>()
                         args.add(TranslateExprArg(arg))
@@ -9292,7 +9366,7 @@ public class Translator {
     private func TranslateMemberOwnerType(funcDecl: AstFuncDecl): Type {
         let outer = funcDecl.outerDecl ??
             throw IllegalStateException("faithful AST2CHIR member function has no owner decl")
-        return chirTy.TranslateType(RequireAstTy(outer))
+        return chirTy.TranslateType(outer)
     }
 
     private func IsThisOrSuperRef(expr: AstExpr): Bool {
@@ -9304,7 +9378,7 @@ public class Translator {
 
     private func TranslateStructOrClassCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Option<Value> {
         let loc = TranslateLocation(expr)
-        let thisTy = chirTy.TranslateType(RequireAstTy(expr)).StripAllRefs()
+        let thisTy = chirTy.TranslateType(expr).StripAllRefs()
         let thisRefTy = builder.context.GetRefTy(thisTy)
         let userArgs = ArrayList<Value>()
         let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
@@ -9531,7 +9605,7 @@ public class Translator {
         let isEnumPattern = pattern.astKind == ASTKind.ENUM_PATTERN
         var leftValue: Option<Value> = None
         if (let Some(value) <- initValue) {
-            leftValue = Some(CastValueIfNeeded(GetDerefedValue(value), chirTy.TranslateType(RequireAstTy(pattern))))
+            leftValue = Some(CastValueIfNeeded(GetDerefedValue(value), chirTy.TranslateType(pattern)))
         }
         var idx: Int64 = 0
         for (subPattern in subPatterns) {
@@ -9546,7 +9620,7 @@ public class Translator {
                 }
                 let path = ArrayList<UInt64>()
                 path.add(UInt64(if (isEnumPattern) { idx + 1 } else { idx }))
-                let createdField8825 = builder.CreateField(chirTy.TranslateType(RequireAstTy(subPattern)),
+                let createdField8825 = builder.CreateField(chirTy.TranslateType(subPattern),
                     GetDerefedValue(baseValue), path, CurrentBlock())
                 CurrentBlock().AppendExpression(createdField8825)
                 fieldValue = RequireResult(createdField8825)
@@ -9568,7 +9642,7 @@ public class Translator {
             if (!path.isEmpty()) {
                 let base = info.base.getOrThrow()
                 let memberRefExpr = builder.CreateGetElementByName(
-                    builder.context.GetRefTy(chirTy.TranslateType(RequireAstTy(leftExpr))), base, path, CurrentBlock())
+                    builder.context.GetRefTy(chirTy.TranslateType(leftExpr)), base, path, CurrentBlock())
                 CurrentBlock().AppendExpression(memberRefExpr)
                 let memberRef = RequireResult(memberRefExpr)
                 exprValueTable[leftExpr.objectId] = memberRef
@@ -9595,7 +9669,7 @@ public class Translator {
     private func TranslateCompoundAssign(expr: AstAssignExpr, leftExpr: AstExpr, rightExpr: AstExpr): Option<Value> {
         let loc = TranslateLocation(expr)
         let leftValueInfo = TranslateExprAsLeftValue(leftExpr)
-        let lhsValue = LoadLeftValue(leftValueInfo, chirTy.TranslateType(RequireAstTy(leftExpr))) ??
+        let lhsValue = LoadLeftValue(leftValueInfo, chirTy.TranslateType(leftExpr)) ??
             throw IllegalStateException("faithful AST2CHIR compound lhs produced no value")
         var compoundValue: Value
         if (expr.op == AstTokenKind.AND_ASSIGN) {
@@ -9651,7 +9725,7 @@ public class Translator {
         if (let Some(memberAccess) <- (leftExpr as AstMemberAccess)) {
             let baseExpr = RequireExpr(memberAccess.baseExpr, "property setter base")
             let baseInfo = TranslateExprAsLeftValue(baseExpr)
-            let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr))
+            let baseTy = chirTy.TranslateType(baseExpr)
             let thisObj = TranslatePropertySetterThisObject(setter, callee, baseInfo, baseTy)
             thisTy = thisObj.GetType()
             args.add(thisObj)
@@ -9681,7 +9755,7 @@ public class Translator {
         if (let Some(setter) <- FindSubscriptSetter(subscriptExpr, rightExpr)) {
             let baseExpr = RequireExpr(subscriptExpr.baseExpr, "subscript setter base")
             let baseInfo = TranslateExprAsLeftValue(baseExpr)
-            let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr))
+            let baseTy = chirTy.TranslateType(baseExpr)
             let callee = GetSymbolTable(setter)
             let thisObj = TranslateSubscriptSetterThisObject(setter, callee, baseInfo, baseTy)
             let thisTy = thisObj.GetType()
@@ -9874,9 +9948,9 @@ public class Translator {
         if (subscriptExpr.indexExprs.size != 1) {
             throw IllegalArgumentException("faithful AST2CHIR VArray assignment expects exactly one index")
         }
-        let elementTy = chirTy.TranslateType(RequireAstTy(subscriptExpr))
+        let elementTy = chirTy.TranslateType(subscriptExpr)
         let baseExpr = RequireExpr(subscriptExpr.baseExpr, "VArray assign base")
-        let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr))
+        let baseTy = chirTy.TranslateType(baseExpr)
         if (!IsCompoundAssignOp(assign.op)) {
             let rhs = GetDerefedValue(TranslateExprArg(rightExpr))
             let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
@@ -10010,7 +10084,7 @@ public class Translator {
 
     private func TranslateStructOrClassCtorCallAsLeftValue(expr: AstCallExpr,
         calleeDecl: AstFuncDecl): FaithfulLeftValueInfo {
-        let thisTy = chirTy.TranslateType(RequireAstTy(expr)).StripAllRefs()
+        let thisTy = chirTy.TranslateType(expr).StripAllRefs()
         let thisRefTy = builder.context.GetRefTy(thisTy)
         let userArgs = ArrayList<Value>()
         let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
@@ -10050,7 +10124,7 @@ public class Translator {
         CJC_ASSERT(refExpr.isThis || refExpr.isSuper)
         var thisParam = GetImplicitThisParam()
         if (refExpr.isSuper) {
-            let superType = chirTy.TranslateType(RequireAstTy(refExpr))
+            let superType = chirTy.TranslateType(refExpr)
             thisParam = TypeCastOrBoxIfNeeded(thisParam, superType, TranslateLocation(refExpr))
         }
         return FaithfulLeftValueInfo(thisParam, ArrayList<String>())
@@ -10108,7 +10182,7 @@ public class Translator {
         CJC_ASSERT(target.outerDecl.getOrThrow().astKind == ASTKind.ENUM_DECL)
         CJC_ASSERT(target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR))
         let loc = TranslateLocation(refExpr)
-        let enumType = (chirTy.TranslateType(RequireAstTy(refExpr)) as EnumType).getOrThrow()
+        let enumType = (chirTy.TranslateType(refExpr) as EnumType).getOrThrow()
         let enumId = GetEnumCtorId(target)
         let enumAstType = (RequireAstTy(refExpr) as AstEnumTy).getOrThrow()
         let selectorType = GetSelectorType(enumAstType)
@@ -10183,6 +10257,7 @@ public class Translator {
         if (!target.TestAttr(AstAttribute.STATIC) && target.outerDecl.isSome()) {
             var base: Option<AstExpr> = Some(member)
             var targetBaseAstTy: Option<AstTy> = None
+            var targetBaseMode = ModalInfo()
             let path = ArrayList<String>()
             var readOnly = false
             while (base.isSome()) {
@@ -10201,6 +10276,7 @@ public class Translator {
                         targetBaseAstTy = Some(RequireAstTy((maTarget.outerDecl ??
                             throw IllegalStateException("faithful AST2CHIR member target has no outer declaration"))))
                         CJC_ASSERT(targetBaseAstTy.getOrThrow().IsStruct() || targetBaseAstTy.getOrThrow().IsClass())
+                        targetBaseMode = ASTModal2CHIRModal(ma.baseExpr.getOrThrow().resolvedMode)
                         base = ma.baseExpr
                         continue
                     }
@@ -10294,6 +10370,11 @@ public class Translator {
                 baseValGenericTy.GetInstMap(instMap, builder)
             }
             var targetBaseTy = chirTy.TranslateType(targetBaseAstTy.getOrThrow())
+            // TranslateMemberAccess.cpp:506,528 @63bf237b: the target base keeps its mode regardless of the
+            // local-mode option. An unqualified member uses the implicit receiver; an explicit projection
+            // uses its base.
+            let mode = if (base.isNone()) { strippedBaseValueTy.GetModalInfo() } else { targetBaseMode }
+            targetBaseTy = builder.WithModal(targetBaseTy, mode)
             if (targetBaseTy.GetRefDims() > baseValRefDims) {
                 baseValRefDims = targetBaseTy.GetRefDims()
             }
@@ -10418,7 +10499,7 @@ public class Translator {
                 baseTy.IsValueOrGenericTypeWithRefDims(0))) {
             return FaithfulLeftValueInfo(base, path)
         }
-        let loaded = LoadLeftValue(info, chirTy.TranslateType(RequireAstTy(baseExpr))) ??
+        let loaded = LoadLeftValue(info, chirTy.TranslateType(baseExpr)) ??
             throw IllegalStateException("faithful AST2CHIR member base produced no value")
         path.clear()
         return FaithfulLeftValueInfo(loaded, path)
@@ -10493,12 +10574,12 @@ public class Translator {
         }
         let targetNode = GetSymbolTable(target)
         if (let Some(_) <- (target as AstVarDecl)) {
-            let targetTy = chirTy.TranslateType(RequireAstTy(target))
+            let targetTy = chirTy.TranslateType(target)
             let loc = TranslateLocation(expr)
             let load = builder.CreateLoad(targetTy, targetNode, CurrentBlock())
             CurrentBlock().AppendExpression(load)
             load.SetDebugLocation(loc)
-            return Some(TypeCastOrBoxIfNeeded(RequireResult(load), chirTy.TranslateType(RequireAstTy(expr)), loc))
+            return Some(TypeCastOrBoxIfNeeded(RequireResult(load), chirTy.TranslateType(expr), loc))
         }
         if ((target as AstFuncDecl).isSome()) {
             return targetNode
@@ -10971,7 +11052,7 @@ public class Translator {
                 return chirTy.TranslateType(memberTy)
             }
         }
-        return chirTy.TranslateType(RequireAstTy(target))
+        return chirTy.TranslateType(target)
     }
 
     private func ResolveMemberAccessTargetFromBase(member: AstMemberAccess): Option<AstDecl> {

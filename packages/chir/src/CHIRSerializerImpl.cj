@@ -474,6 +474,9 @@ private func ToPackageExprKind(expr: Expression): UInt8 {
         case ExprKind.INTRINSIC => CHIRFB_CHIR_EXPR_KIND_INTRINSIC
         case ExprKind.GET_RTTI => CHIRFB_CHIR_EXPR_KIND_GET_RTTI
         case ExprKind.GET_RTTI_STATIC => CHIRFB_CHIR_EXPR_KIND_GET_RTTI_STATIC
+        case ExprKind.START_REGION => CHIRFB_CHIR_EXPR_KIND_START_REGION
+        case ExprKind.END_REGION => CHIRFB_CHIR_EXPR_KIND_END_REGION
+        case ExprKind.EXCLAVE => CHIRFB_CHIR_EXPR_KIND_EXCLAVE
         case ExprKind.FORIN_RANGE | ExprKind.FORIN_ITER | ExprKind.FORIN_CLOSED_RANGE | ExprKind.INVALID =>
             CHIRFB_CHIR_EXPR_KIND_INVALID
     }
@@ -746,7 +749,7 @@ class CHIRSerializerImpl {
     private func Serialize(obj: Type): FlatBufferOffset {
         let kind = UInt8(TypeKindIndex(obj.GetTypeKind()))
         let argTys = GetId(obj.GetTypeArgs())
-        return CreateTypeDirect(builder, kind, if (argTys.isEmpty()) { None } else { Some(argTys) })
+        return CreateTypeDirect(builder, kind, if (argTys.isEmpty()) { None } else { Some(argTys) }, obj.modal)
     }
 
     private func Serialize(obj: RawArrayType): FlatBufferOffset {
@@ -802,8 +805,9 @@ class CHIRSerializerImpl {
         } else {
             0u32
         }
+        let defaultId = if (let Some(value) <- obj.paramDftValFunc) { GetId(value) } else { 0u32 }
         return CreateParameterDirect(builder, base, ownedFunc, ownedLambda,
-            Some(obj.GetSrcCodeIdentifier()), Serialize(obj.GetAnnoInfo()))
+            Some(obj.GetSrcCodeIdentifier()), Serialize(obj.GetAnnoInfo()), defaultId)
     }
 
     private func Serialize(obj: LocalVar): FlatBufferOffset {
@@ -903,7 +907,7 @@ class CHIRSerializerImpl {
         for (param in obj.GetGenericTypeParams()) {
             genericTypeParams.add(GetId((param as Type).getOrThrow()))
         }
-        let paramDftValHostFunc = if (let Some(value) <- obj.GetParamDftValHostFunc()) {
+        let paramDftValHostParam = if (let Some(value) <- obj.GetParamDftValHostParam()) {
             GetId((value as Value).getOrThrow())
         } else {
             0u32
@@ -923,7 +927,7 @@ class CHIRSerializerImpl {
         }
         return CreateFunctionDirect(builder, base, genericDecl, UInt8(FuncKindIndex(obj.GetFuncKind())),
             obj.IsFastNative(), obj.IsCFFIWrapper(), originalLambdaInfo,
-            if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) }, paramDftValHostFunc, body,
+            if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) }, paramDftValHostParam, body,
             if (params.isEmpty()) { None } else { Some(params) }, retVal, propLoc,
             obj.localId, obj.blockId, obj.blockGroupId)
     }
@@ -1183,7 +1187,11 @@ class CHIRSerializerImpl {
         return CreateLambdaDirect(builder, base, funcTy, obj.IsLocalFunc(), Some(obj.GetIdentifier()),
             Some(obj.GetSrcCodeIdentifier()), if (params.isEmpty()) { None } else { Some(params) },
             if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) }, body, retVal,
-            obj.IsCompileTimeValue())
+            obj.IsCompileTimeValue(), if (let Some(param) <- obj.GetParamDftValHostParam()) {
+                GetId((param as Value).getOrThrow())
+            } else { 0u32 }, if (let Some(decl) <- obj.GetGenericDecl()) {
+                GetId((decl as Expression).getOrThrow())
+            } else { 0u32 })
     }
 
     private func Dispatch(obj: Type): FlatBufferOffset {
@@ -1367,7 +1375,7 @@ class CHIRSerializerImpl {
                 ExprKind.TUPLE | ExprKind.BOX | ExprKind.UNBOX_TO_VALUE | ExprKind.GET_EXCEPTION |
                 ExprKind.RAW_ARRAY_LITERAL_INIT | ExprKind.RAW_ARRAY_INIT_BY_VALUE | ExprKind.VARRAY |
                 ExprKind.VARRAY_BUILDER | ExprKind.CAST_TO_GENERIC | ExprKind.CAST_TO_CONCRETE |
-                ExprKind.UNBOX_TO_REF | ExprKind.GET_RTTI =>
+                ExprKind.UNBOX_TO_REF | ExprKind.GET_RTTI | ExprKind.EXCLAVE | ExprKind.START_REGION | ExprKind.END_REGION =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_EXPRESSION
                 Serialize(obj)
             case ExprKind.INVALID =>
@@ -1793,7 +1801,7 @@ class CHIRSerializerImpl {
         fields.add(if (let Some(parentDef) <- fn.GetParentCustomTypeDef()) { CHIRBaseId(parentDef) } else { "" })
         fields.add(CHIRWireJoinList(fn.GetFeatures()))
         fields.add(if (let Some(genericDecl) <- fn.GetGenericDecl()) { CHIRValueId(genericDecl) } else { "" })
-        fields.add(if (let Some(hostFunc) <- fn.GetParamDftValHostFunc()) { CHIRValueId(hostFunc) } else { "" })
+        fields.add(if (let Some(param) <- fn.GetParamDftValHostParam()) { CHIRValueId(param) } else { "" })
         fields.add(CHIRSerializeDebugLocation(fn.GetPropLocation()))
         fields.add(CHIRSerializeAnnoInfo(fn.GetAnnoInfo()))
         fields.add(CHIRSerializeDebugLocation(fn.GetDebugLocation()))
@@ -2116,6 +2124,7 @@ class CHIRSerializerImpl {
         fields.add(CHIRSerializeDebugLocation(param.GetDebugLocation()))
         fields.add(CHIRSerializeAttributes(param))
         fields.add(CHIRSerializeBaseAnnotations(param))
+        fields.add(if (let Some(value) <- param.paramDftValFunc) { CHIRValueId(value) } else { "" })
         return CHIRWireJoinFields(fields)
     }
 
@@ -2279,11 +2288,12 @@ class CHIRSerializerImpl {
         fields.add(CHIRSerializeGenericTypeList(lambdaExpr.GetGenericTypeParams()))
         fields.add(if (let Some(retValue) <- lambdaExpr.GetReturnValue()) { CHIRValueId(retValue) } else { "" })
         fields.add(CHIRBoolToWire(lambdaExpr.IsCompileTimeValue()))
-        fields.add(if (let Some(hostFunc) <- lambdaExpr.GetParamDftValHostFunc()) {
-            CHIRBaseId(hostFunc)
+        fields.add(if (let Some(param) <- lambdaExpr.GetParamDftValHostParam()) {
+            CHIRValueId(param)
         } else {
             ""
         })
+        fields.add(if (let Some(decl) <- lambdaExpr.GetGenericDecl()) { CHIRBaseId(decl) } else { "" })
         return expressionPayload("lambda", fields)
     }
 

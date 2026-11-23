@@ -17,6 +17,7 @@ import cjcj::chir.CHIRType
 import cjcj::chir.CHIRTypeCache
 import cjcj::chir.CallGraphAnalysis
 import cjcj::chir.BCHIR
+import cjcj::chir.SetMemRegion
 import cjcj::chir.BoxRecursionValueType
 import cjcj::chir.ClosureConversion
 import cjcj::chir.ConstAnalysisWrapper
@@ -328,7 +329,10 @@ private class ToCHIR {
     // CHIR.cpp:1318-1356: translation owns its phase recorder.
     private func TranslateToCHIR(): Bool {
         try (recorder = ProfileRecorder("CHIR", "AST to CHIR Translation")) {
-            let chirType = CHIRType(builder, CHIRTypeCache())
+            // CHIRType.cpp:271-297 @63bf237b translates every AST::ModalTy without consulting the local-mode
+            // option. Deserialized std declarations built with --local-mode-api keep their modal slots even
+            // when this package does not enable local mode; Sema still rejects user-written modes.
+            let chirType = CHIRType(builder, CHIRTypeCache(), localSlots: true)
             let ast2chir = FaithfulAST2CHIR(builder, chirType, instance.GetSourceManager(),
                 gim: instance.gim,
                 importedPkgs: instance.importManager.getOrThrow().GetAllImportedPackages(),
@@ -490,6 +494,11 @@ private class ToCHIR {
             UpdateMemberVarPath(builder).RunOnPackage(current)
             let _ = NoSideEffectMarker().RunOnPackage(current)
             BoxRecursionValueType(current, builder).Run()
+            // Run region lowering whether or not --enable-local-mode is set, as upstream does
+            // (src/CHIR/CHIR.cpp:1318 SetMemoryRegion @63bf237b): bodies deserialized from a std built with
+            // --local-mode-api carry exclave/region constructs even when this package has none.
+            SetMemRegion(builder).RunOnPackage(current)
+            DumpCHIRToFile("SetMemoryRegion")
             DumpCHIRToFile("Canonicalization")
         }
     }

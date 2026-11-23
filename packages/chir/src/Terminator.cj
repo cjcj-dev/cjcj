@@ -10,6 +10,16 @@ public open class Terminator <: Expression {
     }
 }
 
+public class Exclave <: Expression {
+    public init(parent: Block) { super(ExprKind.EXCLAVE, ArrayList<Value>(), parent) }
+    public func GetBody(): BlockGroup { return GetBlockGroup(0) }
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let expr = builder.CreateExclave(parent)
+        GetBody().Clone(builder, expr)
+        return expr
+    }
+}
+
 public class GoTo <: Terminator {
     public init(target: Block, parent: Option<Block>) {
         super(ExprKind.GOTO, ArrayList<Value>(), MakeOneSuccessor(target), parent)

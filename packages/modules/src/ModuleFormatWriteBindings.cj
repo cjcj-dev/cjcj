@@ -231,8 +231,10 @@ public func CreateDecl(builder: FlatBufferBuilder, kind: UInt16, isTopLevel: Boo
     genericDecl: FlatBufferOffset, generic: FlatBufferOffset, begin: ArrayList<UInt8>, end: ArrayList<UInt8>,
     identifier: FlatBufferOffset, identifierPos: ArrayList<UInt8>, attributes: FlatBufferOffset, annotations: FlatBufferOffset,
     ty: UInt32, mangledName: FlatBufferOffset, exportId: FlatBufferOffset, mangledBeforeSema: FlatBufferOffset,
-    hash: ArrayList<UInt8>, infoType: UInt8, info: FlatBufferOffset, dependencies: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(19)
+    hash: ArrayList<UInt8>, infoType: UInt8, info: FlatBufferOffset, dependencies: FlatBufferOffset,
+    tyMode!: FlatBufferOffset = 0u32): FlatBufferOffset {
+    builder.StartTable(20)
+    builder.AddOffset(19, tyMode)
     builder.AddOffset(18, dependencies)
     builder.AddOffset(17, info)
     builder.AddStruct(15, hash, 8)
@@ -425,8 +427,10 @@ public func CreateSpawnInfo(builder: FlatBufferBuilder, future: FlatBufferOffset
 
 // ModuleFormat_generated.h (CreateExpr). info is ExprInfo union.
 public func CreateExpr(builder: FlatBufferBuilder, kind: UInt16, begin: ArrayList<UInt8>, end: ArrayList<UInt8>, mapExpr: UInt32,
-    operands: FlatBufferOffset, ty: UInt32, overflowPolicy: UInt8, infoType: UInt8, info: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(9)
+    operands: FlatBufferOffset, ty: UInt32, overflowPolicy: UInt8, infoType: UInt8, info: FlatBufferOffset,
+    tyMode!: FlatBufferOffset = 0u32): FlatBufferOffset {
+    builder.StartTable(10)
+    builder.AddOffset(9, tyMode)
     builder.AddOffset(8, info)
     builder.AddU32(5, ty, defaultValue: 0u32)
     builder.AddOffset(4, operands)
@@ -458,8 +462,11 @@ public func CreatePattern(builder: FlatBufferBuilder, kind: Int64, begin: ArrayL
 }
 
 // ModuleFormat_generated.h (CreateFuncTyInfo).
-func CreateFuncTyInfo(builder: FlatBufferBuilder, retType: UInt32, isC: Bool, hasVariableLenArg: Bool): FlatBufferOffset {
-    builder.StartTable(3)
+public func CreateFuncTyInfo(builder: FlatBufferBuilder, retType: UInt32, isC: Bool, hasVariableLenArg: Bool,
+    paramModes!: FlatBufferOffset = 0u32, retMode!: FlatBufferOffset = 0u32): FlatBufferOffset {
+    builder.StartTable(5)
+    builder.AddOffset(4, retMode)
+    builder.AddOffset(3, paramModes)
     builder.AddU32(0, retType, defaultValue: 0u32)
     builder.AddBool(2, hasVariableLenArg, defaultValue: false)
     builder.AddBool(1, isC, defaultValue: false)

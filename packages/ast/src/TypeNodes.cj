@@ -27,6 +27,7 @@ public open class Type <: Node {
     public var typePos: Position = INVALID_POSITION
     public var typeParameterName: String = ""
     public var typeParameterNameIsRawId: Bool = false
+    public var modal: Option<ASTModalInfo> = None
     public var aliasTy: Option<Ty> = Ty.GetInitialTy()
 
     public init() {

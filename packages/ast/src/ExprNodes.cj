@@ -38,6 +38,7 @@ private func exprJoinFuncArgs(values: ArrayList<FuncArg>, delimiter: String): St
 }
 
 public open class Expr <: Node {
+    public var expectedLocalMode: Option<ASTMode> = None
     public var desugarExpr: Option<Expr> = None
     public var sourceExpr: Option<Expr> = None
     public var mapExpr: Option<Expr> = None
@@ -444,6 +445,17 @@ public class TryExpr <: Expr {
         }
         return out
     }
+}
+
+public class ExclaveExpr <: Expr {
+    public var body: Option<Block> = None
+    public init() { super(ASTKind.EXCLAVE_EXPR) }
+    public override func Children(): ArrayList<Node> {
+        let out = ArrayList<Node>()
+        if (let Some(block) <- body) { out.add(block) }
+        return out
+    }
+    public override func ToString(): String { return "exclave " + body.getOrThrow().ToString() }
 }
 
 public class ThrowExpr <: Expr {
@@ -1033,6 +1045,7 @@ public class LitConstExpr <: Expr {
 }
 
 public class FuncArg <: Node {
+    public var checkedMode: Option<ASTMode> = None
     public var name: SrcIdentifier = SrcIdentifier()
     public var colonPos: Position = INVALID_POSITION
     public var expr: Option<Expr> = None
@@ -1055,6 +1068,7 @@ public class FuncArg <: Node {
         if (let Some(value) <- expr) {
             value.Clear()
         }
+        checkedMode = None
         DisableAttr(Attribute.HAS_INITIAL)
     }
 
@@ -1117,6 +1131,7 @@ public class CallExpr <: Expr {
     public var leftParenPos: Position = INVALID_POSITION
     public let args: ArrayList<FuncArg> = ArrayList<FuncArg>()
     public var rightParenPos: Position = INVALID_POSITION
+    public var modal: Option<ASTModalInfo> = None
     public var resolvedFunction: Option<FuncDecl> = None
     public var callKind: CallKind = CallKind.CALL_INVALID
     public var desugarArgs: Option<ArrayList<Option<FuncArg>>> = None

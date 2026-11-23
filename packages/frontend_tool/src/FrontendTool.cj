@@ -249,6 +249,11 @@ private func ExecuteCompile(instance: DefaultCompilerInstance): Bool {
         return HandleEmptyInputFileSituation(instance)
     }
 
+    if (globalOptions.outputMode == OutputMode.CJO) {
+        if (opts.dumpAction != DumpAction.NO_ACTION ||
+            !globalOptions.inputObjs.isEmpty()) { return false }
+        return instance.CompileCjoInterface()
+    }
     if (!globalOptions.compilePackage && globalOptions.srcFiles.isEmpty() && !globalOptions.inputObjs.isEmpty()) {
         return ProcessObjectOnlyFrontendInputs(globalOptions)
     }

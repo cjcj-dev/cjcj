@@ -9,7 +9,6 @@ import cjcj::utils.ProfileRecorder
 
 private let GENERIC_VIRTUAL_FUNC: String = "$GenericVirtualFunc"
 private let INST_VIRTUAL_FUNC: String = "$InstVirtualFunc"
-private let CC_GENERIC_BASE_PREFIX: String = "$Cg"
 private let CC_FUNC_IMPL_PREFIX: String = "$Cf"
 private let CC_LAMBDA_IMPL_PREFIX: String = "$Cl"
 private let CC_CAPTURED_PREFIX: String = "$Captured_"
@@ -517,12 +516,17 @@ public class ClosureConversion {
     private func LiftType(pkg: Package): Unit {
         let convertTypeToClosure: ConvertTypeFunc = { ty: Type => ConvertTypeToClosureType(ty) }
         func convertTypeToInstBase(ty: Type): Type {
+            // Official LiftType (ClosureConversion.cpp:1531-1543 @63bf237b): the AutoEnv def is keyed by the
+            // modal-free function type and the function type's modal is re-applied to the instantiated base.
             let funcType = StaticCast<FuncType>(ty)
-            let autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(funcType)
+            let dataFuncType = StaticCast<FuncType>(builder.WithModal(funcType, ModalInfo()))
+            let autoEnvBaseDef = GetOrCreateAutoEnvBaseDef(dataFuncType)
             let nestedConverter = TypeConverterForCC(convertTypeToClosure, convertTypeToInstBase, builder)
             LiftCustomDefType(autoEnvBaseDef, nestedConverter)
-            let convertedFuncType = ConvertFuncArgsAndRetType(funcType)
-            return builder.context.GetRefTy(InstantiateAutoEnvBaseType(autoEnvBaseDef, convertedFuncType))
+            let convertedFuncType = ConvertFuncArgsAndRetType(dataFuncType)
+            let autoEnvTy = builder.WithModal(InstantiateAutoEnvBaseType(autoEnvBaseDef, convertedFuncType),
+                funcType.GetModalInfo())
+            return builder.context.GetRefTy(autoEnvTy)
         }
         let converter = TypeConverterForCC(convertTypeToClosure, convertTypeToInstBase, builder)
         let preVisit = { expr: Expression =>
@@ -634,22 +638,27 @@ public class ClosureConversion {
 
     private func ConvertCompositionalType(ty: Type): Type {
         if (let Some(tupleTy) <- (ty as TupleType)) {
-            return builder.context.GetTupleTy(ConvertTypeArgs(tupleTy.GetTypeArgs()))
+            return builder.context.GetTupleTy(ConvertTypeArgs(tupleTy.GetTypeArgs()), modal: ty.GetModalInfo())
         } else if (let Some(funcTy) <- (ty as FuncType)) {
             return ConvertFuncType(funcTy)
         } else if (let Some(enumTy) <- (ty as EnumType)) {
-            return builder.context.GetEnumTy(enumTy.GetEnumDef(), ConvertTypeArgs(enumTy.GetGenericArgs()))
+            return builder.context.GetEnumTy(enumTy.GetEnumDef(), ConvertTypeArgs(enumTy.GetGenericArgs()),
+                modal: ty.GetModalInfo())
         } else if (let Some(structTy) <- (ty as StructType)) {
-            return builder.context.GetStructTy(structTy.GetStructDef(), ConvertTypeArgs(structTy.GetGenericArgs()))
+            return builder.context.GetStructTy(structTy.GetStructDef(), ConvertTypeArgs(structTy.GetGenericArgs()),
+                modal: ty.GetModalInfo())
         } else if (let Some(classTy) <- (ty as ClassType)) {
-            return builder.context.GetClassTy(classTy.GetClassDef(), ConvertTypeArgs(classTy.GetGenericArgs()))
+            return builder.context.GetClassTy(classTy.GetClassDef(), ConvertTypeArgs(classTy.GetGenericArgs()),
+                modal: ty.GetModalInfo())
         } else if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
             return builder.context.GetRawArrayTy(ConvertTypeToClosureType(rawArrayTy.GetElementType()),
-                dims: rawArrayTy.GetDims())
+                dims: rawArrayTy.GetDims(), modal: ty.GetModalInfo())
         } else if (let Some(varrayTy) <- (ty as VArrayType)) {
-            return builder.context.GetVArrayTy(ConvertTypeToClosureType(varrayTy.GetElementType()), varrayTy.size)
+            return builder.context.GetVArrayTy(ConvertTypeToClosureType(varrayTy.GetElementType()), varrayTy.size,
+                modal: ty.GetModalInfo())
         } else if (let Some(pointerTy) <- (ty as CPointerType)) {
-            return builder.context.GetCPointerTy(ConvertTypeToClosureType(pointerTy.GetElementType()))
+            return builder.context.GetCPointerTy(ConvertTypeToClosureType(pointerTy.GetElementType()),
+                modal: ty.GetModalInfo())
         } else if (let Some(refTy) <- (ty as RefType)) {
             return builder.context.GetRefTy(ConvertTypeToClosureType(refTy.GetBaseType()))
         } else if (let Some(boxTy) <- (ty as BoxType)) {
@@ -698,9 +707,13 @@ public class ClosureConversion {
     }
 
     private func ConvertFuncType(funcTy: FuncType): Type {
-        let autoEnvBaseDef = GetOrCreateGenericAutoEnvBaseDef(funcTy.GetParamTypes().size)
-        let convertedFuncType = ConvertFuncArgsAndRetType(funcTy)
-        let autoEnvBaseTy = InstantiateAutoEnvBaseType(autoEnvBaseDef, convertedFuncType)
+        // Official ConvertFuncType (ClosureConversion.cpp:1379-1389 @63bf237b): the AutoEnv class must not
+        // depend on the function type's own modal; the modal is applied to the instantiated base instead.
+        let dataFuncType = StaticCast<FuncType>(builder.WithModal(funcTy, ModalInfo()))
+        let autoEnvBaseDef = GetOrCreateGenericAutoEnvBaseDef(dataFuncType)
+        let convertedFuncType = ConvertFuncArgsAndRetType(dataFuncType)
+        let autoEnvBaseTy = builder.WithModal(InstantiateAutoEnvBaseType(autoEnvBaseDef, convertedFuncType),
+            funcTy.GetModalInfo())
         return builder.context.GetRefTy(autoEnvBaseTy)
     }
 
@@ -714,15 +727,17 @@ public class ClosureConversion {
     }
 
     private func GetOrCreateAutoEnvBaseDef(funcTy: FuncType): ClassDef {
-        let genericBase = GetOrCreateGenericAutoEnvBaseDef(funcTy.GetParamTypes().size)
+        let dataType = StaticCast<FuncType>(builder.WithModal(funcTy, ModalInfo()))
+        let genericBase = GetOrCreateGenericAutoEnvBaseDef(dataType)
         if (funcTy.IsGenericRelated()) {
             return genericBase
         }
-        return GetOrCreateInstAutoEnvBaseDef(funcTy, genericBase)
+        return GetOrCreateInstAutoEnvBaseDef(dataType, genericBase)
     }
 
-    private func GetOrCreateGenericAutoEnvBaseDef(paramNum: Int64): ClassDef {
-        let className = CC_GENERIC_BASE_PREFIX + paramNum.toString() + "_"
+    private func GetOrCreateGenericAutoEnvBaseDef(funcTy: FuncType): ClassDef {
+        let paramNum = funcTy.GetParamTypes().size
+        let className = GenerateGenericBaseClassMangleName(funcTy)
         if (let Some(found) <- genericAutoEnvBaseDefs.get(className)) {
             return found
         }
@@ -743,7 +758,12 @@ public class ClosureConversion {
         SetAutoEnvBaseDefAttr(classDef)
         classDef.EnableAttr(Attribute.GENERIC)
         AddClassToPackage(classDef)
-        CreateVirtualFuncInAutoEnvBaseDef(classDef, GENERIC_VIRTUAL_FUNC, paramsAndRet)
+        let methodArgs = ArrayList<Type>()
+        let actual = funcTy.GetTypeArgs()
+        for (i in 0..paramsAndRet.size) {
+            methodArgs.add(builder.WithModal(paramsAndRet[i], actual[i].StripAllRefs().GetModalInfo()))
+        }
+        CreateVirtualFuncInAutoEnvBaseDef(classDef, GENERIC_VIRTUAL_FUNC, methodArgs)
         genericAutoEnvBaseDefs[className] = classDef
         return classDef
     }
@@ -756,7 +776,7 @@ public class ClosureConversion {
         let classDef = builder.CreateClassDef(CurrentPackage().GetName(), className)
         let classTy = builder.context.GetClassTy(classDef, ArrayList<Type>())
         classDef.SetType(classTy)
-        classDef.SetSuperClassTy(builder.context.GetClassTy(superClass, funcTy.GetTypeArgs()))
+        classDef.SetSuperClassTy(InstantiateAutoEnvBaseType(superClass, funcTy))
         SetAutoEnvBaseDefAttr(classDef)
         AddClassToPackage(classDef)
         CreateVirtualFuncInAutoEnvBaseDef(classDef, INST_VIRTUAL_FUNC, funcTy.GetTypeArgs())
@@ -870,9 +890,9 @@ public class ClosureConversion {
             if (let Some(srcTy) <- srcFunc.GetType()) {
                 if (let Some(funcTy) <- (srcTy as FuncType)) {
                     for (paramTy in funcTy.GetParamTypes()) {
-                        superArgs.add(SubstituteGenericTypes(paramTy, genericMap))
+                        superArgs.add(SubstituteGenericTypes(builder.WithModal(paramTy, ModalInfo()), genericMap))
                     }
-                    superArgs.add(SubstituteGenericTypes(funcTy.GetReturnType(), genericMap))
+                    superArgs.add(SubstituteGenericTypes(builder.WithModal(funcTy.GetReturnType(), ModalInfo()), genericMap))
                 }
             }
         }
@@ -1219,10 +1239,8 @@ public class ClosureConversion {
             envParamDebug = Some(debugExpr)
         }
         ReplaceEnvVarWithMemberVar(capturedValues, envParamDebug, globalFunc, thisParam)
-        if (let Some(hostFunc) <- lambda.GetParamDftValHostFunc()) {
-            if (let Some(convertedHostFunc) <- convertedCache.get(hostFunc.nodeId)) {
-                globalFunc.SetParamDftValHostFunc(convertedHostFunc)
-            }
+        if (let Some(param) <- lambda.GetParamDftValHostParam()) {
+            globalFunc.SetParamDftValHostParam(param)
         }
         // Mirror C++ LiftLambdaToGlobalFunc step 3 (ClosureConversion.cpp:2008-2028):
         // traverse the lifted body and re-map the original generics (e.g. the
@@ -1385,7 +1403,7 @@ public class ClosureConversion {
             params.add(ReplaceThisTypeToConcreteType(paramTy, thisType, builder))
         }
         return builder.context.GetFuncTy(params, ReplaceThisTypeToConcreteType(funcTy.GetReturnType(), thisType, builder),
-            hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+            hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc(), modal: funcTy.modal)
     }
 
     private func ConvertTypeArgsWithThisType(args: ArrayList<Type>, thisType: Type): ArrayList<Type> {
@@ -1491,7 +1509,7 @@ public class ClosureConversion {
         let obj = CreateAutoEnvImplObject(parent, RequireClassType(autoEnvImplDef), envs, user, fn)
         let curClassTy = (((obj.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType() as ClassType).getOrThrow())
         let superClassTy = curClassTy.GetSuperClassTy(builder: builder).getOrThrow()
-        let superClassRefTy = builder.context.GetRefTy(superClassTy)
+        let superClassRefTy = builder.context.GetRefTy(ClosureClassView(superClassTy, curClassTy))
         let castToBaseType = builder.CreateClassStaticCast(superClassRefTy, obj, parent)
         castToBaseType.MoveBefore(user)
         let converted = CastTypeFromAutoEnvRefToFuncType(fn.GetFuncType().getOrThrow(),
@@ -1554,12 +1572,32 @@ public class ClosureConversion {
         user.ReplaceOperand(result, converted)
     }
 
+    private func ClosureClassView(dataType: ClassType, source: Type): ClassType {
+        return (builder.WithModal(dataType, source.StripAllRefs().GetModalInfo()) as ClassType).getOrThrow()
+    }
+
     private func CreateAutoEnvImplObject(parent: Block, autoEnvImplType: ClassType, envs: ArrayList<Value>,
         user: Expression, srcFunc: Value): LocalVar {
-        let instantiateClassTy = GenerateInstantiatedClassType(autoEnvImplType, user, srcFunc)
+        let instantiateClassTy = ClosureClassView(GenerateInstantiatedClassType(autoEnvImplType, user, srcFunc),
+            srcFunc.GetType().getOrThrow())
         let refType = builder.context.GetRefTy(instantiateClassTy)
         let allocate = builder.CreateAllocate(refType, instantiateClassTy, parent)
         let obj = RequireResult(allocate)
+        // Allocate early enough for recursion without hoisting out of an inlined exclave.
+        // Boundaries in a predecessor already dominate this block; keep any preceding
+        // boundary in this block on the same side of the allocation as the original use.
+        var boundary: Option<Expression> = None
+        if (instantiateClassTy.IsLocalRegion()) {
+            for (expr in parent.GetExpressions()) {
+                if (refEq(expr, user)) { break }
+                if (expr.GetExprKind() == ExprKind.START_REGION || expr.GetExprKind() == ExprKind.END_REGION) {
+                    boundary = expr
+                }
+            }
+        }
+        if (let Some(start) <- boundary) { allocate.MoveAfter(start) }
+        else { parent.InsertExprIntoHead(allocate) }
+
         var idx: UInt64 = 0u64
         for (env in envs) {
             let path = ArrayList<UInt64>()
@@ -1568,8 +1606,6 @@ public class ClosureConversion {
             store.MoveBefore(user)
             idx++
         }
-        // If not moved to head, recursive lambda calls can leave unreachable expressions.
-        parent.InsertExprIntoHead(allocate)
         return obj
     }
 
@@ -1746,10 +1782,10 @@ public class ClosureConversion {
     private func GetFuncTypeWithoutThisPtrFromAutoEnvType(autoEnvType: ClassType): FuncType {
         CJC_ASSERT(autoEnvType.IsAutoEnv())
         if (autoEnvType.IsAutoEnvBase()) {
-            let (paramTypes, retType) = GetFuncTypeWithoutThisPtrFromAutoEnvBaseType(autoEnvType)
-            return builder.context.GetFuncTy(paramTypes, retType)
+            return GetClosureCallType(autoEnvType, builder)
         }
-        return GetFuncTypeWithoutThisPtrFromAutoEnvType(autoEnvType.GetSuperClassTy(builder: builder).getOrThrow())
+        let parent = autoEnvType.GetSuperClassTy(builder: builder).getOrThrow()
+        return GetFuncTypeWithoutThisPtrFromAutoEnvType(ClosureClassView(parent, autoEnvType))
     }
 
     private func BoxAllMutableVars(rawEnvs: ArrayList<Value>): ArrayList<Value> {
@@ -1773,7 +1809,15 @@ public class ClosureConversion {
             throw IllegalStateException("ClosureConversion mutable capture has no defining expression")
         let parent = envExpr.GetParentBlock() ??
             throw IllegalStateException("ClosureConversion mutable capture has no parent block")
-        let classTy = RequireClassType(classDef)
+        // The box must live in the same region as the variable it holds, or the runtime write barrier
+        // rejects it ("heap object must not reference local object"). Gate on IsLocalRegion() to match
+        // SetMemRegion, which opens no region for a modal but Copyable capture (`Int64 @local?`).
+        // Official !2370 f463f5a8, ClosureConversion.cpp:1131-1143 @63bf237b.
+        let envTy = env.GetType() ??
+            throw IllegalStateException("ClosureConversion mutable capture has no type")
+        let capturedTy = envTy.StripAllRefs()
+        let boxModal = if (capturedTy.IsLocalRegion()) { capturedTy.GetModalInfo() } else { ModalInfo() }
+        let classTy = builder.WithModal(RequireClassType(classDef), boxModal)
         let obj = builder.CreateAllocate(builder.context.GetRefTy(classTy), classTy, parent)
         obj.SetDebugLocation(envExpr.GetDebugLocation())
         obj.MoveBefore(envExpr)
@@ -1943,7 +1987,7 @@ public class ClosureConversion {
             if (let Some(funcTy) <- (calleeTy as FuncType)) {
                 let baseDef = GetOrCreateAutoEnvBaseDef(funcTy)
                 let instParentType = InstantiateAutoEnvBaseType(baseDef, funcTy)
-                return InstantiateAutoEnvGenericBaseType(instParentType, call)
+                return ClosureClassView(InstantiateAutoEnvGenericBaseType(instParentType, call), funcTy)
             }
             if (let Some(refTy) <- (calleeTy as RefType)) {
                 if (let Some(classTy) <- (refTy.GetBaseType() as ClassType)) {
@@ -2046,10 +2090,9 @@ public class ClosureConversion {
     }
 
     private func InstantiateAutoEnvBaseType(autoEnvBaseDef: ClassDef, funcTy: FuncType): ClassType {
-        let args = if (autoEnvBaseDef.GetGenericTypeParams().isEmpty()) {
-            ArrayList<Type>()
-        } else {
-            funcTy.GetTypeArgs()
+        let args = ArrayList<Type>()
+        if (!autoEnvBaseDef.GetGenericTypeParams().isEmpty()) {
+            for (arg in funcTy.GetTypeArgs()) { args.add(builder.WithModal(arg, ModalInfo())) }
         }
         return builder.context.GetClassTy(autoEnvBaseDef, args)
     }
@@ -2162,7 +2205,8 @@ public class ClosureConversion {
         for (idx in index) {
             let op = expr.GetOperand(idx)
             let opClassTy = (op.GetType().getOrThrow().StripAllRefs() as ClassType).getOrThrow()
-            let expectedType = builder.context.GetRefTy(opClassTy.GetClassDef().GetSuperClassTy().getOrThrow())
+            let parent = opClassTy.GetSuperClassTy(builder: builder).getOrThrow()
+            let expectedType = builder.context.GetRefTy(ClosureClassView(parent, opClassTy))
             let typecast = builder.CreateClassStaticCast(expectedType, op, parentBlock)
             typecast.MoveBefore(expr)
             expr.ReplaceOperand(idx, RequireResult(typecast))
@@ -2217,7 +2261,13 @@ public class ClosureConversion {
         let memberVars = autoEnvWrapperDef.GetDirectInstanceVars()
         CJC_ASSERT(memberVars.size == 1)
         let memberVarType = (memberVars[0].ty.StripAllRefs() as ClassType).getOrThrow()
-        let (paramTypes, retType) = CreateFuncTypeWithBoxType(autoEnvWrapperDef, memberVarType.GetGenericArgs(),
+        let base = autoEnvWrapperDef.GetSuperClassTy().getOrThrow().GetSuperClassTy(builder: builder).getOrThrow()
+        let instMap = HashMap<Int64, (GenericType, Type)>()
+        base.GetInstMap(instMap, builder)
+        let (_, signature) = GetFuncTypeFromAutoEnvBaseDef(base.GetClassDef())
+        let args = ReplaceRawGenericArgType(signature, instMap, builder).GetTypeArgs()
+        args.remove(at: 0)
+        let (paramTypes, retType) = CreateFuncTypeWithBoxType(autoEnvWrapperDef, args,
             HashMap<String, Type>())
         paramTypes.add(builder.context.GetRefTy(RequireClassType(autoEnvWrapperDef)), at: 0)
         let funcType = builder.context.GetFuncTy(paramTypes, retType)
@@ -2320,7 +2370,8 @@ public class ClosureConversion {
         if (let Some(found) <- instAutoEnvWrapperDefs.get(wrapperName)) {
             return found
         }
-        let wrapperClassDef = CreateAutoEnvWrapper(wrapperName, instAutoEnvBaseType)
+        // The cache is keyed by the definition; the first use must not color its superclass.
+        let wrapperClassDef = CreateAutoEnvWrapper(wrapperName, RequireClassType(instAutoEnvBaseDef))
         CreateMemberVarInAutoEnvWrapper(wrapperClassDef)
         let genericFunc = CreateGenericMethodInAutoEnvWrapper(wrapperClassDef)
         CreateInstMethodInAutoEnvWrapper(wrapperClassDef, genericFunc)
@@ -2353,11 +2404,11 @@ public class ClosureConversion {
         let applyRetType = applyRetVal.GetType().getOrThrow()
         let applyRetTypeNoRef = (applyRetType.StripAllRefs() as ClassType).getOrThrow()
         let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(applyRetTypeNoRef)
-        let newApplyRetType = builder.context.GetRefTy(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
-            GetSuperClassTy().getOrThrow())
+        let newApplyRetType = builder.context.GetRefTy(ClosureClassView(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
+            GetSuperClassTy().getOrThrow(), applyRetTypeNoRef))
         applyRetVal.SetType(newApplyRetType)
         let parentBlock = apply.GetParentBlock().getOrThrow()
-        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let autoEnvWrapperType = ClosureClassView(RequireClassType(autoEnvWrapperDef), applyRetTypeNoRef)
         let allocate = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
             parentBlock)
         allocate.MoveAfter(apply)
@@ -2397,10 +2448,10 @@ public class ClosureConversion {
         let applyRetType = applyRetVal.GetType().getOrThrow()
         let applyRetTypeNoRef = (applyRetType.StripAllRefs() as ClassType).getOrThrow()
         let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(applyRetTypeNoRef)
-        let newApplyRetType = builder.context.GetRefTy(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
-            GetSuperClassTy().getOrThrow())
+        let newApplyRetType = builder.context.GetRefTy(ClosureClassView(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
+            GetSuperClassTy().getOrThrow(), applyRetTypeNoRef))
         applyRetVal.SetType(newApplyRetType)
-        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let autoEnvWrapperType = ClosureClassView(RequireClassType(autoEnvWrapperDef), applyRetTypeNoRef)
         let autoEnvWrapperRefType = builder.context.GetRefTy(autoEnvWrapperType)
         for (user in applyRetVal.GetUsers()) {
             if (user.GetExprKind() == ExprKind.INSTANCEOF) {
@@ -2433,11 +2484,11 @@ public class ClosureConversion {
         let invokeRetType = invokeRetVal.GetType().getOrThrow()
         let invokeRetTypeNoRef = (invokeRetType.StripAllRefs() as ClassType).getOrThrow()
         let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(invokeRetTypeNoRef)
-        let newInvokeRetType = builder.context.GetRefTy(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
-            GetSuperClassTy().getOrThrow())
+        let newInvokeRetType = builder.context.GetRefTy(ClosureClassView(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
+            GetSuperClassTy().getOrThrow(), invokeRetTypeNoRef))
         invokeRetVal.SetType(newInvokeRetType)
         let parentBlock = e.GetParentBlock().getOrThrow()
-        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let autoEnvWrapperType = ClosureClassView(RequireClassType(autoEnvWrapperDef), invokeRetTypeNoRef)
         let allocate = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
             parentBlock)
         allocate.MoveAfter(e)
@@ -2465,10 +2516,10 @@ public class ClosureConversion {
         let invokeRetType = invokeRetVal.GetType().getOrThrow()
         let invokeRetTypeNoRef = (invokeRetType.StripAllRefs() as ClassType).getOrThrow()
         let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(invokeRetTypeNoRef)
-        let newInvokeRetType = builder.context.GetRefTy(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
-            GetSuperClassTy().getOrThrow())
+        let newInvokeRetType = builder.context.GetRefTy(ClosureClassView(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
+            GetSuperClassTy().getOrThrow(), invokeRetTypeNoRef))
         invokeRetVal.SetType(newInvokeRetType)
-        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let autoEnvWrapperType = ClosureClassView(RequireClassType(autoEnvWrapperDef), invokeRetTypeNoRef)
         let autoEnvWrapperRefType = builder.context.GetRefTy(autoEnvWrapperType)
         for (user in invokeRetVal.GetUsers()) {
             if (user.GetExprKind() == ExprKind.INSTANCEOF) {
@@ -2509,10 +2560,10 @@ public class ClosureConversion {
         let getEleRefRetTypeNoRef = (getEleRefRetType.StripAllRefs() as ClassType).getOrThrow()
         let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(getEleRefRetTypeNoRef)
         let newGetEleRefRetType = builder.context.GetRefTy(builder.context.GetRefTy(
-            autoEnvWrapperDef.GetSuperClassDef().getOrThrow().GetSuperClassTy().getOrThrow()))
+            ClosureClassView(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().GetSuperClassTy().getOrThrow(), getEleRefRetTypeNoRef)))
         getEleRefRetVal.SetType(newGetEleRefRetType)
         let parentBlock = getEleRef.GetParentBlock().getOrThrow()
-        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let autoEnvWrapperType = ClosureClassView(RequireClassType(autoEnvWrapperDef), getEleRefRetTypeNoRef)
         let allocate1 = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
             parentBlock)
         allocate1.MoveAfter(getEleRef)
@@ -2544,11 +2595,11 @@ public class ClosureConversion {
         CJC_ASSERT(fieldRetType.IsReferenceTypeWithRefDims(1))
         let fieldRetTypeNoRef = (fieldRetType.StripAllRefs() as ClassType).getOrThrow()
         let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(fieldRetTypeNoRef)
-        let newFieldRetType = builder.context.GetRefTy(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
-            GetSuperClassTy().getOrThrow())
+        let newFieldRetType = builder.context.GetRefTy(ClosureClassView(autoEnvWrapperDef.GetSuperClassDef().getOrThrow().
+            GetSuperClassTy().getOrThrow(), fieldRetTypeNoRef))
         fieldRetVal.SetType(newFieldRetType)
         let parentBlock = field.GetParentBlock().getOrThrow()
-        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let autoEnvWrapperType = ClosureClassView(RequireClassType(autoEnvWrapperDef), fieldRetTypeNoRef)
         let allocate = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
             parentBlock)
         allocate.MoveAfter(field)
@@ -2587,7 +2638,7 @@ public class ClosureConversion {
         let targetTypeNoRef = (typecast.GetTargetType().getOrThrow().StripAllRefs() as ClassType).getOrThrow()
         let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper(targetTypeNoRef)
         let parentBlock = typecast.GetParentBlock().getOrThrow()
-        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let autoEnvWrapperType = ClosureClassView(RequireClassType(autoEnvWrapperDef), typecast.GetSourceType().getOrThrow())
         let allocate = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
             parentBlock)
         allocate.MoveBefore(typecast)
@@ -2667,10 +2718,20 @@ public class ClosureConversion {
         let paramType = param.GetType().getOrThrow().StripAllRefs()
         let autoEnvWrapperDef = GetOrCreateAutoEnvWrapper((paramType as ClassType).getOrThrow())
         let parentBlock = fn.GetBody().getOrThrow().GetEntryBlock().getOrThrow()
-        let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
+        let autoEnvWrapperType = ClosureClassView(RequireClassType(autoEnvWrapperDef), paramType)
         let allocate = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
             parentBlock)
-        parentBlock.InsertExprIntoHead(allocate)
+        // A parameter has one wrapper shared by all its users. Keep it in the entry
+        // prologue, inside this function's region if SetMemRegion opened one.
+        var opening: Option<Expression> = None
+        if (autoEnvWrapperType.IsLocalRegion()) {
+            for (expr in parentBlock.GetExpressions()) {
+                if (expr.GetExprKind() == ExprKind.END_REGION) { break }
+                if (expr.GetExprKind() == ExprKind.START_REGION) { opening = expr; break }
+            }
+        }
+        if (let Some(start) <- opening) { allocate.MoveAfter(start) }
+        else { parentBlock.InsertExprIntoHead(allocate) }
         let path = ArrayList<UInt64>()
         path.add(0u64)
         let storeMemberVar = builder.CreateStoreElementRef(param, RequireResult(allocate), path, parentBlock)
@@ -2726,57 +2787,19 @@ public class ClosureConversion {
     }
 
     private func SubstituteGenericTypes(ty: Type, genericMap: HashMap<String, Type>): Type {
+        if (genericMap.isEmpty()) { return ty }
         if (let Some(genericTy) <- (ty as GenericType)) {
-            return genericMap.get(GenericTypeKey(genericTy)) ?? ty
-        }
-        if (let Some(refTy) <- (ty as RefType)) {
-            return builder.context.GetRefTy(SubstituteGenericTypes(refTy.GetBaseType(), genericMap))
-        }
-        if (let Some(funcTy) <- (ty as FuncType)) {
-            let params = ArrayList<Type>()
-            for (paramTy in funcTy.GetParamTypes()) {
-                params.add(SubstituteGenericTypes(paramTy, genericMap))
+            if (let Some(mapped) <- genericMap.get(GenericTypeKey(genericTy))) {
+                return builder.WithModal(mapped, genericTy.GetModalInfo())
             }
-            return builder.context.GetFuncTy(params, SubstituteGenericTypes(funcTy.GetReturnType(), genericMap),
-                hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+            return ty
         }
-        if (let Some(tupleTy) <- (ty as TupleType)) {
-            return builder.context.GetTupleTy(SubstituteGenericTypeArgs(tupleTy.GetTypeArgs(), genericMap))
-        }
-        if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
-            return builder.context.GetRawArrayTy(SubstituteGenericTypes(rawArrayTy.GetElementType(), genericMap),
-                dims: rawArrayTy.GetDims())
-        }
-        if (let Some(varrayTy) <- (ty as VArrayType)) {
-            return builder.context.GetVArrayTy(SubstituteGenericTypes(varrayTy.GetElementType(), genericMap),
-                varrayTy.size)
-        }
-        if (let Some(pointerTy) <- (ty as CPointerType)) {
-            return builder.context.GetCPointerTy(SubstituteGenericTypes(pointerTy.GetElementType(), genericMap))
-        }
-        if (let Some(boxTy) <- (ty as BoxType)) {
-            return builder.context.GetBoxTy(SubstituteGenericTypes(boxTy.GetBaseType(), genericMap))
-        }
-        if (let Some(structTy) <- (ty as StructType)) {
-            return builder.context.GetStructTy(structTy.GetStructDef(),
-                SubstituteGenericTypeArgs(structTy.GetGenericArgs(), genericMap))
-        }
-        if (let Some(classTy) <- (ty as ClassType)) {
-            return builder.context.GetClassTy(classTy.GetClassDef(),
-                SubstituteGenericTypeArgs(classTy.GetGenericArgs(), genericMap))
-        }
-        if (let Some(enumTy) <- (ty as EnumType)) {
-            return builder.context.GetEnumTy(enumTy.GetEnumDef(),
-                SubstituteGenericTypeArgs(enumTy.GetGenericArgs(), genericMap))
-        }
-        return ty
+        return CreateNewTypeWithArgs(ty, SubstituteGenericTypeArgs(ty.GetTypeArgs(), genericMap), builder)
     }
 
     private func SubstituteGenericTypeArgs(args: ArrayList<Type>, genericMap: HashMap<String, Type>): ArrayList<Type> {
         let out = ArrayList<Type>()
-        for (arg in args) {
-            out.add(SubstituteGenericTypes(arg, genericMap))
-        }
+        for (arg in args) { out.add(SubstituteGenericTypes(arg, genericMap)) }
         return out
     }
 

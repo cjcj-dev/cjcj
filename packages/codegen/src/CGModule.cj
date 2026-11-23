@@ -505,6 +505,7 @@ public class CGModule {
                 result = unsafe { LLVMAddGlobal(moduleHandle.raw, constantType, nameCString.value) }
             }
         }
+        if (!unsafe { LLVMGetInitializer(result) }.isNull()) { return result }
         unsafe {
             LLVMSetGlobalConstant(result, 1)
             LLVMSetUnnamedAddress(result, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr))

@@ -144,6 +144,13 @@ public open class DefaultCompilerInstance <: Resource {
         })
     }
 
+    public func CompileCjoInterface(): Bool {
+        if (!Compile(stage: CompileStage.SAVE_CJO) || diag.GetErrorCount() != 0) { return false }
+        // SaveCjo has already written these files to the driver's final output
+        // directory. There is no codegen cache file to rename in this path.
+        return true
+    }
+
     protected func RegisterCjoOutputs(pkgs: ArrayList<Package>): Unit {
         for (pkg in pkgs) {
             if (pkg.IsEmpty()) {

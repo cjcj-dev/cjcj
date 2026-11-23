@@ -1,0 +1,1257 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// This source file is part of the Cangjie project, licensed under Apache-2.0
+// with Runtime Library Exception.
+//
+// See https://cangjie-lang.cn/pages/LICENSE for license information.
+
+namespace CHIRFormat;
+
+file_identifier "CR01";
+
+// Using 'uint32' as type of 'Type/Value/Expression/CustomTypeDef' 's table index.
+// 0 is invalid index or means void, valid index start from 1, which is the offset of table plus 1.
+
+// Attribute words use the low 64 bits of the compiler AttributeIndex.
+// The installed cangjie/CHIR/IR/AttributeInfo.h names their positions.
+
+enum CHIRTypeKind: uint8 {
+  INVALID,
+  // integer
+  INT8,
+  INT16,
+  INT32,
+  INT64,
+  INT_NATIVE,
+  // unsigned integer
+  UINT8,
+  UINT16,
+  UINT32,
+  UINT64,
+  UINT_NATIVE,
+  // float
+  FLOAT16,
+  FLOAT32,
+  FLOAT64,
+  // other primitive type
+  RUNE,
+  BOOLEAN,
+  UNIT,
+  NOTHING,
+  // Void type
+  VOID,
+  // composite type
+  TUPLE,
+  STRUCT,
+  ENUM,
+  FUNC,
+  CLASS,
+  // Built-in array related type
+  RAWARRAY,
+  VARRAY,
+  // Built-in CFFI related type
+  C_POINTER,
+  C_STRING,
+  // Generic type
+  GENERIC,
+  // Referece to an value with abritray type
+  REFTYPE,
+  // Built-in box type
+  BOXTYPE,
+  THIS,
+}
+
+enum SourceExpr: uint8 {
+  IF_EXPR,
+  WHILE_EXPR,
+  DO_WHILE_EXPR,
+  MATCH_EXPR,
+  IF_LET_OR_WHILE_LET,
+  QUEST,
+  BINARY,
+  FOR_IN_EXPR,
+  MATCH_CASE,
+  OTHER,
+}
+
+table Type {
+  kind: CHIRTypeKind;
+  argTys: [uint32]; // use types id
+  modal: ModalInfo;
+}
+
+enum Mode: int16 {
+  NONE,
+  MAYBE,
+  MUST,
+}
+
+table ModalInfo {
+  local: Mode;
+}
+
+table RawArrayType {
+  base: Type;
+  dims: uint32;
+}
+
+table VArrayType {
+  base: Type;
+  size: int64;
+}
+
+table FuncType {
+  base: Type;
+  isCFuncType: bool = false;
+  hasVarArg: bool = false;
+}
+
+table CustomType {
+  base: Type;
+  customTypeDef: uint32; // use defs id
+}
+
+table GenericType {
+  base: Type;
+  identifier: string(shared);
+  srcCodeIdentifier: string(shared);
+  upperBounds: [uint32]; // use types id
+}
+
+enum Linkage: int16 {
+  WEAK_ODR,
+  EXTERNAL,
+  INTERNAL,
+  LINKONCE_ODR,
+  EXTERNAL_WEAK,
+}
+
+table Pos {
+  line: uint32;
+  column: uint32;
+}
+
+table DebugLocation {
+  filePath: string(shared);
+  fileId: uint32;
+  beginPos: Pos;
+  endPos: Pos;
+  scope: [int32];
+}
+
+table LinkTypeInfo {
+  linkage: Linkage;
+}
+
+enum SkipKind : uint8 {
+  NO_SKIP,
+  SKIP_DCE_WARNING,
+  SKIP_FORIN_EXIT,
+  SKIP_VIC,
+}
+
+table SkipCheck {
+  skipKind: SkipKind;
+}
+
+table NeedCheckArrayBound {
+  need: bool = true;
+}
+
+table NeedCheckCast {
+  need: bool = true;
+}
+
+enum OverflowStrategy: uint8 {
+  NA,
+  WRAPPING,
+  THROWING,
+  SATURATING,
+}
+
+table NeverOverflowInfo {
+  neverOverflow: bool = false;
+}
+
+table GeneratedFromForIn {
+  value: bool = false;
+}
+
+table IsAutoEnvClass {
+  value: bool = false;
+}
+
+table IsCapturedClassInCC {
+  value: bool = false;
+}
+
+table EnumCaseIndex {
+  index: int64 = -1;
+}
+
+table VirMethodOffset {
+  offset: int64 = -1;
+}
+
+table WrappedRawMethod {
+  rawMethod: uint32; // use values id
+}
+
+table OverrideSrcFuncType {
+  type: uint32;  // use types id
+}
+
+table MatchCaseId {
+  // Groups table entries generated from one source match case.
+  id: uint64;
+}
+
+union Annotation {
+  needCheckArrayBound: NeedCheckArrayBound,
+  needCheckCast: NeedCheckCast,
+  debugLocationInfoForWarning: DebugLocation,
+  generatedFromForIn: GeneratedFromForIn,
+  isAutoEnvClass: IsAutoEnvClass,
+  isCapturedClassInCC: IsCapturedClassInCC,
+  linkTypeInfo: LinkTypeInfo,
+  skipCheck: SkipCheck,
+  neverOverflowInfo: NeverOverflowInfo,
+  enumCaseIndex: EnumCaseIndex,
+  virMethodOffset: VirMethodOffset,
+  wrappedRawMethod: WrappedRawMethod,
+  overrideSrcFuncType : OverrideSrcFuncType,
+  matchCaseId: MatchCaseId
+}
+
+table Base {
+  annos: [Annotation];
+  loc: DebugLocation;
+  attributes: uint64;
+}
+
+enum ValueKind: uint8 {
+  LITERAL,
+  GLOBALVAR,
+  PARAMETER,
+  LOCALVAR,
+  FUNC,
+  BLOCK,
+  BLOCK_GROUP,
+}
+
+table Value {
+  base: Base;
+  type: uint32; // use types id
+  identifier: string(shared);
+  kind: ValueKind;
+}
+
+enum ConstantValueKind: uint8 {
+  BOOL,
+  RUNE,
+  INT,
+  FLOAT,
+  STRING,
+  UNIT,
+  NULL,
+  FUNC,
+}
+
+table LiteralValue {
+  base: Value;
+  literalKind: ConstantValueKind;
+}
+
+table BoolLiteral {
+  base: LiteralValue;
+  val: bool;
+}
+
+table StringLiteral {
+  base: LiteralValue;
+  val: string(shared);
+}
+
+table RuneLiteral {
+  base: LiteralValue;
+  val: uint32; // coding of `rune`
+}
+
+table IntLiteral {
+  base: LiteralValue;
+  val: uint64;
+}
+
+table FloatLiteral {
+  base: LiteralValue;
+  val: double = 1.0; // use a non-0.0 as the default value to avoid sign problem
+}
+
+table UnitLiteral {
+  base: LiteralValue;
+}
+
+table NullLiteral {
+  base: LiteralValue;
+}
+
+table Parameter {
+  base: Value;
+  ownedFunc: uint32;  // use values id
+  ownedLambda: uint32;  // use exprs id
+  srcCodeIdentifier: string(shared);
+  annoInfo: AnnoInfo;
+  paramDftValFunc: uint32; // use values id, desugared default-value Function
+}
+
+table LocalVar {
+  base: Value;
+  associatedExpr: uint32; // use exprs id
+  isRetVal: bool = false;
+  srcCodeIdentifier: string(shared);
+}
+
+table GlobalValue {
+  base: Value;
+  srcCodeIdentifier: string(shared);
+  rawMangledName: string(shared);
+  packageName: string(shared);
+  declaredParent: uint32; // use defs id
+  features: [string]; // features set to which declaration belongs
+  annoInfo: AnnoInfo;
+}
+
+table GlobalVar {
+  base: GlobalValue;
+  // LiteralValue or Function (GLOBALVAR_INIT), 0 for none or imported var
+  initializer: uint32; // use values id
+}
+
+enum FuncKind: uint8 {
+  DEFAULT,
+  GETTER,
+  SETTER,
+  LAMBDA,
+  CLASS_CONSTRUCTOR,
+  PRIMAL_CLASS_CONSTRUCTOR,
+  STRUCT_CONSTRUCTOR,
+  PRIMAL_STRUCT_CONSTRUCTOR,
+  GLOBALVAR_INIT,
+  FINALIZER,
+  MAIN_ENTRY,
+  ANNOFACTORY_FUNC,
+  MACRO_FUNC,
+  DEFAULT_PARAMETER_FUNC,
+  INSTANCEVAR_INIT
+}
+
+table FuncSigInfo {
+  funcName: string(shared);
+  funcType: uint32; // use types id
+  genericTypeParams: [uint32]; // use types id
+}
+
+table Function {
+  base: GlobalValue;
+  genericDecl: uint32; // use values id
+  funcKind: FuncKind;
+  isFastNative: bool;
+  isCFFIWrapper: bool;
+  originalLambdaInfo: FuncSigInfo;
+  genericTypeParams: [uint32]; // use types id
+  paramDftValHostParam: uint32; // use values id, host Parameter of default-value desugar func
+  body: uint32; // use values id, 0 for imported func
+  params: [uint32]; // use values id (signature params for imported func, body params for func with body)
+  retVal: uint32; // use values id
+  propLoc: DebugLocation;
+  localId: uint64;
+  blockId: uint64;
+  blockGroupId: uint64;
+}
+
+table Block {
+  base: Value;
+  parentGroup: uint32; // use values id
+  exprs: [uint32];  // use  exprs
+  predecessors: [uint32];  // use values id
+  isLandingPadBlock: bool;
+  exceptionCatchList: [uint32];  // use types id
+}
+
+table BlockGroup {
+  base: Value;
+  entryBlock: uint32;  // use values id
+  blocks: [uint32];  // use values id
+  ownedFunc: uint32;  // use values id
+  ownedExpression: uint32;  // use exprs id
+}
+
+enum CustomDefKind: uint8 {
+  STRUCT,
+  ENUM,
+  CLASS,
+  EXTEND,
+}
+
+table CustomAnnoInstance {
+  annoClassName: string(shared);
+  argValues: [string];
+  loc: DebugLocation;
+}
+
+table AnnoInfo {
+  mangledName: string(shared);
+  annoInstances: [CustomAnnoInstance];
+}
+
+table MemberVarInfo {
+  name: string(shared);
+  rawMangledName: string(shared);
+  type: uint32; // use types id
+  attributes: uint64;
+  loc: DebugLocation;
+  annoInfo : AnnoInfo;
+  initializerFunc: uint32;
+  outerDef: uint32; // use defs id
+}
+
+table VirtualMethodInfo {
+  // condition
+  funcName : string(shared);
+  sigType : uint32; // use types id
+  methodGenericTypeParams : [uint32]; // use types id
+  // result
+  instance : uint32; // used value Id
+  attributes: uint64;
+  originalType : uint32; // use types id
+  parentType : uint32; // use types id
+  returnType : uint32; // use types id
+}
+
+table VTableInType {
+  // the first level
+  srcParentType : uint32; // use types id
+  // the second level
+  virtualMethods : [VirtualMethodInfo];
+}
+
+table CustomTypeDef {
+  base: Base;
+  kind: CustomDefKind;
+  customTypeDefID: uint32; // current id in defs
+  srcCodeIdentifier: string(shared);
+  identifier: string(shared);
+  packageName: string(shared);
+  type: uint32; // use types id
+  genericDecl: uint32;  // use defs id
+  methods: [uint32]; // use values id
+  implementedInterfaces: [uint32]; // use types id
+  instanceMemberVars: [MemberVarInfo];
+  staticMemberVars: [uint32]; // use values id
+  annoInfo: AnnoInfo;
+  vtable: [VTableInType];
+  instanceVarInitFunc: uint32;
+}
+
+table EnumCtorInfo {
+  srcCodeName: string(shared);
+  mangledName: string(shared);
+  funcType: uint32; // use types id
+  annoInfo: AnnoInfo;
+}
+
+table EnumDef {
+  base: CustomTypeDef;
+  ctors: [EnumCtorInfo];
+  nonExhaustive: bool;
+}
+
+table StructDef {
+  base: CustomTypeDef;
+  isCStruct: bool = false;
+  alignment: int64;
+  isPacked: bool = false;
+}
+
+table ExtendDef {
+  base: CustomTypeDef;
+  extendedType: uint32; // use types id
+  genericParams: [uint32]; // use types id
+}
+
+table ClassDef {
+  base: CustomTypeDef;
+  isClass: bool;
+  isAnnotation: bool;
+  annotationTargets: [uint32]; // use values id (GlobalVar), absent when not an @Annotation class
+  superClass: uint32; // use types id
+}
+
+enum CHIRExprKind: uint8 {
+  Invalid,
+ 
+  // terminator
+  Goto,
+  Branch,
+  MultiBranch,
+  Exit,
+  TryApply,
+  TryInvoke,
+  TryIntrinsic,
+  RaiseException,
+  TrySpawn,
+  TryNumericCast,
+  TryAllocate,
+  TryRawArrayAllocate,
+  TryNeg,
+  TryAdd,
+  TrySub,
+  TryMul,
+  TryDiv,
+  TryMod,
+  TryExp,
+  TryLShift,
+  TryRShift,
+ 
+  // unary expr
+  Neg,
+  Not,
+  BitNot,
+ 
+  // binary expr
+  Add,
+  Sub,
+  Mul,
+  Div,
+  Mod,
+  Exp,
+  LShift,
+  RShift,
+  BitAnd,
+  BitOr,
+  BitXor,
+  LT,
+  GT,
+  LE,
+  GE,
+  Equal,
+  NotEqual,
+  And,
+  Or,
+
+  // type cast
+  StaticCast,
+  Box,
+  UnboxToValue,
+  UnboxToRef,
+  NumericCast,
+  CastToConcrete,
+  CastToGeneric,
+
+  // memory expr
+  Allocate,
+  Load,
+  Store,
+  GetElementByName,
+  GetElementRef,
+  StoreElementByName,
+  StoreElementRef,
+  Field,
+  FieldByName,
+
+  // array
+  RawArrayAllocate,
+  RawArrayLiteralInit,
+  RawArrayInitByValue,
+  VArrayExpr,
+  VArrayBuilder,
+
+  // others
+  Constant,
+  Debug,
+  Tuple,
+  InstanceOf,
+  GetException,
+  Spawn,
+  Lambda,
+  GetInstantiateValue,
+  Apply,
+  Invoke,
+  Intrinsic,
+  GetRtti,
+  GetRttiStatic,
+  Exclave,
+  StartRegion,
+  EndRegion,
+}
+
+enum IntrinsicKind: uint16 {
+  NOT_INTRINSIC,
+  NOT_IMPLEMENTED,
+
+  // For hoisting, but we should later split arraybuilder
+  // into allocation and initialisation
+  ARRAY_INIT,
+
+  // CORE
+  SIZE_OF,
+  ALIGN_OF,
+  ARRAY_ACQUIRE_RAW_DATA,
+  ARRAY_RELEASE_RAW_DATA,
+  ARRAY_BUILT_IN_COPY_TO,
+  ARRAY_GET,
+  ARRAY_SET,
+  ARRAY_GET_UNCHECKED,
+  ARRAY_GET_REF_UNCHECKED,
+  ARRAY_SET_UNCHECKED,
+  ARRAY_SIZE,
+  ARRAY_CLONE,
+  ARRAY_SLICE_INIT,
+  ARRAY_SLICE,
+  ARRAY_SLICE_RAWARRAY,
+  ARRAY_SLICE_START,
+  ARRAY_SLICE_SIZE,
+  ARRAY_SLICE_GET_ELEMENT,
+  ARRAY_SLICE_GET_ELEMENT_UNCHECKED,
+  ARRAY_SLICE_SET_ELEMENT,
+  ARRAY_SLICE_SET_ELEMENT_UNCHECKED,
+  FILL_IN_STACK_TRACE,
+  DECODE_STACK_TRACE,
+  DUMP_CURRENT_THREAD_INFO,
+  DUMP_ALL_THREADS_INFO,
+
+  CHR,
+  ORD,
+
+  CPOINTER_GET_POINTER_ADDRESS,
+  CPOINTER_INIT0, // CPointer constructor with no arguments
+  CPOINTER_INIT1, // CPointer constructor with one argument
+  CPOINTER_READ,
+  CPOINTER_WRITE,
+  CPOINTER_ADD,
+
+  CSTRING_INIT,
+  CSTRING_CONVERT_CSTR_TO_PTR,
+
+  INOUT_PARAM,
+
+  REGISTER_WATCHED_OBJECT,
+
+  OBJECT_REFEQ,
+
+  RAW_ARRAY_REFEQ,  // cjnative only
+  FUNC_REFEQ, // cjnative only
+
+  OBJECT_ZERO_VALUE,
+
+  INVOKE_GC,
+  SET_GC_THRESHOLD,
+  DUMP_CJ_HEAP_DATA,
+  GET_GC_COUNT,
+  GET_GC_TIME_US,
+  GET_GC_FREED_SIZE,
+  START_CJ_CPU_PROFILING,
+  STOP_CJ_CPU_PROFILING,
+  BLACK_BOX,
+  GET_MAX_HEAP_SIZE,
+  GET_ALLOCATE_HEAP_SIZE,
+  GET_REAL_HEAP_SIZE,
+  GET_THREAD_NUMBER,
+  GET_BLOCKING_THREAD_NUMBER,
+  GET_NATIVE_THREAD_NUMBER,
+
+  VARRAY_SET,
+  VARRAY_GET,
+
+  // About Future
+  FUTURE_INIT,
+
+  FUTURE_IS_COMPLETE,  // cjnative only
+  FUTURE_WAIT,  // cjnative only
+  FUTURE_NOTIFYALL,  // cjnative only
+
+  IS_THREAD_OBJECT_INITED,
+  GET_THREAD_OBJECT,
+  SET_THREAD_OBJECT,
+
+  OVERFLOW_CHECKED_ADD,
+  OVERFLOW_CHECKED_SUB,
+  OVERFLOW_CHECKED_MUL,
+  OVERFLOW_CHECKED_DIV,
+  OVERFLOW_CHECKED_MOD,
+  OVERFLOW_CHECKED_POW,
+  OVERFLOW_CHECKED_INC,
+  OVERFLOW_CHECKED_DEC,
+  OVERFLOW_CHECKED_NEG,
+  OVERFLOW_THROWING_ADD,
+  OVERFLOW_THROWING_SUB,
+  OVERFLOW_THROWING_MUL,
+  OVERFLOW_THROWING_DIV,
+  OVERFLOW_THROWING_MOD,
+  OVERFLOW_THROWING_POW,
+  OVERFLOW_THROWING_INC,
+  OVERFLOW_THROWING_DEC,
+  OVERFLOW_THROWING_NEG,
+  OVERFLOW_SATURATING_ADD,
+  OVERFLOW_SATURATING_SUB,
+  OVERFLOW_SATURATING_MUL,
+  OVERFLOW_SATURATING_DIV,
+  OVERFLOW_SATURATING_MOD,
+  OVERFLOW_SATURATING_POW,
+  OVERFLOW_SATURATING_INC,
+  OVERFLOW_SATURATING_DEC,
+  OVERFLOW_SATURATING_NEG,
+  OVERFLOW_WRAPPING_ADD,
+  OVERFLOW_WRAPPING_SUB,
+  OVERFLOW_WRAPPING_MUL,
+  OVERFLOW_WRAPPING_DIV,
+  OVERFLOW_WRAPPING_MOD,
+  OVERFLOW_WRAPPING_POW,
+  OVERFLOW_WRAPPING_INC,
+  OVERFLOW_WRAPPING_DEC,
+  OVERFLOW_WRAPPING_NEG,
+
+  // llvm vector instructions for string optimization
+
+  VECTOR_COMPARE_32,  // cjnative only
+  VECTOR_INDEX_BYTE_32,  // cjnative only
+
+  // Foreign functions translated to intrinsic functions in the interpreter,
+  // These functions are not not marked as intrinsic in Cangjie but they are translated to intrinsics in BCHIR
+
+  CJ_CORE_CAN_USE_SIMD,  // cjnative only
+
+  CJ_TLS_DYN_SET_SESSION_CALLBACK,
+  CJ_TLS_DYN_SSL_INIT,
+
+  // ============================ cjnative only start =================
+  REFLECTION_INTRINSIC_START_FLAG,
+
+  IS_INTERFACE,
+  IS_CLASS,
+  IS_PRIMITIVE,
+  IS_STRUCT,
+  IS_GENERIC,
+  IS_TUPLE,
+  IS_FUNCTION,
+  IS_ENUM,
+  IS_BOX,
+  GET_OR_CREATE_TYPEINFO_FOR_REFLECT,
+  GET_TYPETEMPLATE,
+  CHECK_METHOD_ACTUAL_ARGS,
+  METHOD_ENTRYPOINT_IS_NULL,
+  IS_RELECT_UNSUPPORTED_TYPE,
+  GET_TYPE_FOR_ANY,
+  GET_TYPE_BY_MANGLED_NAME,
+  GET_TYPE_NAME,
+  GET_TYPE_BY_QUALIFIED_NAME,
+  GET_TYPE_QUALIFIED_NAME_LENGTH,
+  GET_TYPE_QUALIFIED_NAME,
+  GET_NUM_OF_INTERFACE,
+  GET_INTERFACE,
+  IS_SUBTYPE,
+  GET_TYPE_INFO_MODIFIER,
+  GET_TYPE_INFO_ANNOTATIONS,
+  GET_OBJ_CLASS,
+  GET_SUPER_TYPE_INFO,
+  GET_TYPE_ARGS,
+
+  GET_NUM_OF_INSTANCE_METHOD_INFOS,
+  GET_INSTANCE_METHOD_INFO,
+  GET_NUM_OF_STATIC_METHOD_INFOS,
+  GET_STATIC_METHOD_INFO,
+  GET_METHOD_NAME,
+  GET_METHOD_RETURN_TYPE,
+  GET_METHOD_MODIFIER,
+  GET_METHOD_ANNOTATIONS,
+  APPLY_CJ_METHOD,
+  APPLY_CJ_STATIC_METHOD,
+  APPLY_CJ_GENERIC_METHOD,
+  APPLY_CJ_GENERIC_STATIC_METHOD,
+  GET_NUM_OF_ACTUAL_PARAMETERS,
+  GET_NUM_OF_GENERIC_PARAMETERS,
+  GET_ACTUAL_PARAMETER_INFO,
+  GET_GENERIC_PARAMETER_INFO,
+
+  GET_NUM_OF_INSTANCE_FIELD_INFOS,
+  GET_INSTANCE_FIELD_INFO,
+  GET_NUM_OF_STATIC_FIELD_INFOS,
+  GET_STATIC_FIELD_INFO,
+  GET_STATIC_FIELD_NAME,
+  GET_STATIC_FIELD_TYPE,
+  GET_STATIC_FIELD_ANNOTATIONS,
+  GET_INSTANCE_FIELD_NAME,
+  GET_INSTANCE_FIELD_TYPE,
+  GET_INSTANCE_FIELD_ANNOTATIONS,
+  GET_INSTANCE_FIELD_MODIFIER,
+  GET_STATIC_FIELD_MODIFIER,
+  GET_FIELD_VALUE,
+  SET_FIELD_VALUE,
+  GET_STATIC_FIELD_VALUE,
+  SET_STATIC_FIELD_VALUE,
+  GET_FIELD_DECLARING_TYPE,
+
+  GET_PARAMETER_INDEX,
+  GET_PARAMETER_NAME,
+  GET_PARAMETER_TYPE,
+  GET_PARAMETER_ANNOTATIONS,
+
+  GET_RELATED_PACKAGE_INF,
+  GET_PACKAGE_NAME,
+  GET_PACKAGE_NUM_OF_TYPE_INFOS,
+  GET_PACKAGE_TYPE_INFO,
+  GET_PACKAGE_NUM_OF_GLOBAL_METHODS,
+  GET_PACKAGE_GLOBAL_METHOD_INFO,
+  GET_PACKAGE_NUM_OF_GLOBAL_FIELD_INFOS,
+  GET_PACKAGE_GLOBAL_FIELD_INFO,
+  LOAD_PACKAGE,
+  GET_PACKAGE_BY_QUALIFIEDNAME,
+  GET_PACKAGE_VERSION,
+  GET_SUB_PACKAGES,
+  GET_NUM_OF_FIELD_TYPES,
+  GET_FIELD_TYPES,
+  NEW_AND_INIT_OBJECT,
+  GET_ASSOCIATED_VALUES,
+  GET_NUM_OF_FUNCTION_SIGNATURETYPES,
+  GET_FUNCTION_SIGNATURE_TYPES,
+  GET_NUM_OF_ENUM_CONSTRUCTOR_INFOS,
+  GET_ENUM_CONSTRUCTOR_INFO,
+  GET_ENUM_CONSTRUCTOR_NAME,
+  GET_ENUM_CONSTRUCTOR_INFO_FROM_ANY,
+  REFLECTION_INTRINSIC_END_FLAG,
+  // ============================ cjnative only end =================
+
+  SLEEP,
+
+  SOURCE_FILE,
+  SOURCE_LINE,
+
+  IDENTITY_HASHCODE,
+  IDENTITY_HASHCODE_FOR_ARRAY,
+
+  // ============================ cjnative only start =================
+  // SYNC
+  ATOMIC_LOAD,
+  ATOMIC_STORE,
+  ATOMIC_SWAP,
+  ATOMIC_COMPARE_AND_SWAP,
+  ATOMIC_FETCH_ADD,
+  ATOMIC_FETCH_SUB,
+  ATOMIC_FETCH_AND,
+  ATOMIC_FETCH_OR,
+  ATOMIC_FETCH_XOR,
+  MUTEX_INIT,
+  CJ_MUTEX_LOCK,
+  MUTEX_TRY_LOCK,
+  MUTEX_CHECK_STATUS,
+  MUTEX_UNLOCK,
+  WAITQUEUE_INIT,
+  MONITOR_INIT,
+  MOITIOR_WAIT,
+  MOITIOR_NOTIFY,
+  MOITIOR_NOTIFY_ALL,
+  MULTICONDITION_WAIT,
+  MULTICONDITION_NOTIFY,
+  MULTICONDITION_NOTIFY_ALL,
+  CROSS_ACCESS_BARRIER,
+  CREATE_EXPORT_HANDLE,
+  GET_EXPORTED_REF,
+  REMOVE_EXPORTED_REF,
+  GET_JSLAMBDA_ADDR,
+  // ============================ cjnative only end =================
+
+  // Syscall
+
+  // AST lib FFI
+  FFI_CJ_AST_LEX,
+  FFI_CJ_AST_PARSEEXPR,
+  FFI_CJ_AST_PARSEDECL,
+  FFI_CJ_AST_PARSE_PROPMEMBERDECL,
+  FFI_CJ_AST_PARSE_PRICONSTRUCTOR,
+  FFI_CJ_AST_PARSE_PATTERN,
+  FFI_CJ_AST_PARSE_TYPE,
+  FFI_CJ_AST_PARSETOPLEVEL,
+  FFI_CJ_AST_DIAGREPORT,
+
+  // Macro With Context FFI
+  FFI_CJ_PARENT_CONTEXT,
+  FFI_CJ_MACRO_ITEM_INFO,
+  FFI_CJ_GET_CHILD_MESSAGES,
+  FFI_CJ_CHECK_ADD_SPACE,
+  // CodeGen
+  CG_UNSAFE_BEGIN,
+  CG_UNSAFE_END,
+
+  // C FFI funcs
+  STRLEN,
+  MEMCPY_S,
+  MEMSET_S,
+  FREE,
+  MALLOC,
+  STRCMP,
+  MEMCMP,
+  STRNCMP,
+  STRCASECMP,
+
+  // The interpreter is using these for cjnative backend as well
+  ATOMIC_INT8_LOAD,
+  ATOMIC_INT8_STORE,
+  ATOMIC_INT8_SWAP,
+  ATOMIC_INT8_CAS,
+  ATOMIC_INT8_FETCH_ADD,
+  ATOMIC_INT8_FETCH_SUB,
+  ATOMIC_INT8_FETCH_AND,
+  ATOMIC_INT8_FETCH_OR,
+  ATOMIC_INT8_FETCH_XOR,
+
+  ATOMIC_INT16_LOAD,
+  ATOMIC_INT16_STORE,
+  ATOMIC_INT16_SWAP,
+  ATOMIC_INT16_CAS,
+  ATOMIC_INT16_FETCH_ADD,
+  ATOMIC_INT16_FETCH_SUB,
+  ATOMIC_INT16_FETCH_AND,
+  ATOMIC_INT16_FETCH_OR,
+  ATOMIC_INT16_FETCH_XOR,
+
+  ATOMIC_INT32_LOAD,
+  ATOMIC_INT32_STORE,
+  ATOMIC_INT32_SWAP,
+  ATOMIC_INT32_CAS,
+  ATOMIC_INT32_FETCH_ADD,
+  ATOMIC_INT32_FETCH_SUB,
+  ATOMIC_INT32_FETCH_AND,
+  ATOMIC_INT32_FETCH_OR,
+  ATOMIC_INT32_FETCH_XOR,
+
+  ATOMIC_INT64_LOAD,
+  ATOMIC_INT64_STORE,
+  ATOMIC_INT64_SWAP,
+  ATOMIC_INT64_CAS,
+  ATOMIC_INT64_FETCH_ADD,
+  ATOMIC_INT64_FETCH_SUB,
+  ATOMIC_INT64_FETCH_AND,
+  ATOMIC_INT64_FETCH_OR,
+  ATOMIC_INT64_FETCH_XOR,
+
+  ATOMIC_UINT8_LOAD,
+  ATOMIC_UINT8_STORE,
+  ATOMIC_UINT8_SWAP,
+  ATOMIC_UINT8_CAS,
+  ATOMIC_UINT8_FETCH_ADD,
+  ATOMIC_UINT8_FETCH_SUB,
+  ATOMIC_UINT8_FETCH_AND,
+  ATOMIC_UINT8_FETCH_OR,
+  ATOMIC_UINT8_FETCH_XOR,
+
+  ATOMIC_UINT16_LOAD,
+  ATOMIC_UINT16_STORE,
+  ATOMIC_UINT16_SWAP,
+  ATOMIC_UINT16_CAS,
+  ATOMIC_UINT16_FETCH_ADD,
+  ATOMIC_UINT16_FETCH_SUB,
+  ATOMIC_UINT16_FETCH_AND,
+  ATOMIC_UINT16_FETCH_OR,
+  ATOMIC_UINT16_FETCH_XOR,
+
+  ATOMIC_UINT32_LOAD,
+  ATOMIC_UINT32_STORE,
+  ATOMIC_UINT32_SWAP,
+  ATOMIC_UINT32_CAS,
+  ATOMIC_UINT32_FETCH_ADD,
+  ATOMIC_UINT32_FETCH_SUB,
+  ATOMIC_UINT32_FETCH_AND,
+  ATOMIC_UINT32_FETCH_OR,
+  ATOMIC_UINT32_FETCH_XOR,
+
+  ATOMIC_UINT64_LOAD,
+  ATOMIC_UINT64_STORE,
+  ATOMIC_UINT64_SWAP,
+  ATOMIC_UINT64_CAS,
+  ATOMIC_UINT64_FETCH_ADD,
+  ATOMIC_UINT64_FETCH_SUB,
+  ATOMIC_UINT64_FETCH_AND,
+  ATOMIC_UINT64_FETCH_OR,
+  ATOMIC_UINT64_FETCH_XOR,
+
+  ATOMIC_BOOL_LOAD,
+  ATOMIC_BOOL_STORE,
+  ATOMIC_BOOL_SWAP,
+  ATOMIC_BOOL_CAS,
+
+  ATOMIC_REFERENCEBASE_LOAD,
+  ATOMIC_REFERENCEBASE_STORE,
+  ATOMIC_REFERENCEBASE_SWAP,
+  ATOMIC_REFERENCEBASE_CAS,
+
+  ATOMIC_OPTIONREFERENCE_LOAD,
+  ATOMIC_OPTIONREFERENCE_STORE,
+  ATOMIC_OPTIONREFERENCE_SWAP,
+  ATOMIC_OPTIONREFERENCE_CAS,
+
+  // Exception intrinsic
+  BEGIN_CATCH,
+
+  // Math intrinsic
+  ABS,
+  FABS,
+  FLOOR,
+  CEIL,
+  TRUNC,
+  SIN,
+  COS,
+  EXP,
+  EXP2,
+  LOG,
+  LOG2,
+  LOG10,
+  SQRT,
+  ROUND,
+  POW,
+  POWI,
+  BIT_CAST,
+
+  // preinitialize intrinsic
+  PREINITIALIZE,
+  // Box cast intrinsic
+  OBJECT_AS,
+  IS_NULL,
+
+  GET_TYPE_FOR_TYPE_PARAMETER,
+  IS_SUBTYPE_TYPES,
+
+  // cjnative only
+  EXCLUSIVE_SCOPE,
+
+  // Self-hosted compiler intrinsics appended after the common wire domain.
+  CANONICALIZE_STRING_BACKING,
+  REFERENCE_INVOKE_FINALIZE,
+  REFERENCE_WAIT_PENDING,
+  REFERENCE_RUNTIME_RUNNING,
+  REFERENCE_NANO_TIME,
+  REGISTER_FINALIZER,
+}
+
+table Expression {
+  base: Base;
+  kind: CHIRExprKind;
+  operands: [uint32]; // use values id
+  blockGroups: [uint32]; // use values id
+  owner: uint32; // enclosing Block, use values id
+  resultLocalVar: uint32; // use values id
+  resultTy: uint32; // use types id
+}
+
+table UnaryExpressionBase {
+  base: Expression;
+  overflowStrategy: OverflowStrategy;
+}
+
+table BinaryExpressionBase {
+  base: Expression;
+  overflowStrategy: OverflowStrategy;
+}
+
+table AllocateBase {
+  base: Expression;
+  allocatedType: uint32; // use types id
+}
+
+table FuncCall {
+  base: Expression;
+  instantiatedTypeArgs: [uint32]; // use types id
+  objType: uint32; // use types id
+}
+
+table ApplyBase {
+  base: FuncCall;
+  isSuperCall: bool;
+}
+
+table InvokeBase {
+  base: FuncCall;
+  overflowStrategy: OverflowStrategy = NA;
+}
+
+table IntrinsicBase {
+  base: FuncCall;
+  intrinsicKind: IntrinsicKind;
+}
+
+table NumericCastBase {
+  base: Expression;
+  overflowStrategy: OverflowStrategy;
+}
+
+table Branch {
+  base: Expression;
+  sourceExpr: SourceExpr;
+}
+
+table MultiBranch {
+  base: Expression;
+  caseValues: [uint64];
+  // Identifies whether the default edge stays in a case or enters the next source case.
+  sourceExpr: SourceExpr = OTHER;
+}
+
+table GetElementRef {
+  base: Expression;
+  path: [uint64];
+}
+
+table GetElementByName {
+  base: Expression;
+  fieldNames: [string];
+}
+
+table StoreElementRef {
+  base: Expression;
+  path: [uint64];
+}
+
+table StoreElementByName {
+  base: Expression;
+  fieldNames: [string];
+}
+
+table InstanceOf {
+  base: Expression;
+  targetType: uint32; // use types id
+}
+
+table Field {
+  base: Expression;
+  path: [uint64];
+}
+
+table FieldByName {
+  base: Expression;
+  fieldNames: [string];
+}
+
+table RawArrayAllocateBase {
+  base: Expression;
+  elementType: uint32; // use types id
+}
+
+table Debug {
+  base: Expression;
+  srcCodeName: string(shared);
+}
+
+table SpawnBase {
+  base: Expression;
+  executeClosure: uint32;  // use values id
+}
+
+table Lambda {
+  base: Expression;
+  funcTy: uint32; // use types id
+  isLocalFunc: bool;
+  identifier: string(shared);
+  srcCodeName: string(shared);
+  params: [uint32];  // use values id
+  genericTypeParams: [uint32]; // use types id
+  body: uint32; // use values id
+  retVal: uint32; // use values id
+  isCompileTimeValue: bool = false;
+  paramDftValHostParam: uint32; // use values id, host Parameter of default-value desugar lambda
+  genericDecl: uint32; // use exprs id, generic Lambda of an instantiated nested func
+}
+
+table GetInstantiateValue {
+  base: Expression;
+  instantiateTypes: [uint32]; // use types id
+}
+
+table GetRTTIStatic {
+  base: Expression;
+  rttiType: uint32; // use type id
+}
+
+union TypeElem {
+  Type,
+  RawArrayType,
+  VArrayType,
+  FuncType,
+  CustomType,
+  GenericType,
+}
+
+union CustomTypeDefElem {
+  EnumDef,
+  StructDef,
+  ClassDef,
+  ExtendDef,
+}
+
+union ExpressionElem {
+  Expression, // not a specific expression, more like a wildcard
+  AllocateBase,
+  ApplyBase,
+  BinaryExpressionBase,
+  Branch,
+  Debug,
+  Field,
+  FieldByName,
+  GetElementByName,
+  GetElementRef,
+  GetInstantiateValue,
+  GetRTTIStatic,
+  InstanceOf,
+  IntrinsicBase,
+  InvokeBase,
+  Lambda,
+  MultiBranch,
+  NumericCastBase,
+  RawArrayAllocateBase,
+  SpawnBase,
+  StoreElementByName,
+  StoreElementRef,
+  UnaryExpressionBase,
+}
+
+union ValueElem {
+  BoolLiteral,
+  RuneLiteral,
+  StringLiteral,
+  IntLiteral,
+  FloatLiteral,
+  UnitLiteral,
+  NullLiteral,
+  Parameter,
+  LocalVar,
+  GlobalVar,
+  Function,
+  Block,
+  BlockGroup,
+}
+
+enum PackageAccessLevel: uint8 {
+  INVALID,
+  INTERNAL,
+  PROTECTED,
+  PUBLIC,
+}
+
+enum Phase: uint8 {
+  RAW, // before compiler optimization, after translation from ast
+  OPT, // after compiler optimization
+  PLUGIN, // after perform pulgin
+  ANALYSIS_FOR_CJLINT, // after analysis for cjlint
+}
+
+table CHIRPackage {
+  name: string(shared);
+  path: string(shared);
+  pkgAccessLevel: PackageAccessLevel;
+  types: [TypeElem];
+  values: [ValueElem];
+  exprs: [ExpressionElem];
+  defs: [CustomTypeDefElem];
+  packageInitFunc: uint32;  // use values id
+  phase: Phase;
+  packageLiteralInitFunc: uint32;  // use valueID (Function)
+}
+
+root_type CHIRPackage;

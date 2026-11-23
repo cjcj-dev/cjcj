@@ -315,6 +315,8 @@ func CHIRKnownAttributes(): ArrayList<Attribute> {
     attrs.add(Attribute.OBJ_C_EXPORT)
     attrs.add(Attribute.MATCH_PATTERN)
     attrs.add(Attribute.PLUGIN_ADDED)
+    attrs.add(Attribute.DEMODE)
+    attrs.add(Attribute.EXCLAVE)
     attrs.add(Attribute.FAST_NATIVE)
     attrs.add(Attribute.NO_HEAP_ALLOC)
     attrs.add(Attribute.NO_WRITE_BARRIER)
@@ -368,6 +370,8 @@ func CHIRAttributeFromIndex(index: Int64): Attribute {
         case 39 => Attribute.OBJ_C_EXPORT
         case 40 => Attribute.MATCH_PATTERN
         case 41 => Attribute.PLUGIN_ADDED
+        case 42 => Attribute.DEMODE
+        case 43 => Attribute.EXCLAVE
         case 71 => Attribute.FAST_NATIVE
         case 76 => Attribute.NO_HEAP_ALLOC
         case 77 => Attribute.NO_WRITE_BARRIER_REC
@@ -491,6 +495,9 @@ func CHIRExprKindFromIndex(index: Int64): ExprKind {
         case 80 => ExprKind.UNBOX_TO_REF
         case 81 => ExprKind.GET_RTTI
         case 82 => ExprKind.GET_RTTI_STATIC
+        case 83 => ExprKind.START_REGION
+        case 84 => ExprKind.END_REGION
+        case 85 => ExprKind.EXCLAVE
         case _ => ExprKind.INVALID
     }
 }
@@ -552,11 +559,21 @@ func CHIRApplyAnnoInfo(info: AnnoInfo, value: String): Unit {
 }
 
 func CHIRSerializeType(ty: Type): String {
+    return CHIRSerializeType(ty, HashSet<Int64>())
+}
+
+private func CHIRSerializeType(ty: Type, visiting: HashSet<Int64>): String {
+    let body = CHIRSerializeTypeBody(ty, visiting)
+    if (!ty.IsModal()) { return body }
+    return CHIRWireJoinFields(ArrayList<String>(["modal", ty.modal.HashIndex().toString(), body]))
+}
+
+private func CHIRSerializeTypeBody(ty: Type, visiting: HashSet<Int64>): String {
     if (ty.IsTuple()) {
         if (let Some(tupleTy) <- (ty as TupleType)) {
             let args = ArrayList<String>()
             for (argTy in tupleTy.GetTypeArgs()) {
-                args.add(CHIRSerializeType(argTy))
+                args.add(CHIRSerializeType(argTy, visiting))
             }
             let fields = ArrayList<String>()
             fields.add("tuple")
@@ -568,13 +585,13 @@ func CHIRSerializeType(ty: Type): String {
         if (let Some(funcTy) <- (ty as FuncType)) {
             let params = ArrayList<String>()
             for (paramTy in funcTy.GetParamTypes()) {
-                params.add(CHIRSerializeType(paramTy))
+                params.add(CHIRSerializeType(paramTy, visiting))
             }
             let fields = ArrayList<String>()
             fields.add("func")
             fields.add(CHIRBoolToWire(funcTy.IsCFunc()))
             fields.add(CHIRBoolToWire(funcTy.HasVarArg()))
-            fields.add(CHIRSerializeType(funcTy.GetReturnType()))
+            fields.add(CHIRSerializeType(funcTy.GetReturnType(), visiting))
             fields.add(CHIRWireJoinList(params))
             return CHIRWireJoinFields(fields)
         }
@@ -582,41 +599,47 @@ func CHIRSerializeType(ty: Type): String {
     if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
         let fields = ArrayList<String>()
         fields.add("rawarray")
-        fields.add(CHIRSerializeType(rawArrayTy.GetElementType()))
+        fields.add(CHIRSerializeType(rawArrayTy.GetElementType(), visiting))
         fields.add(rawArrayTy.GetDims().toString())
         return CHIRWireJoinFields(fields)
     }
     if (let Some(varrayTy) <- (ty as VArrayType)) {
         let fields = ArrayList<String>()
         fields.add("varray")
-        fields.add(CHIRSerializeType(varrayTy.GetElementType()))
+        fields.add(CHIRSerializeType(varrayTy.GetElementType(), visiting))
         fields.add(varrayTy.size.toString())
         return CHIRWireJoinFields(fields)
     }
     if (let Some(pointerTy) <- (ty as CPointerType)) {
         let fields = ArrayList<String>()
         fields.add("cpointer")
-        fields.add(CHIRSerializeType(pointerTy.GetElementType()))
+        fields.add(CHIRSerializeType(pointerTy.GetElementType(), visiting))
         return CHIRWireJoinFields(fields)
     }
     if (let Some(refTy) <- (ty as RefType)) {
         let fields = ArrayList<String>()
         fields.add("ref")
-        fields.add(CHIRSerializeType(refTy.GetBaseType()))
+        fields.add(CHIRSerializeType(refTy.GetBaseType(), visiting))
         return CHIRWireJoinFields(fields)
     }
     if (let Some(boxTy) <- (ty as BoxType)) {
         let fields = ArrayList<String>()
         fields.add("box")
-        fields.add(CHIRSerializeType(boxTy.GetBaseType()))
+        fields.add(CHIRSerializeType(boxTy.GetBaseType(), visiting))
         return CHIRWireJoinFields(fields)
     }
     if (let Some(genericTy) <- (ty as GenericType)) {
+        if (visiting.contains(ty.objectId)) {
+            return CHIRWireJoinFields(ArrayList<String>(["generic-ref", genericTy.GetIdentifier(),
+                genericTy.GetSrcCodeIdentifier()]))
+        }
+        visiting.add(ty.objectId)
         let bounds = ArrayList<String>()
         for (boundTy in genericTy.GetUpperBounds()) {
-            bounds.add(CHIRSerializeType(boundTy))
+            bounds.add(CHIRSerializeType(boundTy, visiting))
         }
         let fields = ArrayList<String>()
+        visiting.remove(ty.objectId)
         fields.add("generic")
         fields.add(genericTy.GetIdentifier())
         fields.add(genericTy.GetSrcCodeIdentifier())
@@ -632,7 +655,7 @@ func CHIRSerializeType(ty: Type): String {
     if (let Some(customTy) <- (ty as CustomType)) {
         let args = ArrayList<String>()
         for (argTy in customTy.GetGenericArgs()) {
-            args.add(CHIRSerializeType(argTy))
+            args.add(CHIRSerializeType(argTy, visiting))
         }
         let fields = ArrayList<String>()
         fields.add(CHIRCustomTypeKindName(customTy.GetCustomTypeDef()))
@@ -655,7 +678,26 @@ func CHIRParseType(value: String, builder: CHIRBuilder, customDefs: HashMap<Stri
     if (fields.isEmpty()) {
         return builder.context.GetInvalidTy()
     }
-    return match (fields[0]) {
+    if (fields[0] == "modal") {
+        if (fields.size != 3) { throw IllegalArgumentException("Invalid CHIR modal type") }
+        let modal = match (fields[1]) {
+            case "1" => ModalInfo(CHIRMode.MAYBE)
+            case "2" => ModalInfo(CHIRMode.MUST)
+            case _ => throw IllegalArgumentException("Invalid CHIR local mode")
+        }
+        return CHIRParseTypeBody(fields[2], builder, customDefs, modal)
+    }
+    return CHIRParseTypeBody(value, builder, customDefs, ModalInfo())
+}
+
+private func CHIRParseTypeBody(value: String, builder: CHIRBuilder, customDefs: HashMap<String, CustomTypeDef>,
+    modal: ModalInfo): Type {
+    let fields = CHIRWireSplitFields(value)
+    if (fields.isEmpty()) { return builder.context.GetInvalidTy() }
+    if (fields[0] == "generic") { return CHIRParseGenericType(fields, builder, customDefs, modal) }
+    if (fields[0] == "generic-ref") { return builder.context.GetGenericTy(CHIRFieldAt(fields, 1),
+        CHIRFieldAt(fields, 2), modal: modal) }
+    let ty = match (fields[0]) {
         case "builtin" => CHIRBuiltinTypeFromIndex(CHIRSafeI64(CHIRFieldAt(fields, 1)), builder)
         case "tuple" => builder.context.GetTupleTy(CHIRParseTypeList(CHIRFieldAt(fields, 1), builder, customDefs))
         case "func" => CHIRParseFuncType(fields, builder, customDefs)
@@ -666,13 +708,15 @@ func CHIRParseType(value: String, builder: CHIRBuilder, customDefs: HashMap<Stri
         case "cpointer" => builder.context.GetCPointerTy(CHIRParseType(CHIRFieldAt(fields, 1), builder, customDefs))
         case "ref" => builder.context.GetRefTy(CHIRParseType(CHIRFieldAt(fields, 1), builder, customDefs))
         case "box" => builder.context.GetBoxTy(CHIRParseType(CHIRFieldAt(fields, 1), builder, customDefs))
-        case "generic" => CHIRParseGenericType(fields, builder, customDefs)
         case "this" => builder.context.GetThisTy()
         case "struct" => CHIRParseCustomType(fields, builder, customDefs)
         case "class" => CHIRParseCustomType(fields, builder, customDefs)
         case "enum" => CHIRParseCustomType(fields, builder, customDefs)
         case _ => CHIRParseLegacyType(value, builder)
     }
+    if (modal.local == CHIRMode.NONE) { return ty }
+    if (ty.IsRef() || ty.IsBox()) { throw IllegalArgumentException("CHIR wrapper cannot carry a mode") }
+    return builder.context.WithModal(ty, modal)
 }
 
 func CHIRParseFuncType(fields: ArrayList<String>, builder: CHIRBuilder,
@@ -684,8 +728,8 @@ func CHIRParseFuncType(fields: ArrayList<String>, builder: CHIRBuilder,
 }
 
 func CHIRParseGenericType(fields: ArrayList<String>, builder: CHIRBuilder,
-    customDefs: HashMap<String, CustomTypeDef>): GenericType {
-    let genericTy = builder.context.GetGenericTy(CHIRFieldAt(fields, 1), CHIRFieldAt(fields, 2))
+    customDefs: HashMap<String, CustomTypeDef>, modal: ModalInfo): GenericType {
+    let genericTy = builder.context.GetGenericTy(CHIRFieldAt(fields, 1), CHIRFieldAt(fields, 2), modal: modal)
     let bounds = CHIRParseTypeList(CHIRFieldAt(fields, 3), builder, customDefs)
     if (!bounds.isEmpty()) {
         genericTy.SetUpperBounds(bounds)

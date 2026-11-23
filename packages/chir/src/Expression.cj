@@ -493,6 +493,9 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     }
 
     public open func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        if (kind == ExprKind.START_REGION || kind == ExprKind.END_REGION) {
+            return builder.CreateRegionBoundary(kind, parent)
+        }
         let clonedOperands = GetOperands()
         return builder.CreateExpression(kind, None, clonedOperands, parent)
     }
@@ -2158,7 +2161,8 @@ public class Lambda <: Expression {
     private var identifier: String = ""
     private var srcCodeIdentifier: String = ""
     private var isLocalFunc: Bool = false
-    private var paramDftValHostFunc: Option<Lambda> = None
+    private var paramDftValHostParam: Option<Parameter> = None
+    private var genericDecl: Option<Lambda> = None
     private var isCompileTimeValue: Bool = false
 
     public init(operands: ArrayList<Value>, body: BlockGroup, parent: Option<Block>) {
@@ -2210,12 +2214,19 @@ public class Lambda <: Expression {
         return srcCodeIdentifier
     }
 
-    public func SetParamDftValHostFunc(hostFunc: Lambda): Unit {
-        paramDftValHostFunc = hostFunc
+    public func SetGenericDecl(decl: Lambda): Unit { genericDecl = decl }
+    public func GetGenericDecl(): Option<Lambda> { return genericDecl }
+
+    public func GetParamDftValHostParam(): Option<Parameter> { return paramDftValHostParam }
+
+    public func SetParamDftValHostParam(param: Parameter): Unit {
+        paramDftValHostParam = param
+        param.paramDftValFunc = GetResult().getOrThrow()
     }
 
     public func GetParamDftValHostFunc(): Option<Lambda> {
-        return paramDftValHostFunc
+        if (let Some(param) <- paramDftValHostParam) { return param.GetOwnerLambda() }
+        return None
     }
 
     public func GetBody(): Option<BlockGroup> { return body }
@@ -2331,7 +2342,7 @@ public class Lambda <: Expression {
         if (!srcCodeIdentifier.isEmpty()) {
             parts.add("srcCodeIdentifier: " + srcCodeIdentifier)
         }
-        if (let Some(hostFunc) <- paramDftValHostFunc) {
+        if (let Some(hostFunc) <- GetParamDftValHostFunc()) {
             parts.add("paramDftValHostFunc: " + hostFunc.GetIdentifier())
         }
         return JoinStrings(parts, ", ")
@@ -2346,9 +2357,8 @@ public class Lambda <: Expression {
         if (IsCompileTimeValue()) {
             cloned.SetCompileTimeValue()
         }
-        if (let Some(hostFunc) <- GetParamDftValHostFunc()) {
-            cloned.SetParamDftValHostFunc(hostFunc)
-        }
+        if (let Some(decl) <- genericDecl) { cloned.SetGenericDecl(decl) }
+        cloned.paramDftValHostParam = paramDftValHostParam
         if (let Some(lambdaBody) <- body) {
             let clonedBody = lambdaBody.Clone(builder, cloned)
             for (param in GetParams()) {

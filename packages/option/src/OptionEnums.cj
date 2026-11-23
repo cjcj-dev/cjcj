@@ -63,6 +63,7 @@ public enum ID {
     | PGO_INSTR_GEN | PGO_INSTR_USE | DISCARD_EH_FRAME | CJCJ_OPTIMIZATION
     | RUNTIME_CONFIG | APC_SPLIT_NUM | DISABLE_MANGLING_CONCURRENCY
     | CJCJ_DISABLE_PARSE_CONCURRENCY | CJCJ_DISABLE_CODEGEN_CONCURRENCY | CJCJ_DISABLE_LOWERING_CONCURRENCY | CJCJ_DISABLE_GENERIC_CONCURRENCY
+    | ENABLE_LOCAL_MODE
 }
 
 
@@ -77,7 +78,7 @@ public enum OSType { | WINDOWS | LINUX | DARWIN | IOS | WASI | UNKNOWN }
 public enum Vendor { | PC | APPLE | UNKNOWN }
 public enum EnvironmentType { | OHOS | GNU | ANDROID | SIMULATOR | NOT_AVAILABLE }
 public enum OptimizationLevel { | O0 | O1 | O2 | O3 | Os | Oz }
-public enum OutputMode { | EXECUTABLE | STATIC_LIB | SHARED_LIB | CHIR | OBJ }
+public enum OutputMode { | EXECUTABLE | STATIC_LIB | SHARED_LIB | CHIR | OBJ | CJO }
 public enum CompileTarget { | EXECUTABLE | STATIC_LIB | SHARED_LIB | DEFAULT }
 public enum LTOMode { | FULL_LTO | THIN_LTO | NO_LTO }
 public enum SanitizerCoverageType { | SCK_UNKNOW | SCK_NONE | SCK_FUNCTION | SCK_BB }
@@ -346,6 +347,7 @@ public func IDIndex(value: ID): Int64 {
         case ID.CJCJ_DISABLE_CODEGEN_CONCURRENCY => 173
         case ID.CJCJ_DISABLE_LOWERING_CONCURRENCY => 174
         case ID.CJCJ_DISABLE_GENERIC_CONCURRENCY => 175
+        case ID.ENABLE_LOCAL_MODE => 176
     }
 }
 
@@ -446,6 +448,7 @@ public func OutputModeIndex(value: OutputMode): Int64 {
         case OutputMode.SHARED_LIB => 2
         case OutputMode.CHIR => 3
         case OutputMode.OBJ => 4
+        case OutputMode.CJO => 5
     }
 }
 extend OutputMode <: Equatable<OutputMode> {

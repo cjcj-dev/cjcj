@@ -198,8 +198,13 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
             case ExprMajorKind.UNARY_EXPR => ()
             case ExprMajorKind.BINARY_EXPR => ()
             case ExprMajorKind.OTHERS => PreHandleOthersExpr(state, expression)
-            case ExprMajorKind.STRUCTURED_CTRL_FLOW_EXPR => InternalError("Unsupported major expr kind")
-            case _ => InternalError("Unsupported major expr kind")
+            case _ =>
+                let block = expression.GetParentBlock().getOrThrow()
+                let kinds = ArrayList<String>()
+                for (instr in block.GetExpressions()) { kinds.add(ExprKindName(instr.GetExprKind())) }
+                InternalError("Unsupported major expr kind: " + ExprKindName(expression.GetExprKind()) +
+                    " in " + block.GetTopLevelFunc().getOrThrow().GetIdentifier() + " at " +
+                    expression.GetDebugLocation().ToString() + "; block: " + JoinStrings(kinds, ","))
         }
         HandleNormalExpressionEffect(state, expression)
     }

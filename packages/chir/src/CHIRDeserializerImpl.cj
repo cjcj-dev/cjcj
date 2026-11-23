@@ -32,6 +32,9 @@ private func DeserializeOverflowStrategy(strategy: UInt8): OverflowStrategy {
 }
 
 private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
+    if (kind == CHIRFB_CHIR_EXPR_KIND_EXCLAVE) { return (ExprKind.EXCLAVE, false) }
+    if (kind == CHIRFB_CHIR_EXPR_KIND_START_REGION) { return (ExprKind.START_REGION, false) }
+    if (kind == CHIRFB_CHIR_EXPR_KIND_END_REGION) { return (ExprKind.END_REGION, false) }
     return match (kind) {
         case 1u8 => (ExprKind.GOTO, false)
         case 2u8 => (ExprKind.BRANCH, false)
@@ -135,6 +138,8 @@ class CHIRDeserializerImpl {
     private let id2Value: HashMap<UInt32, Value> = HashMap<UInt32, Value>()
     private let id2Expression: HashMap<UInt32, Expression> = HashMap<UInt32, Expression>()
     private let id2CustomTypeDef: HashMap<UInt32, CustomTypeDef> = HashMap<UInt32, CustomTypeDef>()
+    private let parameterDefaults = ArrayList<(Parameter, UInt32)>()
+    private let textParameterDefaults = ArrayList<(Parameter, String)>()
     private let genericTypeConfig: ArrayList<(GenericType, PackageFormat_GenericType)> =
         ArrayList<(GenericType, PackageFormat_GenericType)>()
 
@@ -211,6 +216,7 @@ class CHIRDeserializerImpl {
             }
             id++
         }
+        for ((param, id) in parameterDefaults) { param.paramDftValFunc = GetValue<Value>(id).getOrThrow() }
         var genericIndex: Int64 = 0
         while (genericIndex < genericTypeConfig.size) {
             let (genericType, rawGenericType) = genericTypeConfig[genericIndex]
@@ -256,6 +262,7 @@ class CHIRDeserializerImpl {
         configureExpressionPayloadLinks()
         configureBlockPredecessors()
         configureBlockGroups()
+        for ((param, id) in textParameterDefaults) { param.paramDftValFunc = valuesById[id] }
         configurePackageFunctions(pkg)
         return pkg
     }
@@ -478,6 +485,7 @@ class CHIRDeserializerImpl {
             CHIRApplyAnnoInfo(param.GetAnnoInfo(), CHIRFieldAt(fields, 4))
             CHIRApplyBaseInfo(param, CHIRFieldAt(fields, 5), CHIRFieldAt(fields, 6), annotationText: CHIRFieldAt(fields, 7))
             valuesById[CHIRFieldAt(fields, 0)] = param
+            if (fields.size > 8 && !fields[8].isEmpty()) { textParameterDefaults.add((param, fields[8])) }
         }
     }
 
@@ -722,8 +730,8 @@ class CHIRDeserializerImpl {
                         }
                     }
                     if (let Some(hostValue) <- valuesById.get(CHIRFieldAt(fields, 14))) {
-                        if (let Some(hostFn) <- (hostValue as Function)) {
-                            fn.SetParamDftValHostFunc(hostFn)
+                        if (let Some(param) <- (hostValue as Parameter)) {
+                            fn.SetParamDftValHostParam(param)
                         }
                     }
                     if (let Some(rawValue) <- valuesById.get(CHIRFieldAt(fields, 20))) {
@@ -797,9 +805,11 @@ class CHIRDeserializerImpl {
                             lambdaExpr.SetReturnValue(retLocal)
                         }
                     }
-                    if (let Some(hostExpr) <- expressionsById.get(CHIRFieldAt(payload, 8))) {
-                        if (let Some(hostLambda) <- (hostExpr as Lambda)) {
-                            lambdaExpr.SetParamDftValHostFunc(hostLambda)
+                    let declId = CHIRFieldAt(payload, 9)
+                    if (!declId.isEmpty()) { lambdaExpr.SetGenericDecl((expressionsById[declId] as Lambda).getOrThrow()) }
+                    if (let Some(value) <- valuesById.get(CHIRFieldAt(payload, 8))) {
+                        if (let Some(param) <- value.AsParameter()) {
+                            lambdaExpr.SetParamDftValHostParam(param)
                         }
                     }
                 }
@@ -819,6 +829,7 @@ class CHIRDeserializerImpl {
                 let paramFields = CHIRWireSplitFields(item)
                 let paramTy = CHIRParseType(CHIRFieldAt(paramFields, 3), builder, customDefs)
                 let param = Parameter(paramTy, CHIRFieldAt(paramFields, 1), lambdaExpr)
+                if (paramFields.size > 8 && !paramFields[8].isEmpty()) { textParameterDefaults.add((param, paramFields[8])) }
                 builder.context.RegisterValue(param)
                 param.SetSrcCodeIdentifier(CHIRFieldAt(paramFields, 2))
                 CHIRApplyAnnoInfo(param.GetAnnoInfo(), CHIRFieldAt(paramFields, 4))
@@ -1040,6 +1051,15 @@ class CHIRDeserializerImpl {
         if (kind == ExprKind.GET_INSTANTIATE_VALUE && !operands.isEmpty() && CHIRFieldAt(payload, 0) == "instantiate") {
             return builder.CreateGetInstantiateValue(resultTypeOrInvalid(resultTy), operands[0],
                 CHIRParseTypeList(CHIRFieldAt(payload, 1), builder, customDefs), block)
+        }
+        if (kind == ExprKind.EXCLAVE) {
+            CJC_ASSERT(blockGroups.size == 1)
+            let expr = builder.CreateExclave(block)
+            expr.AppendBlockGroup(blockGroups[0])
+            return expr
+        }
+        if (kind == ExprKind.START_REGION || kind == ExprKind.END_REGION) {
+            return builder.CreateRegionBoundary(kind, block)
         }
         if (kind == ExprKind.GET_RTTI_STATIC && CHIRFieldAt(payload, 0) == "rttiStatic") {
             return builder.CreateGetRTTIStatic(resultTypeOrInvalid(resultTy),
@@ -1422,6 +1442,15 @@ class CHIRDeserializerImpl {
     }
 
     private func Deserialize(obj: PackageFormat_Type): Type {
+        let ty = DeserializeBaseType(obj)
+        let modal = obj.GetModal()
+        if ((ty.IsRef() || ty.IsBox()) && modal.local != CHIRMode.NONE) {
+            throw IllegalArgumentException("Serialized CHIR reference wrapper carries a data mode")
+        }
+        return if (ty.IsRef() || ty.IsBox()) { ty } else { builder.context.WithModal(ty, modal) }
+    }
+
+    private func DeserializeBaseType(obj: PackageFormat_Type): Type {
         let kind = obj.GetKind()
         if (kind == CHIRFB_CHIR_TYPE_KIND_INT8) { return builder.context.GetInt8Ty() }
         if (kind == CHIRFB_CHIR_TYPE_KIND_INT16) { return builder.context.GetInt16Ty() }
@@ -1459,13 +1488,13 @@ class CHIRDeserializerImpl {
     private func Deserialize(obj: PackageFormat_RawArrayType): RawArrayType {
         let argTys = obj.GetBase().getOrThrow().GetArgTys().getOrThrow()
         let elemTy = GetType<Type>(argTys.Get(0u32, 0u32)).getOrThrow()
-        return builder.context.GetRawArrayTy(elemTy, dims: UInt64(obj.GetDims()))
+        return builder.context.GetRawArrayTy(elemTy, dims: UInt64(obj.GetDims()), modal: obj.GetBase().getOrThrow().GetModal())
     }
 
     private func Deserialize(obj: PackageFormat_VArrayType): VArrayType {
         let argTys = obj.GetBase().getOrThrow().GetArgTys().getOrThrow()
         let elemTy = GetType<Type>(argTys.Get(0u32, 0u32)).getOrThrow()
-        return builder.context.GetVArrayTy(elemTy, UInt64(obj.GetSize()))
+        return builder.context.GetVArrayTy(elemTy, UInt64(obj.GetSize()), modal: obj.GetBase().getOrThrow().GetModal())
     }
 
     private func Deserialize(obj: PackageFormat_FuncType): FuncType {
@@ -1480,7 +1509,7 @@ class CHIRDeserializerImpl {
             index++
         }
         return builder.context.GetFuncTy(paramTys, retTy, hasVarLenParam: obj.GetHasVarArg(),
-            isCFunc: obj.GetIsCFuncType())
+            isCFunc: obj.GetIsCFuncType(), modal: obj.GetBase().getOrThrow().GetModal())
     }
 
     private func Deserialize(obj: PackageFormat_CustomType): CustomType {
@@ -1488,22 +1517,22 @@ class CHIRDeserializerImpl {
         let def = GetCustomTypeDef<CustomTypeDef>(obj.GetCustomTypeDef()).getOrThrow()
         let typeArgs = GetType<Type>(obj.GetBase().getOrThrow().GetArgTys())
         if (kind == CHIRFB_CHIR_TYPE_KIND_CLASS) {
-            return builder.context.GetClassTy((def as ClassDef).getOrThrow(), typeArgs)
+            return builder.context.GetClassTy((def as ClassDef).getOrThrow(), typeArgs, modal: obj.GetBase().getOrThrow().GetModal())
         }
         if (kind == CHIRFB_CHIR_TYPE_KIND_ENUM) {
-            return builder.context.GetEnumTy((def as EnumDef).getOrThrow(), typeArgs)
+            return builder.context.GetEnumTy((def as EnumDef).getOrThrow(), typeArgs, modal: obj.GetBase().getOrThrow().GetModal())
         }
         if (kind == CHIRFB_CHIR_TYPE_KIND_STRUCT) {
-            return builder.context.GetStructTy((def as StructDef).getOrThrow(), typeArgs)
+            return builder.context.GetStructTy((def as StructDef).getOrThrow(), typeArgs, modal: obj.GetBase().getOrThrow().GetModal())
         }
         CJC_ABORT()
-        return builder.context.GetStructTy((def as StructDef).getOrThrow(), typeArgs)
+        return builder.context.GetStructTy((def as StructDef).getOrThrow(), typeArgs, modal: obj.GetBase().getOrThrow().GetModal())
     }
 
     private func Deserialize(obj: PackageFormat_GenericType): GenericType {
         let identifier = obj.GetIdentifier().getOrThrow().str()
         let srcCodeIdentifier = obj.GetSrcCodeIdentifier().getOrThrow().str()
-        let genericType = builder.context.GetGenericTy(identifier, srcCodeIdentifier)
+        let genericType = builder.context.GetGenericTy(identifier, srcCodeIdentifier, modal: obj.GetBase().getOrThrow().GetModal())
         genericTypeConfig.add((genericType, obj))
         return genericType
     }
@@ -1927,6 +1956,8 @@ class CHIRDeserializerImpl {
             let result = builder.CreateBlockGroup(ownedExpression.GetTopLevelFunc().getOrThrow())
             if (let Some(lambda) <- (ownedExpression as Lambda)) {
                 lambda.InitBody(result)
+            } else if (ownedExpression is Exclave) {
+                ownedExpression.AppendBlockGroup(result)
             }
             blockGroup = result
         }
@@ -1952,6 +1983,7 @@ class CHIRDeserializerImpl {
             return builder.CreateParameter(ty, INVALID_LOCATION,
                 GetValue<Function>(obj.GetOwnedFunc()).getOrThrow())
         }
+        if (obj.GetParamDftValFunc() != 0u32) { parameterDefaults.add((result, obj.GetParamDftValFunc())) }
         result.SetSrcCodeIdentifier(obj.GetSrcCodeIdentifier().getOrThrow().str())
         if (let Some(annoInfo) <- obj.GetAnnoInfo()) {
             result.SetAnnoInfo(Create(annoInfo))
@@ -2157,6 +2189,10 @@ class CHIRDeserializerImpl {
                 CJC_ASSERT(operands.size == 1)
                 return DeserializeConstant(resultTy.getOrThrow(),
                     (operands[0] as LiteralValue).getOrThrow(), owner)
+            case ExprKind.EXCLAVE => return builder.CreateExclave(owner)
+            case ExprKind.START_REGION | ExprKind.END_REGION =>
+                CJC_ASSERT(operands.isEmpty())
+                return builder.CreateRegionBoundary(kind, owner)
             case ExprKind.EXIT => return builder.CreateExit(None, owner)
             case ExprKind.GET_EXCEPTION => return builder.CreateGetException(resultTy.getOrThrow(), owner)
             case ExprKind.GET_RTTI =>
@@ -2931,6 +2967,12 @@ class CHIRDeserializerImpl {
     private func ConfigLambda(buffer: PackageFormat_Lambda, obj: Lambda): Unit {
         ConfigExpression(buffer.GetBase().getOrThrow(), obj)
         GetValue<Parameter>(buffer.GetParams())
+        if (buffer.GetParamDftValHostParam() != 0u32) {
+            obj.SetParamDftValHostParam(GetValue<Parameter>(buffer.GetParamDftValHostParam()).getOrThrow())
+        }
+        if (buffer.GetGenericDecl() != 0u32) {
+            obj.SetGenericDecl(GetExpression<Lambda>(buffer.GetGenericDecl()).getOrThrow())
+        }
         if (let Some(returnValue) <- GetValue<LocalVar>(buffer.GetRetVal())) {
             obj.SetReturnValue(returnValue)
         }
@@ -2967,8 +3009,8 @@ class CHIRDeserializerImpl {
     private func Config(buffer: PackageFormat_Function, obj: Function): Unit {
         if (obj.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) { return }
         ConfigBase(buffer.GetBase().getOrThrow().GetBase().getOrThrow().GetBase().getOrThrow(), obj)
-        if (buffer.GetParamDftValHostFunc() != 0u32) {
-            obj.SetParamDftValHostFunc(GetValue<Function>(buffer.GetParamDftValHostFunc()).getOrThrow())
+        if (buffer.GetParamDftValHostParam() != 0u32) {
+            obj.SetParamDftValHostParam(GetValue<Parameter>(buffer.GetParamDftValHostParam()).getOrThrow())
         }
         if (buffer.GetGenericDecl() != 0u32) {
             obj.SetGenericDecl(GetValue<Function>(buffer.GetGenericDecl()).getOrThrow())

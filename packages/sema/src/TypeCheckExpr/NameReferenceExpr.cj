@@ -176,7 +176,7 @@ func FoundSameSignatureMember(typeManager: TypeManager, decl: Decl, funcTy: Func
                 }
             }
         }
-        if (methodSigs[idx][0] == decl.identifier.Val() && sameParams) {
+        if (methodSigs[idx][0] == decl.identifier.Val() && sameParams && SameModalInputs(decl, methodSigs[idx][2])) {
             return Some(idx)
         }
     }
@@ -199,7 +199,7 @@ func FoundSameSignatureMember(typeManager: TypeManager, decl: Decl, funcTy: Func
                         }
                     }
                 }
-                if (methodSigs[idx][0] == decl.identifier.Val() && sameParams) {
+                if (methodSigs[idx][0] == decl.identifier.Val() && sameParams && SameModalInputs(decl, methodSigs[idx][2])) {
                     return Some(idx)
                 }
             }
@@ -211,7 +211,7 @@ func FoundSameSignatureMember(typeManager: TypeManager, decl: Decl, funcTy: Func
 func FoundSameSignatureMember(typeManager: TypeManager, decl: Decl, funcTy: FuncTy,
     methodSigs: ArrayList<(FuncTy, Decl)>): Option<Int64> {
     for (idx in 0..methodSigs.size) {
-        if (methodSigs[idx][0] == funcTy) {
+        if (methodSigs[idx][0] == funcTy && SameModalInputs(decl, methodSigs[idx][1])) {
             return Some(idx)
         }
     }
@@ -225,7 +225,7 @@ func FoundSameSignatureMember(typeManager: TypeManager, decl: Decl, funcTy: Func
         let typeMapping = typeManager.GenerateGenericMappingFromGeneric(decl, method)
         if (let Some(instTy) <- (typeManager.GetInstantiatedTy(funcTy, typeMapping) as FuncTy)) {
             for (idx in 0..methodSigs.size) {
-                if (methodSigs[idx][0] == instTy) {
+                if (methodSigs[idx][0] == instTy && SameModalInputs(decl, methodSigs[idx][1])) {
                     return Some(idx)
                 }
             }

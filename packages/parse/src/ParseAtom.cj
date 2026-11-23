@@ -68,6 +68,18 @@ extend ParserImpl {
             }
             return ret
         }
+        if (compileOptions.IsLocalModeAnalysis() && tokenKind == TokenKind.IDENTIFIER && Peek().Value() == "exclave") {
+            let next = lexer.LookAheadSkipNL(1)
+            if (!next.isEmpty() && next[0].kind == TokenKind.LCURL) {
+                let expr = ExclaveExpr()
+                expr.begin = Peek().Begin()
+                Next()
+                let block = ParseBlock(ScopeKind.FUNC_BODY)
+                expr.body = block
+                expr.end = block.end
+                return expr
+            }
+        }
         if (Seeing(TokenKind.IDENTIFIER) || SeeingContextualKeyword()) {
             return ParseRefExpr(ek)
         }
@@ -309,6 +321,14 @@ extend ParserImpl {
         }
         ret.rightParenPos = lastToken.Begin()
         ret.end = lastToken.End()
+        if (!newlineSkipped) {
+            if (let Some(modal) <- ParseLocalModeSuffix()) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_modal_type,
+                    MakeRange(modal.localPos, modal.end)).Emit()
+                ret.EnableAttr(Attribute.IS_BROKEN)
+                ret.end = modal.end
+            }
+        }
         return ret
     }
 
@@ -411,6 +431,11 @@ extend ParserImpl {
                 while (Skip(TokenKind.NL)) {}
                 let ty = ParseType()
                 if (!ty.TestAttr(Attribute.IS_BROKEN)) {
+                    if (let Some(modal) <- ty.modal) {
+                        ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_modal_type,
+                            MakeRange(modal.localPos, modal.end)).Emit()
+                        ty.EnableAttr(Attribute.IS_BROKEN)
+                    }
                     out.add(ty)
                 }
             },

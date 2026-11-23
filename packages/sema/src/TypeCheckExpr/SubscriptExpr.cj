@@ -56,7 +56,11 @@ public func ChkSubscriptExpr(typeManager: TypeManager, ctx: ASTContext, target: 
             CJC_ASSERT((desugarExpr as CallExpr).isSome())
             let desugaredCall = (desugarExpr as CallExpr).getOrThrow()
             CJC_ASSERT(desugaredCall.resolvedFunction.isSome())
-            let resolvedFunction: Decl = desugaredCall.resolvedFunction.getOrThrow()
+            let fd = desugaredCall.resolvedFunction.getOrThrow()
+            if ((let Some(ty) <- fd.GetTy()) && (let Some(ft) <- (ty as FuncTy))) {
+                se.resolvedMode = ft.retMode
+            }
+            let resolvedFunction: Decl = fd
             ReplaceTarget(se, Some(resolvedFunction))
             return true
         }

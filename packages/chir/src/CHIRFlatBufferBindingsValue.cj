@@ -233,6 +233,8 @@ class PackageFormat_Parameter <: Table {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_PARAMETER_VT_SRCCODEIDENTIFIER)) { Some(FlatBufferString(data, pointerPos)) } else { None }
     }
 
+    func GetParamDftValFunc(): UInt32 { return GetField(CHIRFB_PARAMETER_VT_PARAMDFTVALFUNC, 0u32) }
+
     func GetAnnoInfo(): Option<PackageFormat_AnnoInfo> {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_PARAMETER_VT_ANNOINFO)) { Some(PackageFormat_AnnoInfo(data, pointerPos)) } else { None }
     }
@@ -247,7 +249,7 @@ class PackageFormat_Parameter <: Table {
             verifier.VerifyString(GetPointer(CHIRFB_PARAMETER_VT_SRCCODEIDENTIFIER)) &&
             VerifyOffset(verifier, CHIRFB_PARAMETER_VT_ANNOINFO) &&
             verifier.VerifyTable(GetPointer(CHIRFB_PARAMETER_VT_ANNOINFO), {tablePos: Int64, active: VerifierTemplate => PackageFormat_AnnoInfo(data, tablePos).Verify(active)}) &&
-            verifier.EndTable()
+            VerifyField<UInt32>(verifier, CHIRFB_PARAMETER_VT_PARAMDFTVALFUNC, 4) && verifier.EndTable()
     }
 }
 
@@ -425,8 +427,8 @@ class PackageFormat_Function <: Table {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_FUNCTION_VT_GENERICTYPEPARAMS)) { Some(Vector<UInt32>(data, pointerPos)) } else { None }
     }
 
-    func GetParamDftValHostFunc(): UInt32 {
-        return GetField(CHIRFB_FUNCTION_VT_PARAMDFTVALHOSTFUNC, 0u32)
+    func GetParamDftValHostParam(): UInt32 {
+        return GetField(CHIRFB_FUNCTION_VT_PARAMDFTVALHOSTPARAM, 0u32)
     }
 
     func GetBody(): UInt32 {
@@ -469,7 +471,7 @@ class PackageFormat_Function <: Table {
             verifier.VerifyTable(GetPointer(CHIRFB_FUNCTION_VT_ORIGINALLAMBDAINFO), {tablePos: Int64, active: VerifierTemplate => PackageFormat_FuncSigInfo(data, tablePos).Verify(active)}) &&
             VerifyOffset(verifier, CHIRFB_FUNCTION_VT_GENERICTYPEPARAMS) &&
             verifier.VerifyVector(GetPointer(CHIRFB_FUNCTION_VT_GENERICTYPEPARAMS), 4) &&
-            VerifyField<UInt32>(verifier, CHIRFB_FUNCTION_VT_PARAMDFTVALHOSTFUNC, 4) &&
+            VerifyField<UInt32>(verifier, CHIRFB_FUNCTION_VT_PARAMDFTVALHOSTPARAM, 4) &&
             VerifyField<UInt32>(verifier, CHIRFB_FUNCTION_VT_BODY, 4) &&
             VerifyOffset(verifier, CHIRFB_FUNCTION_VT_PARAMS) &&
             verifier.VerifyVector(GetPointer(CHIRFB_FUNCTION_VT_PARAMS), 4) &&

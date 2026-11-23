@@ -1,6 +1,7 @@
 package cjcj::parse
 
 import cjcj::ast.ASTCloner
+import cjcj::ast.ASTMode
 import cjcj::ast.InsertPropGetterSignature
 import cjcj::ast.InsertPropSetterSignature
 import cjcj::ast.INVALID_IDENTIFIER
@@ -658,59 +659,40 @@ extend ParserImpl {
         return ret
     }
 
-    private func ParseFuncDeclAnnos(annos: ArrayList<Annotation>, funcDecl: FuncDecl): Unit {
-        funcDecl.annotations.clear()
+    private func ParseFuncDeclAnnos(annos: ArrayList<Annotation>, decl: Decl): Unit {
+        decl.annotations.clear()
         for (anno in annos) {
-            funcDecl.annotations.add(anno)
+            decl.annotations.add(anno)
             if (anno.kind == AnnotationKind.INTRINSIC) {
-                CheckIntrinsicFunc(funcDecl)
-                funcDecl.EnableAttr(Attribute.INTRINSIC)
-            }
-            if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
-                funcDecl.EnableAttr(Attribute.NUMERIC_OVERFLOW)
-                funcDecl.overflowStrategy = anno.overflowStrategy
-            }
-            if (anno.kind == AnnotationKind.FASTNATIVE) {
-                funcDecl.isFastNative = true
+                decl.EnableAttr(Attribute.INTRINSIC)
+            } else if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
+                decl.EnableAttr(Attribute.NUMERIC_OVERFLOW)
+                if (let Some(fd) <- (decl as FuncDecl)) {
+                    fd.overflowStrategy = anno.overflowStrategy
+                } else if (let Some(ctor) <- (decl as PrimaryCtorDecl)) {
+                    ctor.overflowStrategy = anno.overflowStrategy
+                } else {
+                    let entry = (decl as MainDecl).getOrThrow()
+                    entry.overflowStrategy = anno.overflowStrategy
+                }
+            } else if (anno.kind == AnnotationKind.FASTNATIVE) {
+                if (let Some(fd) <- (decl as FuncDecl)) {
+                    fd.isFastNative = true
+                } else if (let Some(ctor) <- (decl as PrimaryCtorDecl)) {
+                    ctor.isFastNative = true
+                } else {
+                    let entry = (decl as MainDecl).getOrThrow()
+                    entry.isFastNative = true
+                }
             }
             @When[backend == "cjnative"]
             let isFrozenAnno = anno.kind == AnnotationKind.FROZEN
             @When[backend != "cjnative"]
             let isFrozenAnno = false
-            if (isFrozenAnno) {
-                funcDecl.isFrozen = true
+            if (isFrozenAnno && (let Some(fd) <- (decl as FuncDecl))) {
+                fd.isFrozen = true
             }
         }
-    }
-
-    private func ParseFuncDeclAnnos(annos: ArrayList<Annotation>, funcDecl: PrimaryCtorDecl): Unit {
-        funcDecl.annotations.clear()
-        for (anno in annos) {
-            funcDecl.annotations.add(anno)
-            if (anno.kind == AnnotationKind.INTRINSIC) {
-                CheckIntrinsicFunc(funcDecl)
-                funcDecl.EnableAttr(Attribute.INTRINSIC)
-            }
-            if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
-                funcDecl.EnableAttr(Attribute.NUMERIC_OVERFLOW)
-                funcDecl.overflowStrategy = anno.overflowStrategy
-            }
-            if (anno.kind == AnnotationKind.FASTNATIVE) {
-                funcDecl.isFastNative = true
-            }
-        }
-    }
-
-    private func CheckIntrinsicFunc(fd: Decl): Unit {
-        for (intrinsic in intrinsics) {
-            if (let Some(intrinsicDecl) <- (intrinsic as Decl)) {
-                if (fd.identifier == intrinsicDecl.identifier) {
-                    DiagDuplicatedIntrinsicFunc(fd, intrinsicDecl)
-                    return
-                }
-            }
-        }
-        intrinsics.add(fd)
     }
 
     public func ParseMacroDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MacroDecl {
@@ -820,6 +802,13 @@ extend ParserImpl {
     }
 
     private func CheckMacroParamType(macroDecl: MacroDecl, typeNode: Type, isReturnTy: Bool): Unit {
+        if (let Some(modal) <- typeNode.modal) {
+            if (modal.local != ASTMode.NOT) {
+                DiagnoseUnexpectedLocalMode(modal)
+                macroDecl.EnableAttr(Attribute.HAS_BROKEN)
+                return
+            }
+        }
         if (IsTokensRefType(typeNode)) {
             return
         }
@@ -877,19 +866,7 @@ extend ParserImpl {
             if (let None <- body.body) {
                 DiagMissingBody("main function", "", lastToken.End())
             }
-            for (anno in annos) {
-                if (anno.kind == AnnotationKind.INTRINSIC) {
-                    CheckIntrinsicFunc(ret)
-                    ret.EnableAttr(Attribute.INTRINSIC)
-                }
-                if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
-                    ret.EnableAttr(Attribute.NUMERIC_OVERFLOW)
-                    ret.overflowStrategy = anno.overflowStrategy
-                }
-                if (anno.kind == AnnotationKind.FASTNATIVE) {
-                    ret.isFastNative = true
-                }
-            }
+            ParseFuncDeclAnnos(annos, ret)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.MAIN))
             if (ret.TestAttr(Attribute.UNSAFE)) {
                 SetUnsafe(ret, modifiers: modifiers)
@@ -1572,7 +1549,7 @@ extend ParserImpl {
                     enableThis = true
                 }
                 if (SeeingAny(GetTypeFirst()) || SeeingContextualKeyword()) {
-                    body.retType = ParseType()
+                    body.retType = ParseType(compileOptions.IsLocalModeAnalysis())
                 } else {
                     body.EnableAttr(Attribute.IS_BROKEN)
                     DiagExpectedIdentifierFuncBody(body)
@@ -1655,6 +1632,18 @@ extend ParserImpl {
         try (cs = ChainScope(this, list)) {
             list.begin = lastToken.Begin()
             list.leftParenPos = lastToken.Begin()
+            if (!ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_GETTER_BODY) &&
+                !ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY) &&
+                Seeing(TokenKind.THIS) && PeekLocalMode(1).isSome()) {
+                Next()
+                list.receiverModal = ParseLocalModeSuffix(receiverOrCall: true)
+                if (!Skip(TokenKind.COMMA) && !Seeing(TokenKind.RPAREN)) {
+                    DiagExpectedRightDelimiter("(", list.leftParenPos)
+                    list.end = lastToken.End()
+                    list.EnableAttr(Attribute.IS_BROKEN)
+                    return list
+                }
+            }
             let namedParameter = Box<Option<FuncParam>>(None)
             let memberParameter = Box<Option<FuncParam>>(None)
             ParseZeroOrMoreSepTrailing(
@@ -1720,7 +1709,8 @@ extend ParserImpl {
             param.begin = lookahead.Begin()
             if (Skip(TokenKind.COLON)) {
                 param.colonPos = lastToken.Begin()
-                param.typeNode = ParseType()
+                // A lambda parameter is a parameter slot: Sema checks its mode like a function parameter's.
+                param.typeNode = ParseType(compileOptions.IsLocalModeAnalysis())
                 if (let Some(typeNode) <- param.typeNode) {
                     param.end = typeNode.end
                 }
@@ -1828,7 +1818,7 @@ extend ParserImpl {
             return param
         } else {
             param.colonPos = lastToken.Begin()
-            param.typeNode = ParseType()
+            param.typeNode = ParseType(ScopeKindEquals(scopeKind, ScopeKind.UNKNOWN_SCOPE))
         }
         if (Skip(TokenKind.ASSIGN)) {
             if (!param.isNamedParam) {
@@ -1968,6 +1958,14 @@ extend ParserImpl {
             ParseTypeAndExpr(decl)
             EnableModifierAttrs(decl, CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE))
             CheckVarDeclModifiers(modifiers, decl, scopeKind, key)
+            if ((ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) &&
+                !HasModifier(modifiers, TokenKind.STATIC)) {
+                if (let Some(ty) <- decl.typeNode) {
+                    if (let Some(modal) <- ty.modal) {
+                        DiagnoseUnexpectedLocalMode(modal)
+                    }
+                }
+            }
         }
         return decl
     }
@@ -2031,7 +2029,7 @@ extend ParserImpl {
     public func ParseTypeAndExpr(ret: VarDeclAbstract): Unit {
         if (Skip(TokenKind.COLON)) {
             ret.colonPos = lastToken.Begin()
-            ret.typeNode = ParseType()
+            ret.typeNode = ParseType(compileOptions.IsLocalModeAnalysis())
             if (let Some(typeNode) <- ret.typeNode) {
                 if (typeNode.TestAttr(Attribute.IS_BROKEN) || typeNode.TestAttr(Attribute.HAS_BROKEN)) {
                     ret.EnableAttr(Attribute.HAS_BROKEN)
@@ -2436,7 +2434,7 @@ extend ParserImpl {
     public func ParseInheritedTypes(decl: InheritableDecl): Unit {
         decl.upperBoundPos = lastToken.Begin()
         while (true) {
-            let inheritedType = ParseType()
+            let inheritedType = ParseNonModalBound(decl)
             // C++: Parse/ParseDecl.cpp:1295-1304 ParserImpl::ParseInheritedTypes.
             if (let Some(refType) <- (inheritedType as RefType) &&
                 refType.ref.identifier == decl.identifier) {
@@ -2457,7 +2455,7 @@ extend ParserImpl {
 
     public func ParseStructInheritedTypes(structDecl: StructDecl): Unit {
         while (true) {
-            let interfaceType = ParseType()
+            let interfaceType = ParseNonModalBound(structDecl)
             if (interfaceType.astKind == ASTKind.REF_TYPE || interfaceType.astKind == ASTKind.QUALIFIED_TYPE) {
                 structDecl.inheritedTypes.add(interfaceType)
             } else if (!interfaceType.TestAttr(Attribute.IS_BROKEN)) {
@@ -2734,7 +2732,7 @@ extend ParserImpl {
                     if (lastToken.kind == TokenKind.BITAND && !ret.inheritedTypes.isEmpty()) {
                         ret.inheritedTypes[ret.inheritedTypes.size - 1].bitAndPos = lastToken.Begin()
                     }
-                    ret.inheritedTypes.add(ParseType())
+                    ret.inheritedTypes.add(ParseNonModalBound(ret))
                     if (!Skip(TokenKind.BITAND)) {
                         break
                     }
@@ -2836,7 +2834,7 @@ extend ParserImpl {
             ret.identifier = ExpectIdentifierWithPos(ret)
             if (Skip(TokenKind.COLON)) {
                 ret.colonPos = lastToken.Begin()
-                ret.typeNode = ParseType()
+                ret.typeNode = ParseType(compileOptions.IsLocalModeAnalysis())
             } else {
                 // C++ anchor: cangjie_compiler/src/Parse/Parser.cpp:416-419
                 ret.typeNode = InvalidType(Peek().Begin())

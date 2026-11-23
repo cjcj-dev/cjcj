@@ -58,10 +58,86 @@ public open class Type <: Hashable & Equatable<Type> {
     public let objectId: Int64
     public let kind: TypeKind
     public let argTys: ArrayList<Type> = ArrayList<Type>(0)
+    // Local-region modal (official Type::modal, Type.h:474 @63bf237b). Interned with the type.
+    public let modal: ModalInfo
 
-    public init(kind: TypeKind) {
+    public init(kind: TypeKind, modal!: ModalInfo = ModalInfo()) {
         objectId = nextObjectId.fetchAdd(1)
         this.kind = kind
+        this.modal = modal
+    }
+
+    // Runtime TypeInfo describes the data, including the data carried by a box.
+    public func GetDataType(builder: CHIRBuilder): Type {
+        return builder.WithModal(this, ModalInfo())
+    }
+
+    public func IsModal(): Bool {
+        return modal.local != CHIRMode.NONE
+    }
+
+    public func GetModalInfo(): ModalInfo {
+        return modal
+    }
+
+    // Official Type::IsLocalRegion (Type.cpp:228-231 @63bf237b): a modal value needs a local
+    // region only when it is not Copyable; a Copyable modal value is copied out instead.
+    public func IsLocalRegion(): Bool {
+        return IsModal() && !IsCopyable()
+    }
+
+    public func IsMustLocalRegion(): Bool {
+        return modal.local == CHIRMode.MUST && !IsCopyable()
+    }
+
+    public func IsMaybeLocalRegion(): Bool {
+        return modal.local == CHIRMode.MAYBE && !IsCopyable()
+    }
+
+    // Official Type::IsCopyable (Type.cpp:184-226 @63bf237b).
+    public func IsCopyable(): Bool {
+        if (IsPrimitive() || IsCPointer() || IsCString() || IsVoid() || IsVArray()) {
+            return true
+        }
+        if (let Some(structTy) <- (this as StructType)) {
+            let structDef = structTy.GetStructDef()
+            if (StructDefIsCopyable(structDef)) {
+                return true
+            }
+            for (extendDef in structDef.GetExtends()) {
+                if (ExtendImplementsCopyable(extendDef)) {
+                    return true
+                }
+            }
+            return false
+        }
+        if (let Some(genericTy) <- (this as GenericType)) {
+            for (upper in genericTy.GetUpperBounds()) {
+                if (let Some(classTy) <- (upper.StripAllRefs() as ClassType)) {
+                    if (IsCopyableInterfaceDef(classTy.GetClassDef())) {
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+        if (IsTuple()) {
+            for (arg in argTys) {
+                if (!arg.IsCopyable()) {
+                    return false
+                }
+            }
+            return true
+        }
+        return false
+    }
+
+    // Official Type::FormatWithModal (Type.cpp:67-73 @63bf237b).
+    protected func FormatWithModal(baseStr: String): String {
+        if (!IsModal()) {
+            return baseStr
+        }
+        return baseStr + " " + modal.ToString()
     }
 
     public operator func ==(right: Type): Bool {
@@ -77,7 +153,7 @@ public open class Type <: Hashable & Equatable<Type> {
     }
 
     public open func ToString(): String {
-        return TypeKindName(kind)
+        return FormatWithModal(TypeKindName(kind))
     }
 
     public open func ToSrcCodeString(): String {
@@ -314,11 +390,11 @@ public open class Type <: Hashable & Equatable<Type> {
     public open func Hash(): Int64 {
         var hashVal = HashArgTypes(argTys)
         hashVal = HashValue(hashVal, kind)
-        return hashVal
+        return HashModal(hashVal, modal)
     }
 
     public open func IsEqual(other: Type): Bool {
-        return kind == other.kind && TypeArgsAreEqual(argTys, other.argTys)
+        return kind == other.kind && TypeArgsAreEqual(argTys, other.argTys) && modal == other.modal
     }
 
     public func IsGenericRelated(): Bool {
@@ -540,8 +616,8 @@ public open class Type <: Hashable & Equatable<Type> {
 public open class BuiltinType <: Type {
     private let extends: ArrayList<ExtendDef> = ArrayList<ExtendDef>()
 
-    public init(kind: TypeKind) {
-        super(kind)
+    public init(kind: TypeKind, modal!: ModalInfo = ModalInfo()) {
+        super(kind, modal: modal)
     }
 
     public func AddExtend(extendDef: ExtendDef): Unit {
@@ -557,7 +633,8 @@ public open class BuiltinType <: Type {
     }
 
     public open override func GetExtends(builder: CHIRBuilder): ArrayList<ExtendDef> {
-        let _ = builder
+        // Extensions belong to the underlying data type, not to each mode of its values.
+        if (IsModal()) { return builder.WithModal(this, ModalInfo()).GetExtends(builder) }
         return GetExtends()
     }
 
@@ -638,8 +715,8 @@ public open class BuiltinType <: Type {
 }
 
 public open class NumericType <: BuiltinType {
-    public init(kind: TypeKind) {
-        super(kind)
+    public init(kind: TypeKind, modal!: ModalInfo = ModalInfo()) {
+        super(kind, modal: modal)
     }
 
     public func GetBitness(): UInt64 {
@@ -663,8 +740,8 @@ public open class NumericType <: BuiltinType {
 }
 
 public class IntType <: NumericType {
-    public init(kind: TypeKind) {
-        super(kind)
+    public init(kind: TypeKind, modal!: ModalInfo = ModalInfo()) {
+        super(kind, modal: modal)
     }
 
     public func IsSigned(): Bool {
@@ -681,38 +758,38 @@ public class IntType <: NumericType {
 }
 
 public class FloatType <: NumericType {
-    public init(kind: TypeKind) {
-        super(kind)
+    public init(kind: TypeKind, modal!: ModalInfo = ModalInfo()) {
+        super(kind, modal: modal)
     }
 }
 
 public class UnitType <: BuiltinType {
-    public init() { super(TypeKind.TYPE_UNIT) }
+    public init(modal!: ModalInfo = ModalInfo()) { super(TypeKind.TYPE_UNIT, modal: modal) }
 }
 
 public class BooleanType <: BuiltinType {
-    public init() { super(TypeKind.TYPE_BOOLEAN) }
+    public init(modal!: ModalInfo = ModalInfo()) { super(TypeKind.TYPE_BOOLEAN, modal: modal) }
 }
 
 public class RuneType <: BuiltinType {
-    public init() { super(TypeKind.TYPE_RUNE) }
+    public init(modal!: ModalInfo = ModalInfo()) { super(TypeKind.TYPE_RUNE, modal: modal) }
 }
 
 public class NothingType <: BuiltinType {
-    public init() { super(TypeKind.TYPE_NOTHING) }
+    public init(modal!: ModalInfo = ModalInfo()) { super(TypeKind.TYPE_NOTHING, modal: modal) }
 }
 
 public class VoidType <: BuiltinType {
-    public init() { super(TypeKind.TYPE_VOID) }
+    public init(modal!: ModalInfo = ModalInfo()) { super(TypeKind.TYPE_VOID, modal: modal) }
 }
 
 public class CStringType <: BuiltinType {
-    public init() { super(TypeKind.TYPE_CSTRING) }
+    public init(modal!: ModalInfo = ModalInfo()) { super(TypeKind.TYPE_CSTRING, modal: modal) }
 }
 
 public class TupleType <: Type {
-    public init(fieldTys: ArrayList<Type>) {
-        super(TypeKind.TYPE_TUPLE)
+    public init(fieldTys: ArrayList<Type>, modal!: ModalInfo = ModalInfo()) {
+        super(TypeKind.TYPE_TUPLE, modal: modal)
         for (ty in fieldTys) {
             argTys.add(ty)
         }
@@ -731,7 +808,7 @@ public class TupleType <: Type {
         for (ty in argTys) {
             parts.add(ty.ToString())
         }
-        return "Tuple(" + JoinStrings(parts, ",") + ")"
+        return FormatWithModal("Tuple(" + JoinStrings(parts, ",") + ")")
     }
 }
 
@@ -739,8 +816,9 @@ public class FuncType <: Type {
     private var hasVarArg: Bool = false
     private var isCFunc: Bool = false
 
-    public init(paramTys: ArrayList<Type>, retTy: Type, hasVarLenParam!: Bool = false, isCFunc!: Bool = false) {
-        super(TypeKind.TYPE_FUNC)
+    public init(paramTys: ArrayList<Type>, retTy: Type, hasVarLenParam!: Bool = false, isCFunc!: Bool = false,
+        modal!: ModalInfo = ModalInfo()) {
+        super(TypeKind.TYPE_FUNC, modal: modal)
         for (ty in paramTys) {
             argTys.add(ty)
         }
@@ -794,7 +872,7 @@ public class FuncType <: Type {
             params.add("...")
         }
         let funcText = "(" + JoinStrings(params, ", ") + ") -> " + GetReturnType().ToString()
-        return if (isCFunc) { "CFunc<" + funcText + ">" } else { funcText }
+        return FormatWithModal(if (isCFunc) { "CFunc<" + funcText + ">" } else { funcText })
     }
 
     public override func ToSrcCodeString(): String {
@@ -816,13 +894,13 @@ public class FuncType <: Type {
         hashVal = HashValue(hashVal, isCFunc)
         hashVal = HashValue(hashVal, hasVarArg)
         hashVal = HashValue(hashVal, kind)
-        return hashVal
+        return HashModal(hashVal, modal)
     }
 
     public override func IsEqual(other: Type): Bool {
         if (let Some(funcTy) <- (other as FuncType)) {
             return TypeArgsAreEqual(argTys, funcTy.argTys) && isCFunc == funcTy.IsCFunc() &&
-                hasVarArg == funcTy.HasVarArg()
+                hasVarArg == funcTy.HasVarArg() && modal == funcTy.modal
         }
         return false
     }
@@ -831,8 +909,8 @@ public class FuncType <: Type {
 public class RawArrayType <: BuiltinType {
     private let dims: UInt64
 
-    public init(elementTy: Type, dims!: UInt64 = 1u64) {
-        super(TypeKind.TYPE_RAWARRAY)
+    public init(elementTy: Type, dims!: UInt64 = 1u64, modal!: ModalInfo = ModalInfo()) {
+        super(TypeKind.TYPE_RAWARRAY, modal: modal)
         argTys.add(elementTy)
         this.dims = dims
     }
@@ -854,7 +932,7 @@ public class RawArrayType <: BuiltinType {
             suffix += ">"
             idx++
         }
-        return prefix + GetElementType().ToString() + suffix
+        return FormatWithModal(prefix + GetElementType().ToString() + suffix)
     }
 
     public override func ToSrcCodeString(): String {
@@ -873,12 +951,13 @@ public class RawArrayType <: BuiltinType {
         var hashVal = HashArgTypes(argTys)
         hashVal = HashValue(hashVal, dims)
         hashVal = HashValue(hashVal, kind)
-        return hashVal
+        return HashModal(hashVal, modal)
     }
 
     public override func IsEqual(other: Type): Bool {
         if (let Some(rawArrayTy) <- (other as RawArrayType)) {
-            return TypeArgsAreEqual(argTys, rawArrayTy.argTys) && dims == rawArrayTy.GetDims()
+            return TypeArgsAreEqual(argTys, rawArrayTy.argTys) && dims == rawArrayTy.GetDims() &&
+                modal == rawArrayTy.modal
         }
         return false
     }
@@ -887,8 +966,8 @@ public class RawArrayType <: BuiltinType {
 public class VArrayType <: BuiltinType {
     public let size: UInt64
 
-    public init(elementTy: Type, size: UInt64) {
-        super(TypeKind.TYPE_VARRAY)
+    public init(elementTy: Type, size: UInt64, modal!: ModalInfo = ModalInfo()) {
+        super(TypeKind.TYPE_VARRAY, modal: modal)
         argTys.add(elementTy)
         this.size = size
     }
@@ -902,7 +981,7 @@ public class VArrayType <: BuiltinType {
     }
 
     public override func ToString(): String {
-        return "VArray<" + GetElementType().ToString() + ", $" + "${size}" + ">"
+        return FormatWithModal("VArray<" + GetElementType().ToString() + ", $" + "${size}" + ">")
     }
 
     public override func ToSrcCodeString(): String {
@@ -913,20 +992,20 @@ public class VArrayType <: BuiltinType {
         var hashVal = HashArgTypes(argTys)
         hashVal = HashValue(hashVal, size)
         hashVal = HashValue(hashVal, kind)
-        return hashVal
+        return HashModal(hashVal, modal)
     }
 
     public override func IsEqual(other: Type): Bool {
         if (let Some(varrayTy) <- (other as VArrayType)) {
-            return TypeArgsAreEqual(argTys, varrayTy.argTys) && size == varrayTy.size
+            return TypeArgsAreEqual(argTys, varrayTy.argTys) && size == varrayTy.size && modal == varrayTy.modal
         }
         return false
     }
 }
 
 public class CPointerType <: BuiltinType {
-    public init(elementTy: Type) {
-        super(TypeKind.TYPE_CPOINTER)
+    public init(elementTy: Type, modal!: ModalInfo = ModalInfo()) {
+        super(TypeKind.TYPE_CPOINTER, modal: modal)
         argTys.add(elementTy)
     }
 
@@ -949,7 +1028,7 @@ public class CPointerType <: BuiltinType {
     }
 
     public override func ToString(): String {
-        return "CPointer<${GetElementType().ToString()}>"
+        return FormatWithModal("CPointer<${GetElementType().ToString()}>")
     }
 
     public override func ToSrcCodeString(): String {
@@ -1010,14 +1089,15 @@ public class BoxType <: Type {
 public class GenericType <: Type & Equatable<GenericType> {
     public let name: String
     private var srcCodeIdentifier: String
-    private let upperBounds: ArrayList<Type> = ArrayList<Type>()
+    private let boundsMutex = Mutex()
+    private var upperBounds: ArrayList<Type> = ArrayList<Type>()
 
     public init(name: String) {
         this(name, name)
     }
 
-    public init(name: String, srcCodeIdentifier: String) {
-        super(TypeKind.TYPE_GENERIC)
+    public init(name: String, srcCodeIdentifier: String, modal!: ModalInfo = ModalInfo()) {
+        super(TypeKind.TYPE_GENERIC, modal: modal)
         this.name = name
         this.srcCodeIdentifier = srcCodeIdentifier
     }
@@ -1043,18 +1123,18 @@ public class GenericType <: Type & Equatable<GenericType> {
     }
 
     public func GetUpperBounds(): ArrayList<Type> {
-        return upperBounds.clone()
+        synchronized(boundsMutex) { return upperBounds.clone() }
     }
 
     public func SetUpperBounds(bounds: ArrayList<Type>): Unit {
-        upperBounds.clear()
+        let updated = ArrayList<Type>()
         for (bound in bounds) {
             if (bound.StripAllRefs().IsValueType()) {
                 throw IllegalArgumentException("Generic type upper bound should not be a value type")
             }
-            upperBounds.add(bound)
+            updated.add(bound)
         }
-        sort(upperBounds, by: { left: Type, right: Type =>
+        sort(updated, by: { left: Type, right: Type =>
             if (left.ToString() < right.ToString()) {
                 Ordering.LT
             } else if (left.ToString() > right.ToString()) {
@@ -1063,10 +1143,11 @@ public class GenericType <: Type & Equatable<GenericType> {
                 Ordering.EQ
             }
         }, stable: true)
+        synchronized(boundsMutex) { upperBounds = updated }
     }
 
     public func GetInstMap(instMap: HashMap<Int64, (GenericType, Type)>, builder: CHIRBuilder): Unit {
-        for (upperBound in upperBounds) {
+        for (upperBound in GetUpperBounds()) {
             let upperBoundCustomType = (upperBound.StripAllRefs() as CustomType).getOrThrow()
             upperBoundCustomType.GetInstMap(instMap, builder)
         }
@@ -1078,7 +1159,7 @@ public class GenericType <: Type & Equatable<GenericType> {
 
     public func GetInstMemberTypeByPathCheckingReadOnly(path: ArrayList<UInt64>, builder: CHIRBuilder): (Type, Bool) {
         var concretType: Option<Type> = None
-        for (upperBound in upperBounds) {
+        for (upperBound in GetUpperBounds()) {
             let upperBoundCustomType = (upperBound.StripAllRefs() as CustomType).getOrThrow()
             if (upperBoundCustomType.GetCustomTypeDef().IsClassLike()) {
                 if (concretType.isNone()) {
@@ -1097,7 +1178,7 @@ public class GenericType <: Type & Equatable<GenericType> {
     public override func GetExpectedFunc(funcName: String, funcType: FuncType, isStatic: Bool,
         funcInstTypeArgs: ArrayList<Type>, builder: CHIRBuilder,
         checkAbstractMethod: Bool): Option<Function> {
-        for (upperBound in upperBounds) {
+        for (upperBound in GetUpperBounds()) {
             if (let Some(expectedFunc) <- upperBound.StripAllRefs().GetExpectedFunc(funcName, funcType, isStatic,
                 funcInstTypeArgs, builder, checkAbstractMethod)) {
                 return expectedFunc
@@ -1107,7 +1188,7 @@ public class GenericType <: Type & Equatable<GenericType> {
     }
 
     public override func ToString(): String {
-        return "Generic-" + name
+        return FormatWithModal("Generic-" + name)
     }
 
     public override func ToSrcCodeString(): String {
@@ -1117,24 +1198,24 @@ public class GenericType <: Type & Equatable<GenericType> {
     public override func Hash(): Int64 {
         var hashVal: Int64 = 0
         hashVal = HashValue(hashVal, name)
-        return hashVal
+        return HashModal(hashVal, modal)
     }
 
     public override func IsEqual(other: Type): Bool {
         if (let Some(genericTy) <- (other as GenericType)) {
-            return name == genericTy.name
+            return name == genericTy.name && modal == genericTy.modal
         }
         return false
     }
 }
 
 public class ThisType <: Type {
-    public init() {
-        super(TypeKind.TYPE_THIS)
+    public init(modal!: ModalInfo = ModalInfo()) {
+        super(TypeKind.TYPE_THIS, modal: modal)
     }
 
     public override func ToString(): String {
-        return "This"
+        return FormatWithModal("This")
     }
 
     public override func ToSrcCodeString(): String {
@@ -1151,8 +1232,8 @@ public open class CustomType <: Type {
     private let setSuperInterfaceMtx: Mutex = Mutex()
     private let setInstMemberTyMtx: Mutex = Mutex()
 
-    public init(kind: TypeKind, def: CustomTypeDef, typeArgs: ArrayList<Type>) {
-        super(kind)
+    public init(kind: TypeKind, def: CustomTypeDef, typeArgs: ArrayList<Type>, modal!: ModalInfo = ModalInfo()) {
+        super(kind, modal: modal)
         this.def = def
         for (ty in typeArgs) {
             argTys.add(ty)
@@ -1415,12 +1496,10 @@ public open class CustomType <: Type {
             return (this, false)
         }
         let customTypeDef = GetCustomTypeDef()
-        let instMap = HashMap<Int64, (GenericType, Type)>()
-        GetInstMap(instMap, builder)
-        let currentIdx = path[0]
-        let member = customTypeDef.GetAllInstanceVars()[Int64(currentIdx)]
+        let currentIdx = Int64(path[0])
+        let member = customTypeDef.GetAllInstanceVars()[currentIdx]
         let isReadOnly = member.TestAttr(Attribute.READONLY)
-        let memberTy = ReplaceRawGenericArgType(member.ty, instMap, builder)
+        let memberTy = GetInstantiatedMemberTys(builder)[currentIdx]
         if (path.size > 1) {
             var pureMemberTy = memberTy
             while (pureMemberTy.IsRef()) {
@@ -1458,7 +1537,8 @@ public open class CustomType <: Type {
         }
         let result = ArrayList<Type>()
         for (member in def.GetDirectInstanceVars()) {
-            result.add(ReplaceRawGenericArgType(member.ty, replaceTable, builder))
+            let ty = ReplaceRawGenericArgType(member.ty, replaceTable, builder)
+            result.add(if (IsModal() && !member.TestAttr(Attribute.DEMODE)) { builder.WithModal(ty, modal) } else { ty })
         }
         return result
     }
@@ -1467,7 +1547,8 @@ public open class CustomType <: Type {
         let out = ArrayList<Type>()
         if (let Some(classTy) <- (this as ClassType)) {
             if (let Some(superTy) <- classTy.GetSuperClassTy(builder: builder)) {
-                for (fieldTy in superTy.GetInstantiatedMemberTys(builder)) {
+                let superView = if (IsModal()) { (builder.WithModal(superTy, modal) as ClassType).getOrThrow() } else { superTy }
+                for (fieldTy in superView.GetInstantiatedMemberTys(builder)) {
                     out.add(fieldTy)
                 }
             }
@@ -1502,12 +1583,12 @@ public open class CustomType <: Type {
     public override func Hash(): Int64 {
         var hashVal = HashArgTypes(argTys)
         hashVal = HashValue(hashVal, def.nodeId)
-        return hashVal
+        return HashModal(hashVal, modal)
     }
 
     public override func IsEqual(other: Type): Bool {
         if (let Some(customTy) <- (other as CustomType)) {
-            return TypeArgsAreEqual(argTys, customTy.argTys) && refEq(def, customTy.def)
+            return TypeArgsAreEqual(argTys, customTy.argTys) && refEq(def, customTy.def) && modal == customTy.modal
         }
         return false
     }
@@ -1709,13 +1790,13 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type
     }
     if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
         return RawArrayType(ReplaceRawGenericArgType(rawArrayTy.GetElementType(), replaceTable),
-            dims: rawArrayTy.GetDims())
+            dims: rawArrayTy.GetDims(), modal: ty.GetModalInfo())
     }
     if (let Some(varrayTy) <- (ty as VArrayType)) {
-        return VArrayType(ReplaceRawGenericArgType(varrayTy.GetElementType(), replaceTable), varrayTy.size)
+        return VArrayType(ReplaceRawGenericArgType(varrayTy.GetElementType(), replaceTable), varrayTy.size, modal: ty.GetModalInfo())
     }
     if (let Some(pointerTy) <- (ty as CPointerType)) {
-        return CPointerType(ReplaceRawGenericArgType(pointerTy.GetElementType(), replaceTable))
+        return CPointerType(ReplaceRawGenericArgType(pointerTy.GetElementType(), replaceTable), modal: ty.GetModalInfo())
     }
     if (let Some(boxTy) <- (ty as BoxType)) {
         return BoxType(ReplaceRawGenericArgType(boxTy.GetBaseType(), replaceTable))
@@ -1725,7 +1806,7 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type
         for (arg in tupleTy.GetTypeArgs()) {
             args.add(ReplaceRawGenericArgType(arg, replaceTable))
         }
-        return TupleType(args)
+        return TupleType(args, modal: ty.GetModalInfo())
     }
     if (let Some(funcTy) <- (ty as FuncType)) {
         let params = ArrayList<Type>()
@@ -1733,28 +1814,28 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type
             params.add(ReplaceRawGenericArgType(param, replaceTable))
         }
         let retTy = ReplaceRawGenericArgType(funcTy.GetReturnType(), replaceTable)
-        return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+        return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc(), modal: ty.GetModalInfo())
     }
     if (let Some(structTy) <- (ty as StructType)) {
         let args = ArrayList<Type>()
         for (arg in structTy.GetGenericArgs()) {
             args.add(ReplaceRawGenericArgType(arg, replaceTable))
         }
-        return StructType(structTy.GetStructDef(), args)
+        return StructType(structTy.GetStructDef(), args, modal: ty.GetModalInfo())
     }
     if (let Some(classTy) <- (ty as ClassType)) {
         let args = ArrayList<Type>()
         for (arg in classTy.GetGenericArgs()) {
             args.add(ReplaceRawGenericArgType(arg, replaceTable))
         }
-        return ClassType(classTy.GetClassDef(), args)
+        return ClassType(classTy.GetClassDef(), args, modal: ty.GetModalInfo())
     }
     if (let Some(enumTy) <- (ty as EnumType)) {
         let args = ArrayList<Type>()
         for (arg in enumTy.GetGenericArgs()) {
             args.add(ReplaceRawGenericArgType(arg, replaceTable))
         }
-        return EnumType(enumTy.GetEnumDef(), args)
+        return EnumType(enumTy.GetEnumDef(), args, modal: ty.GetModalInfo())
     }
     return ty
 }
@@ -1765,13 +1846,13 @@ public func CreateNewTypeWithArgs(oldType: Type, newArgs: ArrayList<Type>, build
     }
     if (let Some(tupleTy) <- (oldType as TupleType)) {
         let _ = tupleTy
-        return builder.context.GetTupleTy(newArgs)
+        return builder.context.GetTupleTy(newArgs, modal: oldType.GetModalInfo())
     }
     if (let Some(structTy) <- (oldType as StructType)) {
-        return builder.context.GetStructTy(structTy.GetStructDef(), newArgs)
+        return builder.context.GetStructTy(structTy.GetStructDef(), newArgs, modal: oldType.GetModalInfo())
     }
     if (let Some(enumTy) <- (oldType as EnumType)) {
-        return builder.context.GetEnumTy(enumTy.GetEnumDef(), newArgs)
+        return builder.context.GetEnumTy(enumTy.GetEnumDef(), newArgs, modal: oldType.GetModalInfo())
     }
     if (let Some(funcTy) <- (oldType as FuncType)) {
         let paramTys = ArrayList<Type>()
@@ -1781,10 +1862,10 @@ public func CreateNewTypeWithArgs(oldType: Type, newArgs: ArrayList<Type>, build
             idx++
         }
         return builder.context.GetFuncTy(paramTys, newArgs[newArgs.size - 1], hasVarLenParam: funcTy.HasVarArg(),
-            isCFunc: oldType.IsCFunc())
+            isCFunc: oldType.IsCFunc(), modal: oldType.GetModalInfo())
     }
     if (let Some(classTy) <- (oldType as ClassType)) {
-        return builder.context.GetClassTy(classTy.GetClassDef(), newArgs)
+        return builder.context.GetClassTy(classTy.GetClassDef(), newArgs, modal: oldType.GetModalInfo())
     }
     if (let Some(refTy) <- (oldType as RefType)) {
         let _ = refTy
@@ -1794,15 +1875,15 @@ public func CreateNewTypeWithArgs(oldType: Type, newArgs: ArrayList<Type>, build
     if (let Some(pointerTy) <- (oldType as CPointerType)) {
         let _ = pointerTy
         CJC_ASSERT(newArgs.size == 1)
-        return builder.context.GetCPointerTy(newArgs[0])
+        return builder.context.GetCPointerTy(newArgs[0], modal: oldType.GetModalInfo())
     }
     if (let Some(rawArrayTy) <- (oldType as RawArrayType)) {
         CJC_ASSERT(newArgs.size == 1)
-        return builder.context.GetRawArrayTy(newArgs[0], dims: rawArrayTy.GetDims())
+        return builder.context.GetRawArrayTy(newArgs[0], dims: rawArrayTy.GetDims(), modal: oldType.GetModalInfo())
     }
     if (let Some(varrayTy) <- (oldType as VArrayType)) {
         CJC_ASSERT(newArgs.size == 1)
-        return builder.context.GetVArrayTy(newArgs[0], varrayTy.size)
+        return builder.context.GetVArrayTy(newArgs[0], varrayTy.size, modal: oldType.GetModalInfo())
     }
     if (let Some(boxTy) <- (oldType as BoxType)) {
         let _ = boxTy
@@ -1817,8 +1898,9 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Type, Type>
         return ty
     }
     if (let Some(genericTy) <- (ty as GenericType)) {
-        if (let Some(instTy) <- replaceTable.get(genericTy)) {
-            return instTy
+        let dataTy = builder.context.GetGenericTy(genericTy.name, genericTy.GetSrcCodeIdentifier())
+        if (let Some(instTy) <- replaceTable.get(dataTy)) {
+            return builder.context.WithModal(instTy, genericTy.modal)
         }
         return ty
     }
@@ -1834,8 +1916,9 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, Type
         return ty
     }
     if (let Some(genericTy) <- (ty as GenericType)) {
-        if (let Some(instTy) <- replaceTable.get(genericTy.objectId)) {
-            return instTy
+        let dataTy = builder.context.GetGenericTy(genericTy.name, genericTy.GetSrcCodeIdentifier())
+        if (let Some(instTy) <- replaceTable.get(dataTy.objectId)) {
+            return builder.context.WithModal(instTy, genericTy.modal)
         }
         return ty
     }
@@ -1851,8 +1934,9 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<GenericType
         return ty
     }
     if (let Some(genericTy) <- (ty as GenericType)) {
-        if (let Some(instTy) <- replaceTable.get(genericTy)) {
-            return instTy
+        let dataTy = builder.context.GetGenericTy(genericTy.name, genericTy.GetSrcCodeIdentifier())
+        if (let Some(instTy) <- replaceTable.get(dataTy)) {
+            return builder.context.WithModal(instTy, genericTy.modal)
         }
         return ty
     }
@@ -1869,8 +1953,9 @@ public func ReplaceRawGenericArgType(ty: Type, replaceTable: HashMap<Int64, (Gen
         return ty
     }
     if (let Some(genericTy) <- (ty as GenericType)) {
-        if (let Some(instTy) <- replaceTable.get(genericTy.objectId)) {
-            return instTy[1]
+        let dataTy = builder.context.GetGenericTy(genericTy.name, genericTy.GetSrcCodeIdentifier())
+        if (let Some(instTy) <- replaceTable.get(dataTy.objectId)) {
+            return builder.context.WithModal(instTy[1], genericTy.modal)
         }
         return ty
     }
@@ -1901,37 +1986,37 @@ private func ReplaceRawGenericArgType(ty: Type, genericParams: ArrayList<Generic
     }
     if (let Some(rawArrayTy) <- (ty as RawArrayType)) {
         return RawArrayType(ReplaceRawGenericArgType(rawArrayTy.GetElementType(), genericParams, genericArgs),
-            dims: rawArrayTy.GetDims())
+            dims: rawArrayTy.GetDims(), modal: ty.modal)
     }
     if (let Some(varrayTy) <- (ty as VArrayType)) {
         return VArrayType(ReplaceRawGenericArgType(varrayTy.GetElementType(), genericParams, genericArgs),
-            varrayTy.size)
+            varrayTy.size, modal: ty.modal)
     }
     if (let Some(pointerTy) <- (ty as CPointerType)) {
-        return CPointerType(ReplaceRawGenericArgType(pointerTy.GetElementType(), genericParams, genericArgs))
+        return CPointerType(ReplaceRawGenericArgType(pointerTy.GetElementType(), genericParams, genericArgs), modal: ty.modal)
     }
     if (let Some(boxTy) <- (ty as BoxType)) {
         return BoxType(ReplaceRawGenericArgType(boxTy.GetBaseType(), genericParams, genericArgs))
     }
     if (let Some(tupleTy) <- (ty as TupleType)) {
-        return TupleType(ReplaceRawGenericArgTypes(tupleTy.GetTypeArgs(), genericParams, genericArgs))
+        return TupleType(ReplaceRawGenericArgTypes(tupleTy.GetTypeArgs(), genericParams, genericArgs), modal: ty.modal)
     }
     if (let Some(funcTy) <- (ty as FuncType)) {
         let params = ReplaceRawGenericArgTypes(funcTy.GetParamTypes(), genericParams, genericArgs)
         let retTy = ReplaceRawGenericArgType(funcTy.GetReturnType(), genericParams, genericArgs)
-        return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc())
+        return FuncType(params, retTy, hasVarLenParam: funcTy.HasVarArg(), isCFunc: funcTy.IsCFunc(), modal: ty.modal)
     }
     if (let Some(structTy) <- (ty as StructType)) {
         return StructType(structTy.GetStructDef(),
-            ReplaceRawGenericArgTypes(structTy.GetGenericArgs(), genericParams, genericArgs))
+            ReplaceRawGenericArgTypes(structTy.GetGenericArgs(), genericParams, genericArgs), modal: ty.modal)
     }
     if (let Some(classTy) <- (ty as ClassType)) {
         return ClassType(classTy.GetClassDef(),
-            ReplaceRawGenericArgTypes(classTy.GetGenericArgs(), genericParams, genericArgs))
+            ReplaceRawGenericArgTypes(classTy.GetGenericArgs(), genericParams, genericArgs), modal: ty.modal)
     }
     if (let Some(enumTy) <- (ty as EnumType)) {
         return EnumType(enumTy.GetEnumDef(),
-            ReplaceRawGenericArgTypes(enumTy.GetGenericArgs(), genericParams, genericArgs))
+            ReplaceRawGenericArgTypes(enumTy.GetGenericArgs(), genericParams, genericArgs), modal: ty.modal)
     }
     return ty
 }
@@ -1946,12 +2031,12 @@ private func ReplaceRawGenericArgTypes(values: ArrayList<Type>, genericParams: A
 }
 
 public class StructType <: CustomType {
-    public init(def: StructDef, typeArgs: ArrayList<Type>) {
-        super(TypeKind.TYPE_STRUCT, def, typeArgs)
+    public init(def: StructDef, typeArgs: ArrayList<Type>, modal!: ModalInfo = ModalInfo()) {
+        super(TypeKind.TYPE_STRUCT, def, typeArgs, modal: modal)
     }
 
     public override func ToString(): String {
-        return "Struct-" + def.GetIdentifierWithoutPrefix() + TypeVecToString("<", argTys, ">")
+        return FormatWithModal("Struct-" + def.GetIdentifierWithoutPrefix() + TypeVecToString("<", argTys, ">"))
     }
 
     public func GetStructDef(): StructDef {
@@ -1967,12 +2052,12 @@ public class ClassType <: CustomType {
     private var hasSetSuperClass: Bool = false
     private let setSuperClassMtx: Mutex = Mutex()
 
-    public init(def: ClassDef, typeArgs: ArrayList<Type>) {
-        super(TypeKind.TYPE_CLASS, def, typeArgs)
+    public init(def: ClassDef, typeArgs: ArrayList<Type>, modal!: ModalInfo = ModalInfo()) {
+        super(TypeKind.TYPE_CLASS, def, typeArgs, modal: modal)
     }
 
     public override func ToString(): String {
-        return "Class-" + def.GetIdentifierWithoutPrefix() + TypeVecToString("<", argTys, ">")
+        return FormatWithModal("Class-" + def.GetIdentifierWithoutPrefix() + TypeVecToString("<", argTys, ">"))
     }
 
     public func GetClassDef(): ClassDef {
@@ -2023,12 +2108,12 @@ public class ClassType <: CustomType {
 }
 
 public class EnumType <: CustomType {
-    public init(def: EnumDef, typeArgs: ArrayList<Type>) {
-        super(TypeKind.TYPE_ENUM, def, typeArgs)
+    public init(def: EnumDef, typeArgs: ArrayList<Type>, modal!: ModalInfo = ModalInfo()) {
+        super(TypeKind.TYPE_ENUM, def, typeArgs, modal: modal)
     }
 
     public override func ToString(): String {
-        return "Enum-" + def.GetIdentifierWithoutPrefix() + TypeVecToString("<", argTys, ">")
+        return FormatWithModal("Enum-" + def.GetIdentifierWithoutPrefix() + TypeVecToString("<", argTys, ">"))
     }
 
     public func GetEnumDef(): EnumDef {
@@ -2141,4 +2226,39 @@ public func GetFieldOfType(baseTy: Type, index: UInt64, builder: CHIRBuilder): O
         ty = rawArrayTy.GetElementType()
     }
     return ty
+}
+
+// Official IsCopyableInterfaceDef: the interface is std.core.Copyable or inherits it.
+func IsCopyableInterfaceDef(def: ClassDef): Bool {
+    if (def.GetPackageName() == "std.core" && def.GetSrcCodeIdentifier() == "Copyable") {
+        return true
+    }
+    for (parent in def.GetImplementedInterfaceDefs()) {
+        if (IsCopyableInterfaceDef(parent)) {
+            return true
+        }
+    }
+    return false
+}
+
+func ExtendImplementsCopyable(extendDef: ExtendDef): Bool {
+    for (iface in extendDef.GetImplementedInterfaceDefs()) {
+        if (IsCopyableInterfaceDef(iface)) {
+            return true
+        }
+    }
+    return false
+}
+
+// Official StructDef::IsCopyable: @C structs are implicitly Copyable.
+func StructDefIsCopyable(def: StructDef): Bool {
+    if (def.IsCStruct()) {
+        return true
+    }
+    for (iface in def.GetImplementedInterfaceDefs()) {
+        if (IsCopyableInterfaceDef(iface)) {
+            return true
+        }
+    }
+    return false
 }

@@ -235,7 +235,7 @@ public class OverrideFunctionResolver {
         let noRelation = srcFunc.TestAttr(Attribute.STATIC) != superFunc.TestAttr(Attribute.STATIC) ||
             srcFunc.TestAttr(Attribute.GENERIC) != superFunc.TestAttr(Attribute.GENERIC) ||
             srcFunc.identifier != superFunc.identifier
-        if (noRelation) {
+        if (noRelation || !SameModalInputs(srcFunc, superFunc)) {
             return false
         }
         if (srcFunc.TestAttr(Attribute.GENERIC) && superFunc.TestAttr(Attribute.GENERIC)) {
@@ -254,6 +254,7 @@ public class OverrideFunctionResolver {
     public func GetMatchedFuncInstTyByGivenTarget(candidates: MemberFuncWithInstTys,
         target: FuncDecl, targetBaseTy: Ty): Ty {
         let implFunc = candidates[0]
+        if (!SameModalInputs(implFunc, target)) { return TypeManager.GetInvalidTy() }
         let typeMappings = Promotion(typeManager).GetPromoteTypeMapping(
             targetBaseTy, target.outerDecl.getOrThrow().GetTy().getOrThrow())
         let instFuncTys = typeManager.GetInstantiatedTys(target.GetTy().getOrThrow(), typeMappings)

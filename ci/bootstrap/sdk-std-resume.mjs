@@ -1,6 +1,7 @@
 // Validate existing flow and command records; these are provenance, not authority.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {sdkPlatform} from './sdk-platform.mjs';
 export function flag(argv, name) {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : argv.find(v => v.startsWith(name + '='))?.slice(name.length + 1);
@@ -14,11 +15,27 @@ export function stdBuildType(value = 'relwithdebinfo') {
   if (!['debug','release','relwithdebinfo'].includes(value)) throw new Error('STD_BUILD_TYPE '+value);
   return value;
 }
+export function selectedStdAst({ast,compiler}) {
+  if (!ast?.install || (!ast.astInstallation && ast.install===compiler?.install)) return undefined;
+  return {include:path.join(ast.install,'include'),library:path.join(ast.install,ast.astInstallation?.library??'libcangjie-ast-support.a')};
+}
+export async function checkStdAstOutput({source, output, platform}) {
+  const tuple=sdkPlatform(platform).tuple, archive='libcangjie-std-astFFI.a';
+  const built=await fs.readFile(path.join(source,'stdlib/build/build',archive));
+  const installed=await fs.readFile(path.join(output,'lib',tuple,archive));
+  if(!built.length || !built.equals(installed))throw Error('STD_AST_FFI_INSTALL_MISMATCH');
+  const module=await fs.stat(path.join(output,'modules',tuple,'std/std.ast.cjo'));
+  if(!module.isFile() || !module.size)throw Error('STD_AST_MODULE');
+}
+
 export async function acceptInstalledStd({file, source, output, commit, sdk, runtime, link, platform,
-  compilerRuntime, heap, previous, expected, buildType}) {
+  compilerRuntime, heap, previous, expected, buildType, localModeApi, astInclude, astLibrary}) {
   if (!file) throw new Error('STD_RESUME_RECORD missing');
   if (!previous || !expected) throw new Error('WORK_INPUTS_MISSING');
   const selectedType = stdBuildType(buildType === undefined ? flag(expected.argv, '--build-type') : buildType);
+  localModeApi??=expected.argv.includes('--local-mode-api');
+  astInclude??=flag(expected.argv,'--std-ast-include');
+  astLibrary??=flag(expected.argv,'--std-ast-library');
   if (compilerRuntime !== 'target') throw new Error('STD_RESUME_RECORD compiler-runtime');
   let text;
   try { text = await fs.readFile(file, 'utf8'); }
@@ -35,6 +52,8 @@ export async function acceptInstalledStd({file, source, output, commit, sdk, run
   const required = {source, output, commit, sdk, runtime, platform, 'compiler-runtime': compilerRuntime};
   if (!identity || !sameCommand(identity, expected)
       || Object.entries(required).some(([k,v]) => flag(identity.argv, '--'+k) !== v)
+      || identity.argv.includes('--local-mode-api')!==localModeApi
+      || flag(identity.argv,'--std-ast-include')!==astInclude || flag(identity.argv,'--std-ast-library')!==astLibrary
       || stdBuildType(flag(identity.argv, '--build-type')) !== selectedType
       || flag(identity.argv, '--heap') !== heap
       || identity.argv.includes('--resume-installed')) throw new Error('STD_RESUME_RECORD identity');
@@ -57,14 +76,16 @@ export async function acceptInstalledStd({file, source, output, commit, sdk, run
   const successful = (command, result) => command?.event === 'target-command'
     && result?.event === 'target-result' && sameCommand(command, result)
     && result.rc === 0 && !result.signal && !result.error && !result.cancelled;
-  if (!successful(buildCommand, build) || build.argv.length !== 10
-      || buildArgv.some((v,i) => build.argv[i] !== v) || !/^[1-9][0-9]*$/.test(build.argv[7])
-      || build.argv[8] !== '--target-lib='+path.join(stdlib,'build/build/lib')
-      || build.argv[9] !== '--target-lib='+link) throw new Error('STD_RESUME_RECORD build');
+  const tail=['--target-lib='+path.join(stdlib,'build/build/lib'),'--target-lib='+link,
+    ...(astInclude?['--include='+astInclude]:[]),...(localModeApi?['--local_mode_api']:[])];
+  if (!successful(buildCommand, build) || !/^[1-9][0-9]*$/.test(build.argv[7])
+      || JSON.stringify(build.argv)!==JSON.stringify([...buildArgv,build.argv[7],...tail]))
+    throw new Error('STD_RESUME_RECORD build');
   if (!successful(installCommand, install) || JSON.stringify(install.argv) !== JSON.stringify(
     ['python3','-I','build.py','install','--prefix',output])) throw new Error('STD_RESUME_RECORD install');
   if (actions.length !== 4 || after.slice(end + 1).some(row => row.cwd === stdlib
       && Array.isArray(row.argv) && row.argv.includes('build.py')))
     throw new Error('STD_RESUME_RECORD sequence');
+  if(astInclude)await checkStdAstOutput({source,output,platform});
   return {build, install, identity, terminal};
 }

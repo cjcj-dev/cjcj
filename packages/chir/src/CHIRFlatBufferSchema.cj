@@ -4,7 +4,7 @@ import cjcj::flatbuffers.ReadScalar
 
 // CHIR FlatBuffer root and file identifier. PackageFormat.fbs:9,1249;
 // PackageFormat_generated.h:8509-8542 (CHIRPackageIdentifier/GetCHIRPackage/FinishCHIRPackageBuffer).
-const CHIRFB_FILE_IDENTIFIER: String = "CHIR"
+const CHIRFB_FILE_IDENTIFIER: String = CONSTRUCTOR_ABI_CHIR_IDENTIFIER
 const CHIRFB_ROOT_TABLE: String = "CHIRPackage"
 
 func GetCHIRPackage(data: Array<UInt8>): PackageFormat_CHIRPackage {
@@ -238,8 +238,11 @@ const CHIRFB_CHIR_EXPR_KIND_INVOKE: UInt8 = 74u8
 const CHIRFB_CHIR_EXPR_KIND_INTRINSIC: UInt8 = 75u8
 const CHIRFB_CHIR_EXPR_KIND_GET_RTTI: UInt8 = 76u8
 const CHIRFB_CHIR_EXPR_KIND_GET_RTTI_STATIC: UInt8 = 77u8
+const CHIRFB_CHIR_EXPR_KIND_EXCLAVE: UInt8 = 78u8
+const CHIRFB_CHIR_EXPR_KIND_START_REGION: UInt8 = 79u8
+const CHIRFB_CHIR_EXPR_KIND_END_REGION: UInt8 = 80u8
 const CHIRFB_CHIR_EXPR_KIND_MIN: UInt8 = 0u8
-const CHIRFB_CHIR_EXPR_KIND_MAX: UInt8 = 77u8
+const CHIRFB_CHIR_EXPR_KIND_MAX: UInt8 = CHIRFB_CHIR_EXPR_KIND_END_REGION
 
 // IntrinsicKind enum ordinals. PackageFormat.fbs:591-1028; PackageFormat_generated.h:1106-1471.
 const CHIRFB_INTRINSIC_KIND_NOT_INTRINSIC: UInt16 = 0u16
@@ -699,6 +702,8 @@ const CHIRFB_PHASE_MAX: UInt8 = 3u8
 // PackageFormat_generated.h:2748-2751 (Type::FlatBuffersVTableOffset).
 const CHIRFB_TYPE_VT_KIND: UInt16 = 4u16
 const CHIRFB_TYPE_VT_ARGTYS: UInt16 = 6u16
+const CHIRFB_TYPE_VT_MODAL: UInt16 = 8u16
+const CHIRFB_MODAL_INFO_VT_LOCAL: UInt16 = 4u16
 
 // RawArrayType table field slot offsets. PackageFormat.fbs:107-110;
 // PackageFormat_generated.h:2811-2814 (RawArrayType::FlatBuffersVTableOffset).
@@ -849,6 +854,7 @@ const CHIRFB_PARAMETER_VT_OWNEDFUNC: UInt16 = 6u16
 const CHIRFB_PARAMETER_VT_OWNEDLAMBDA: UInt16 = 8u16
 const CHIRFB_PARAMETER_VT_SRCCODEIDENTIFIER: UInt16 = 10u16
 const CHIRFB_PARAMETER_VT_ANNOINFO: UInt16 = 12u16
+const CHIRFB_PARAMETER_VT_PARAMDFTVALFUNC: UInt16 = 14u16
 
 // LocalVar table field slot offsets. PackageFormat.fbs:315-320;
 // PackageFormat_generated.h:4455-4460 (LocalVar::FlatBuffersVTableOffset).
@@ -887,7 +893,7 @@ const CHIRFB_FUNCTION_VT_ISFASTNATIVE: UInt16 = 10u16
 const CHIRFB_FUNCTION_VT_ISCFFIWRAPPER: UInt16 = 12u16
 const CHIRFB_FUNCTION_VT_ORIGINALLAMBDAINFO: UInt16 = 14u16
 const CHIRFB_FUNCTION_VT_GENERICTYPEPARAMS: UInt16 = 16u16
-const CHIRFB_FUNCTION_VT_PARAMDFTVALHOSTFUNC: UInt16 = 18u16
+const CHIRFB_FUNCTION_VT_PARAMDFTVALHOSTPARAM: UInt16 = 18u16
 const CHIRFB_FUNCTION_VT_BODY: UInt16 = 20u16
 const CHIRFB_FUNCTION_VT_PARAMS: UInt16 = 22u16
 const CHIRFB_FUNCTION_VT_RETVAL: UInt16 = 24u16
@@ -1127,6 +1133,8 @@ const CHIRFB_LAMBDA_VT_GENERICTYPEPARAMS: UInt16 = 16u16
 const CHIRFB_LAMBDA_VT_BODY: UInt16 = 18u16
 const CHIRFB_LAMBDA_VT_RETVAL: UInt16 = 20u16
 const CHIRFB_LAMBDA_VT_ISCOMPILETIMEVALUE: UInt16 = 22u16
+const CHIRFB_LAMBDA_VT_PARAMDFTVALHOSTPARAM: UInt16 = 24u16
+const CHIRFB_LAMBDA_VT_GENERICDECL: UInt16 = 26u16
 
 // GetInstantiateValue table field slot offsets. PackageFormat.fbs:1154-1157;
 // PackageFormat_generated.h:7817-7820 (GetInstantiateValue::FlatBuffersVTableOffset).
@@ -1158,7 +1166,7 @@ const CHIRFB_CHIR_PACKAGE_VT_PACKAGELITERALINITFUNC: UInt16 = 30u16
 // Self-check for the constants above. Mirrors generated-header constants from PackageFormat_generated.h:240-8542.
 public func VerifyCHIRPackageBufferSchemaConstants(): Bool {
     var ok = true
-    ok = ok && CHIRFB_FILE_IDENTIFIER == "CHIR"
+    ok = ok && CHIRFB_FILE_IDENTIFIER == "CR01"
     ok = ok && CHIRFB_ROOT_TABLE == "CHIRPackage"
     ok = ok && CHIRFB_INVALID_POOL_ID == 0u32
     ok = ok && CHIRFB_FIRST_POOL_ID == 1u32
@@ -1365,7 +1373,10 @@ public func VerifyCHIRPackageBufferSchemaConstants(): Bool {
     ok = ok && CHIRFB_CHIR_EXPR_KIND_GET_RTTI == 76u8
     ok = ok && CHIRFB_CHIR_EXPR_KIND_GET_RTTI_STATIC == 77u8
     ok = ok && CHIRFB_CHIR_EXPR_KIND_MIN == 0u8
-    ok = ok && CHIRFB_CHIR_EXPR_KIND_MAX == 77u8
+    ok = ok && CHIRFB_CHIR_EXPR_KIND_EXCLAVE == 78u8
+    ok = ok && CHIRFB_CHIR_EXPR_KIND_START_REGION == 79u8
+    ok = ok && CHIRFB_CHIR_EXPR_KIND_END_REGION == 80u8
+    ok = ok && CHIRFB_CHIR_EXPR_KIND_MAX == 80u8
     ok = ok && CHIRFB_INTRINSIC_KIND_NOT_INTRINSIC == 0u16
     ok = ok && CHIRFB_INTRINSIC_KIND_NOT_IMPLEMENTED == 1u16
     ok = ok && CHIRFB_INTRINSIC_KIND_ARRAY_INIT == 2u16
@@ -1868,6 +1879,7 @@ public func VerifyCHIRPackageBufferSchemaConstants(): Bool {
     ok = ok && CHIRFB_PARAMETER_VT_OWNEDLAMBDA == 8u16
     ok = ok && CHIRFB_PARAMETER_VT_SRCCODEIDENTIFIER == 10u16
     ok = ok && CHIRFB_PARAMETER_VT_ANNOINFO == 12u16
+    ok = ok && CHIRFB_PARAMETER_VT_PARAMDFTVALFUNC == 14u16
     ok = ok && CHIRFB_LOCAL_VAR_VT_BASE == 4u16
     ok = ok && CHIRFB_LOCAL_VAR_VT_ASSOCIATEDEXPR == 6u16
     ok = ok && CHIRFB_LOCAL_VAR_VT_ISRETVAL == 8u16
@@ -1891,7 +1903,7 @@ public func VerifyCHIRPackageBufferSchemaConstants(): Bool {
     ok = ok && CHIRFB_FUNCTION_VT_ISCFFIWRAPPER == 12u16
     ok = ok && CHIRFB_FUNCTION_VT_ORIGINALLAMBDAINFO == 14u16
     ok = ok && CHIRFB_FUNCTION_VT_GENERICTYPEPARAMS == 16u16
-    ok = ok && CHIRFB_FUNCTION_VT_PARAMDFTVALHOSTFUNC == 18u16
+    ok = ok && CHIRFB_FUNCTION_VT_PARAMDFTVALHOSTPARAM == 18u16
     ok = ok && CHIRFB_FUNCTION_VT_BODY == 20u16
     ok = ok && CHIRFB_FUNCTION_VT_PARAMS == 22u16
     ok = ok && CHIRFB_FUNCTION_VT_RETVAL == 24u16

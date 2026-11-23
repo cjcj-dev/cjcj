@@ -199,7 +199,7 @@ foreign {
     func LLVMGetTypeByName2(context: LLVMContextRef, name: CString): LLVMTypeRef
     func LLVMStructCreateNamed(context: LLVMContextRef, name: CString): LLVMTypeRef
     func LLVMGetStructName(structTy: LLVMTypeRef): CString
-    func LLVMStructSetBody(structTy: LLVMTypeRef, elementTypes: CPointer<LLVMTypeRef>, elementCount: UInt32,
+    func LLVMSelfhostSetStructBodyForCJ(structTy: LLVMTypeRef, elementTypes: CPointer<LLVMTypeRef>, elementCount: UInt32,
         packed: Int32): Unit
     func LLVMIsLiteralStruct(structTy: LLVMTypeRef): Int32
     func LLVMIsOpaqueStruct(structTy: LLVMTypeRef): Int32
@@ -267,6 +267,7 @@ foreign {
     func LLVMValueMetadataEntriesGetMetadata(entries: LLVMValueMetadataEntry, index: UInt32): LLVMMetadataRef
     func LLVMGlobalObjectAddStringAttribute(gv: LLVMValueRef, k: CString, kLen: UInt32, v: CString,
         vLen: UInt32): Unit
+    func LLVMSelfhostGlobalVariableAddDebugInfo(gv: LLVMValueRef, expression: LLVMMetadataRef): Unit
     func LLVMSelfhostGlobalVariableAddEnumAttribute(gv: LLVMValueRef, kindId: UInt32): Unit
     func LLVMCountParams(fn: LLVMValueRef): UInt32
     func LLVMGetParam(fn: LLVMValueRef, index: UInt32): LLVMValueRef
@@ -342,6 +343,7 @@ foreign {
     func LLVMSelfhostInvokeGetNormalDest(invokeInst: LLVMValueRef): LLVMBasicBlockRef
     func LLVMSelfhostInvokeGetUnwindDest(invokeInst: LLVMValueRef): LLVMBasicBlockRef
     func LLVMSelfhostBasicBlockGetFirstInsertionPoint(block: LLVMBasicBlockRef): LLVMValueRef
+    func LLVMSelfhostMarkNoTail(call: LLVMValueRef): Unit
     func LLVMSelfhostGetInsertPointInstruction(builder: LLVMBuilderRef): LLVMValueRef
     func LLVMSelfhostCreateCall(builder: LLVMBuilderRef, functionTy: LLVMTypeRef, callee: LLVMValueRef,
         args: CPointer<LLVMValueRef>, argCount: UInt32, name: CString): LLVMValueRef

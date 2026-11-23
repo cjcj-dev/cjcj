@@ -24,6 +24,11 @@ private func CopyNodeField(source: Node, target: Node): Unit {
     target.begin = source.begin
     target.end = source.end
     target.SetTy(source.GetTy().getOrThrow())
+    target.resolvedMode = source.resolvedMode
+    if ((let Some(fromExpr) <- (source as Expr)) && (let Some(toExpr) <- (target as Expr))) {
+        toExpr.expectedLocalMode = fromExpr.expectedLocalMode
+    }
+    if ((let Some(t) <- (source as Type)) && (let Some(u) <- (target as Type))) { u.modal = t.modal }
     target.curMacroCall = source.curMacroCall
     target.isInMacroCall = source.isInMacroCall
     CopyNodeScopeInfo(target, source)
@@ -195,10 +200,7 @@ public class TyGeneralizer {
             for (paramTy in funcTy.paramTys) {
                 paramTys.add(Generalize(paramTy))
             }
-            let cfg = FuncTyConfig()
-            cfg.isC = funcTy.IsCFunc()
-            cfg.isClosureTy = funcTy.isClosureTy
-            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+            let cfg = funcTy.CopyConfig()
             return tyMgr.GetFunctionTy(paramTys.toArray(), Generalize(funcTy.retTy), cfg: cfg)
         }
         if (let Some(tupleTy) <- (ty as TupleTy)) {
@@ -445,7 +447,7 @@ public class PartialInstantiation {
     }
 
     private func InstantiateFuncParam(source: FuncParam, visitor: (Node, Node) -> Unit): VarDecl {
-        let target = FuncParam()
+        let target: FuncParam = if (source is ThisParam) { ThisParam() } else { FuncParam() }
         target.colonPos = source.colonPos
         target.assignment = InstantiateExpr(source.assignment, visitor)
         if (let Some(desugarDecl) <- source.desugarDecl) {
@@ -1045,6 +1047,8 @@ public class PartialInstantiation {
 
     private func InstantiateCallExpr(source: CallExpr, visitor: (Node, Node) -> Unit): CallExpr {
         let target = CallExpr()
+        target.modal = source.modal
+        target.expectedLocalMode = source.expectedLocalMode
         target.baseFunc = InstantiateExpr(source.baseFunc, visitor)
         target.leftParenPos = source.leftParenPos
         target.needCheckToTokens = source.needCheckToTokens
@@ -1383,6 +1387,16 @@ public class PartialInstantiation {
             case ASTKind.TOKEN_PART => InstantiateTokenPart((source as TokenPart).getOrThrow(), visitor)
             case ASTKind.QUOTE_EXPR => InstantiateQuoteExpr((source as QuoteExpr).getOrThrow(), visitor)
             case ASTKind.TRY_EXPR => InstantiateTryExpr((source as TryExpr).getOrThrow(), visitor)
+            case ASTKind.EXCLAVE_EXPR =>
+                let ex = ExclaveExpr()
+                if (let Some(body) <- (source as ExclaveExpr).getOrThrow().body) { ex.body = InstantiateBlock(body, visitor) }
+                ex
+            case ASTKind.EXCLAVE_EXPR =>
+                let ex = ExclaveExpr()
+                if (let Some(block) <- (source as ExclaveExpr).getOrThrow().body) {
+                    ex.body = InstantiateExpr(block, visitor) as Block
+                }
+                ex
             case ASTKind.THROW_EXPR => InstantiateThrowExpr((source as ThrowExpr).getOrThrow(), visitor)
             case ASTKind.RETURN_EXPR => InstantiateReturnExpr((source as ReturnExpr).getOrThrow(), visitor)
             case ASTKind.WHILE_EXPR => InstantiateWhileExpr((source as WhileExpr).getOrThrow(), visitor)
@@ -1792,6 +1806,8 @@ public class PartialInstantiation {
         source: FuncParamList, visitor: (Node, Node) -> Unit): FuncParamList {
         let target = FuncParamList()
         CopyNodeField(source, target)
+        target.receiverModal = source.receiverModal
+        if (let Some(tp) <- source.thisParam) { target.thisParam = InstantiateDecl(tp, visitor) as ThisParam }
         target.leftParenPos = source.leftParenPos
         for (param in source.params) {
             if (let Some(cloned) <- (InstantiateDecl(param, visitor) as FuncParam)) {

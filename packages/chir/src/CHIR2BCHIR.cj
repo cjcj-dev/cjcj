@@ -177,7 +177,7 @@ public class CHIR2BCHIR {
     private func CollectMethods(def: CustomTypeDef, info: BCHIRSClassInfo): Unit {
         for (vtable in def.GetDefVTable().GetTypeVTables()) {
             for (funcInfo in vtable.GetVirtualMethods()) {
-                let methodName = MangleMethodName(funcInfo.GetMethodName(), funcInfo.GetMethodSigType())
+                let methodName = MangleMethodName(funcInfo.GetMethodName(), funcInfo.GetMethodSigType(), omitFirstArg: true)
                 let method = funcInfo.GetVirtualMethod().getOrThrow()
                 if (!method.IsPureAbstract()) {
                     info.vtable[methodName] = method.GetIdentifierWithoutPrefix()
@@ -267,17 +267,18 @@ public class CHIR2BCHIR {
         }
         context.definition.PushOp(OpCode.DROP)
         if (let Some(body) <- function.GetBody()) {
-            if (let Some(entry) <- body.GetEntryBlock()) {
-                TranslateBlock(context, entry)
-                for (block in body.GetBlocks()) {
-                    if (block.nodeId != entry.nodeId) {
-                        TranslateBlock(context, block)
-                    }
-                }
-            }
+            TranslateBlockGroup(context, body)
         }
         context.definition.SetNumArgs(function.GetNumOfParams())
         context.definition.SetNumLVars(context.localVarId)
+    }
+
+    public func TranslateBlockGroup(context: CHIR2BCHIRContext, body: BlockGroup): Unit {
+        let entry = body.GetEntryBlock().getOrThrow()
+        TranslateBlock(context, entry)
+        for (block in body.GetBlocks()) {
+            if (!refEq(block, entry)) { TranslateBlock(context, block) }
+        }
     }
 
     public func TranslateBlock(context: CHIR2BCHIRContext, block: Block): Unit {

@@ -177,6 +177,8 @@ public func As(kind: ASTKind, node: Option<Node>): Option<Node> {
                 if (let Some(casted) <- DynamicCast<DoWhileExpr>(value)) { casted } else { None }
             case ASTKind.TYPE_CONV_EXPR =>
                 if (let Some(casted) <- DynamicCast<TypeConvExpr>(value)) { casted } else { None }
+            case ASTKind.EXCLAVE_EXPR =>
+                if (let Some(casted) <- DynamicCast<ExclaveExpr>(value)) { casted } else { None }
             case ASTKind.THROW_EXPR =>
                 if (let Some(casted) <- DynamicCast<ThrowExpr>(value)) { casted } else { None }
             case ASTKind.PERFORM_EXPR =>
@@ -326,6 +328,7 @@ public func StaticAs(kind: ASTKind, node: Any): Node {
         case ASTKind.FOR_IN_EXPR => StaticCast<ForInExpr>(node)
         case ASTKind.DO_WHILE_EXPR => StaticCast<DoWhileExpr>(node)
         case ASTKind.TYPE_CONV_EXPR => StaticCast<TypeConvExpr>(node)
+        case ASTKind.EXCLAVE_EXPR => StaticCast<ExclaveExpr>(node)
         case ASTKind.THROW_EXPR => StaticCast<ThrowExpr>(node)
         case ASTKind.PERFORM_EXPR => StaticCast<PerformExpr>(node)
         case ASTKind.RESUME_EXPR => StaticCast<ResumeExpr>(node)

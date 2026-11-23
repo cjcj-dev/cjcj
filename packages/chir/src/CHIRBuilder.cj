@@ -1,7 +1,7 @@
 package cjcj::chir
 
 import std.collection.*
-import cjcj::utils.OverflowStrategy
+import cjcj::utils.{CJC_ASSERT, OverflowStrategy}
 
 public class CHIRBuilder {
     public let context: CHIRContext
@@ -377,6 +377,11 @@ public class CHIRBuilder {
         return expr
     }
 
+    // Official CHIRBuilder::WithModal (CHIRBuilder.h:45-48 @63bf237b).
+    public func WithModal(ty: Type, modal: ModalInfo): Type {
+        return context.WithModal(ty, modal)
+    }
+
     public func CreateAllocate(resultTy: Type, allocatedTy: Type, parent: Block): Allocate {
         let expr = Allocate(allocatedTy, parent)
         expr.ConnectOperandsAndGroups()
@@ -608,6 +613,17 @@ public class CHIRBuilder {
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
         return expr
+    }
+
+    public func CreateExclave(parent: Block): Exclave {
+        let expr = Exclave(parent)
+        StoreAllocatedPtrInFuncOrLambda(parent.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
+        return expr
+    }
+
+    public func CreateRegionBoundary(kind: ExprKind, parent: Block): Expression {
+        CJC_ASSERT(kind == ExprKind.START_REGION || kind == ExprKind.END_REGION)
+        return CreateExpression(kind, context.GetUnitTy(), ArrayList<Value>(), parent)
     }
 
     public func CreateGetException(resultTy: Type, parent: Block): GetException {

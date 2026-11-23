@@ -195,10 +195,8 @@ private open class MetadataInfo {
         return ops.CreateMDTuple()
     }
 
-    protected func GetTiName(ty: Type): String {
-        if (ty.IsRef()) {
-            return GetTiName(ty.StripAllRefs())
-        }
+    protected func GetTiName(sourceType: Type): String {
+        let ty = sourceType.StripAllRefs().GetDataType(module.GetCGContext().GetCHIRBuilder())
         let cgType = CGType.GetOrCreate(module, ty)
         if (ty.IsGenericRelated()) {
             let ti = cgType.GetOrCreateTypeInfo()

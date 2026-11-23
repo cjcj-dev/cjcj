@@ -410,12 +410,19 @@ extend ParserImpl {
                 { pos: Position => callExpr.args[callExpr.args.size - 1].commaPos = pos },
                 { => callExpr.args.add(ParseFuncArg()) },
                 TokenKind.RPAREN)
-            if (!Skip(TokenKind.RPAREN) && !callExpr.TestAttr(Attribute.HAS_BROKEN)) {
+            let closed = Skip(TokenKind.RPAREN)
+            if (!closed && !callExpr.TestAttr(Attribute.HAS_BROKEN)) {
                 callExpr.EnableAttr(Attribute.HAS_BROKEN)
                 DiagExpectedRightDelimiter("(", callExpr.leftParenPos)
             }
             callExpr.rightParenPos = lastToken.Begin()
             callExpr.end = lastToken.End()
+            if (closed && !newlineSkipped) {
+                callExpr.modal = ParseLocalModeSuffix(receiverOrCall: true)
+                if (let Some(modal) <- callExpr.modal) {
+                    callExpr.end = modal.end
+                }
+            }
         }
         return callExpr
     }
@@ -651,6 +658,9 @@ extend ParserImpl {
                     invalid
                 } else {
                     ParseType()
+                }
+                if (let Some(modal) <- typeNode.modal) {
+                    DiagnoseUnexpectedLocalMode(modal)
                 }
                 base.end = typeNode.end
                 if (let Some(isExpr) <- (base as IsExpr)) {
@@ -1634,6 +1644,20 @@ extend ParserImpl {
         ret.handlers.add(handler)
     }
 
+    private func ParseExceptTypes(pattern: ExceptTypePattern): Unit {
+        do {
+            if (lastToken.kind == TokenKind.BITOR) {
+                pattern.bitOrPosVector.add(lastToken.Begin())
+            }
+            let ty = ParseType()
+            if (let Some(modal) <- ty.modal) {
+                DiagnoseUnexpectedLocalMode(modal)
+            }
+            pattern.types.add(ty)
+            pattern.end = ty.end
+        } while (Skip(TokenKind.BITOR))
+    }
+
     public func ParseExceptTypePattern(): Pattern {
         if (Skip(TokenKind.WILDCARD)) {
             let wildcard = WildcardPattern(lastToken.Begin())
@@ -1645,15 +1669,7 @@ extend ParserImpl {
             pattern.patternPos = wildcard.begin
             pattern.colonPos = lastToken.Begin()
             pattern.begin = wildcard.begin
-            do {
-                if (lastToken.kind == TokenKind.BITOR) {
-                    pattern.bitOrPosVector.add(lastToken.Begin())
-                }
-                pattern.types.add(ParseType())
-            } while (Skip(TokenKind.BITOR))
-            if (!pattern.types.isEmpty()) {
-                pattern.end = pattern.types[pattern.types.size - 1].end
-            }
+            ParseExceptTypes(pattern)
             return pattern
         }
         if (SeeingIdentifierLike()) {
@@ -1672,15 +1688,7 @@ extend ParserImpl {
                     ConvertToken(Peek())).Emit()
                 pattern.isBroken = true
             }
-            do {
-                if (lastToken.kind == TokenKind.BITOR) {
-                    pattern.bitOrPosVector.add(lastToken.Begin())
-                }
-                pattern.types.add(ParseType())
-            } while (Skip(TokenKind.BITOR))
-            if (!pattern.types.isEmpty()) {
-                pattern.end = pattern.types[pattern.types.size - 1].end
-            }
+            ParseExceptTypes(pattern)
             return pattern
         }
         let token = Peek()

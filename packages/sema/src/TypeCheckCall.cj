@@ -35,6 +35,7 @@ private class MatchingStat {
 private class FunctionMatchingUnit {
     public var id: Int64 = -1
     public var fd: FuncDecl
+    public let argumentModes = ArrayList<Option<ASTMode>>()
     public var tysInArgOrder: ArrayList<Ty>
     public var typeMapping: SubstPack
     public var diags: Array<BasicDiagnostic> = Array<BasicDiagnostic>()
@@ -1164,6 +1165,10 @@ private func IsInterfaceFuncWithSameSignature(typeManager: TypeManager, left: Fu
 
 private func CompareFuncCandidates(typeManager: TypeManager, left: FunctionMatchingUnit, right: FunctionMatchingUnit,
     ce: CallExpr): Bool {
+    if (!SameModalInputs(left.fd, right.fd) &&
+        typeManager.IsFuncParameterTypesIdentical(left.tysInArgOrder, right.tysInArgOrder)) {
+        return MoreSpecificModes(left.fd, right.fd, ce)
+    }
     var hasGeneric = false
     for (ty in right.tysInArgOrder) {
         if (ty.HasGeneric()) {
@@ -1192,6 +1197,9 @@ private func CompareFuncCandidates(typeManager: TypeManager, left: FunctionMatch
         }
         var pos: Int64 = 0
         while (pos < left.tysInArgOrder.size) {
+            let l = LocalParameterMode(left.fd, ModeArgumentIndex(left.fd, ce, pos))
+            let r = LocalParameterMode(right.fd, ModeArgumentIndex(right.fd, ce, pos))
+            if (!l.IsSubMode(r) && !typeManager.IsModalCopyType(left.tysInArgOrder[pos])) { return false }
             if (left.tysInArgOrder[pos].IsNumeric() && right.tysInArgOrder[pos].IsNumeric() &&
                 CompareIntAndFloat(left.tysInArgOrder[pos], right.tysInArgOrder[pos]) == ComparisonRes.GT) {
                 return false
@@ -1261,7 +1269,7 @@ private func FilterOverriden(typeManager: TypeManager, candidates: ArrayList<Fun
             let otherInstFuncTy = typeManager.ApplySubstPack(candidates[otherIdx].fd.GetTy().getOrThrow(),
                 candidates[otherIdx].typeMapping)
             let otherFuncBody = candidates[otherIdx].fd.funcBody.getOrThrow()
-            var sameSig = SameTy(instFuncTy, otherInstFuncTy)
+            var sameSig = SameTy(instFuncTy, otherInstFuncTy) && SameModalInputs(candidates[idx].fd, candidates[otherIdx].fd)
             sameSig = sameSig && (funcBody.generic.isNone() == otherFuncBody.generic.isNone())
             if (sameSig) {
                 if (let Some(generic) <- funcBody.generic) {
@@ -1282,12 +1290,269 @@ private func FilterOverriden(typeManager: TypeManager, candidates: ArrayList<Fun
     }
 }
 
-private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<FunctionMatchingUnit>, ce: CallExpr): ArrayList<Int64> {
+// Type checking selects an overload before the whole-body lifetime walk. Inspect the
+// declared slot or a local initializer without changing the shared semantic data type.
+public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Option<ASTMode> {
+    if (let Some(paren) <- (expr as ParenExpr)) {
+        if (let Some(inner) <- paren.expr) { return CallSiteMode(inner, receiver, seen) }
+    }
+    if (let Some(block) <- (expr as Block)) {
+        if ((let Some(last) <- block.GetLastExprOrDecl()) && (let Some(value) <- (last as Expr))) {
+            return CallSiteMode(value, receiver, seen)
+        }
+    }
+    if (let Some(index) <- (expr as SubscriptExpr)) {
+        if (index.isTupleAccess || index.IsVArrayAccess()) {
+            if (let Some(base) <- index.baseExpr) { return CallSiteMode(base, receiver, seen) }
+        }
+        if (let Some(lowered) <- index.desugarExpr) { return CallSiteMode(lowered, receiver, seen) }
+        if ((let Some(target) <- index.GetTarget()) && (let Some(fd) <- (target as FuncDecl)) &&
+            (let Some(ty) <- fd.GetTy()) && (let Some(ft) <- (ty as FuncTy))) { return ft.retMode }
+    }
+    if (let Some(call) <- (expr as CallExpr)) {
+        if (let Some(m) <- call.modal) { return m.local }
+        if (let Some(fd) <- call.resolvedFunction) {
+            if (fd.TestAttr(Attribute.CONSTRUCTOR)) { return GetReceiverMode(fd) }
+            if ((let Some(t) <- fd.GetTy()) && (let Some(ft) <- (t as FuncTy))) { return ft.retMode }
+        } else if ((let Some(callee) <- call.baseFunc) && (let Some(t) <- callee.GetTy()) &&
+            (let Some(ft) <- (t as FuncTy))) {
+            // A call through a function-typed value has the result mode of that function type.
+            return ft.retMode
+        }
+        return None
+    }
+    if (let Some(ma) <- (expr as MemberAccess)) {
+        let target = ma.GetTarget() ?? return None;
+        if (let Some(pd) <- (target as PropDecl)) { return PropertyMode(pd) }
+        if (target is VarDecl && IsInstanceMember(target) && !HasLocalModifier(target, TokenKind.DEMODE)) {
+            let base = ma.baseExpr ?? return None;
+            return CallSiteMode(base, receiver, seen)
+        }
+        return target.resolvedMode
+    }
+    if (let Some(ref) <- (expr as RefExpr)) {
+        if (ref.isThis || ref.isSuper) { return receiver }
+        let target = ref.GetTarget() ?? return None;
+        if (let Some(pd) <- (target as PropDecl)) { return PropertyMode(pd) }
+        if (let Some(vd) <- (target as VarDeclAbstract)) {
+            if (IsInstanceMember(vd) && !HasLocalModifier(vd, TokenKind.DEMODE)) { return receiver }
+            // A setter value without a written modal has the property mode bound by the collector.
+            if ((let Some(fp) <- (vd as FuncParam)) && fp.isPropSetterValue && fp.resolvedMode != ASTMode.NOT &&
+                (fp.typeNode.map({ t => t.modal.isNone() }) ?? true)) {
+                return fp.resolvedMode
+            }
+            if (let Some(t) <- vd.typeNode) { return t.modal.map({ m => m.local }) ?? t.resolvedMode }
+            if (let Some(initValue) <- vd.initializer) {
+                if (seen.contains(vd)) { return None }
+                seen.add(vd)
+                return CallSiteMode(initValue, receiver, seen)
+            }
+        }
+        return target.resolvedMode
+    }
+    if (let Some(be) <- (expr as BinaryExpr)) {
+        // `a ?? b` yields the content of `a`, or `b`. A right side that cannot complete normally
+        // (throw/return, type Nothing) contributes no value, so the result has the mode of `a`.
+        if (be.op == TokenKind.COALESCING) {
+            let left = be.leftExpr ?? return None;
+            let leftMode = CallSiteMode(left, receiver, seen)
+            let rightMode = if (let Some(right) <- be.rightExpr) {
+                if ((let Some(rt) <- right.GetTy()) && rt.IsNothing()) { leftMode } else { CallSiteMode(right, receiver, seen) }
+            } else { leftMode }
+            if ((let Some(l) <- leftMode) && (let Some(r) <- rightMode) && l == r) { return l }
+            return None
+        }
+    }
+    // An if/match/try yields one of its branches; a branch that cannot complete normally (type
+    // Nothing) contributes no value. Differing branch modes join to HALF, as in
+    // LocalModeAnalysis.MergeBranchModes (std.fs file_info.cj:245 `let pathStr = if ...`,
+    // std.ast parse_node.cj:695 `let macroNode = match ...`, ffi.cj:206 `try { ... } finally`).
+    let branches = ArrayList<Expr>()
+    if (let Some(ie) <- (expr as IfExpr)) {
+        branches.add(ie.thenBody ?? return None)
+        branches.add(ie.elseBody ?? return None)
+    } else if (let Some(me) <- (expr as MatchExpr)) {
+        for (c in me.matchCases) { branches.add(c.exprOrDecls ?? return None) }
+        for (c in me.matchCaseOthers) { branches.add(c.exprOrDecls ?? return None) }
+    } else if (let Some(te) <- (expr as TryExpr)) {
+        branches.add(te.tryBlock ?? return None)
+        for (c in te.catchBlocks) { branches.add(c) }
+    }
+    if (!branches.isEmpty()) {
+        var joined: Option<ASTMode> = None
+        for (branch in branches) {
+            if ((let Some(bt) <- branch.GetTy()) && bt.IsNothing()) { continue }
+            let m = CallSiteMode(branch, receiver, seen) ?? return None;
+            joined = if (let Some(j) <- joined) { if (j == m) { j } else { ASTMode.HALF } } else { m }
+        }
+        return joined
+    }
+    // `x as T` is a view of x itself (socket_util.cj:77 `(socketAddress as IPSocketAddress) ?? return`).
+    if (let Some(ae) <- (expr as AsExpr)) {
+        if (let Some(inner) <- ae.leftExpr) { return CallSiteMode(inner, receiver, seen) }
+    }
+    if (expr is LitConstExpr || expr.resolvedMode != ASTMode.NOT) { return expr.resolvedMode }
+    // Sugar lowered before or during type checking (a trailing closure, `|>`/`~>`, `quote(...)`,
+    // `?.`) has the mode of its lowering: std.unittest entry_main.cj:48 `Framework.launch(...) { }`,
+    // testmacro instrumentation.cj:690 `... |> collectHashSet`, macro_state.cj:23 `quote(@Attribute[)`.
+    if (let Some(lowered) <- expr.desugarExpr) { return CallSiteMode(lowered, receiver, seen) }
+    return None
+}
+
+private func ModeArgumentIndex(fd: FuncDecl, call: CallExpr, i: Int64): Int64 {
+    if (i >= call.args.size) { return i }
+    let name = GetArgName(fd, call.args[i])
+    return GetParamTyAccordingToArgName(fd, name).map({ p => p.index }) ?? i
+}
+
+private func ReceiverAtCall(call: CallExpr, ctx: Option<ASTContext>): ASTMode {
+    if ((let Some(context) <- ctx) && (let Some(body) <- GetCurFuncBody(context, call.scopeName)) &&
+        (let Some(fd) <- body.funcDecl)) { return GetReceiverMode(fd) }
+    return ASTMode.NOT
+}
+
+private func PermitsModalCall(typeManager: TypeManager, unit: FunctionMatchingUnit, call: CallExpr, receiver: ASTMode): Bool {
+    let fd = unit.fd
+    let base = call.baseFunc ?? return true;
+    if (!fd.TestAttr(Attribute.CONSTRUCTOR) && !fd.TestAttr(Attribute.ENUM_CONSTRUCTOR) &&
+        (let Some(mode) <- call.expectedLocalMode) && (let Some(ty) <- fd.GetTy()) &&
+        (let Some(ft) <- (ty as FuncTy)) && !ft.retMode.IsSubMode(mode) &&
+        !typeManager.IsModalCopyType(typeManager.ApplySubstPack(ft.retTy, unit.typeMapping))) {
+        return false
+    }
+    if (fd.TestAttr(Attribute.CONSTRUCTOR) && !fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+        if ((let Some(m) <- call.modal) && m.local != GetReceiverMode(fd)) { return false }
+        if (call.modal.isNone() && (let Some(expected) <- call.expectedLocalMode) &&
+            !GetReceiverMode(fd).IsSubMode(expected)) { return false }
+        if ((let Some(r) <- (base as RefExpr)) && (r.isThis || r.isSuper) &&
+            !receiver.IsSubMode(GetReceiverMode(fd))) { return false }
+    } else if (IsInstanceMember(fd)) {
+        var actual: Option<ASTMode> = Some(receiver)
+        var receiverTy = fd.outerDecl.flatMap({ d => d.GetTy() })
+        if ((let Some(ma) <- (base as MemberAccess)) && (let Some(obj) <- ma.baseExpr)) {
+            actual = CallSiteMode(obj, receiver, HashSet<Decl>())
+            receiverTy = obj.GetTy()
+        }
+        if ((let Some(m) <- actual) && !m.IsSubMode(GetReceiverMode(fd)) &&
+            !(receiverTy.map({ t => typeManager.IsModalCopyType(t) }) ?? false)) { return false }
+    }
+    for (i in 0..call.args.size) {
+        if (let Some(value) <- call.args[i].expr) {
+            // Candidate argument checking may have rolled back the speculative expression type.
+            // Use the already matched, substituted parameter for Copyable conversions in that case.
+            if ((value.GetTy().map({ ty => Ty.IsTyCorrect(ty) && typeManager.IsModalCopyType(ty) }) ?? false) ||
+                (i < unit.tysInArgOrder.size &&
+                typeManager.IsModalCopyType(typeManager.ApplySubstPack(unit.tysInArgOrder[i], unit.typeMapping)))) {
+                continue
+            }
+            let slot = LocalParameterMode(fd, ModeArgumentIndex(fd, call, i))
+            let actual = if (i < unit.argumentModes.size && unit.argumentModes[i].isSome()) { unit.argumentModes[i] }
+                else { CallSiteMode(value, receiver, HashSet<Decl>()) }
+            if ((let Some(m) <- actual) && !m.IsSubMode(slot)) { return false }
+        }
+    }
+    return true
+}
+
+private func MoreSpecificModes(left: FuncDecl, right: FuncDecl, ce: CallExpr): Bool {
+    let a = GetReceiverMode(left)
+    let b = GetReceiverMode(right)
+    var better = false
+    if (a != b) {
+        if (left.TestAttr(Attribute.CONSTRUCTOR) && ce.modal.isNone() &&
+            (a == (ce.expectedLocalMode ?? ASTMode.NOT) || b == (ce.expectedLocalMode ?? ASTMode.NOT))) {
+            if (b == (ce.expectedLocalMode ?? ASTMode.NOT)) { return false }
+        } else if (!a.IsSubMode(b)) { return false }
+        better = true
+    }
+    for (i in 0..ce.args.size) {
+        let l = LocalParameterMode(left, ModeArgumentIndex(left, ce, i))
+        let r = LocalParameterMode(right, ModeArgumentIndex(right, ce, i))
+        if (!l.IsSubMode(r)) { return false }
+        if (l != r) { better = true }
+    }
+    return better
+}
+
+// Match the implicit or explicit receiver before comparing the ordinary parameter list.
+// A Copyable argument does not make a less specific receiver as good as an exact one.
+private func FilterReceiverModes(call: CallExpr, enclosing: ASTMode,
+    candidates: ArrayList<FunctionMatchingUnit>, marks: ArrayList<Bool>): Unit {
+    let base = call.baseFunc ?? return;
+    if (!(base is NameReferenceExpr)) { return }
+    var actual: Option<ASTMode> = Some(enclosing)
+    if ((let Some(member) <- (base as MemberAccess)) && (let Some(obj) <- member.baseExpr)) {
+        actual = CallSiteMode(obj, enclosing, HashSet<Decl>())
+    }
+    let m = actual ?? ASTMode.NOT
+    var exact = false
+    var sub = false
+    for (i in 0..marks.size) {
+        let fd = candidates[i].fd
+        if (!marks[i] || !IsInstanceMember(fd) || fd.TestAttr(Attribute.CONSTRUCTOR)) { continue }
+        let param = GetReceiverMode(fd)
+        if (m == param) { exact = true }
+        if (actual.isSome() && m.IsSubMode(param)) { sub = true }
+    }
+    if (!exact && !sub) { return }
+    for (i in 0..marks.size) {
+        let fd = candidates[i].fd
+        if (!marks[i] || !IsInstanceMember(fd) || fd.TestAttr(Attribute.CONSTRUCTOR)) { continue }
+        let param = GetReceiverMode(fd)
+        if ((exact && m != param) || (!exact && !m.IsSubMode(param))) { marks[i] = false }
+    }
+}
+
+private func HasAnyLocalInput(unit: FunctionMatchingUnit, call: CallExpr): Bool {
+    if (GetReceiverMode(unit.fd) != ASTMode.NOT) { return true }
+    for (i in 0..unit.tysInArgOrder.size) {
+        if (LocalParameterMode(unit.fd, ModeArgumentIndex(unit.fd, call, i)) != ASTMode.NOT) { return true }
+    }
+    return false
+}
+
+// Equivalent data types with Copyable elements can tie even after ordinary generic comparison.
+// Only a RawArray intrinsic may break such a tie on the mode of the first parameter.
+private func CompareRawArrayIntrinsicModes(tm: TypeManager, left: FunctionMatchingUnit,
+    right: FunctionMatchingUnit, call: CallExpr): Option<Bool> {
+    let n = left.tysInArgOrder.size
+    if (!left.fd.TestAttr(Attribute.INTRINSIC) || !right.fd.TestAttr(Attribute.INTRINSIC) ||
+        n == 0 || n != right.tysInArgOrder.size || n != call.args.size) { return None }
+    let arr = tm.ApplySubstPack(left.tysInArgOrder[0], left.typeMapping)
+    if (!arr.IsArray() || arr.typeArgs.isEmpty() || !tm.IsModalCopyType(arr.typeArgs[0]) ||
+        !SameTy(arr, tm.ApplySubstPack(right.tysInArgOrder[0], right.typeMapping))) { return None }
+    let a = LocalParameterMode(left.fd, ModeArgumentIndex(left.fd, call, 0))
+    let b = LocalParameterMode(right.fd, ModeArgumentIndex(right.fd, call, 0))
+    if (a == b) { return None }
+    for (i in 1..n) {
+        let ty = tm.ApplySubstPack(left.tysInArgOrder[i], left.typeMapping)
+        if (!SameTy(ty, tm.ApplySubstPack(right.tysInArgOrder[i], right.typeMapping))) { return None }
+        if (LocalParameterMode(left.fd, ModeArgumentIndex(left.fd, call, i)) !=
+            LocalParameterMode(right.fd, ModeArgumentIndex(right.fd, call, i)) && !tm.IsModalCopyType(ty)) { return None }
+    }
+    if (a.IsSubMode(b)) { return Some(true) }
+    if (b.IsSubMode(a)) { return Some(false) }
+    return None
+}
+
+private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<FunctionMatchingUnit>, ce: CallExpr,
+    ctx: Option<ASTContext>): ArrayList<Int64> {
     let targetMark = ArrayList<Bool>()
     for (_ in candidates) {
         targetMark.add(true)
     }
     FilterOverriden(typeManager, candidates, targetMark)
+    var differs = false
+    for (i in 1..candidates.size) {
+        if (!SameModalInputs(candidates[i].fd, candidates[0].fd)) { differs = true; break }
+    }
+    if (differs) {
+        let receiver = ReceiverAtCall(ce, ctx)
+        for (i in 0..candidates.size) {
+            if (targetMark[i]) { targetMark[i] = PermitsModalCall(typeManager, candidates[i], ce, receiver) }
+        }
+        FilterReceiverModes(ce, receiver, candidates, targetMark)
+    }
     var idx: Int64 = 0
     while (idx < candidates.size) {
         if (!targetMark[idx]) {
@@ -1300,8 +1565,14 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
                 otherIdx++
                 continue
             }
-            let leftToRight = CompareFuncCandidates(typeManager, candidates[idx], candidates[otherIdx], ce)
-            let rightToLeft = CompareFuncCandidates(typeManager, candidates[otherIdx], candidates[idx], ce)
+            var leftToRight = CompareFuncCandidates(typeManager, candidates[idx], candidates[otherIdx], ce)
+            var rightToLeft = CompareFuncCandidates(typeManager, candidates[otherIdx], candidates[idx], ce)
+            if (!leftToRight && !rightToLeft) {
+                if (let Some(leftBetter) <- CompareRawArrayIntrinsicModes(typeManager, candidates[idx], candidates[otherIdx], ce)) {
+                    leftToRight = leftBetter
+                    rightToLeft = !leftBetter
+                }
+            }
             if (leftToRight && !rightToLeft) {
                 targetMark[otherIdx] = false
             } else if (!leftToRight && rightToLeft) {
@@ -1315,6 +1586,15 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
             otherIdx++
         }
         idx++
+    }
+    var hasOrdinary = false
+    for (i in 0..targetMark.size) {
+        if (targetMark[i] && !HasAnyLocalInput(candidates[i], ce)) { hasOrdinary = true; break }
+    }
+    if (hasOrdinary) {
+        for (i in 0..targetMark.size) {
+            if (targetMark[i] && HasAnyLocalInput(candidates[i], ce)) { targetMark[i] = false }
+        }
     }
     let out = ArrayList<Int64>()
     var markIdx: Int64 = 0
@@ -2160,12 +2440,7 @@ private func IsConcreteForTyArgSynthesis(tyVarsToSolve: ArrayList<GenericsTy>, t
 }
 
 private func CloneFuncTyCfgForQuest(funcTy: FuncTy): FuncTyConfig {
-    let cfg = FuncTyConfig()
-    cfg.isC = funcTy.isC
-    cfg.isClosureTy = funcTy.isClosureTy
-    cfg.hasVariableLenArg = funcTy.hasVariableLenArg
-    cfg.noCast = funcTy.noCast
-    return cfg
+    return funcTy.CopyConfig()
 }
 
 private func UnsolvedAsQuest(typeManager: TypeManager, tyVarsToSolve: ArrayList<GenericsTy>, ty: Ty): Option<Ty> {
@@ -3156,6 +3431,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
             return None
         }
     }
+    for (arg in ce.args) { unit.argumentModes.add(arg.checkedMode) }
     unit.argNameValid = candidate.stat.argNameValid
     unit.matchedArgs = candidate.stat.matchedArgs
     if (NeedSynOnUsed(fd)) {
@@ -4127,7 +4403,7 @@ private func CheckMatchResult(typeManager: TypeManager, diag: Option<BasicDiagno
             return (out, SubstPack())
         }
         InstantiatePartOfTheGenericParameters(typeManager, legals)
-        let resolved = ResolveOverload(typeManager, legals, ce)
+        let resolved = ResolveOverload(typeManager, legals, ce, ctx)
         if (resolved.size == 1) {
             selectedIdx = resolved[0]
         } else {
@@ -4237,6 +4513,11 @@ internal func MatchFunctionForCall(ctx: Option<ASTContext>, candidates: ArrayLis
     }
     let fdScopeLevelMap = HashMap<Node, Int64>()
     let orderedCandidates = GetOrderedCandidates(ctx, ce, candidates, fdScopeLevelMap)
+    var compareModes = false
+    for (i in 1..candidates.size) {
+        if (!SameModalInputs(candidates[0], candidates[i])) { compareModes = true; break }
+    }
+    let enclosingMode = ReceiverAtCall(ce, ctx)
     let illegals = ArrayList<FunctionMatchingUnit>()
     var preScopeLevel: Int64 = 0
     if (!orderedCandidates.isEmpty()) {
@@ -4263,6 +4544,8 @@ internal func MatchFunctionForCall(ctx: Option<ASTContext>, candidates: ArrayLis
             try (ds = DiagSuppressor(diag)) {
                 checked = CheckCandidate(typeManager, diag, ctx, candidate, target, argChecker: argChecker,
                     inferenceFailure: None, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer)
+                if (compareModes && !fd.TestAttr(Attribute.ENUM_CONSTRUCTOR) && (let Some(unit) <- checked) &&
+                    !PermitsModalCall(typeManager, unit, ce, enclosingMode)) { checked = None }
                 suppressedDiags = ds.GetSuppressedDiag()
             }
             let duplicated = checked.isSome() && !legals.isEmpty() &&

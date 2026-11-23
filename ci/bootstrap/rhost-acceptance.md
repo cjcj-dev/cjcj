@@ -74,6 +74,28 @@ native H1 commands). It feeds the existing stage0 reuse branch after checking
 source, host, N, producer command/rc and product bytes. Omit it for a native H1
 build. It is not a migration of a previous flow's stage output.
 
+For a Linux front-end-only install of that same native H1, use
+`node ci/bootstrap/sdk-build.mjs --install-inputs DESCRIPTOR --no-package`.
+Set `layout: "h1-frontend"`, private `work` and `install` paths, `sources.h1`
+and its full `h1Commit`, `host.install`, and `installations.llvm.install`
+to the original N prefix. Supply `installations.shim.install` when the producer
+used a separately installed compiler shim. `installations.h1` has the same
+fields as above. The producer's source determines whether there must be a
+matching flatc command, schema, and generated interface in that installation.
+The existing installer copies H1 and its selected execution libraries and
+publishes `bin/cjc` and `bin/cjc-frontend`. Set `stdCoreInterface` to the
+compatible `std.core.cjo` to install for the front end. Supply other interfaces
+with the compiler's normal import options. This layout has no target runtime
+or native std libraries and does not qualify native programs, packages, or the
+complete SDK.
+
+The installer derives cross execution from the selected platform and the
+running host. Omit `cross`; an explicit value that disagrees is a configuration
+error. This layout is native Linux only and checks compiler identity before
+publishing. The install result reports `compiler-identity` for that check alone,
+or `compiler-identity-and-configured-checks` when it also ran configured
+`test.required` or `test.commands` checks.
+
 ## Controlled semantic cut and recovery (prepared, NOT_RUN)
 
 This is a design for a later explicitly authorized isolated R source/install,

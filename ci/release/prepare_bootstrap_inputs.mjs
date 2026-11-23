@@ -1,4 +1,5 @@
 #!/usr/bin/env zx
+import {stdxChirMembers} from '../bootstrap/sdk-platform.mjs';
 import {nativeLlvmInputs} from '../native-llvm-inputs.mjs';
 
 import crypto from 'node:crypto';
@@ -88,7 +89,7 @@ const hostLlvm = prepareHostLlvm();
 
 function completeAstInput(archive) {
   return archive && ['SHA256SUMS', 'include/cangjie',
-    'include/flatbuffers/StdAstFormat_generated.h', 'schema/StdAstFormat.fbs',
+    'include/flatbuffers/StdAstFormat_generated.h', 'schema/StdAstFormat.fbs', ...stdxChirMembers,
     `third_party/flatbuffers/bin/flatc${sdkPlatform(platform).exe}`, 'third_party/flatbuffers/include',
     'third_party/flatbuffers/cangjie', 'third_party/flatbuffers/modules']
     .every(name => fs.existsSync(path.join(path.dirname(archive), name)));

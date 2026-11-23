@@ -64,8 +64,12 @@ private class LookUpImpl {
             if (!decl.TestAttr(Attribute.ABSTRACT)) {
                 var propIdx: Int64 = 0
                 while (propIdx < results.size) {
-                    if (results[propIdx].TestAttr(Attribute.ABSTRACT)) {
+                    let previous = results[propIdx]
+                    if (previous.TestAttr(Attribute.ABSTRACT) &&
+                        (let Some(pd) <- (previous as PropDecl)) &&
+                        PropertyMode(pd) == PropertyMode((decl as PropDecl).getOrThrow())) {
                         results.remove(at: propIdx)
+                        if (propIdx < resultsWithInstTyV.size) { resultsWithInstTyV.remove(at: propIdx) }
                     } else {
                         propIdx++
                     }
@@ -271,17 +275,16 @@ private func isNodeInTypeAliasDecl(node: Node, tad: TypeAliasDecl): Bool {
     return false
 }
 
-private func isTargetVisibleToNode(target: Decl, node: Node): Bool {
-    if (!target.TestAttr(Attribute.PRIVATE)) {
+func isTargetVisibleToNode(target: Decl, node: Node): Bool {
+    if (!target.TestAttr(Attribute.PRIVATE)) { return true }
+    let file = node.curFile ?? return false
+    if ((let Some(pkg) <- file.curPackage) && pkg.fullPackageName == "std.core" &&
+        target.fullPackageName == pkg.fullPackageName && target.TestAttr(Attribute.GLOBAL) &&
+        (target.identifier.Val() == "arrayInitByFunction" || target.identifier.Val() == "arrayInitByCollection")) {
         return true
     }
-    if (let Some(leftFile) <- target.curFile) {
-        if (let Some(rightFile) <- node.curFile) {
-            return leftFile.fileHash == rightFile.fileHash && leftFile.filePath == rightFile.filePath
-        }
-        return false
-    }
-    return true
+    let owner = target.curFile ?? return false
+    return owner.fileHash == file.fileHash && owner.filePath == file.filePath
 }
 
 private func propAccessibleForAccess(propDecl: PropDecl, isSetter: Bool): Bool {
@@ -919,6 +922,8 @@ private func findRealResult(ctx: ASTContext, node: Node, isSetter: Bool, results
             } else {
                 results.add(varDecl)
             }
+            // Every usable property at this scope participates in receiver overload resolution.
+            if (targetDecl is PropDecl) { continue }
             if (let Some(refExpr) <- (node as RefExpr)) {
                 if (let Some(_) <- refExpr.callOrPattern) {
                     continue

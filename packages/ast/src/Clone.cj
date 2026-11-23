@@ -62,6 +62,10 @@ func CopyNodeField(source: Node, target: Node): Unit {
     target.begin = source.begin
     target.end = source.end
     target.SetTy(source.GetTy().getOrThrow())
+    target.resolvedMode = source.resolvedMode
+    if ((let Some(fromExpr) <- (source as Expr)) && (let Some(toExpr) <- (target as Expr))) {
+        toExpr.expectedLocalMode = fromExpr.expectedLocalMode
+    }
     target.curMacroCall = source.curMacroCall
     target.isInMacroCall = source.isInMacroCall
     target.comments = cloneCommentGroups(source.comments)
@@ -613,9 +617,8 @@ public class ASTCloner {
     }
 
     private static func CloneFuncParam(source: FuncParam, visitFunc: (Node, Node) -> Unit): VarDecl {
-        let _ = source
         let _ = visitFunc
-        let target = FuncParam()
+        let target: FuncParam = if (source is ThisParam) { ThisParam() } else { FuncParam() }
         target.EnableAttr(Attribute.COMPILER_ADD)
         return target
     }
@@ -1006,6 +1009,12 @@ public class ASTCloner {
         return target
     }
 
+    private static func CloneExclaveExpr(source: ExclaveExpr, visitFunc: (Node, Node) -> Unit): ExclaveExpr {
+        let target = ExclaveExpr()
+        target.body = CloneBlock(source.body, visitFunc)
+        return target
+    }
+
     private static func CloneThrowExpr(source: ThrowExpr, visitFunc: (Node, Node) -> Unit): ThrowExpr {
         let target = ThrowExpr()
         target.throwPos = source.throwPos
@@ -1143,6 +1152,8 @@ public class ASTCloner {
         let target = CallExpr()
         target.baseFunc = CloneExpr(source.baseFunc, visitFunc)
         target.leftParenPos = source.leftParenPos
+        target.modal = source.modal
+        target.expectedLocalMode = source.expectedLocalMode
         target.needCheckToTokens = source.needCheckToTokens
         let cloneTable = HashMap<Node, FuncArg>()
         for (arg in source.args) {
@@ -1444,6 +1455,7 @@ public class ASTCloner {
             case ASTKind.TOKEN_PART => CloneTokenPart((source as TokenPart).getOrThrow(), visitFunc)
             case ASTKind.QUOTE_EXPR => CloneQuoteExpr((source as QuoteExpr).getOrThrow(), visitFunc)
             case ASTKind.TRY_EXPR => CloneTryExpr((source as TryExpr).getOrThrow(), visitFunc)
+            case ASTKind.EXCLAVE_EXPR => CloneExclaveExpr((source as ExclaveExpr).getOrThrow(), visitFunc)
             case ASTKind.THROW_EXPR => CloneThrowExpr((source as ThrowExpr).getOrThrow(), visitFunc)
             case ASTKind.PERFORM_EXPR => ClonePerformExpr((source as PerformExpr).getOrThrow(), visitFunc)
             case ASTKind.RESUME_EXPR => CloneResumeExpr((source as ResumeExpr).getOrThrow(), visitFunc)
@@ -1585,6 +1597,7 @@ public class ASTCloner {
             case ASTKind.MATCH_CASE_OTHER => MatchCaseOther()
             case ASTKind.MATCH_EXPR => MatchExpr()
             case ASTKind.TRY_EXPR => TryExpr()
+            case ASTKind.EXCLAVE_EXPR => ExclaveExpr()
             case ASTKind.THROW_EXPR => ThrowExpr()
             case ASTKind.PERFORM_EXPR => PerformExpr()
             case ASTKind.RESUME_EXPR => ResumeExpr()
@@ -1861,6 +1874,7 @@ public class ASTCloner {
                 dst.desugarDecl = if (let Some(decl) <- src.desugarDecl) { CloneNode(decl, visitFunc) as FuncDecl } else { None }
                 dst.isNamedParam = src.isNamedParam
                 dst.hasLetOrVar = src.hasLetOrVar
+                dst.isPropSetterValue = src.isPropSetterValue
             }
         }
         if (let Some(src) <- (source as EnumDecl)) {
@@ -1885,6 +1899,8 @@ public class ASTCloner {
         if (let Some(src) <- (source as FuncParamList)) {
             if (let Some(dst) <- (target as FuncParamList)) {
                 dst.leftParenPos = src.leftParenPos
+                dst.receiverModal = src.receiverModal
+                if (let Some(tp) <- src.thisParam) { dst.thisParam = CloneNode(tp, visitFunc) as ThisParam }
                 for (param in src.params) { if (let Some(cloned) <- (CloneNode(param, visitFunc) as FuncParam)) { dst.params.add(cloned) } }
                 dst.rightParenPos = src.rightParenPos
                 dst.variadicArgIndex = src.variadicArgIndex
@@ -2080,6 +2096,11 @@ public class ASTCloner {
     }
 
     private static func copyType(source: Node, target: Node, visitFunc: (Node, Node) -> Unit): Unit {
+        if (let Some(src) <- (source as Type)) {
+            if (let Some(dst) <- (target as Type)) {
+                dst.modal = src.modal
+            }
+        }
         if (let Some(src) <- (source as RefType)) {
             if (let Some(dst) <- (target as RefType)) {
                 dst.ref = cloneReference(src.ref)
@@ -2284,6 +2305,7 @@ public class ASTCloner {
                 dst.finallyLambda = if (let Some(lambda) <- src.finallyLambda) { CloneNode(lambda, visitFunc) as LambdaExpr } else { None }
             }
         }
+        if ((let Some(src) <- (source as ExclaveExpr)) && (let Some(dst) <- (target as ExclaveExpr))) { dst.body = cloneBlock(src.body, visitFunc) }
         if (let Some(src) <- (source as ThrowExpr)) { if (let Some(dst) <- (target as ThrowExpr)) { dst.throwPos = src.throwPos; dst.expr = cloneExpr(src.expr, visitFunc) } }
         if (let Some(src) <- (source as PerformExpr)) { if (let Some(dst) <- (target as PerformExpr)) { dst.performPos = src.performPos; dst.expr = cloneExpr(src.expr, visitFunc) } }
         if (let Some(src) <- (source as ResumeExpr)) {
@@ -2381,6 +2403,8 @@ public class ASTCloner {
         }
         if (let Some(src) <- (source as CallExpr)) {
             if (let Some(dst) <- (target as CallExpr)) {
+                dst.modal = src.modal
+                dst.expectedLocalMode = src.expectedLocalMode
                 dst.baseFunc = cloneExpr(src.baseFunc, visitFunc)
                 if (let Some(baseFunc) <- dst.baseFunc) {
                     if (let Some(member) <- (baseFunc as MemberAccess)) {

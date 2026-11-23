@@ -1251,6 +1251,10 @@ extend TypeChecker {
             }
         }
         PostTypeCheck(activeContexts)
+        if ((let Some(instance) <- impl.ci) && instance.globalOptions.IsLocalModeAnalysis() &&
+            (let Some(diag) <- impl.diag) && diag.GetErrorCount() == 0u64) {
+            for (pkg in pkgs) { LocalModeAnalysis(diag, impl.typeManager).Resolve(pkg) }
+        }
     }
 
     public func PerformDesugarAfterSema(pkgs: ArrayList<Package>): Unit {
@@ -2083,6 +2087,8 @@ extend TypeChecker {
             }
             let firstParam = body.paramLists[0].params[0]
             if (firstParam.typeNode.isNone()) {
+                // Keep the clone as it is. The setter value's mode lives on the parameter (see
+                // Collector.SetPropAccessorContext), so it does not spread through the synthesized type.
                 firstParam.typeNode = ASTCloner.Clone(typeNode) as Type
             }
             AddUnitType(setter)
@@ -3550,6 +3556,37 @@ extend TypeChecker {
         return true
     }
 
+    // Pass the contextual mode only along value-producing edges. A condition, earlier statement
+    // or nested function body never inherits the result slot of its enclosing expression.
+    private func SetExpectedResultMode(expr: Expr, mode: ASTMode): Unit {
+        expr.expectedLocalMode = Some(mode)
+        if (let Some(b) <- (expr as Block)) {
+            if ((let Some(last) <- b.GetLastExprOrDecl()) && (let Some(value) <- (last as Expr))) {
+                SetExpectedResultMode(value, mode)
+            }
+        } else if (let Some(p) <- (expr as ParenExpr)) {
+            if (let Some(value) <- p.expr) { SetExpectedResultMode(value, mode) }
+        } else if (let Some(region) <- (expr as ExclaveExpr)) {
+            if (let Some(value) <- region.body) { SetExpectedResultMode(value, mode) }
+        } else if (let Some(branch) <- (expr as IfExpr)) {
+            if (let Some(value) <- branch.thenBody) { SetExpectedResultMode(value, mode) }
+            if (let Some(value) <- branch.elseBody) { SetExpectedResultMode(value, mode) }
+        } else if (let Some(m) <- (expr as MatchExpr)) {
+            for (arm in m.matchCases) { if (let Some(value) <- arm.exprOrDecls) { SetExpectedResultMode(value, mode) } }
+            for (arm in m.matchCaseOthers) { if (let Some(value) <- arm.exprOrDecls) { SetExpectedResultMode(value, mode) } }
+        } else if (let Some(t) <- (expr as TryExpr)) {
+            if (let Some(value) <- t.tryBlock) { SetExpectedResultMode(value, mode) }
+            for (value in t.catchBlocks) { SetExpectedResultMode(value, mode) }
+        }
+    }
+
+    private func ExpectedReturnMode(body: FuncBody, retType: Type): ASTMode {
+        if ((let Some(fd) <- body.funcDecl) && fd.isGetter && (let Some(pd) <- fd.propDecl)) {
+            return PropertyMode(pd)
+        }
+        return retType.modal.map({ m => m.local }) ?? retType.resolvedMode
+    }
+
     private func CheckBodyRetType(ctx: ASTContext, fb: FuncBody): Bool {
         let retType = fb.retType.getOrThrow()
         let retTy = retType.GetTy().getOrThrow()
@@ -3591,6 +3628,7 @@ extend TypeChecker {
             if (retTy.IsUnit()) {
                 isWellTyped = Ty.IsTyCorrect(Synthesize(ctx, SynPos.UNUSED, body))
             } else {
+                SetExpectedResultMode(body, ExpectedReturnMode(fb, retType))
                 isWellTyped = Check(ctx, retTy, body)
                 if (!isWellTyped && body.body.isEmpty()) {
                     if (let Some(diagValue2) <- impl.diag) {
@@ -3741,6 +3779,7 @@ extend TypeChecker {
             hasVariableLenArg = funcDecl2.hasVariableLenArg || hasVariableLenArg
         }
         let cfg = FuncTyConfig()
+        cfg.ReadModes(fb)
         cfg.isC = isCFunc
         cfg.hasVariableLenArg = hasVariableLenArg
         let retType = fb.retType.getOrThrow()
@@ -3853,7 +3892,7 @@ extend TypeChecker {
         }
         CheckFuncParamList(ctx, fb.paramLists[0])
         let paramTys = GetFuncBodyParamTys(fb)
-        let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), ctorTy)
+        let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), ctorTy, cfg: FunctionTyConfigForFuncBody(fb))
         fb.SetTy(funcTy)
         funcDecl.SetTy(funcTy)
         fb.retType.getOrThrow().SetTy(ctorTy)
@@ -4006,6 +4045,9 @@ extend TypeChecker {
         }
         vd.EnableAttr(Attribute.IS_CHECK_VISITED)
         SynthesizeTypeNode(ctx, vd.typeNode)
+        if ((let Some(ty) <- vd.typeNode) && (let Some(initial) <- vd.initializer)) {
+            SetExpectedResultMode(initial, ty.modal.map({ m => m.local }) ?? ty.resolvedMode)
+        }
         if (let Some(initializer) <- vd.initializer) {
             if (let Some(typeNode) <- vd.typeNode) {
                 if (!Ty.IsTyCorrect(typeNode.GetTy())) {
@@ -4264,6 +4306,14 @@ extend TypeChecker {
                 }
             }
             if (patternMatches && isIrrefutable) {
+                if (let Some(initValue) <- vpd.initializer) {
+                    let receiver = GetCurFuncBody(ctx, vpd.scopeName).flatMap({ b => b.funcDecl })
+                        .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+                    let mode = if (let Some(t) <- vpd.typeNode) { t.modal.map({ m => m.local }) ?? t.resolvedMode }
+                        else { BindingResultMode(impl.typeManager, initValue, receiver) ?? ASTMode.NOT }
+                    vpd.resolvedMode = mode
+                    BindPatternMode(pattern, mode)
+                }
                 BindPatternBindings(ctx, pattern)
             }
             if (vpd.isConst) {
@@ -4389,6 +4439,7 @@ extend TypeChecker {
 
     private func FunctionTyConfigForFuncBody(fb: FuncBody): FuncTyConfig {
         let cfg = FuncTyConfig()
+        cfg.ReadModes(fb)
         let isCFFIBackend = OptionIsUnsafeBackend(GlobalOptions().backend)
         if (fb.TestAttr(Attribute.C)) {
             cfg.isC = true
@@ -4693,6 +4744,8 @@ extend TypeChecker {
                 let originalCtor = IsInstanceConstructor(member) && member.astKind == ASTKind.FUNC_DECL &&
                     member.identifier.Val() == "init"
                 if (originalCtor) {
+                    if ((let Some(modal) <- ce.modal) &&
+                        GetReceiverMode((member as FuncDecl).getOrThrow()) != modal.local) { continue }
                     ctorCandidates.add(Some((member as FuncDecl).getOrThrow()))
                 }
             }
@@ -5708,10 +5761,11 @@ extend TypeChecker {
         return le.GetTy().getOrThrow()
     }
 
-    private func ChkLamParamTys(ctx: ASTContext, le: LambdaExpr, targetParamTys: ArrayList<Ty>,
+    private func ChkLamParamTys(ctx: ASTContext, le: LambdaExpr, formal: FuncTy,
         outParamTys: ArrayList<Ty>): Bool {
         CJC_ASSERT(le.funcBody.isSome() && !le.funcBody.getOrThrow().paramLists.isEmpty())
         let paramList = le.funcBody.getOrThrow().paramLists[0]
+        let targetParamTys = formal.paramTys
         if (paramList.params.size != targetParamTys.size) {
             if (let Some(diagValue) <- impl.diag) {
                 let builder = DiagnoseRefactor(
@@ -5732,6 +5786,21 @@ extend TypeChecker {
                 implicitBoxed: false, allowOptionBox: false)) {
                 le.SetTy(TypeManager.GetInvalidTy())
                 return false
+            }
+            if ((let Some(instance) <- impl.ci) && instance.globalOptions.IsLocalModeAnalysis() &&
+                (let Some(typeNode) <- param.typeNode)) {
+                param.resolvedMode = typeNode.resolvedMode
+                if (targetParamTy.kind != TypeKind.TYPE_INT64 && !formal.ParamMode(idx).IsSubMode(param.resolvedMode)) {
+                    if (let Some(diag) <- impl.diag) {
+                        let ty = targetParamTy.String()
+                        DiagMismatchedTypesWithFoundTy(diag, param, ty + formal.ParamMode(idx).Suffix(),
+                            ty + param.resolvedMode.Suffix())
+                    }
+                    return false
+                }
+            } else {
+                // A contextual lambda parameter is pending until this formal is selected.
+                param.resolvedMode = formal.ParamMode(idx)
             }
             outParamTys.add(param.GetTy().getOrThrow())
         }
@@ -5777,11 +5846,12 @@ extend TypeChecker {
         if (let Some(targetFuncTy) <- (targetTy as FuncTy)) {
             try (ds = DiagSuppressor(impl.diag)) {
                 let paramTys = ArrayList<Ty>()
-                let paramsMatched = ChkLamParamTys(ctx, le, targetFuncTy.paramTys, paramTys)
+                let paramsMatched = ChkLamParamTys(ctx, le, targetFuncTy, paramTys)
                 let retType = RefType()
                 retType.begin = le.begin
                 retType.end = le.end
                 retType.SetTy(targetFuncTy.retTy)
+                retType.resolvedMode = targetFuncTy.retMode
                 retType.EnableAttr(Attribute.COMPILER_ADD)
                 le.funcBody.getOrThrow().retType = Some(retType)
                 ClearLambdaBodyForReCheck(le)
@@ -5794,10 +5864,9 @@ extend TypeChecker {
                             bodyRetTy = bodyFuncTy.retTy
                         }
                     }
-                    let cfg = FuncTyConfig()
-                    cfg.isC = targetFuncTy.isC
-                    cfg.isClosureTy = targetFuncTy.isClosureTy
-                    cfg.hasVariableLenArg = targetFuncTy.hasVariableLenArg
+                    let cfg = targetFuncTy.CopyConfig()
+                    let params = funcBody.paramLists[0].params
+                    cfg.paramModes = Array<ASTMode>(params.size, { i => params[i].resolvedMode })
                     let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), bodyRetTy, cfg: cfg)
                     funcBody.SetTy(funcTy)
                     le.SetTy(funcTy)
@@ -5990,6 +6059,8 @@ extend TypeChecker {
                 } else {
                     retTy
                 }
+                let slot = fb.retType.getOrThrow()
+                SetExpectedResultMode(innerExpr, ExpectedReturnMode(fb, slot))
                 isWellTyped = Check(ctx, targetTy, innerExpr) && isWellTyped
                 if (isWellTyped) {
                     typeCheckExprPutTargetType(ctx, innerExpr, innerExpr.GetTy() ?? targetTy)
@@ -6067,6 +6138,9 @@ extend TypeChecker {
                 exprChecker: Some({ target: Ty, expr: Expr =>
                     Check(ctx, target, expr)
                 }), refInferer: Some({ refExpr: RefExpr => InferRefExpr(ctx, refExpr) })) && subpatternsGood
+            let receiver = GetCurFuncBody(ctx, initializer.scopeName).flatMap({ b => b.funcDecl })
+                .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+            BindPatternMode(pattern, BindingResultMode(impl.typeManager, initializer, receiver) ?? ASTMode.NOT)
         }
         if (Ty.IsTyCorrect(selectorTy) && subpatternsGood) {
             letPattern.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
@@ -6437,6 +6511,13 @@ extend TypeChecker {
                     Check(ctx, patternExpectedTy, patternExpr)
                 }), refInferer: Some({ refExpr: RefExpr => InferRefExpr(ctx, refExpr) }), diag: impl.diag)
             isWellTyped = patternOk && isWellTyped
+            // Bind the loop variables before the body is checked, so calls in the body see the mode of
+            // the iterated value (an element of a `@local!` collection is `@local!`).
+            if (patternOk && (let Some(inExpression) <- forInExpr.inExpression)) {
+                let receiver = GetCurFuncBody(ctx, inExpression.scopeName).flatMap({ b => b.funcDecl })
+                    .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+                BindPatternMode(pattern, BindingResultMode(impl.typeManager, inExpression, receiver) ?? ASTMode.NOT)
+            }
         } else {
             isWellTyped = false
         }
@@ -6752,6 +6833,9 @@ extend TypeChecker {
             } else {
                 idx++
             }
+        }
+        if (!isStaticAccess) {
+            TypeCheckReferenceFilterPropertyReceivers(impl.typeManager, ctx, ma, targets)
         }
         return targets
     }
@@ -7359,12 +7443,12 @@ extend TypeChecker {
             let thisTy = impl.typeManager.ApplySubstPack(
                 impl.typeManager.GetClassThisTy(classDecl, classDecl.GetTy().getOrThrow().typeArgs.toArray()),
                 typeMapping)
-            baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), thisTy))
+            baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), thisTy, cfg: funcTy.CopyConfig()))
             return Some(thisTy)
         } else if (let Some(memberAccess) <- (baseExpr as MemberAccess)) {
             if (let Some(memberBase) <- memberAccess.baseExpr) {
                 if (let Some(genericTy) <- (memberBase.GetTy().getOrThrow() as GenericsTy)) {
-                    baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), genericTy))
+                    baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), genericTy, cfg: funcTy.CopyConfig()))
                     return Some(genericTy)
                 }
             }
@@ -7646,13 +7730,33 @@ extend TypeChecker {
         return 0
     }
 
+    private func ExpectedCacheMode(node: Node): Option<ASTMode> {
+        if (let Some(arg) <- (node as FuncArg)) { return arg.expr.flatMap({ e => e.expectedLocalMode }) }
+        if (let Some(e) <- (node as Expr)) { return e.expectedLocalMode }
+        return None
+    }
+
+    private func CacheResultMode(ctx: ASTContext, node: Node): Option<ASTMode> {
+        let value = if (let Some(arg) <- (node as FuncArg)) { arg.expr } else { node as Expr }
+        if (let Some(e) <- value) {
+            let receiver = GetCurFuncBody(ctx, e.scopeName).flatMap({ b => b.funcDecl })
+                .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+            return CallSiteMode(e, receiver, HashSet<Decl>())
+        }
+        return None
+    }
+
     private func GetCacheKeyForSyn(ctx: ASTContext, node: Node): CacheKey {
         let target = ctx.targetTypeMap.get(node)
-        return CacheKey(target, IsNodeDesugared(node), GetDiagCacheKey())
+        var key = CacheKey(target, IsNodeDesugared(node), GetDiagCacheKey())
+        key.expectedMode = ExpectedCacheMode(node)
+        return key
     }
 
     private func GetCacheKeyForChk(ctx: ASTContext, node: Node, target: Ty): CacheKey {
-        return CacheKey(Some(target), IsNodeDesugared(node), GetDiagCacheKey())
+        var key = CacheKey(Some(target), IsNodeDesugared(node), GetDiagCacheKey())
+        key.expectedMode = ExpectedCacheMode(node)
+        return key
     }
 
     private func GetTypeCheckCache(ctx: ASTContext, node: Node): TypeCheckCache {
@@ -7674,6 +7778,8 @@ extend TypeChecker {
         } else {
             node.SetTy(Ty.GetInitialTy())
         }
+        if (let Some(m) <- cache.resultMode) { node.resolvedMode = m }
+        if (let Some(arg) <- (node as FuncArg)) { arg.checkedMode = cache.resultMode }
         RestoreTargets(node, cache.targets)
         if (recoverDiag) {
             if (let Some(diagValue) <- impl.diag) {
@@ -7691,7 +7797,8 @@ extend TypeChecker {
         if (let Some(diagValue2) <- impl.diag) {
             dc.BackUp(diagValue2)
         }
-        let entry = CacheEntry(Ty.IsTyCorrect(ret) && dc.NoError(), Some(ret), dc, CollectTargets(expr))
+        var entry = CacheEntry(Ty.IsTyCorrect(ret) && dc.NoError(), Some(ret), dc, CollectTargets(expr))
+        entry.resultMode = CacheResultMode(ctx, expr)
         GetTypeCheckCache(ctx, expr).synCache[key] = entry
         return ret
     }
@@ -7706,7 +7813,9 @@ extend TypeChecker {
         if (let Some(diagValue2) <- impl.diag) {
             dc.BackUp(diagValue2)
         }
-        let entry = CacheEntry(Ty.IsTyCorrect(ret) && dc.NoError(), Some(ret), dc, CollectTargets(arg))
+        var entry = CacheEntry(Ty.IsTyCorrect(ret) && dc.NoError(), Some(ret), dc, CollectTargets(arg))
+        entry.resultMode = CacheResultMode(ctx, arg)
+        arg.checkedMode = entry.resultMode
         GetTypeCheckCache(ctx, arg).synCache[key] = entry
         return ret
     }
@@ -7720,7 +7829,8 @@ extend TypeChecker {
         if (let Some(diagValue2) <- impl.diag) {
             dc.BackUp(diagValue2)
         }
-        let entry = CacheEntry(ret, expr.GetTy(), dc, CollectTargets(expr))
+        var entry = CacheEntry(ret, expr.GetTy(), dc, CollectTargets(expr))
+        entry.resultMode = CacheResultMode(ctx, expr)
         GetTypeCheckCache(ctx, expr).chkCache[key] = entry
         return ret
     }
@@ -7735,7 +7845,9 @@ extend TypeChecker {
         if (let Some(diagValue2) <- impl.diag) {
             dc.BackUp(diagValue2)
         }
-        let entry = CacheEntry(ret, arg.GetTy(), dc, CollectTargets(arg))
+        var entry = CacheEntry(ret, arg.GetTy(), dc, CollectTargets(arg))
+        entry.resultMode = CacheResultMode(ctx, arg)
+        arg.checkedMode = entry.resultMode
         GetTypeCheckCache(ctx, arg).chkCache[key] = entry
         return ret
     }
@@ -7883,6 +7995,7 @@ extend TypeChecker {
             return false
         }
         arg.SetTy(expr.GetTy() ?? TypeManager.GetInvalidTy())
+        arg.checkedMode = CacheResultMode(ctx, arg)
         return true
     }
 
@@ -8116,6 +8229,24 @@ extend TypeChecker {
         return None
     }
 
+    private func SynthesizeExclaveExpr(ctx: ASTContext, expr: ExclaveExpr): Ty {
+        let block = expr.body.getOrThrow()
+        let owner = GetCurFuncBody(ctx, expr.scopeName)
+        var result: Ty = TypeManager.GetNothingTy()
+        if ((let Some(body) <- owner) && (let Some(ty) <- body.GetTy()) && (let Some(ft) <- (ty as FuncTy))) {
+            if (ft.retTy.kind == TypeKind.TYPE_QUEST) {
+                let inferred = SynthesizeBlock(ctx, SynPos.EXPR_ARG, block)
+                if (Ty.IsTyCorrect(inferred) && !inferred.HasQuestTy() && !inferred.HasIdealTy()) { result = inferred }
+            } else if (body.funcDecl.map({ fd => fd.TestAttr(Attribute.CONSTRUCTOR) || fd.IsFinalizer() }) ?? false) {
+                let _ = SynthesizeBlock(ctx, SynPos.EXPR_ARG, block)
+            } else if (!CheckBlock(ctx, ft.retTy, block)) { result = TypeManager.GetInvalidTy() }
+        } else {
+            let _ = SynthesizeBlock(ctx, SynPos.EXPR_ARG, block)
+        }
+        expr.SetTy(result)
+        return FinishSynthesize(ctx, expr, result)
+    }
+
     private func SynthesizeThrowExpr(ctx: ASTContext, throwExpr: ThrowExpr): Ty {
         if (let Some(innerExpr) <- throwExpr.expr) {
             let _ = Synthesize(ctx, innerExpr)
@@ -8277,6 +8408,13 @@ extend TypeChecker {
         if (leftTy.IsInvalid()) {
             ae.SetTy(TypeManager.GetInvalidTy())
             return TypeManager.GetInvalidTy()
+        }
+        if (!ae.isCompound) {
+            let receiver = GetCurFuncBody(ctx, ae.scopeName).flatMap({ b => b.funcDecl })
+                .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+            if (let Some(mode) <- CallSiteMode(leftExpr, receiver, HashSet<Decl>())) {
+                SetExpectedResultMode(rightExpr, mode)
+            }
         }
         let concreteLeftTy = Ty.GetPrimitiveUpperBound(TcReplaceIdeal(impl.typeManager, leftExpr))
         if (!IsAssignable(leftExpr, ae.isCompound, diagsForOverload.toArray(), impl.diag.getOrThrow())) {
@@ -8457,6 +8595,7 @@ extend TypeChecker {
             assign.SetTy(assignTy)
             return FinishSynthesize(ctx, assign, assignTy)
         }
+        if (let Some(ex) <- (expr as ExclaveExpr)) { return SynthesizeExclaveExpr(ctx, ex) }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             return SynthesizeThrowExpr(ctx, throwExpr)
         }
@@ -8744,6 +8883,7 @@ extend TypeChecker {
             }
             return FinishCheck(ctx, expr, this.ChkRefExpr(ctx, realTarget, nameRef))
         }
+        if (let Some(ex) <- (expr as ExclaveExpr)) { return FinishCheck(ctx, ex, Ty.IsTyCorrect(SynthesizeExclaveExpr(ctx, ex))) }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             let throwTy = SynthesizeThrowExpr(ctx, throwExpr)
             return FinishCheck(ctx, throwExpr, Ty.IsTyCorrect(throwTy) &&

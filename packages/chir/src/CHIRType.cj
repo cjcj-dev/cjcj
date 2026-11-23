@@ -20,6 +20,8 @@ import cjcj::ast.StructTy as AstStructTy
 import cjcj::ast.InterfaceTy as AstInterfaceTy
 import cjcj::ast.EnumTy as AstEnumTy
 import cjcj::ast.GenericsTy as AstGenericsTy
+import cjcj::ast.ASTMode
+import cjcj::ast.Node as AstNode
 
 public class CHIRTypeCacheEntry {
     public let astTy: AstTy
@@ -112,16 +114,18 @@ public class CHIRTypeCache {
 public class CHIRType {
     private let builder: CHIRBuilder
     private let chirTypeCache: CHIRTypeCache
+    private let localSlots: Bool
     private let frozenGenericBounds: Bool
 
-    public init(builder: CHIRBuilder, typeCache: CHIRTypeCache, frozenGenericBounds!: Bool = false) {
+    public init(builder: CHIRBuilder, typeCache: CHIRTypeCache, frozenGenericBounds!: Bool = false, localSlots!: Bool = false) {
+        this.localSlots = localSlots
         this.builder = builder
         this.chirTypeCache = typeCache
         this.frozenGenericBounds = frozenGenericBounds
     }
 
     public func Fork(workerBuilder: CHIRBuilder): CHIRType {
-        return CHIRType(workerBuilder, CHIRTypeCache(parent: Some(chirTypeCache)), frozenGenericBounds: true)
+        return CHIRType(workerBuilder, CHIRTypeCache(parent: Some(chirTypeCache)), frozenGenericBounds: true, localSlots: localSlots)
     }
 
     public func MergeFrom(worker: CHIRType): Unit { chirTypeCache.MergeFrom(worker.chirTypeCache) }
@@ -175,6 +179,24 @@ public class CHIRType {
 
     public func GetGlobalNominalCache(): ArrayList<CHIRNominalCacheEntry> {
         return chirTypeCache.globalNominalCache
+    }
+
+    // Official CHIRType::TranslateType(AST::ModalTy) (CHIRType.cpp:271-297 @63bf237b): a local mode is
+    // derived from the NOT translation and interned through WithModal, which looks through the Ref that
+    // reference types already carry. `mode` must be the Sema-resolved mode of the declaration or
+    // expression; the underlying data type is shared across occurrences.
+    public func TranslateType(node: AstNode): Type {
+        let ty = node.GetTy() ?? throw IllegalStateException("AST to CHIR requires a resolved Sema type")
+        return if (localSlots) { TranslateType(ty, node.resolvedMode) } else { TranslateType(ty) }
+    }
+
+    public func TranslateType(ty: AstTy, mode: ASTMode): Type {
+        let base = TranslateType(ty)
+        let chirModal = ASTModal2CHIRModal(mode)
+        if (chirModal.local == CHIRMode.NONE) {
+            return base
+        }
+        return builder.WithModal(base, chirModal)
     }
 
     public func TranslateType(ty: AstTy): Type {
@@ -232,10 +254,10 @@ public class CHIRType {
     }
 
     private func TranslateFuncType(fnTy: AstFuncTy): Type {
-        let retTy = TranslateType(fnTy.retTy)
+        let retTy = if (localSlots) { TranslateType(fnTy.retTy, fnTy.retMode) } else { TranslateType(fnTy.retTy) }
         let paramTys = ArrayList<Type>()
-        for (paramTy in fnTy.paramTys) {
-            var paramType = TranslateType(paramTy)
+        for (i in 0..fnTy.paramTys.size) {
+            var paramType = if (localSlots) { TranslateType(fnTy.paramTys[i], fnTy.ParamMode(i)) } else { TranslateType(fnTy.paramTys[i]) }
             if (fnTy.IsCFunc() && paramType.IsVArray()) {
                 paramType = builder.context.GetRefTy(paramType)
             }

@@ -685,7 +685,7 @@ class LambdaBuilder {
 
     public init(builder: FlatBufferBuilder) {
         this.builder = builder
-        builder.StartTable(10)
+        builder.StartTable(12)
     }
 
     public func add_base(base: FlatBufferOffset): Unit {
@@ -724,6 +724,12 @@ class LambdaBuilder {
         builder.AddU32(8, retVal, defaultValue: 0u32)
     }
 
+    public func add_paramDftValHostParam(param: UInt32): Unit { builder.AddU32(10, param, defaultValue: 0u32) }
+
+    public func add_genericDecl(genericDecl: UInt32): Unit {
+        builder.AddU32(11, genericDecl, defaultValue: 0u32)
+    }
+
     public func add_isCompileTimeValue(isCompileTimeValue: Bool): Unit {
         builder.AddBool(9, isCompileTimeValue, defaultValue: false)
     }
@@ -733,8 +739,10 @@ class LambdaBuilder {
     }
 }
 
-func CreateLambda(builder: FlatBufferBuilder, base: FlatBufferOffset, funcTy: UInt32, isLocalFunc: Bool, identifier: FlatBufferOffset, srcCodeName: FlatBufferOffset, params: FlatBufferOffset, genericTypeParams: FlatBufferOffset, body: UInt32, retVal: UInt32, isCompileTimeValue: Bool): FlatBufferOffset {
+func CreateLambda(builder: FlatBufferBuilder, base: FlatBufferOffset, funcTy: UInt32, isLocalFunc: Bool, identifier: FlatBufferOffset, srcCodeName: FlatBufferOffset, params: FlatBufferOffset, genericTypeParams: FlatBufferOffset, body: UInt32, retVal: UInt32, isCompileTimeValue: Bool, hostParam: UInt32, genericDecl: UInt32): FlatBufferOffset {
     let tableBuilder = LambdaBuilder(builder)
+    tableBuilder.add_paramDftValHostParam(hostParam)
+    tableBuilder.add_genericDecl(genericDecl)
     tableBuilder.add_retVal(retVal)
     tableBuilder.add_body(body)
     tableBuilder.add_genericTypeParams(genericTypeParams)
@@ -748,12 +756,12 @@ func CreateLambda(builder: FlatBufferBuilder, base: FlatBufferOffset, funcTy: UI
     return tableBuilder.Finish()
 }
 
-func CreateLambdaDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, funcTy: UInt32, isLocalFunc: Bool, identifier: Option<String>, srcCodeName: Option<String>, params: Option<ArrayList<UInt32>>, genericTypeParams: Option<ArrayList<UInt32>>, body: UInt32, retVal: UInt32, isCompileTimeValue: Bool): FlatBufferOffset {
+func CreateLambdaDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, funcTy: UInt32, isLocalFunc: Bool, identifier: Option<String>, srcCodeName: Option<String>, params: Option<ArrayList<UInt32>>, genericTypeParams: Option<ArrayList<UInt32>>, body: UInt32, retVal: UInt32, isCompileTimeValue: Bool, hostParam: UInt32, genericDecl: UInt32): FlatBufferOffset {
     let identifierOffset = if (let Some(value) <- identifier) { builder.CreateSharedString(value) } else { 0u32 }
     let srcCodeNameOffset = if (let Some(value) <- srcCodeName) { builder.CreateSharedString(value) } else { 0u32 }
     let paramsOffset = if (let Some(value) <- params) { builder.CreateVectorU32(value) } else { 0u32 }
     let genericTypeParamsOffset = if (let Some(value) <- genericTypeParams) { builder.CreateVectorU32(value) } else { 0u32 }
-    return CreateLambda(builder, base, funcTy, isLocalFunc, identifierOffset, srcCodeNameOffset, paramsOffset, genericTypeParamsOffset, body, retVal, isCompileTimeValue)
+    return CreateLambda(builder, base, funcTy, isLocalFunc, identifierOffset, srcCodeNameOffset, paramsOffset, genericTypeParamsOffset, body, retVal, isCompileTimeValue, hostParam, genericDecl)
 }
 
 class GetInstantiateValueBuilder {

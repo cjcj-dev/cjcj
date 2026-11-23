@@ -152,7 +152,7 @@ public func ManglePrimitive(kind: TypeKind): String {
 func MangleArraySliceType(t: Type, genericsTypeStack: ArrayList<String>, useGenericName: Bool): String {
     let typeArgs = t.GetTypeArgs()
     return MANGLE_ARRAY_SLICE_PREFIX + MangleType(typeArgs[0], genericsTypeStack, useGenericName: useGenericName) +
-        MANGLE_SUFFIX
+        MANGLE_SUFFIX + MangleCHIRTypeMode(t)
 }
 
 private func IdentifierForMangledCHIRType(def: CustomTypeDef): String {
@@ -194,6 +194,18 @@ public func MangleType(t: Type): String {
 }
 
 public func MangleType(t: Type, genericsTypeStack: ArrayList<String>, useGenericName!: Bool = false): String {
+    return MangleTypeBody(t, genericsTypeStack, useGenericName) + MangleCHIRTypeMode(t)
+}
+
+private func MangleCHIRTypeMode(t: Type): String {
+    return match (t.GetModalInfo().Local()) {
+        case CHIRMode.NONE => ""
+        case CHIRMode.MAYBE => "QlE"
+        case CHIRMode.MUST => "QLE"
+    }
+}
+
+private func MangleTypeBody(t: Type, genericsTypeStack: ArrayList<String>, useGenericName: Bool): String {
     let primitive = ManglePrimitive(t.GetTypeKind())
     if (!primitive.isEmpty()) {
         return primitive
@@ -277,7 +289,7 @@ public func GetTypeQualifiedName(t: Type, forNameFieldOfTi!: Bool = false): Stri
         if (t.GetTypeKind() == TypeKind.TYPE_VOID) {
             return MANGLE_UNIT_STR
         }
-        return t.ToString()
+        return TypeKindName(t.GetTypeKind())
     }
     if (let Some(rawArrayTy) <- (t as RawArrayType)) {
         return MANGLE_RAWARR_STR + MANGLE_LT_PREFIX + GetTypeQualifiedName(rawArrayTy.GetElementType(),
@@ -448,6 +460,20 @@ public func GenerateAnnotationFuncMangleName(name: String): String {
 
 public func GenerateGenericBaseClassMangleName(paramNum: Int64): String {
     return MANGLE_CLOSURE_GENERIC_PREFIX + "${paramNum}" + MANGLE_WILDCARD_PREFIX
+}
+
+public func GenerateGenericBaseClassMangleName(funcTy: FuncType): String {
+    let params = funcTy.GetParamTypes()
+    var name = GenerateGenericBaseClassMangleName(params.size)
+    for (i in 0..params.size) {
+        let ty = params[i].StripAllRefs()
+        if (ty.IsModal()) {
+            name += i.toString() + (if (ty.GetModalInfo().local == CHIRMode.MUST) { "L_" } else { "l_" })
+        }
+    }
+    let ret = funcTy.GetReturnType().StripAllRefs()
+    if (ret.IsModal()) { name += (if (ret.GetModalInfo().local == CHIRMode.MUST) { "rL_" } else { "rl_" }) }
+    return name
 }
 
 public func GenerateInstantiatedBaseClassMangleName(funcType: FuncType): String {

@@ -3,7 +3,7 @@ package cjcj::cjc
 import std.env.*
 import std.collection.*
 import cjcj::driver.RunDriverMain
-import cjcj::utils.StringifyArgumentVector
+import cjcj::utils.{FileUtil, StringifyArgumentVector}
 
 @When[os == "Windows"]
 private func GetArgumentVector(): Array<String> {
@@ -29,5 +29,10 @@ private func GetArgumentVector(): Array<String> {
 }
 
 main(): Int64 {
-    return RunDriverMain(StringifyArgumentVector(GetArgumentVector()))
+    let args = StringifyArgumentVector(GetArgumentVector())
+    if (!args.isEmpty()) {
+        let name = FileUtil.GetFileName(args[0])
+        if (name == "chir-dis" || name == "chir-dis.exe") { return RunChirDis(args) }
+    }
+    return RunDriverMain(args)
 }

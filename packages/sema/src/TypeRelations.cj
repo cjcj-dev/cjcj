@@ -173,7 +173,7 @@ public func SameTy(lhs: Ty, rhs: Ty): Bool {
     }
     if (let Some(leftFunc) <- (lhs as FuncTy)) {
         if (let Some(rightFunc) <- (rhs as FuncTy)) {
-            return leftFunc.isC == rightFunc.isC &&
+            return leftFunc.SameModes(rightFunc) && leftFunc.isC == rightFunc.isC &&
                 leftFunc.isClosureTy == rightFunc.isClosureTy &&
                 leftFunc.hasVariableLenArg == rightFunc.hasVariableLenArg &&
                 leftFunc.noCast == rightFunc.noCast &&

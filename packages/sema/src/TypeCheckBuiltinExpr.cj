@@ -170,6 +170,8 @@ private func DesugarPointerCall(typeManager: TypeManager, ctx: Option<ASTContext
 
 private func DesugarArrayCall(typeManager: TypeManager, ctx: Option<ASTContext>, ce: CallExpr): Unit {
     let arrayExpr = ArrayExpr()
+    arrayExpr.resolvedMode = ce.modal.map({ m => m.local }) ?? ce.expectedLocalMode ?? ASTMode.NOT
+    ce.resolvedMode = arrayExpr.resolvedMode
     let typeNode = Type()
     arrayExpr.typeNode = typeNode
     if (let Some(context) <- ctx) {

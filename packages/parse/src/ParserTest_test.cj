@@ -3,7 +3,7 @@ package cjcj::parse
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
-import cjcj::ast.{VisitAction, Walker}
+import cjcj::ast.{ASTMode, VisitAction, Walker}
 import cjcj::basic.{DiagCategory, DiagKindRefactor}
 
 private let SHARED_CODE = #"
@@ -35,10 +35,13 @@ private func parseExpr(code: String): (Expr, DiagnosticEngine) {
     return (parser.ParseExpr(), diag)
 }
 
-private func parseTypeNode(code: String): (Type, DiagnosticEngine) {
+private func parseTypeNode(code: String, enabled!: Bool = false): (Type, DiagnosticEngine) {
     let sm = SourceManager()
     let diag = DiagnosticEngine()
     let parser = Parser(code, diag, sm)
+    let opts = GlobalOptions()
+    opts.enableLocalMode = enabled
+    parser.SetCompileOptions(opts)
     return (parser.ParseType(), diag)
 }
 
@@ -79,8 +82,292 @@ class ParameterListRecoveryTest {
     }
 }
 
+@When[env != "ohos"]
+@Test
+class LocalModeSyntaxTest {
+    @TestCase
+    func constructorSuffixKeepsFollowingMember(): Unit {
+        let (expr, diag) = parseExpr("C() @local!.field")
+        let parsedMember = expr as MemberAccess
+        @Assert(parsedMember.isSome())
+        let member = parsedMember.getOrThrow()
+        let call = (member.baseExpr.getOrThrow() as CallExpr).getOrThrow()
+        @Expect(member.field.Val(), "field")
+        @Assert(call.modal.isSome())
+        @Expect(call.modal.getOrThrow().local, ASTMode.FULL)
+        @Expect(call.end.column, 12)
+        @Expect(countErrors(diag), 1)
+    }
+
+    @TestCase
+    func ordinaryCallKeepsFollowingMember(): Unit {
+        let (plain, plainDiag) = parseExpr("C().field")
+        let plainMember = (plain as MemberAccess).getOrThrow()
+        let plainCall = (plainMember.baseExpr.getOrThrow() as CallExpr).getOrThrow()
+        @Expect(plainCall.modal.isNone(), true)
+        @Expect(plainMember.field.Val(), "field")
+        @Expect(countErrors(plainDiag), 0)
+    }
+
+    @TestCase
+    func primitiveConversionRejectsPostfixMode(): Unit {
+        let (expr, diag) = parseExpr("Int64(0) @local!")
+        @Expect(expr.astKind, ASTKind.TYPE_CONV_EXPR)
+        @Expect(expr.TestAttr(Attribute.IS_BROKEN), true)
+        @Expect(countErrors(diag), 2)
+    }
+
+    @TestCase
+    func modalTypeSuffixes(): Unit {
+        for ((source, mode) in [("Int64 @local!", ASTMode.FULL), ("Int64 @local?", ASTMode.HALF),
+            ("Int64 @~local", ASTMode.NOT)]) {
+            let (ty, diag) = parseTypeNode(source)
+            let modal = ty.modal.getOrThrow()
+            @Expect(modal.local == mode, true)
+            @Expect(modal.atPos.column, 7)
+            @Expect(modal.localPos.column, 8)
+            @Expect(ty.end.column, source.size + 1)
+            @Expect(countErrors(diag), 1)
+        }
+    }
+
+    @TestCase
+    func localBangDoesNotEatAssignment(): Unit {
+        let diag = DiagnosticEngine()
+        let parser = Parser("Int64 @local!=42", diag, SourceManager())
+        let ty = parser.ParseType()
+        @Expect(ty.modal.getOrThrow().local == ASTMode.FULL, true)
+        @Expect(ty.end.column, 14)
+        @Expect(parser.Peek().kind == TokenKind.ASSIGN, true)
+        @Expect(parser.Peek().Begin().column, ty.end.column)
+        @Expect(parser.Skip(TokenKind.ASSIGN), true)
+        @Expect(parser.Peek().Value(), "42")
+        @Expect(countErrors(diag), 1)
+    }
+
+    @TestCase
+    func localModalCannotBeTypeArgument(): Unit {
+        let (ty, diag) = parseTypeNode("Array<Int64 @local?>")
+        let arg = ty.GetTypeArgs()[0]
+        @Expect(arg.modal.getOrThrow().local == ASTMode.HALF, true)
+        @Expect(arg.TestAttr(Attribute.IS_BROKEN), true)
+        @Expect(countErrors(diag), 2)
+    }
+    @TestCase
+    func varrayModesGoOnTheContainerNotTheElement(): Unit {
+        let (bad, badDiag) = parseTypeNode("VArray<Int64 @local!, $2>")
+        @Expect(bad.IsInvalid(), true)
+        @Expect(unexpectedModeErrors(badDiag), 1)
+        @Expect(countErrors(badDiag), 2)
+
+        let (good, goodDiag) = parseTypeNode("VArray<Int64, $2> @local?")
+        let varray = (good as VArrayType).getOrThrow()
+        @Expect(varray.modal.getOrThrow().local, ASTMode.HALF)
+        @Expect(varray.typeArgument.getOrThrow().modal.isNone(), true)
+        @Expect(unexpectedModeErrors(goodDiag), 0)
+        @Expect(countErrors(goodDiag), 1)
+    }
+
+    @TestCase
+    func parenthesesDistinguishTupleFieldsFromFunctionParameters(): Unit {
+        for ((source, modes) in [("(Int64 @local!)", 1), ("(Int64 @local?, Int8 @~local)", 2),
+            ("?(Int64 @local?)", 1)]) {
+            let (ty, diag) = parseTypeNode(source)
+            @Expect((ty as OptionType).map({opt => opt.componentType.getOrThrow().IsInvalid()}) ?? ty.IsInvalid(), true)
+            @Expect(unexpectedModeErrors(diag), modes)
+            @Expect(countErrors(diag), modes * 2)
+        }
+        let (tuple, tupleDiag) = parseTypeNode("(Int64, Int8)")
+        @Expect(tuple.astKind, ASTKind.TUPLE_TYPE)
+        @Expect(countErrors(tupleDiag), 0)
+        let (optional, optionDiag) = parseTypeNode("?(Int64) @local?")
+        @Expect(optional.astKind, ASTKind.OPTION_TYPE)
+        @Expect(optional.modal.getOrThrow().local, ASTMode.HALF)
+        @Expect(unexpectedModeErrors(optionDiag), 0)
+        let (callable, funcDiag) = parseTypeNode("((Int64 @local?) -> Int8 @local!) @local?")
+        let paren = (callable as ParenType).getOrThrow()
+        let inner = (paren.innerType.getOrThrow() as FuncType).getOrThrow()
+        @Expect(inner.paramTypes[0].modal.getOrThrow().local, ASTMode.HALF)
+        @Expect(inner.retType.getOrThrow().modal.getOrThrow().local, ASTMode.FULL)
+        @Expect(paren.modal.getOrThrow().local, ASTMode.HALF)
+        @Expect(unexpectedModeErrors(funcDiag), 0)
+        @Expect(countErrors(funcDiag), 3)
+    }
+
+    @TestCase
+    func enabledComponentsDiagnoseEachSuffixOnce(): Unit {
+        for (source in ["VArray<Int64 @local!, $2>", "VArray<String @local?, $2>",
+            "(Int64 @local!)", "(String @~local)", "(Int64 @local!, String @local?)",
+            "(String @local!, Int64 @~local)"]) {
+            let (ty, diag) = parseTypeNode(source, enabled: true)
+            @Expect(ty.IsInvalid(), true)
+            expectUnexpectedAtEachSuffix(source, diag)
+        }
+    }
+
+    @TestCase
+    func enabledParameterAndOuterSlotsFollowTheirOwnType(): Unit {
+        for (source in ["(String @local?) -> Int64", "(Int8 @local!) -> Int64",
+            "(Int64) -> Int64 @local!", "VArray<Int64, $2> @local?", "(Int64, String) @local!",
+            "((Int64) -> Int64) @~local", "((Int64) @local!) -> Int64"]) {
+            let (ty, diag) = parseTypeNode(source, enabled: true)
+            @Expect(ty.modal.isSome() || ty.astKind == ASTKind.FUNC_TYPE, true)
+            expectUnexpectedAtEachSuffix(source, diag)
+        }
+        let (ty, diag) = parseTypeNode("((Int64 @local?) -> String, Int64 @local!) -> Int64", enabled: true)
+        let outer = (ty as FuncType).getOrThrow()
+        let inner = (outer.paramTypes[0] as FuncType).getOrThrow()
+        @Expect(inner.paramTypes[0].modal.getOrThrow().local, ASTMode.HALF)
+        @Expect(outer.paramTypes[1].modal.getOrThrow().local, ASTMode.FULL)
+        @Expect(countErrors(diag), 0)
+    }
+
+    @TestCase
+    func ordinaryComponentsHaveNoModeInEitherConfiguration(): Unit {
+        for (enabled in [false, true]) {
+            for ((source, kind) in [("VArray<Int64, $2>", ASTKind.VARRAY_TYPE),
+                ("(String, Int64)", ASTKind.TUPLE_TYPE), ("(Int64)", ASTKind.PAREN_TYPE),
+                ("((Int64) -> String) -> Int64", ASTKind.FUNC_TYPE)]) {
+                let (ty, diag) = parseTypeNode(source, enabled: enabled)
+                @Expect(ty.astKind, kind)
+                @Expect(ty.modal.isNone(), true)
+                @Expect(countErrors(diag), 0)
+            }
+        }
+    }
+
+    private func expectUnexpectedAtEachSuffix(source: String, diag: DiagnosticEngine): Unit {
+        let bytes = source.toArray()
+        var expected: Int64 = 0
+        for (offset in 0..bytes.size) {
+            if (bytes[offset] != 64u8) { continue } // '@'; diagnostic starts at the next byte.
+            expected++
+            var atPosition: Int64 = 0
+            for (d in diag.GetCategoryDiagnostic(DiagCategory.PARSE)) {
+                if (d.rKind == DiagKindRefactor.parse_unexpected_modal_type &&
+                    d.mainHint.range.begin.column == offset + 2) { atPosition++ }
+            }
+            @Expect(atPosition, 1)
+        }
+        @Expect(countErrors(diag), expected)
+    }
+
+    @TestCase
+    func catchTypesRejectExplicitModes(): Unit {
+        for ((source, restricted) in [
+            ("try {} catch (_: E | F @local!) {}", 1),
+            ("try {} catch (e: E @~local | F) {}", 1),
+            ("try {} catch (e: E | F) {}", 0)
+        ]) {
+            let (expr, diag) = parseExpr(source)
+            @Expect(expr.astKind, ASTKind.TRY_EXPR)
+            @Expect(unexpectedModeErrors(diag), restricted)
+            @Expect(countErrors(diag), restricted * 2)
+        }
+    }
+
+    @TestCase
+    func isAndAsTargetsRejectExplicitModes(): Unit {
+        for ((source, restricted) in [("x is C @local?", 1), ("x as C @~local", 1),
+            ("x is C", 0), ("x as C", 0)]) {
+            let (_, diag) = parseExpr(source)
+            @Expect(unexpectedModeErrors(diag), restricted)
+            @Expect(countErrors(diag), restricted * 2)
+        }
+    }
+
+    @TestCase
+    func instanceFieldsRejectModesButStaticFieldsKeepTheMode(): Unit {
+        for ((source, restricted, disabled) in [
+            ("class C { let x: T @local! = v }", 1, 1),
+            ("struct C { let x: T @~local = v }", 1, 1),
+            ("class C { static let x: T @local! = v }", 0, 1),
+            ("class C { let x: T = v }", 0, 0)
+        ]) {
+            let (_, diag) = parseDecl(source)
+            @Expect(unexpectedModeErrors(diag), restricted)
+            @Expect(countErrors(diag), restricted + disabled)
+        }
+    }
+
+    @TestCase
+    func macroSignatureRejectsLocalTokens(): Unit {
+        for ((source, restricted, disabled) in [
+            ("public macro M(a: Tokens @local!): Tokens { a }", 1, 1),
+            ("public macro M(a: Tokens): Tokens @local? { a }", 1, 1),
+            ("public macro M(a: Tokens @~local): Tokens { a }", 0, 1),
+            ("public macro M(a: Tokens): Tokens { a }", 0, 0)
+        ]) {
+            let (_, diag) = parseDecl(source)
+            @Expect(unexpectedModeErrors(diag), restricted)
+            @Expect(countErrors(diag), restricted + disabled)
+        }
+    }
+
+    @TestCase
+    func inheritanceRejectsExplicitModesAndKeepsBothBounds(): Unit {
+        for ((source, restricted) in [
+            ("class C <: I @local! & J {}", 1),
+            ("interface C <: I & J @local? {}", 1),
+            ("struct C <: I @~local & J {}", 1),
+            ("extend C <: I & J @local! {}", 1),
+            ("class C <: I & J {}", 0),
+            ("interface C <: I & J {}", 0),
+            ("struct C <: I & J {}", 0),
+            ("extend C <: I & J {}", 0)
+        ]) {
+            let (node, diag) = parseDecl(source)
+            let inherited = (node as InheritableDecl).getOrThrow()
+            @Expect(inherited.inheritedTypes.size, 2)
+            @Expect(inherited.TestAttr(Attribute.HAS_BROKEN), restricted == 1)
+            @Expect(unexpectedModeErrors(diag), restricted)
+            @Expect(countErrors(diag), restricted * 2)
+            @Expect(inherited.end.column, source.size + 1)
+        }
+    }
+
+    @TestCase
+    func genericConstraintRejectsAnExplicitModeAndKeepsTheBody(): Unit {
+        for ((source, restricted) in [
+            ("func f<T>(x: T): T where T <: I @~local & J { x }", 1),
+            ("func f<T>(x: T): T where T <: I & J { x }", 0)
+        ]) {
+            let (node, diag) = parseDecl(source)
+            let f = (node as FuncDecl).getOrThrow()
+            let constraint = f.GetGeneric().getOrThrow().genericConstraints[0]
+            @Expect(constraint.upperBounds.size, 2)
+            @Expect(constraint.TestAttr(Attribute.HAS_BROKEN), restricted == 1)
+            @Expect(unexpectedModeErrors(diag), restricted)
+            @Expect(countErrors(diag), restricted * 2)
+            @Expect(f.funcBody.getOrThrow().body.isSome())
+        }
+    }
+
+    private func unexpectedModeErrors(diag: DiagnosticEngine): Int64 {
+        var count = 0
+        for (diagnostic in diag.GetCategoryDiagnostic(DiagCategory.PARSE)) {
+            if (diagnostic.rKind == DiagKindRefactor.parse_unexpected_modal_type) {
+                count++
+            }
+        }
+        return count
+    }
+}
+
 @Test
 class ParseTypePortTest {
+    @TestCase
+    func localModalLookaheadLeavesOtherAtTokens(): Unit {
+        for (source in ["Int64 @local !", "Int64 @~ local", "Int64 @local", "Int64 @Other!"]) {
+            let diag = DiagnosticEngine()
+            let parser = Parser(source, diag, SourceManager())
+            let ty = parser.ParseType()
+            @Expect(ty.modal.isNone(), true)
+            @Expect(parser.Peek().kind == TokenKind.AT, true)
+            @Expect(countErrors(diag), 0)
+        }
+    }
+
     @TestCase
     func parseTypePosition(): Unit {
         let code = #"

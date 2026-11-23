@@ -108,6 +108,22 @@ public func GetFuncTypeWithoutThisPtrFromAutoEnvBaseType(autoEnvBaseType: ClassT
     return (paramTypes, typeArgs[typeArgs.size - 1])
 }
 
+// Generic AutoEnv arguments carry the data types. Their call-site modes are
+// declared on the virtual method slots (after the implicit receiver).
+func GetClosureCallType(base: ClassType, builder: CHIRBuilder): FuncType {
+    let (params, ret) = GetFuncTypeWithoutThisPtrFromAutoEnvBaseType(base)
+    if (base.GetGenericArgs().isEmpty()) {
+        return builder.context.GetFuncTy(params, ret, modal: base.GetModalInfo())
+    }
+    let (_, method) = GetFuncTypeFromAutoEnvBaseDef(base.GetClassDef())
+    CJC_ASSERT(method.GetNumOfParams() == params.size + 1)
+    for (i in 0..params.size) {
+        params[i] = builder.WithModal(params[i], method.GetParamType(i + 1).StripAllRefs().GetModalInfo())
+    }
+    let result = builder.WithModal(ret, method.GetReturnType().StripAllRefs().GetModalInfo())
+    return builder.context.GetFuncTy(params, result, modal: base.GetModalInfo())
+}
+
 public func GetBuiltinTypeWithVTable(ty: BuiltinType, builder: CHIRBuilder): BuiltinType {
     if (ty.IsCPointer()) {
         return builder.context.GetCPointerTy(builder.context.GetUnitTy())
@@ -365,13 +381,9 @@ public func GetInstMapFromCurDefAndExDefToCurType(curType: CustomType): HashMap<
 }
 
 public func ReplaceThisTypeToConcreteType(ty: Type, concreteType: Type, builder: CHIRBuilder): Type {
-    if (let Some(refTy) <- (ty as RefType)) {
-        if (refTy.GetBaseType().IsThis()) {
-            return concreteType
-        }
-    }
-    if (ty.IsThis()) {
-        return concreteType
+    let derefType = ty.StripAllRefs()
+    if (derefType.IsThis()) {
+        return builder.context.WithModal(concreteType, derefType.modal)
     }
     let newArgs = ArrayList<Type>()
     for (argTy in ty.GetTypeArgs()) {
@@ -380,13 +392,13 @@ public func ReplaceThisTypeToConcreteType(ty: Type, concreteType: Type, builder:
     return CreateNewTypeWithArgs(ty, newArgs, builder)
 }
 
-private func GetMemberVarByName(def: CustomTypeDef, varName: String): MemberVarInfo {
+private func GetMemberVarIndex(def: CustomTypeDef, varName: String): Int64 {
     let vars = def.GetAllInstanceVars()
     var idx = vars.size
     while (idx > 0) {
         idx--
         if (vars[idx].name == varName) {
-            return vars[idx]
+            return idx
         }
     }
     CJC_ABORT()
@@ -405,12 +417,9 @@ public func GetInstMemberTypeByNameCheckingReadOnly(rootType: CustomType, names:
         return (rootType, false)
     }
     let customTypeDef = rootType.GetCustomTypeDef()
-    let instMap = HashMap<Int64, (GenericType, Type)>()
-    rootType.GetInstMap(instMap, builder)
-    let currentName = names[0]
-    let member = GetMemberVarByName(customTypeDef, currentName)
-    let isReadOnly = member.TestAttr(Attribute.READONLY)
-    let memberTy = ReplaceRawGenericArgType(member.ty, instMap, builder)
+    let idx = GetMemberVarIndex(customTypeDef, names[0])
+    let isReadOnly = customTypeDef.GetAllInstanceVars()[idx].TestAttr(Attribute.READONLY)
+    let memberTy = rootType.GetInstantiatedMemberTys(builder)[idx]
     if (names.size > 1) {
         let pureMemberTy = memberTy.StripAllRefs()
         if (pureMemberTy.IsNominal()) {
@@ -812,7 +821,7 @@ public func ComputeUnsetVirtualMethodOffset(callee: Function, methodName: String
         i++
     }
     CJC_ABORT()
-    throw IllegalStateException("virtual method offset is not available name=${methodName}")
+    throw IllegalStateException("virtual method offset is not available name=${methodName} owner=${defType.ToString()} callee=${callee.GetIdentifier()} type=${callee.GetFuncType().getOrThrow().ToString()}")
 }
 
 public func GetCalleeInSrcParentType(callee: Function, methodName: String, expectedOffset: Option<UInt64>): Function {
@@ -969,6 +978,17 @@ public func ConstructorReturnsReceiver(fn: Function): Bool {
 public func IsCurrentReceiver(value: Value, firstParam: Value): Bool {
     if (refEq(value, firstParam)) {
         return true
+    }
+    // A delegated `this(...)` passes the receiver through CastValueIfNeeded; for an exclave struct
+    // constructor (`this @local!`) the parameter type differs from the plain RefTy, so the receiver
+    // arrives as a CLASS_STATIC_CAST of the parameter (Translator.TranslateStructOrClassCtorCall).
+    if (let Some(castLocal) <- value.AsLocalVar()) {
+        if (let Some(castExpr) <- castLocal.GetExpr()) {
+            if (castExpr.GetExprKind() == ExprKind.CLASS_STATIC_CAST &&
+                IsCurrentReceiver(castExpr.GetOperand(0), firstParam)) {
+                return true
+            }
+        }
     }
     let param = (firstParam as Parameter) ?? return false
     let fn = param.GetOwnerFunc() ?? return false

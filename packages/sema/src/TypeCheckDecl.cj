@@ -330,6 +330,7 @@ public func CheckPropDecl(pd: PropDecl, typeSynthesizer: (Type) -> Ty, declSynth
     }
     let typeNode = pd.typeNode.getOrThrow()
     let _ = typeSynthesizer(typeNode)
+    pd.resolvedMode = PropertyMode(pd)
     pd.SetTy(typeNode.GetTy() ?? TypeManager.GetInvalidTy())
     for (getter in pd.getters) {
         if (let Some(body) <- getter.funcBody) {
@@ -647,7 +648,9 @@ public func TypeCheckDeclSetEnumElementTyForFunc(
         }
     }
     let retTy = funcDecl.outerDecl.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
-    let ctorTy = tm.GetFunctionTy(paramTys.toArray(), retTy)
+    let cfg = FuncTyConfig()
+    cfg.ReadModes(body)
+    let ctorTy = tm.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
     body.SetTy(ctorTy)
     funcDecl.SetTy(ctorTy)
     let retType = RefType()

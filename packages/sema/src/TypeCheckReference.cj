@@ -770,6 +770,40 @@ public func TypeCheckReferenceFilterTargetsInExtend(
     return !targets.isEmpty()
 }
 
+// A property's receiver is part of its overload identity. Filter before lookup
+// collapses duplicate declarations, for both implicit this and qualified access.
+private func FilterPropertyReceivers(tm: TypeManager, ctx: ASTContext, expr: Expr,
+    base: Option<Expr>, targets: ArrayList<Option<Decl>>): Unit {
+    var hasProperty = false
+    for (candidate in targets) {
+        if ((let Some(t) <- candidate) && t is PropDecl && IsInstanceMember(t)) { hasProperty = true; break }
+    }
+    if (!hasProperty) { return }
+    let owner = GetCurFuncBody(ctx, expr.scopeName).flatMap({ b => b.funcDecl })
+    let enclosing = owner.map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
+    let actual = if (let Some(b) <- base) { CallSiteMode(b, enclosing, HashSet<Decl>()) } else { Some(enclosing) }
+    let ty = if (let Some(b) <- base) { b.GetTy() }
+        else { GetCurInheritableDecl(ctx, expr.scopeName).flatMap({ d => d.GetTy() }) }
+    let copy = ty.map({ t => tm.IsModalCopyType(t) }) ?? false
+    var exact = false
+    for (candidate in targets) {
+        if ((let Some(t) <- candidate) && (let Some(pd) <- (t as PropDecl)) && IsInstanceMember(t) &&
+            (actual.map({ m => m == PropertyMode(pd) }) ?? false)) { exact = true }
+    }
+    var i: Int64 = 0
+    while (i < targets.size) {
+        if ((let Some(t) <- targets[i]) && (let Some(pd) <- (t as PropDecl)) && IsInstanceMember(t)) {
+            let mode = PropertyMode(pd)
+            if (exact && !(actual.map({ m => m == mode }) ?? false) ||
+                !copy && !(actual.map({ m => m.IsSubMode(mode) }) ?? (mode == ASTMode.HALF))) {
+                targets.remove(at: i)
+                continue
+            }
+        }
+        i++
+    }
+}
+
 public func FilterAndCheckTargetsOfRef(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -778,6 +812,7 @@ public func FilterAndCheckTargetsOfRef(
     targets: ArrayList<Option<Decl>>,
     importManager: SemaImportManager
 ): Bool {
+    FilterPropertyReceivers(tm, ctx, re, None, targets)
     TypeCheckReferenceRemoveDuplicateTargets(tm, targets)
     TypeCheckReferenceFilterCandidatesForRef(tm, ctx, re, targets)
     if (targets.isEmpty()) {
@@ -906,6 +941,16 @@ public func FilterAndCheckTargetsOfNameAccess(
     return TypeCheckReferenceCheckForQuestFuncRetType(diag, targets[0], ma, hasTarget)
 }
 
+// Member access on a value receiver, including a generic receiver resolved through its upper bounds.
+public func TypeCheckReferenceFilterPropertyReceivers(tm: TypeManager, ctx: ASTContext, ma: MemberAccess,
+    targets: ArrayList<Decl>): Unit {
+    let candidates = ArrayList<Option<Decl>>()
+    for (candidate in targets) { candidates.add(Some(candidate)) }
+    FilterPropertyReceivers(tm, ctx, ma, ma.baseExpr, candidates)
+    targets.clear()
+    for (candidate in candidates) { targets.add(candidate.getOrThrow()) }
+}
+
 public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -919,6 +964,7 @@ public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
         return None
     }
     let baseExpr = ma.baseExpr.getOrThrow()
+    TypeCheckReferenceFilterPropertyReceivers(tm, ctx, ma, targets)
     if (!TypeCheckReferenceFilterTargetsInExtend(tm, ma, baseExpr.GetTy(), targets)) {
         DiagMemberAccessNotFound(diag, tm, ma, importManager)
         return None
@@ -1564,6 +1610,44 @@ private func TypeCheckReferenceCheckLegalityIsSkip(node: Node): Bool {
     return false
 }
 
+// Function types carry their parameter and return types in typeArgs.
+private func HasLocalSignature(ty: Ty, seen: HashSet<Ptr<Ty>>): Bool {
+    if (!seen.add(Ptr<Ty>(ty))) { return false }
+    if (let Some(ft) <- (ty as FuncTy)) {
+        if (ft.retMode != ASTMode.NOT) { return true }
+        for (i in 0..ft.paramTys.size) {
+            if (ft.ParamMode(i) != ASTMode.NOT) { return true }
+        }
+    }
+    for (arg in ty.typeArgs) {
+        if (HasLocalSignature(arg, seen)) { return true }
+    }
+    return false
+}
+
+private func LocalModeEnabled(impl: TypeCheckerImpl): Bool {
+    return if (let Some(instance) <- impl.ci) { instance.globalOptions.enableLocalMode } else { false }
+}
+
+// ResolveNames has expanded aliases on the use-site Type. Visit the source
+// files, not the imported declarations, and include signatures without bodies
+// or expression references (and children skipped by expression legality).
+public func CheckLocalTypeReferences(diag: BasicDiagnosticEngine, impl: TypeCheckerImpl, pkg: Package): Unit {
+    if (LocalModeEnabled(impl)) { return }
+    for (file in pkg.files) {
+        let _ = Walker(file, visitPre: { node: Node =>
+            if (node.astKind == ASTKind.REF_TYPE || node.astKind == ASTKind.QUALIFIED_TYPE) {
+                if ((let Some(ty) <- node.GetTy()) && HasLocalSignature(ty, HashSet<Ptr<Ty>>())) {
+                    DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_local_api_disabled, node,
+                        arguments: [node.ToString()]).Emit()
+                    return VisitAction.SKIP_CHILDREN
+                }
+            }
+            return VisitAction.WALK_CHILDREN
+        }).Walk()
+    }
+}
+
 private func CheckLegalityOfReferenceForNameReferenceExpr(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
@@ -1571,6 +1655,11 @@ private func CheckLegalityOfReferenceForNameReferenceExpr(
     ctx: ASTContext,
     nameRef: NameReferenceExpr
 ): Unit {
+    if (!LocalModeEnabled(impl) && (let Some(decl) <- nameRef.GetTarget()) && (let Some(ty) <- decl.GetTy()) &&
+        HasLocalSignature(ty, HashSet<Ptr<Ty>>())) {
+        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_local_api_disabled, nameRef,
+            arguments: [decl.identifier.Val()]).Emit()
+    }
     if (!nameRef.instTys.isEmpty()) {
         let _ = impl.CheckInstTypeCompleteness(ctx, nameRef)
     }

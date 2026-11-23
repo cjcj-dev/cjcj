@@ -449,9 +449,6 @@ public class VTableGenerator {
         replaceTable: HashMap<GenericType, Type>): VirtualMethodInfo {
         let originalFuncType = method.GetFuncType().getOrThrow()
         let originalParamTypes = originalFuncType.GetParamTypes()
-        if (!method.TestAttr(Attribute.STATIC)) {
-            originalParamTypes.remove(at: 0)
-        }
         let instParamTypes = ArrayList<Type>()
         for (paramTy in originalParamTypes) {
             instParamTypes.add(ReplaceRawGenericArgType(paramTy, replaceTable, builder))
@@ -869,7 +866,8 @@ public class WrapVirtualFunc {
             expectedIdx++
         }
         if (!rawFunc.TestAttr(Attribute.STATIC)) {
-            expectedParamTypes[0] = instParentType
+            let modal = rawFunc.GetFuncType().getOrThrow().GetParamTypes()[0].StripAllRefs().GetModalInfo()
+            expectedParamTypes[0] = if (modal == ModalInfo()) { instParentType } else { builder.WithModal(instParentType, modal) }
         }
 
         var applyRetTy = rawFunc.GetFuncType().getOrThrow().GetReturnType()
@@ -905,7 +903,7 @@ public class WrapVirtualFunc {
     }
 
     private func GetWrapperFuncType(parentFuncTyWithoutThisArg: FuncType, selfTy: Type,
-        replaceTable: HashMap<Int64, Type>, isStatic: Bool): FuncType {
+        replaceTable: HashMap<Int64, Type>, isStatic: Bool, modal: ModalInfo): FuncType {
         let erasedFuncTy = (ReplaceRawGenericArgType(parentFuncTyWithoutThisArg, replaceTable, builder) as FuncType)
             .getOrThrow()
         let wrapperParamTypes = erasedFuncTy.GetParamTypes()
@@ -928,7 +926,7 @@ public class WrapVirtualFunc {
             if (!selfTy.IsClassOrArray()) {
                 thisArgTy = builder.context.GetRefTy(builder.context.GetAnyTy().getOrThrow())
             }
-            wrapperParamTypes.add(thisArgTy, at: 0)
+            wrapperParamTypes.add(builder.WithModal(thisArgTy, modal), at: 0)
         }
         return builder.context.GetFuncTy(wrapperParamTypes, wrapperRetTy)
     }
@@ -954,7 +952,10 @@ public class WrapVirtualFunc {
             return cached
         }
         let genericTable = GetReplaceTableForVirtualFunc(parentTy, funcIdentifier, parentFuncInfo)
-        let wrapperTy = GetWrapperFuncType(parentFuncTyWithoutThisArg, selfTy, genericTable.replaceTable, isStatic)
+        let modal = if (isStatic) { ModalInfo() } else {
+            curFunc.GetFuncType().getOrThrow().GetParamTypes()[0].StripAllRefs().GetModalInfo()
+        }
+        let wrapperTy = GetWrapperFuncType(parentFuncTyWithoutThisArg, selfTy, genericTable.replaceTable, isStatic, modal)
         let packageName = customTypeDef.GetPackageName()
         let isImported = customTypeDef.TestAttr(Attribute.IMPORTED) &&
             parentTy.GetCustomTypeDef().TestAttr(Attribute.IMPORTED)
@@ -1222,9 +1223,15 @@ public class WrapMutFunc {
     }
 }
 
+private func GetOperatorOperandTypes(info: VirtualMethodInfo): ArrayList<Type> {
+    let params = info.GetMethodSigType().GetParamTypes()
+    if (!info.TestAttr(Attribute.STATIC)) { params.remove(at: 0) }
+    return params
+}
+
 private func IsPossiblyOverflowOperator(info: VirtualMethodInfo): Bool {
     let name = info.GetMethodName()
-    let paramTypes = info.GetMethodSigType().GetParamTypes()
+    let paramTypes = GetOperatorOperandTypes(info)
     if (paramTypes.size == 1 && IsOverflowOperator(name)) {
         return CanBeIntegerType(paramTypes[0]) && CanBeIntegerType(info.GetMethodInstRetType())
     }
@@ -1241,7 +1248,7 @@ private func IsBuiltinOverflowOperator(def: CustomTypeDef, info: VirtualMethodIn
         return false
     }
     let name = info.GetMethodName()
-    let paramTypes = info.GetMethodSigType().GetParamTypes()
+    let paramTypes = GetOperatorOperandTypes(info)
     if (paramTypes.size == 1 && paramTypes[0].IsEqual(defType) && paramTypes[0].IsInteger() &&
         paramTypes[0].IsEqual(info.GetMethodInstRetType())) {
         return IsOverflowOperator(name)
@@ -1381,12 +1388,13 @@ public class UpdateOperatorVTable {
             while (idx < SPLIT_OPERATOR_NAME_PREFIX.size) {
                 let newName = SPLIT_OPERATOR_NAME_PREFIX[idx] + methodInfo.GetMethodName()
                 let ovfFunc = GenerateBuiltinOverflowOperatorFunc(methodInfo.GetMethodName(), OVF_STRATEGIES[idx],
-                    extDef, methodInfo.GetMethodSigType().GetNumOfParams() == 1)
+                    extDef, GetOperatorOperandTypes(methodInfo).size == 1)
                 extDef.AddMethod(ovfFunc)
                 if (idx == SPLIT_OPERATOR_NAME_PREFIX.size - 1) {
                     let vt = user.GetDefVTable().GetExpectedTypeVTable(infType).GetVirtualMethods()[index]
                     CJC_ASSERT(vt.GetMethodName() == methodInfo.GetMethodName())
-                    CJC_ASSERT(vt.GetMethodSigType().IsEqual(methodInfo.GetMethodSigType()))
+                    CJC_ASSERT(vt.TestAttr(Attribute.STATIC) == methodInfo.TestAttr(Attribute.STATIC))
+                    CJC_ASSERT(vt.FuncSigIsMatched(methodInfo.GetCondition(), builder))
                     user.UpdateVtableItem(infType, index, ovfFunc, extDef.GetExtendedType().getOrThrow(), newName)
                 } else {
                     let newFuncInfo = CloneVirtualMethodInfo(methodInfo)
@@ -1405,7 +1413,8 @@ public class UpdateOperatorVTable {
                 if (idx == SPLIT_OPERATOR_NAME_PREFIX.size - 1) {
                     let vt = user.GetDefVTable().GetExpectedTypeVTable(infType).GetVirtualMethods()[index]
                     CJC_ASSERT(vt.GetMethodName() == methodInfo.GetMethodName())
-                    CJC_ASSERT(vt.GetMethodSigType().IsEqual(methodInfo.GetMethodSigType()))
+                    CJC_ASSERT(vt.TestAttr(Attribute.STATIC) == methodInfo.TestAttr(Attribute.STATIC))
+                    CJC_ASSERT(vt.FuncSigIsMatched(methodInfo.GetCondition(), builder))
                     user.UpdateVtableItem(infType, index, methodInfo.GetVirtualMethod(), None, newName)
                 } else {
                     let newMethodInfo = CloneVirtualMethodInfo(methodInfo)
@@ -1638,9 +1647,6 @@ public class GenerateVTable {
         let paramTypes = ArrayList<Type>()
         for (arg in args) {
             paramTypes.add(arg.GetType().getOrThrow())
-        }
-        if (!callee.TestAttr(Attribute.STATIC)) {
-            paramTypes.remove(at: 0)
         }
         let funcCallType = FuncCallType(builder.context.GetFuncTy(paramTypes, retType),
             funcName: callee.GetSrcCodeIdentifier(), genericTypeArgs: instTypeArgs)

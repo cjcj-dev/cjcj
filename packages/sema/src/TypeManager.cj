@@ -899,11 +899,7 @@ public class TypeManager {
                 if (let Some(funcTy) <- (ty as FuncTy)) {
                     let params = instantiateArgs(funcTy.paramTys, typeMapping)
                     let ret = GetInstantiatedTy(funcTy.retTy, typeMapping)
-                    let cfg = FuncTyConfig()
-                    cfg.isC = funcTy.isC
-                    cfg.isClosureTy = funcTy.isClosureTy
-                    cfg.hasVariableLenArg = funcTy.hasVariableLenArg
-                    cfg.noCast = funcTy.noCast
+                    let cfg = funcTy.CopyConfig()
                     return GetFunctionTy(params, ret, cfg: cfg)
                 }
             case TypeKind.TYPE_CLASS =>
@@ -1418,6 +1414,7 @@ public class TypeManager {
         if (fastCheck) {
             return true
         }
+        if (IsCopyInterface(root) && IsModalCopyType(leaf)) { return true }
         if (root.IsNothing()) {
             return false
         }
@@ -1466,7 +1463,7 @@ public class TypeManager {
     public func IsFuncSubtype(leaf: Ty, root: Ty): Bool {
         if (let Some(leftFunc) <- (leaf as FuncTy)) {
             if (let Some(rightFunc) <- (root as FuncTy)) {
-                if (IsFuncParametersSubtype(leftFunc, rightFunc)) {
+                if (leftFunc.retMode.IsSubMode(rightFunc.retMode) && IsFuncParametersSubtype(leftFunc, rightFunc)) {
                     let noCast = leftFunc.noCast || rightFunc.noCast
                     return IsSubtype(leftFunc.retTy, rightFunc.retTy, implicitBoxed: noCast)
                 }
@@ -1481,7 +1478,8 @@ public class TypeManager {
         }
         let noCast = leaf.noCast || root.noCast
         for (idx in 0..leaf.paramTys.size) {
-            if (!IsSubtype(root.paramTys[idx], leaf.paramTys[idx], implicitBoxed: noCast)) {
+            if (!root.ParamMode(idx).IsSubMode(leaf.ParamMode(idx)) ||
+                !IsSubtype(root.paramTys[idx], leaf.paramTys[idx], implicitBoxed: noCast)) {
                 return false
             }
         }
@@ -1561,7 +1559,8 @@ public class TypeManager {
             return false
         }
         for (idx in 0..t2.paramTys.size) {
-            if (CheckTypeCompatibility(t1.paramTys[idx], t2.paramTys[idx], implicitBoxed: false) !=
+            if (t1.ParamMode(idx) != t2.ParamMode(idx) ||
+                CheckTypeCompatibility(t1.paramTys[idx], t2.paramTys[idx], implicitBoxed: false) !=
                 TypeCompatibility.IDENTICAL) {
                 return false
             }
@@ -2184,6 +2183,7 @@ public class TypeManager {
     }
 
     public func IsFuncDeclSubType(decl: FuncDecl, funcDecl: FuncDecl): Bool {
+        if (!SameModalInputs(decl, funcDecl)) { return false }
         if (decl.identifier != funcDecl.identifier) {
             return false
         }
@@ -2200,7 +2200,7 @@ public class TypeManager {
     }
 
     public func IsFuncTySubType(type1: FuncTy, type2: FuncTy): Bool {
-        return IsFuncParameterTypesIdentical(type1.paramTys, type2.paramTys) &&
+        return type1.retMode.IsSubMode(type2.retMode) && IsFuncParameterTypesIdentical(type1, type2) &&
             IsSubtype(type1.retTy, type2.retTy)
     }
 
@@ -2250,6 +2250,7 @@ public class TypeManager {
         if (src.TestAttr(Attribute.IS_BROKEN) || target.TestAttr(Attribute.IS_BROKEN)) {
             return false
         }
+        if (!SameModalInputs(src, target)) { return false }
         if (let Some(cached) <- GetOverrideCache(Some(src), Some(target), baseTy, expectInstParent)) {
             return cached
         }
@@ -2283,6 +2284,7 @@ public class TypeManager {
     }
 
     private func IsOverrideOrShadow(src: PropDecl, target: PropDecl, baseTy: Option<Ty>): Bool {
+        if (PropertyMode(src) != PropertyMode(target)) { return false }
         if (let None <- src.outerDecl) {
             return false
         }
@@ -2734,11 +2736,7 @@ public class TypeManager {
             for (paramTy in funcTy.paramTys) {
                 params.add(ReplaceThisTy(paramTy))
             }
-            let cfg = FuncTyConfig()
-            cfg.isC = funcTy.isC
-            cfg.isClosureTy = funcTy.isClosureTy
-            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
-            cfg.noCast = funcTy.noCast
+            let cfg = funcTy.CopyConfig()
             return GetFunctionTy(params.toArray(), ReplaceThisTy(funcTy.retTy), cfg: cfg)
         }
         if (let Some(tupleTy) <- (now as TupleTy)) {
@@ -2877,7 +2875,7 @@ public class TypeManager {
             }
             let retType: Option<Node> = if (let Some(ret) <- funcType.retType) { Some(ret) } else { None }
             let retTy = ObtainsAliasType(retType).getOrThrow()
-            let cfg = FuncTyConfig()
+            let cfg = funcTy.CopyConfig()
             cfg.isC = funcType.isC
             cfg.hasVariableLenArg = funcTy.hasVariableLenArg
             return GetFunctionTy(params.toArray(), retTy, cfg: cfg)
@@ -3392,9 +3390,7 @@ public class TypeManager {
                 params.add(typeArgs[idx])
                 idx++
             }
-            let cfg = FuncTyConfig()
-            cfg.isC = funcTy.isC
-            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+            let cfg = funcTy.CopyConfig()
             return GetFunctionTy(params.toArray(), typeArgs[typeArgs.size - 1], cfg: cfg)
         }
         if (ty is TupleTy) {
@@ -3430,6 +3426,37 @@ public class TypeManager {
             return GetIntersectionTy(typeArgs)
         }
         return ty
+    }
+
+    public func IsCopyInterface(ty: Ty): Bool {
+        if (let Some(it) <- (ty as InterfaceTy)) {
+            if (let Some(d) <- it.declPtr) {
+                return d.fullPackageName == "std.core" && d.identifier.Val() == "Copyable"
+            }
+        }
+        return false
+    }
+
+    public func IsModalCopyType(ty: Ty): Bool {
+        if (Ty.IsMetCType(ty)) { return true }
+        if (ty is PrimitiveTy) {
+            return match (ty.kind) {
+                case TypeKind.TYPE_FLOAT16 | TypeKind.TYPE_RUNE | TypeKind.TYPE_NOTHING |
+                    TypeKind.TYPE_IDEAL_FLOAT | TypeKind.TYPE_IDEAL_INT | TypeKind.TYPE_INVALID => true
+                case _ => false
+            }
+        }
+        if (ty.IsTuple() || ty.kind == TypeKind.TYPE_VARRAY) {
+            for (arg in ty.typeArgs) { if (!IsModalCopyType(arg)) { return false } }
+            return true
+        }
+        if (let Some(g) <- (ty as GenericsTy)) {
+            if (!g.isUpperBoundLegal) { return false }
+            for (upper in GetAllUpperBounds(g).values) { if (IsCopyInterface(upper)) { return true } }
+        } else if (ty.IsStruct()) {
+            for (upper in GetAllSuperTys(ty).values) { if (IsCopyInterface(upper)) { return true } }
+        }
+        return false
     }
 
     private func GetAllUpperBounds(genTy: GenericsTy): TySet {

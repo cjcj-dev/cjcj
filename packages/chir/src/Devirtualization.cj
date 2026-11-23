@@ -393,10 +393,11 @@ public class Devirtualization {
     private func ResolveNonStaticCalleeAndThisType(state: TypeValue, invoke: InvokeBase): (Option<Function>, Option<Type>) {
         let specific = state.GetSpecificType()
         if (!specific.CanBeInherited() || state.GetTypeKind() == DevirtualTyKind.EXACTLY) {
-            let target = SearchRealCalleeInVtable(specific, invoke, builder).getOrThrow()
+            // No vtable entry matches (e.g. a local-mode variant of the method): keep the virtual call.
+            let target = SearchRealCalleeInVtable(specific, invoke, builder) ?? return (None, None)
             return (Some(target), Some(specific))
         }
-        let subTypes = CollectAllSubTypes((specific as ClassType).getOrThrow())
+        let subTypes = CollectAllSubTypes((specific as ClassType) ?? return (None, None))
         let targets = HashSet<Function>()
         for (sub in subTypes) {
             if (let Some(target) <- SearchRealCalleeInVtable(sub, invoke, builder)) { targets.add(target) }
@@ -404,7 +405,7 @@ public class Devirtualization {
         if (targets.size != 1) { return (None, None) }
         let callee = targets.iterator().next().getOrThrow()
         let srcParentTy = invoke.GetInstSrcParentCustomTypeOfMethod(builder)
-        let genericSubTy = callee.GetParentCustomTypeOrExtendedType().getOrThrow()
+        let genericSubTy = callee.GetParentCustomTypeOrExtendedType() ?? return (None, None)
         let thisTy = GetInstSubType(genericSubTy, srcParentTy, builder)
         if (HasUnknownGenericType(srcParentTy, thisTy)) { return (Some(callee), None) }
         return (Some(callee), Some(thisTy))

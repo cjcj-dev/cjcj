@@ -329,6 +329,11 @@ public open class GlobalOptions <: Option {
     public var enableCompileTest: Bool = false
     public var compileTestsOnly: Bool = false
     public var exportForTest: Bool = false
+    public var enableLocalMode: Bool = false
+
+    // Parsed source, semantic lifetime checking and CHIR region placement share one selection.
+    public func IsLocalModeAnalysis(): Bool { return enableLocalMode }
+
     public var enableEH: Bool = false
     public var mock: MockMode = MockMode.DEFAULT
     public var diagFormat: DiagFormat = DiagFormat.DEFAULT
@@ -517,6 +522,7 @@ public open class GlobalOptions <: Option {
         enableCompileTest = other.enableCompileTest
         compileTestsOnly = other.compileTestsOnly
         exportForTest = other.exportForTest
+        enableLocalMode = other.enableLocalMode
         enableEH = other.enableEH
         mock = other.mock
         diagFormat = other.diagFormat
@@ -1314,6 +1320,20 @@ public open class GlobalOptions <: Option {
     }
 
     protected open func PerformPostActions(): Bool {
+        if (enableLocalMode && (backend != BackendType.CJNATIVE || target.os != OSType.LINUX ||
+            target.arch != ArchType.X86_64 || target.env != EnvironmentType.GNU || interpreter ||
+            enIncrementalCompilation || compileCjd || !commonPartChirs.isEmpty() ||
+            IsEmitCHIREnable())) {
+            Errorln("local mode requires a Linux x86_64 GNU native source compilation")
+            return false
+        }
+        if (outputMode == OutputMode.CJO && (backend != BackendType.CJNATIVE || target.os != OSType.LINUX ||
+            target.arch != ArchType.X86_64 || target.env != EnvironmentType.GNU || enIncrementalCompilation ||
+            !inputObjs.isEmpty() || compileMacroPackage || compileCjd || IsEmitCHIREnable() ||
+            !commonPartCjos.isEmpty() || !commonPartChirs.isEmpty() || (!output.isEmpty() && !IsDir(output)))) {
+            Errorln("CJO interface output requires a Linux x86_64 source package and a directory output")
+            return false
+        }
         chirLLVM = backend == BackendType.CJNATIVE
         chirCC = chirCC || chirLLVM
         if (interpreter) { chirCC = true }
@@ -1657,6 +1677,7 @@ public open class GlobalOptions <: Option {
             case OutputMode.STATIC_LIB => "C"
             case OutputMode.SHARED_LIB => "S"
             case OutputMode.CHIR => "CH"
+            case OutputMode.CJO => "CJO"
             case OutputMode.OBJ => CompileTargetToSerializedString()
         }
     }
@@ -1762,6 +1783,7 @@ public open class GlobalOptions <: Option {
             BoolToSerializedString(interpreterPrintResult),
             BoolToSerializedString(interpMainNoLinkage),
             BoolToSerializedString(disableCodeGen),
+            BoolToSerializedString(enableLocalMode),
             BoolToSerializedString(disableDeserializer),
             AggressiveParallelCompileToSerializedString(),
         ]

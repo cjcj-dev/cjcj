@@ -548,6 +548,8 @@ public open class FuncParam <: VarDecl {
     public var desugarDecl: Option<FuncDecl> = None
     public var isNamedParam: Bool = false
     public var hasLetOrVar: Bool = false
+    // The value parameter of a property setter. Its mode is the property mode.
+    public var isPropSetterValue: Bool = false
 
     public init() {
         super(ASTKind.FUNC_PARAM)
@@ -619,8 +621,12 @@ public class TypeAliasDecl <: Decl {
     }
 }
 
+public class ThisParam <: FuncParam {}
+
 public class FuncParamList <: Node {
+    public var thisParam: Option<ThisParam> = None
     public var leftParenPos: Position = INVALID_POSITION
+    public var receiverModal: Option<ASTModalInfo> = None
     public let params: ArrayList<FuncParam> = ArrayList<FuncParam>()
     public var rightParenPos: Position = INVALID_POSITION
     public var variadicArgIndex: UInt64 = 0

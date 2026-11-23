@@ -181,6 +181,9 @@ private func JoinOrMeetFuncTy(tm: TypeManager, mode: JoinMeetMode, tys: TySet, i
     }
 
     let firstFunc = (tys.values[0] as FuncTy).getOrThrow()
+    for (ty in tys.values) {
+        if (!firstFunc.SameModes((ty as FuncTy).getOrThrow())) { return Some(ModeBound(tm, mode)) }
+    }
     let paramCnt = firstFunc.paramTys.size
     let paramTys = ArrayList<Ty>()
     for (idx in 0..paramCnt) {
@@ -199,7 +202,7 @@ private func JoinOrMeetFuncTy(tm: TypeManager, mode: JoinMeetMode, tys: TySet, i
     }
     let retTy = CoFunc(tm, mode, operandRetTys, ignoredTyVars, curFile)
     if (Ty.AreTysCorrect(paramTys) && Ty.IsTyCorrect(retTy)) {
-        let resultTy = tm.GetFunctionTy(paramTys.toArray(), retTy)
+        let resultTy = tm.GetFunctionTy(paramTys.toArray(), retTy, cfg: firstFunc.CopyConfig())
         for (ty in tys.values) {
             if (!CoSubtype(tm, mode, ty, resultTy)) {
                 return Some(ModeBound(tm, mode))
@@ -406,10 +409,7 @@ private func ToUserVisibleTy(tm: TypeManager, ty: Ty, curFile: Option<File>): Ty
             paramTys.add(ToUserVisibleTy(tm, paramTy, curFile))
         }
         if (Ty.AreTysCorrect(paramTys) && Ty.IsTyCorrect(retTy)) {
-            let cfg = FuncTyConfig()
-            cfg.isC = funcTy.isC
-            cfg.isClosureTy = funcTy.isClosureTy
-            cfg.hasVariableLenArg = funcTy.hasVariableLenArg
+            let cfg = funcTy.CopyConfig()
             return tm.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
         }
         return TypeManager.GetInvalidTy()

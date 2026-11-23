@@ -99,8 +99,23 @@ public class FaithfulAST2CHIRNodeMap {
     }
 
     public func Get(decl: AstDecl): Value {
-        return TryGet(decl) ??
-            throw IllegalStateException("faithful AST2CHIR globalCache miss: ${decl.identifier.Val()}")
+        if (let Some(value) <- TryGet(decl)) { return value }
+        if (let Some(value) <- TryGetSameSymbolFunc(decl)) { return value }
+        throw IllegalStateException(
+            "faithful AST2CHIR globalCache miss: ${decl.identifier.Val()} (${decl.mangledName})")
+    }
+
+    // A function decl that was not collected may still name a symbol that already has a CHIR value: Sema keeps
+    // one instantiated decl per generic overload, while CHIR collects one per mangled name.
+    private func TryGetSameSymbolFunc(decl: AstDecl): Option<Value> {
+        if ((decl as AstFuncDecl).isNone() || decl.mangledName.isEmpty()) { return None }
+        for ((candidate, value) in cache) {
+            if ((candidate as AstFuncDecl).isSome() && candidate.mangledName == decl.mangledName) {
+                return value
+            }
+        }
+        if (let Some(base) <- parent) { return base.TryGetSameSymbolFunc(decl) }
+        return None
     }
 
     public func Has(decl: AstDecl): Bool {

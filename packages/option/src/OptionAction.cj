@@ -188,6 +188,10 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.PROFILE_COMPILE_TIME) { opts.enableTimer = true; return handled() }
     if (id == ID.PROFILE_COMPILE_MEMORY) { opts.enableMemoryCollect = true; return handled() }
     if (id == ID.ENABLE_EFFECTS) { opts.enableEH = true; return handled() }
+    if (id == ID.ENABLE_LOCAL_MODE) {
+        opts.enableLocalMode = true
+        return handled()
+    }
     if (id == ID.STATIC_STD) { opts.linkStaticStd = Some(true); return handled() }
     if (id == ID.DY_STD) { opts.linkStaticStd = Some(false); return handled() }
     if (id == ID.STATIC_LIBS || id == ID.DY_LIBS || id == ID.STATIC) { return handled() }
@@ -356,6 +360,10 @@ private func parseOutputType(opts: GlobalOptions, value: String): ActionResult {
     }
     else if (value == "dylib") {
         opts.outputMode = OutputMode.SHARED_LIB
+        opts.enableHotReload = false
+    }
+    else if (value == "cjo") {
+        opts.outputMode = OutputMode.CJO
         opts.enableHotReload = false
     }
     else if (value == "chir") {

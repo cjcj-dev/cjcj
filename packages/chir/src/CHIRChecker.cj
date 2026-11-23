@@ -823,6 +823,56 @@ public class CHIRChecker {
         for (block in blocks) {
             CheckBlock(block, topLevelFunc)
         }
+        CheckRegionPaths(blockGroup, topLevelFunc)
+    }
+
+    // Nested groups own independent frames. Incoming depth must agree on every
+    // join and back edge, and an exit cannot carry an open frame into its caller.
+    private func CheckRegionPaths(group: BlockGroup, fn: Function): Unit {
+        let forbidden = (group.GetOwnerFunc().map({ f => f.TestAttr(Attribute.EXCLAVE) }) ?? false) ||
+            (group.GetOwnerExpression().map({ e => e is Exclave }) ?? false)
+        if (forbidden) {
+            for (block in group.GetBlocks()) {
+                for (expr in block.GetExpressions()) {
+                    if (expr.GetExprKind() == ExprKind.START_REGION || expr.GetExprKind() == ExprKind.END_REGION) {
+                        ErrorInExpr(fn, expr, "an exclave body cannot open or close a region")
+                    }
+                }
+            }
+        }
+        let entry = group.GetEntryBlock() ?? return
+        let pending = ArrayList<(Block, Int64)>()
+        let seen = HashMap<Int64, Int64>()
+        pending.add((entry, 0))
+        while (!pending.isEmpty()) {
+            let (block, incoming) = pending.remove(at: pending.size - 1)
+            if (let Some(first) <- seen.get(block.nodeId)) {
+                if (first != incoming) {
+                    ErrorInFunc(fn, "inconsistent region depth at block " + block.GetIdentifier())
+                }
+                continue
+            }
+            seen[block.nodeId] = incoming
+            var depth = incoming
+            for (expr in block.GetExpressions()) {
+                if (expr.GetExprKind() == ExprKind.START_REGION) { depth++ }
+                else if (expr.GetExprKind() == ExprKind.END_REGION) {
+                    if (depth == 0) { ErrorInExpr(fn, expr, "EndRegion without StartRegion"); break }
+                    depth--
+                } else if (expr is Exit || expr is Exclave) {
+                    if (depth != 0) { ErrorInExpr(fn, expr, "missing EndRegion before leaving the frame") }
+                    break
+                } else if (expr.IsTerminator()) {
+                    for (succ in expr.GetSuccessors()) {
+                        if (refEq(succ.GetParentBlockGroup().getOrThrow(), group)) {
+                            pending.add((succ, depth))
+                        } else if (depth != 0) {
+                            ErrorInExpr(fn, expr, "control flow leaves block group with an open region")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func CheckBlock(block: Block, topLevelFunc: Function): Unit {
@@ -961,6 +1011,12 @@ public class CHIRChecker {
 
     private func CheckTerminator(expr: Expression, topLevelFunc: Function): Unit {
         let actionMap = HashMap<ExprKind, () -> Unit>([
+            (ExprKind.EXCLAVE, { =>
+                ShouldNotHaveResult(expr, topLevelFunc)
+                OperandNumIsEqual(0, expr, topLevelFunc)
+                if (expr.GetNumOfBlockGroups() == 1) { CheckBlockGroup(expr.GetBlockGroup(0), topLevelFunc) }
+                else { ErrorInExpr(topLevelFunc, expr, "exclave must own one body") }
+            }),
             (ExprKind.GOTO, { =>
                 CheckGoTo((expr as GoTo).getOrThrow(), topLevelFunc) }),
             (ExprKind.EXIT, { =>
@@ -1478,8 +1534,16 @@ public class CHIRChecker {
         }
     }
 
+    private func CheckRegionBoundary(expr: Expression, topLevelFunc: Function): Unit {
+        if (!OperandNumIsEqual(0, expr, topLevelFunc)) { return }
+        let result = expr.GetResult().getOrThrow()
+        if (!result.GetType().getOrThrow().IsUnit()) { TypeCheckError(expr, result, "Unit", topLevelFunc) }
+    }
+
     private func CheckOtherExpression(expr: Expression, topLevelFunc: Function): Unit {
         let actionMap = HashMap<ExprKind, () -> Unit>([
+            (ExprKind.START_REGION, { => CheckRegionBoundary(expr, topLevelFunc) }),
+            (ExprKind.END_REGION, { => CheckRegionBoundary(expr, topLevelFunc) }),
             (ExprKind.CONSTANT, { =>
                 CheckConstant((expr as Constant).getOrThrow(), topLevelFunc) }),
             (ExprKind.DEBUGEXPR, { =>

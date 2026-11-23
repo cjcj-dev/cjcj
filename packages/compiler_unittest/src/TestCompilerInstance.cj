@@ -68,12 +68,13 @@ private func ConfigureInvocation(invocation: CompilerInvocation, sourcePath: Str
 }
 
 public func CompileSource(code: String, stage!: CompileStage = CompileStage.GENERIC_INSTANTIATION,
-    mockOn!: Bool = false): TestCompileResult {
+    mockOn!: Bool = false, localMode!: Bool = false): TestCompileResult {
     let sourcePath = NewTestSourcePath()
     let _ = FileUtil.WriteToFile(sourcePath, code)
     let diag = DiagnosticEngine()
     let invocation = CompilerInvocation()
     ConfigureInvocation(invocation, sourcePath, mockOn)
+    invocation.globalOptions.enableLocalMode = localMode
     let instance = CompilerInstance(invocation, diag)
     instance.buildTrie = false
     let ok = instance.Compile(stage: stage)

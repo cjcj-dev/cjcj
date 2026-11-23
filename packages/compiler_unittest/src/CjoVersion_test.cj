@@ -36,7 +36,7 @@ public class CjoVersionTest {
         @Assert(!data.isEmpty())
         let offset = VersionOffset(data)
         @Expect(data[offset], 2u8)
-        @Expect(data[offset + 1], 0u8)
+        @Expect(data[offset + 1], CJO_MINOR_VERSION)
         @Expect(data[offset + 2], 0u8)
         for (minor in [0u8, 1u8]) {
             let copy = data.clone()
@@ -156,7 +156,7 @@ public class CjoVersionTest {
         let data = result.instance.ExportAST(false, pkg)
         let offset = VersionOffset(data)
         @Assert(data[offset], 2u8)
-        @Assert(data[offset + 1], 0u8)
+        @Assert(data[offset + 1], CJO_MINOR_VERSION)
         @Assert(data[offset + 2], 0u8)
         let control = VersionLoader(result, data)
         @Expect(control.LoadPackageDependencies(data), true)
@@ -164,7 +164,7 @@ public class CjoVersionTest {
         // These are gate unit fixtures, not genuine old-ABI producer artifacts.
         // The real 1.1.0/1.1.1 <-> 2.0.0 matrix belongs to paired production.
         for ((major, minor, patch) in [(1u8, 1u8, 0u8), (1u8, 1u8, 1u8),
-            (3u8, 0u8, 0u8), (2u8, 1u8, 0u8)]) {
+            (3u8, 0u8, 0u8), (2u8, CJO_MINOR_VERSION + 1u8, 0u8)]) {
             let old = data.clone()
             old[offset] = major
             old[offset + 1] = minor

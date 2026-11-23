@@ -49,6 +49,7 @@
 
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
+#include <llvm-c/Target.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -66,6 +67,8 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/Function.h"
@@ -286,6 +289,41 @@ using LLVMSelfhostValueToValueMapRef = ValueToValueMapTy*;
 
 // Mirror TranslateLitConstant's `static_cast<float>(strtold(...))`
 // (src/CHIR/AST2CHIR/TranslateASTNode/TranslateLitConstExpr.cpp:25,80).
+// LLVM's generated lists enumerate the components present in the linked library.
+// A null name registers every configured target; a named request reports absence.
+extern "C" int LLVMSelfhostInitTargetComponent(const char *name, unsigned component)
+{
+    bool found = false;
+    switch (component) {
+    case 0:
+#define LLVM_TARGET(T) if (!name || std::strcmp(name, #T) == 0) { LLVMInitialize##T##TargetInfo(); found = true; }
+#include "llvm/Config/Targets.def"
+        break;
+    case 1:
+#define LLVM_TARGET(T) if (!name || std::strcmp(name, #T) == 0) { LLVMInitialize##T##Target(); found = true; }
+#include "llvm/Config/Targets.def"
+        break;
+    case 2:
+#define LLVM_TARGET(T) if (!name || std::strcmp(name, #T) == 0) { LLVMInitialize##T##TargetMC(); found = true; }
+#include "llvm/Config/Targets.def"
+        break;
+    case 3:
+#define LLVM_ASM_PRINTER(T) if (!name || std::strcmp(name, #T) == 0) { LLVMInitialize##T##AsmPrinter(); found = true; }
+#include "llvm/Config/AsmPrinters.def"
+        break;
+    case 4:
+#define LLVM_ASM_PARSER(T) if (!name || std::strcmp(name, #T) == 0) { LLVMInitialize##T##AsmParser(); found = true; }
+#include "llvm/Config/AsmParsers.def"
+        break;
+    case 5:
+#define LLVM_DISASSEMBLER(T) if (!name || std::strcmp(name, #T) == 0) { LLVMInitialize##T##Disassembler(); found = true; }
+#include "llvm/Config/Disassemblers.def"
+        break;
+    default: break;
+    }
+    return found;
+}
+
 extern "C" double CJSelfhostStrtoldToFloat32(const char *Value)
 {
     return static_cast<float>(strtold(Value, nullptr));
@@ -362,6 +400,11 @@ extern "C" void LLVMSetFastMathFlags(LLVMValueRef FPMathInst, unsigned FMF)
 
 // Mirror C++ `rawGV->addAttribute(llvm::Attribute::ReadOnly)`
 // (src/CodeGen/EmitGlobalVariableIR.cpp:63).
+extern "C" void LLVMSelfhostGlobalVariableAddDebugInfo(LLVMValueRef GV, LLVMMetadataRef Expression)
+{
+    unwrap<GlobalVariable>(GV)->addDebugInfo(unwrap<DIGlobalVariableExpression>(Expression));
+}
+
 extern "C" void LLVMSelfhostGlobalVariableAddEnumAttribute(LLVMValueRef GV, unsigned KindId)
 {
     unwrap<GlobalVariable>(GV)->addAttribute(static_cast<Attribute::AttrKind>(KindId));
@@ -596,6 +639,31 @@ extern "C" LLVMValueRef LLVMSelfhostBasicBlockGetFirstInsertionPoint(LLVMBasicBl
     return wrap(&*insertPoint);
 }
 
+// Named Cangjie layouts may be refined after recursive C function fields are known.
+// N's CJ setter preserves the packing bit; establish it at the first definition.
+extern "C" void LLVMSelfhostSetStructBodyForCJ(LLVMTypeRef type, LLVMTypeRef *elements,
+    unsigned count, int packed)
+{
+    auto *layout = llvm::cast<llvm::StructType>(llvm::unwrap(type));
+    llvm::ArrayRef<llvm::Type *> fields(llvm::unwrap(elements), count);
+    if (layout->isOpaque()) {
+        layout->setBody(fields, packed != 0);
+    } else {
+        if (layout->isPacked() != (packed != 0))
+            llvm::report_fatal_error("inconsistent packing for Cangjie struct layout");
+        layout->setBodyForCJ(fields);
+    }
+}
+
+// The region stub identifies the owner by its caller frame. LLVM 15's
+// LLVMSetTailCall(false) clears a hint but does not forbid tail calls.
+extern "C" void LLVMSelfhostMarkNoTail(LLVMValueRef call)
+{
+    if (auto *inst = llvm::dyn_cast<llvm::CallInst>(llvm::unwrap(call))) {
+        inst->setTailCallKind(llvm::CallInst::TCK_NoTail);
+    }
+}
+
 extern "C" LLVMValueRef LLVMSelfhostGetInsertPointInstruction(LLVMBuilderRef Builder)
 {
     auto *builder = unwrap(Builder);
@@ -779,6 +847,16 @@ extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderReplaceArrays(
     auto *builder = unwrap(Builder);
     auto *composite = unwrap<DICompositeType>(Composite);
     auto *elements = Elements == nullptr ? nullptr : unwrap<MDTuple>(Elements);
+    for (auto *member : composite->getElements()) {
+        if (!elements || llvm::is_contained(elements->operands(), member))
+            continue;
+        llvm::errs() << "incomplete debug type member replacement for " << composite->getName()
+                     << " (" << composite->getIdentifier() << "), missing: ";
+        if (member) member->print(llvm::errs());
+        else llvm::errs() << "null";
+        llvm::errs() << "\n";
+        llvm::report_fatal_error("debug type completion lost an existing member");
+    }
     builder->replaceArrays(composite, DINodeArray(elements));
     return wrap(composite);
 }

@@ -16,6 +16,7 @@ public struct TargetCache {
 }
 
 public struct CacheEntry {
+    public var resultMode: Option<ASTMode> = None
     public var successful: Bool
     public var result: Option<Ty>
     public var diags: DiagnosticCache
@@ -33,6 +34,7 @@ public struct CacheKey <: Hashable & Equatable<CacheKey> {
     public var target: Option<Ty> = None
     public var isDesugared: Bool = false
     public var diagKey: Int64 = 0
+    public var expectedMode: Option<ASTMode> = None
 
     public init() {}
 
@@ -43,7 +45,8 @@ public struct CacheKey <: Hashable & Equatable<CacheKey> {
     }
 
     public operator func ==(right: CacheKey): Bool {
-        return sameTy(target, right.target) && isDesugared == right.isDesugared && diagKey == right.diagKey
+        return sameTy(target, right.target) && isDesugared == right.isDesugared && diagKey == right.diagKey &&
+            expectedMode == right.expectedMode
     }
 
     public operator func !=(right: CacheKey): Bool {
@@ -52,6 +55,7 @@ public struct CacheKey <: Hashable & Equatable<CacheKey> {
 
     public func hashCode(): Int64 {
         var out = diagKey
+        if (let Some(m) <- expectedMode) { out = out ^ (Int64(m.WireValue()) + 1) }
         if (isDesugared) {
             out = out ^ 0x9e3779b9
         }

@@ -7,13 +7,14 @@ import {visibleOptionsOnly,requireOptionVisibility} from './compiler-option-visi
 // The descriptor contains locations, not producer receipts or SDK authorities.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify, isDeepStrictEqual} from 'node:util';
 import {randomUUID} from 'node:crypto';
 import {atomicJson, readJson, privateRoot, fileDigest} from './sdk-flow.mjs';
 import {FIXED_INPUTS,backendArtifactPath} from './sdk-targets.mjs';
-import {sdkPlatform} from './sdk-platform.mjs';
+import {sdkPlatform,stdxChirMembers} from './sdk-platform.mjs';
 import {javaInteropInput} from './sdk-java-interop.mjs';
 import {stage2Input} from './sdk-stage2-input.mjs';
 import {receiveNativeRuntime} from './native-runtime-input.mjs';
@@ -24,9 +25,11 @@ import {checkoutSourceRepository} from './checkout-source.mjs';
 import {readInstalledNativeAst} from './installed-native-ast.mjs';
 import {installPath as mingwInstallPath} from '../../build/toolchain/mingw.mjs';
 import {installationSelection,resolveSources,bootstrapH1Commit} from './native-source-selection.mjs';
-import {stdBuildType,flag} from './sdk-std-resume.mjs';
+import {stdBuildType,flag,selectedStdAst,checkStdAstOutput} from './sdk-std-resume.mjs';
 import {nativePair} from '../runtime-pin.mjs';
 import {stdDependencyInputs} from './stdlib-build.mjs';
+import {compilerChirSchema,compilerChirAttributes,compilerChirGenerated,compilerChirFlatc,
+  compilerChirCommand,wireAttributeHeader} from './compiler-chir-interface.mjs';
 const execute = promisify(execFile);
 
 export async function gitInput(repository, commit) {
@@ -43,6 +46,44 @@ async function installation(root, required) {
   for (const rel of required) if (!(await fs.stat(path.join(root, rel))).isFile())
     throw new Error('NATIVE_INSTALL_FILE ' + rel);
   return root;
+}
+// R's native AST archive is the selected support archive plus ast_api.cpp.o.
+// Ninja folds the compiler depfile into .ninja_deps. Inspect that object, and
+// compare the installed archive with the result of R's deterministic append:
+// a matching build.py argv alone cannot identify what the object included.
+async function matchesFinalStdAst(build, install, input, ast) {
+  const decline=reason=>{console.log('Final std AST reuse declined: '+reason);return false;};
+  const args=build.argv.slice(build.argv.indexOf('build.py')+2);
+  const includes=args.filter(arg=>arg==='-I' || arg==='--include' || arg.startsWith('--include=') || /^-I./.test(arg));
+  const include=flag(args,'--include')??flag(args,'-I')??includes[0]?.match(/^-I(.+)$/)?.[1];
+  if(includes.length!==1 || include!==ast.include ||
+      build.argv.includes('--local_mode_api')!==(input.stdLocalModeApi===true))return decline('build.py arguments');
+  const dir=path.join(build.cwd,'build/build'), src=path.dirname(build.cwd);
+  const cache=await fs.readFile(path.join(dir,'CMakeCache.txt'),'utf8');
+  const cached=key=>cache.split(/\r?\n/).find(l=>l.startsWith(key+':'))?.split('=').slice(1).join('=');
+  if(cached('CMAKE_GENERATOR')!=='Ninja' || cached('CANGJIE_INCLUDE')!==ast.include)return decline('CMake selection');
+  const ninja=cached('CMAKE_MAKE_PROGRAM');
+  if(!ninja)return decline('Ninja not recorded');
+  const target='libs/std/ast/native/CMakeFiles/cangjie-std-astFFI-objs.dir/ast_api.cpp';
+  const obj=target+(sdkPlatform(input.platform).os==='win32'?'.obj':'.o');
+  const {stdout}=await execute(ninja,['-t','deps',obj],{cwd:dir});
+  const deps=stdout.trimEnd().split(/\r?\n/);
+  if(!deps.shift()?.endsWith('(VALID)'))return decline('missing object dependencies');
+  const files=deps.map(line=>path.resolve(dir,line.trim()));
+  const astHeaders=files.filter(f=>f.split(path.sep).includes('cangjie') && f.includes(path.sep+'include'+path.sep+'cangjie'+path.sep));
+  if(!files.includes(path.join(ast.include,'cangjie/CHIR/IR/AttributeInfo.h')) ||
+      !files.includes(path.join(ast.include,'cangjie/AST/Node.h')) ||
+      astHeaders.some(f=>!f.startsWith(ast.include+path.sep)))return decline('object header dependencies');
+  await checkStdAstOutput({source:src,output:install,platform:input.platform});
+  const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'std-ast-compare-'));
+  try {
+    const copy=path.join(tmp,'ffi.a');
+    await fs.copyFile(ast.library,copy);
+    const ar=sdkPlatform(input.platform).os==='linux'?'ar':cached('CMAKE_AR');
+    if(!ar)return decline('no archiver');
+    await execute(ar,['qD',copy,path.join(dir,obj)]);
+    return await fileDigest(copy)===await fileDigest(path.join(dir,'libcangjie-std-astFFI.a')) || decline('archive contents');
+  } finally {await fs.rm(tmp,{recursive:true,force:true});}
 }
 // Reuse a completed native std producer through its existing command log and
 // provenance. Keep final std distinct from the compiler's bootstrap libraries.
@@ -67,6 +108,21 @@ export async function installedFinalStd(supplied, input) {
   const native = sdkPlatform(input.platform);
   await installation(install, ['modules/'+native.tuple+'/std/std.core.cjo',
     'lib/'+native.tuple+'/libcangjie-std-core.a']);
+  const ast=selectedStdAst(input);
+  if(ast){
+    const attempts=rows.filter(row=>row.argv?.includes('build.py') &&
+      (row.argv.includes('build')||row.argv.includes('install')));
+    if(attempts.length!==2 || attempts[0]!==rows[built] || attempts[1]!==rows[installed])return undefined;
+    try {
+      if(!await matchesFinalStdAst(rows[built],install,input,ast))return undefined;
+    } catch(error){
+      // An imported installation need not retain its build directory or tools.
+      if(!['ENOENT','ENOTDIR'].includes(error.code) && typeof error.code!=='number' &&
+          !['STD_AST_FFI_INSTALL_MISMATCH','STD_AST_MODULE'].includes(error.message))throw error;
+      console.log('Final std AST reuse declined: '+error.message);
+      return undefined;
+    }
+  }
   return {install, commands};
 }
 // Check source compatibility before opening installations, and again when a
@@ -98,6 +154,7 @@ export async function validateSourceInputs(input) {
 async function validateInstalledInputs(input) {
   if(input.compiler.shimInstall)await compilerNativeShim({install:input.compiler.shimInstall,
     nativeInstall:input.llvm.install,compilerCommit:input.compiler.commit});
+  if(input.stdLocalModeApi!==undefined && typeof input.stdLocalModeApi!=='boolean')throw Error('STD_LOCAL_MODE_API_SELECTION');
   if(input.stdDependencies&&!isDeepStrictEqual(await stdDependencyInputs(input.stdDependencies),input.stdDependencies))throw Error('STD_DEPENDENCY_INPUT_CHANGED');
   if(input.stage2?.mode==='ordinary-cjpm') {
     const native=sdkPlatform(input.platform);
@@ -115,6 +172,97 @@ async function validateInstalledInputs(input) {
   }
   if(input.reuseFinalStd && !isDeepStrictEqual(await installedFinalStd(input.reuseFinalStd,input),input.reuseFinalStd))
     throw Error('FINAL_STD_REUSE_INPUT_CHANGED');
+}
+async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,windowsShimInstall}) {
+  if(!reused.product||!reused.buildInputs||!reused.buildResult)throw Error('H1_REUSE_LOCATIONS_REQUIRED');
+  const native=sdkPlatform(platform), product=path.resolve(reused.product), buildResult=path.resolve(reused.buildResult);
+  const facts=await readJson(reused.buildInputs), commands=await readJson(buildResult);
+  requireOptionVisibility(facts.visibleOptionsOnly,optionVisibility);
+  const mismatch=detail=>{throw Error('H1_REUSE_PRODUCER_MISMATCH '+detail);};
+  if(facts.source!==h1.commit||facts.host!==host.install||facts.native!==llvm.install
+    ||!facts.sourceChanges||facts.sha256!==await fileDigest(product)
+    ||path.resolve(reused.buildInputs)!==path.join(path.dirname(product),'build-inputs.json'))
+    mismatch('product inputs');
+  if(native.os==='win32') {
+    const shim=await compilerNativeShim({install:windowsShimInstall,nativeInstall:llvm.install,compilerCommit:h1.commit});
+    if(facts.producer!=='sdk-native-stage:windows-h1'||!isDeepStrictEqual(facts.nativeShim,shim)
+      ||!path.isAbsolute(facts.sourceRoot||'')||!Array.isArray(commands)||commands.length!==2
+      ||commands.some(row=>row.cwd!==facts.sourceRoot||row.rc!==0||row.signal||row.error||row.cancelled)
+      ||commands[0].argv?.at(-1)!==path.join(facts.sourceRoot,'runtime_shim/build_shim.mjs')
+      ||commands[1].argv?.[0]!==path.join(host.install,'tools/bin/cjpm.exe')||commands[1].argv[1]!=='build')
+      mismatch('Windows commands');
+    return {product,configuration:facts,buildResult};
+  }
+  if(native.os!=='linux') {
+    if(!tools.privateRoot||!Array.isArray(commands)||commands.length!==1
+      ||commands[0].rc!==0||commands[0].signal||commands[0].cwd!==h1.repository
+      ||commands[0].argv?.[1]!==path.join(path.resolve(tools.privateRoot),'ts/src/sharedbuild/cjcj-stage1.mjs'))
+      mismatch('native command');
+    return {product,configuration:facts,buildResult};
+  }
+
+  const hostRuntimeFile=path.join(host.install,'runtime/lib',native.tuple,'libcangjie-runtime'+native.shared);
+  const hostRuntimeSupportsConfigV1=(await nativeSymbolRows(hostRuntimeFile,{platform,runtime:true,defined:true})).includes('CJ_MRT_CjRuntimeInitWithConfigV1');
+  const llvmLibraryFile=path.join(llvm.install,'third_party/llvm',native.llvmDirectory,native.llvmLibrary);
+  const shim=h1.shimInstall?await compilerNativeShim({install:h1.shimInstall,nativeInstall:llvm.install,compilerCommit:h1.commit})
+    :await readInstalledNativeShim({install:llvm.install});
+  if(facts.producer!=='sdk-native-stage:h1'||!path.isAbsolute(facts.sourceRoot||'')
+    ||!facts.sourceChanges?.['packages/cjc/cjpm.toml']
+    ||!isDeepStrictEqual(facts.startupConfiguration,{hostRuntimeFile,hostRuntimeSupportsConfigV1,llvmLibraryFile})
+    ||!isDeepStrictEqual(facts.nativeShim,shim))mismatch('startup inputs');
+
+  // The interface producer depends on a schema in the pinned H1 source.
+  // Neither the number of rows nor leftover files may pick the legacy shape.
+  const git=(...args)=>execute('git',['-C',h1.repository,...args]).then(result=>result.stdout);
+  const chirInterface=Boolean((await git('ls-tree',h1.commit,'--',compilerChirSchema)).trim());
+  if(!Array.isArray(commands)||commands.length!==(chirInterface?4:3)
+    ||commands.some(row=>row?.rc!==0||row.signal||row.error||row.cancelled
+      ||row.cwd!==facts.sourceRoot||!Array.isArray(row.argv)||row.argv.some(arg=>typeof arg!=='string')))
+    mismatch('command results');
+
+  const [config,heap,cjpm,generate]=commands.map(row=>row.argv);
+  const shimDir=path.join(facts.sourceRoot,'runtime_shim');
+  const compile=(name,defines)=>['-std=c11','-O2','-fPIC',...defines,
+    '-c',path.join(shimDir,name+'.c'),'-o',path.join(shimDir,name+'.o')];
+  const compilerArgs=(argv,args)=>{
+    // The producer permits a configurable C compiler and one optional launcher.
+    const prefix=argv.length-args.length;
+    return (prefix===1||prefix===2)&&argv.slice(0,prefix).every(arg=>arg&&!arg.startsWith('-'))
+      &&isDeepStrictEqual(argv.slice(prefix),args);
+  };
+  if(!compilerArgs(config,compile('cjc_runtime_config',['-D_POSIX_C_SOURCE=200809L','-DCJCJ_COMMIT="'+h1.commit+'"']))
+    ||!compilerArgs(heap,compile('cjc_heap_defaults',hostRuntimeSupportsConfigV1?[]:['-DCJCJ_LEGACY_HOST_RUNTIME']))
+    ||config[0]!==heap[0]||config[1]!==heap[1]
+    ||cjpm[0]!==path.join(host.install,'tools/bin/cjpm')||cjpm[1]!=='build'||!/^-j[1-9]\d*$/.test(cjpm.at(-1))
+    ||!(cjpm.length===3||cjpm.length===5&&cjpm[2]==='--target-dir'&&path.isAbsolute(cjpm[3])))
+    mismatch('compiler commands');
+
+  if(chirInterface) {
+    const root=path.dirname(path.dirname(product));
+    if(product!==path.join(root,'bin/cjcj-stage1'))mismatch('compiler interface prefix');
+    const flatc=await compilerChirFlatc(llvm.install,shim);
+    if(!isDeepStrictEqual(generate,compilerChirCommand(flatc,root)))mismatch('flatc command');
+    const schema=await git('show',h1.commit+':'+compilerChirSchema);
+    const attributes=wireAttributeHeader(await git('show',h1.commit+':packages/chir/src/Enums.cj'));
+    const installed=async member=>{
+      const file=path.join(root,member), stat=await fs.lstat(file);
+      if(!stat.isFile()||!stat.size)mismatch(member);
+      return fs.readFile(file);
+    };
+    if(!(await installed(compilerChirSchema)).equals(Buffer.from(schema)))mismatch(compilerChirSchema);
+    if(!(await installed(compilerChirAttributes)).equals(Buffer.from(attributes)))mismatch(compilerChirAttributes);
+    const generated=await installed(compilerChirGenerated);
+    // Compare with what the selected generator emits for the installed schema.
+    // Use a private directory and leave the producer's prefix untouched.
+    const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'h1-flatc-'));
+    try {
+      await execute(flatc,['--no-warnings','-c','-o',tmp,path.join(root,compilerChirSchema)],{cwd:root,
+        env:{...process.env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''}});
+      if(!generated.equals(await fs.readFile(path.join(tmp,path.basename(compilerChirGenerated)))))
+        mismatch(compilerChirGenerated);
+    } finally {await fs.rm(tmp,{recursive:true,force:true});}
+  }
+  return {product,configuration:facts,buildResult,...(chirInterface?{chirInterface}: {})};
 }
 export async function prepareNativeInputs(descriptor, env = process.env) {
   const optionVisibility=visibleOptionsOnly(descriptor.visibleOptionsOnly);
@@ -169,7 +317,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     llvm:['third_party/llvm/bin/llc'+native.exe, 'third_party/llvm/bin/llvm-as'+native.exe,
       'third_party/llvm/bin/llvm-dis'+native.exe, 'third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,
       'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o', 'tools/bin/cjdb'+native.exe],
-    ast:['libcangjie-ast-support.a', 'schema/StdAstFormat.fbs', 'include/flatbuffers/StdAstFormat_generated.h',
+    ast:['libcangjie-ast-support.a', 'schema/StdAstFormat.fbs', 'include/flatbuffers/StdAstFormat_generated.h', ...stdxChirMembers,
       'third_party/flatbuffers/bin/flatc'+native.exe],
   };
   for (const [name, required] of Object.entries(shapes)) {
@@ -233,50 +381,14 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   if(installations.shim) {
     if(!installations.shim.install)throw Error('NATIVE_SHIM_INSTALL_REQUIRED');
     rows.compiler.shimInstall=await privateRoot(installations.shim.install);
+    if(native.os==='linux'&&compilerCommit===h1Commit)rows.h1.shimInstall=rows.compiler.shimInstall;
   }
   // Optional reuse is an original H1 producer, not a copied flow directory.
   // A new candidate/configuration gets a new work domain while retaining the
   // fixed H1 input. Never relabel an old flow's COMPLETE as this configuration.
   if (installations.h1) {
-    const reused=installations.h1;
-    if(!reused.product||!reused.buildInputs||!reused.buildResult)throw new Error('H1_REUSE_LOCATIONS_REQUIRED');
-    const product=path.resolve(reused.product);
-    const facts=await readJson(reused.buildInputs), commands=await readJson(reused.buildResult);
-    requireOptionVisibility(facts.visibleOptionsOnly,optionVisibility);
-    if(facts.source!==h1Commit||facts.host!==host.install||facts.native!==rows.llvm.install
-      ||!facts.sourceChanges||facts.sha256!==await fileDigest(product)
-      ||path.resolve(reused.buildInputs)!==path.join(path.dirname(product),'build-inputs.json'))
-      throw new Error('H1_REUSE_PRODUCER_MISMATCH');
-    if(native.os==='linux') {
-      const hostRuntimeFile=path.join(host.install,'runtime/lib',native.tuple,'libcangjie-runtime'+native.shared);
-      const hostRuntimeSupportsConfigV1=(await nativeSymbolRows(hostRuntimeFile,{platform,runtime:true,defined:true})).includes('CJ_MRT_CjRuntimeInitWithConfigV1');
-      // The current producer compiles both config and heap adapter, including
-      // legacy hosts. Reuse its real three commands, never a private-script receipt.
-      if(facts.producer!=='sdk-native-stage:h1'||!path.isAbsolute(facts.sourceRoot||'')
-        ||!facts.sourceChanges?.['packages/cjc/cjpm.toml']
-        ||!isDeepStrictEqual(facts.startupConfiguration,{hostRuntimeFile,hostRuntimeSupportsConfigV1})
-        ||!isDeepStrictEqual(facts.nativeShim,await readInstalledNativeShim({install:rows.llvm.install}))
-        ||!Array.isArray(commands)||commands.length!==3
-        ||commands.some(row=>row.rc!==0||row.signal||row.cwd!==facts.sourceRoot)
-        ||!commands[0].argv?.includes(path.join(facts.sourceRoot,'runtime_shim/cjc_runtime_config.c'))
-        ||!commands[0].argv?.includes('-DCJCJ_COMMIT="'+h1Commit+'"')
-        ||!commands[1].argv?.includes(path.join(facts.sourceRoot,'runtime_shim/cjc_heap_defaults.c'))
-        ||commands[1].argv.includes('-DCJCJ_LEGACY_HOST_RUNTIME')===hostRuntimeSupportsConfigV1
-        ||commands[2].argv?.[0]!==path.join(host.install,'tools/bin/cjpm')||commands[2].argv?.[1]!=='build')
-        throw new Error('H1_REUSE_PRODUCER_MISMATCH');
-    } else if(native.os==='win32') {
-      const shim=await compilerNativeShim({install:rows.compiler.shimInstall,nativeInstall:rows.llvm.install,compilerCommit:h1Commit});
-      if(facts.producer!=='sdk-native-stage:windows-h1'||!isDeepStrictEqual(facts.nativeShim,shim)
-        ||!path.isAbsolute(facts.sourceRoot||'')||!Array.isArray(commands)||commands.length!==2
-        ||commands.some(row=>row.cwd!==facts.sourceRoot||row.rc!==0||row.signal||row.error)
-        ||commands[0].argv?.at(-1)!==path.join(facts.sourceRoot,'runtime_shim/build_shim.mjs')
-        ||commands[1].argv?.[0]!==path.join(host.install,'tools/bin/cjpm.exe')||commands[1].argv[1]!=='build')
-        throw Error('H1_REUSE_PRODUCER_MISMATCH');
-    } else if(!tools.privateRoot||!Array.isArray(commands)||commands.length!==1
-      ||commands[0].rc!==0||commands[0].signal||commands[0].cwd!==rows.h1.repository
-      ||commands[0].argv?.[1]!==path.join(path.resolve(tools.privateRoot),'ts/src/sharedbuild/cjcj-stage1.mjs'))
-      throw new Error('H1_REUSE_PRODUCER_MISMATCH');
-    rows.h1={...rows.h1,product,configuration:facts,buildResult:path.resolve(reused.buildResult)};
+    rows.h1={...rows.h1,...await installedH1(installations.h1,{h1:rows.h1,host,llvm:rows.llvm,
+      platform,optionVisibility,tools,windowsShimInstall:rows.compiler.shimInstall})};
   }
   // Only the Darwin producer still consumes private tools.
   // Linux preparation and H1 reuse must not require retired private scripts.
@@ -287,6 +399,7 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
       await fs.stat(path.join(tools.privateRoot,'ts/src/sharedbuild',rel));
   }
   const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,visibleOptionsOnly:optionVisibility,
+    ...(descriptor.stdLocalModeApi!==undefined?{stdLocalModeApi:descriptor.stdLocalModeApi}:{}),
     ...(descriptor.stdDependencies?{stdDependencies:await stdDependencyInputs(descriptor.stdDependencies)}:{}),
     ...(descriptor.stdBuildType === undefined ? {} : {stdBuildType:stdBuildType(descriptor.stdBuildType)}),
     ...(descriptor.nativePair ? {nativePair:descriptor.nativePair} : {}), ...rows, stdlib:stdlib??rows.runtime,
@@ -300,7 +413,11 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     targetComponents:{compiler:component(rows.compiler),std:component(stdlib??rows.runtime),runtime:component(rows.runtime),
       llvm:component(rows.llvm),ast:component(rows.ast)}};
   if(installations.stage2)inputs.stage2=await stage2Input(installations.stage2,inputs);
-  if(descriptor.reuseFinalStd)inputs.reuseFinalStd=await installedFinalStd(descriptor.reuseFinalStd,inputs);
+  if(descriptor.reuseFinalStd){
+    const reused=await installedFinalStd(descriptor.reuseFinalStd,inputs);
+    if(reused)inputs.reuseFinalStd=reused;
+    else console.log('Selected AST build inputs not established for final std; building stage3-std');
+  }
   await validateInstalledInputs(inputs);
   const file = path.join(work, 'sdk-inputs.json');
   await atomicJson(file, inputs);
@@ -392,11 +509,62 @@ export async function resumeSourceComponents(config,file) {
     tools:{launcher:process.env.CMAKE_CXX_COMPILER_LAUNCHER}}};
 }
 
+// A completed H1 can be installed for front-end consumers without claiming
+// that N has a debugger or that R and target std have been built. Use the
+// original producer's H execution and N library; do not accept an SDK overlay.
+async function prepareH1FrontendInstall(descriptor,platform) {
+  const {host:hostInput,sources,installations}=descriptor;
+  const native=sdkPlatform(platform);
+  if(!sources?.h1||!hostInput?.install||!installations?.llvm?.install||!installations.h1
+    ||!descriptor.stdCoreInterface||descriptor.selection||descriptor.production||descriptor.archive)
+    throw Error('INSTALL_H1_FRONTEND_INPUTS');
+  const h1={...await gitInput(sources.h1,descriptor.h1Commit),
+    ...(installations.shim?{shimInstall:await privateRoot(installations.shim.install)}:{})};
+  const host={...hostInput,platform,install:await installation(hostInput.install,
+    ['tools/bin/cjpm','runtime/lib/'+native.tuple+'/libcangjie-runtime'+native.shared])};
+  const llvm={install:path.resolve(installations.llvm.install),platform};
+  const product=await installedH1(installations.h1,{h1,host,llvm,platform,tools:{},
+    optionVisibility:visibleOptionsOnly(descriptor.visibleOptionsOnly)});
+  const shim=product.configuration.nativeShim;
+  // A partial N prefix must still bind the actual libLLVM to this compiler.
+  // The independent shim carries that hash; an ordinary N install carries it
+  // in its producer facts.
+  const library=shim.configuration?.llvmLibrary??(await readJson(path.join(llvm.install,'BUILD-INPUTS.json'))).llvmLibrary;
+  const relative=path.posix.join('third_party/llvm',native.llvmDirectory,native.llvmLibrary);
+  if(library?.file!==relative||library.sha256!==await fileDigest(path.join(llvm.install,relative)))
+    throw Error('INSTALL_H1_FRONTEND_LLVM');
+  // The public compiler resolves std.core within modules/<tuple>. Admit a
+  // separately selected front-end module, without treating it as a std build.
+  const core=await fs.realpath(descriptor.stdCoreInterface);
+  const coreStat=await fs.stat(core);
+  if(!coreStat.isFile()||!coreStat.size)throw Error('INSTALL_H1_FRONTEND_STD_CORE');
+  const compiler={...h1,...product,platform,sourceRepository:await runtimeSourceRepository(h1.repository)};
+  const selection={platform,hostPlatform:platform,bootstrapHost:host,
+    compilerExecution:{role:'separate',stage:'h1-frontend',platform,compiler,runtime:host,
+      llvm:{...llvm,commit:shim.llvm.commit,library}},
+    targetComponents:{compiler},frontendStdCore:{file:core,sha256:await fileDigest(core)}};
+  return {work:await privateRoot(descriptor.work),install:await privateRoot(descriptor.install),selection};
+}
+
 // Installation of existing native products uses the same inputs and recipe,
 // without constructing the bootstrap graph or requiring private stage1 tools.
 export async function prepareInstallInputs(descriptor) {
+  const frontend=descriptor.layout==='h1-frontend';
+  const selection=frontend?undefined:await componentSelection(descriptor);
+  const host=hostPlatform(),{platform:frontendPlatform=host}=descriptor;
+  const platform=frontend?frontendPlatform:selection.platform;
+  // Cross installations execute on their native runner. A descriptor cannot
+  // override the relationship between the selected target and this process.
+  const cross=platform!==host;
+  if(frontend&&(cross||sdkPlatform(platform).os!=='linux'))throw Error('INSTALL_H1_FRONTEND_PLATFORM');
+  if(Object.hasOwn(descriptor,'cross')&&descriptor.cross!==cross)throw Error('INSTALL_CROSS_PLATFORM_CONFLICT');
+  const prepared=frontend?await prepareH1FrontendInstall(descriptor,platform):await prepareComponentInstall(descriptor,selection);
+  return {...descriptor,...prepared,platform,cross};
+}
+
+async function componentSelection(descriptor) {
   const supplied=structuredClone(descriptor.selection), members=supplied?.targetComponents;
-  const work=await privateRoot(descriptor.work),install=await privateRoot(descriptor.install);
+  const work=await privateRoot(descriptor.work);
   // A locations-only component install consumes the upstream selection; never
   // interpret a target or a checkout's current HEAD as a request for a pin.
   if (supplied?.platform==='linux_x86_64' && descriptor.layout!=='native-output' && members
@@ -432,8 +600,12 @@ export async function prepareInstallInputs(descriptor) {
     const facts=await readJson(llvm.buildResult??path.join(llvm.install,'BUILD-INPUTS.json'));
     if(facts.platform!==supplied.platform || facts.commits?.llvm!==llvm.commit)throw Error('INSTALL_COMPONENT_LLVM');
   }
-  const selection=installationSelection(supplied);
+  return installationSelection(supplied);
+}
+
+async function prepareComponentInstall(descriptor,selection) {
   const {platform,targetComponents:target,compilerExecution:execution}=selection,native=sdkPlatform(platform);
+  const work=await privateRoot(descriptor.work),install=await privateRoot(descriptor.install);
   // An optional backend is a normal CMake component install, independent of
   // N's libLLVM/clang/CJDB/AST installation. Record the actual selected binaries
   // in the existing installation selection, without rewriting either producer.
@@ -527,7 +699,7 @@ export async function prepareInstallInputs(descriptor) {
   const cross=platform!==hostPlatform();
   if(descriptor.javaInterop!==undefined)compilerSha256??=await fileDigest(target.compiler.product);
   const javaInterop=await javaInteropInput(descriptor.javaInterop,{platform,cross,compilerSha256,runtimeCommit:target.runtime.commit});
-  return {...descriptor,work,install,platform,selection,cross,javaInterop};
+  return {work,install,selection,javaInterop};
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { await prepareNativeInputs(await readJson(process.argv[2] || process.env.CJCJ_NATIVE_INPUTS)); }

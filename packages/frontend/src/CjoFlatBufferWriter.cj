@@ -10,6 +10,7 @@ import cjcj::mangle.ASTMangler
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
 import cjcj::modules.{INVALID_FORMAT_INDEX, SemaCjoManager, CJO_MAJOR_VERSION, CJO_MINOR_VERSION, CJO_PATCH_VERSION}
+import cjcj::modules.CreateFuncTyInfo
 import cjcj::modules.CreateFullId as CreateModuleFullId
 import cjcj::modules.CreateFeatureId as CreateModuleFeatureId
 import cjcj::modules.CreateFeaturesDirective as CreateModuleFeaturesDirective
@@ -142,8 +143,10 @@ private func CheckForConflictExportId(decls: ArrayList<Decl>): Unit {
         if (!decl.TestAttr(Attribute.GLOBAL) || decl.astKind == ASTKind.EXTEND_DECL) {
             continue
         }
-        if (exportIdDeclMap.contains(decl.exportId)) {
-            InternalError("Found same exportID when export the package.")
+        if (let Some(previous) <- exportIdDeclMap.get(decl.exportId)) {
+            InternalError("Found same exportID when export the package: " + decl.exportId +
+                " (" + previous.identifier.Val() + ":" + previous.begin.line.toString() + ", " +
+                decl.identifier.Val() + ":" + decl.begin.line.toString() + ")")
             return
         }
         exportIdDeclMap[decl.exportId] = decl
@@ -151,8 +154,10 @@ private func CheckForConflictExportId(decls: ArrayList<Decl>): Unit {
             if (member.doNotExport) {
                 continue
             }
-            if (exportIdDeclMap.contains(member.exportId)) {
-                InternalError("Found same exportID when export the package.")
+            if (let Some(previous) <- exportIdDeclMap.get(member.exportId)) {
+                InternalError("Found same exportID when export the package: " + member.exportId +
+                    " (" + previous.identifier.Val() + ":" + previous.begin.line.toString() + ", " +
+                    member.identifier.Val() + ":" + member.begin.line.toString() + ")")
                 return
             }
             exportIdDeclMap[member.exportId] = member
@@ -179,6 +184,7 @@ private class NodeInfo {
     let begin: ArrayList<UInt8>
     let end: ArrayList<UInt8>
     let ty: UInt32
+    var mode: FlatBufferOffset = 0u32
     var mapExpr: UInt32 = 0u32
     var ov: UInt8 = 0u8
 
@@ -868,7 +874,7 @@ public class ASTWriter <: Resource {
 
         let offset = CreateDecl(builder, declKind, isTopLevel, fullPkgName, genericDecl, generic, begin, end,
             identifier, identifierPos, attributes, annotations, typeIndex, mangledName, exportId, rawMangle,
-            hash, infoType, info, dependencies)
+            hash, infoType, info, dependencies, tyMode: OptionalMode(decl.resolvedMode))
         allDecls[Int64(index) - 1] = offset
     }
 
@@ -927,6 +933,7 @@ public class ASTWriter <: Resource {
                     FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
                 }
                 let cfg = FuncTyConfig()
+                cfg.ReadModes(body)
                 if (let Some(declTy2) <- funcDecl.GetTy()) {
                     if (let Some(funcTy2) <- (declTy2 as FuncTy)) {
                         cfg.isC = funcTy2.isC
@@ -963,6 +970,7 @@ public class ASTWriter <: Resource {
                 FaithfulSemaTypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
             }
             let cfg = FuncTyConfig()
+            cfg.ReadModes(funcType)
             cfg.isC = funcType.isC
             if (let Some(typeTy) <- funcType.GetTy()) {
                 if (let Some(funcTy) <- (typeTy as FuncTy)) {
@@ -1001,6 +1009,7 @@ public class ASTWriter <: Resource {
     }
 
     private func SaveDeclInfo(decl: Decl): FlatBufferOffset {
+        if (decl is ThisParam) { return 0u32 }
         if (let Some(param) <- (decl as FuncParam)) {
             return SaveParamInfo(param)
         }
@@ -1045,7 +1054,8 @@ public class ASTWriter <: Resource {
 
     private func SaveFuncInfo(funcDecl: FuncDecl): FlatBufferOffset {
         let body = SaveFuncBody(funcDecl)
-        builder.StartTable(7)
+        builder.StartTable(8)
+        builder.AddBool(7, HasLocalModifier(funcDecl, TokenKind.EXCLAVE))
         builder.AddBool(6, funcDecl.isFastNative)
         builder.AddBool(5, SaveInlineLabel(funcDecl))
         builder.AddBool(4, funcDecl.isConst)
@@ -1106,7 +1116,9 @@ public class ASTWriter <: Resource {
             bodyIdx = SaveExpr(body.body.getOrThrow())
             captureKind = CaptureKindToFlat(body.captureKind)
         }
-        builder.StartTable(5)
+        let retMode = OptionalMode(body.retType.map({ t => t.resolvedMode }) ?? ASTMode.NOT)
+        builder.StartTable(6)
+        builder.AddOffset(5, retMode)
         builder.AddU8(4, captureKind)
         builder.AddU32(2, bodyIdx)
         builder.AddU32(1, retType)
@@ -1154,10 +1166,32 @@ public class ASTWriter <: Resource {
         }
         let paramVec = builder.CreateVectorU32(params)
         let desugarVec = builder.CreateVectorU32(desugars)
-        builder.StartTable(2)
+        let receiver = SaveThisParam(funcDecl, paramList)
+        builder.StartTable(3)
+        builder.AddU32(2, receiver)
         builder.AddOffset(1, desugarVec)
         builder.AddOffset(0, paramVec)
         return builder.EndTable()
+    }
+
+    private func SaveThisParam(fd: Option<FuncDecl>, list: FuncParamList): UInt32 {
+        if (let Some(tp) <- list.thisParam) { return GetDeclIndex(tp) }
+        let modal = list.receiverModal ?? return 0u32;
+        if (modal.local == ASTMode.NOT) { return 0u32 }
+        let owner = fd.getOrThrow().outerDecl.getOrThrow()
+        let data = if (let Some(ext) <- (owner as ExtendDecl)) {
+            ext.extendedType.getOrThrow().GetTy().getOrThrow()
+        } else { owner.GetTy().getOrThrow() }
+        let tp = ThisParam()
+        tp.identifier = SrcIdentifier("this", modal.atPos, modal.end, false)
+        tp.begin = modal.atPos
+        tp.end = modal.end
+        tp.curFile = owner.curFile
+        tp.resolvedMode = modal.local
+        if ((let Some(ct) <- (data as ClassTy)) && (let Some(cd) <- ct.declPtr)) {
+            tp.SetTy(typeManager.GetClassThisTy(cd, data.typeArgs.toArray()))
+        } else { tp.SetTy(data) }
+        return GetDeclIndex(tp)
     }
 
     private func SaveFuncReturnType(body: FuncBody): UInt32 {
@@ -1194,7 +1228,8 @@ public class ASTWriter <: Resource {
         // Mirror ASTWriter.cpp:1319-1322 / ModuleFormat.fbs VarInfo:
         //   field 0 isVar, 1 isConst, 2 isMemberParam, 3 initializer (expr index).
         let initializer = SaveVarInitializer(varDecl)
-        builder.StartTable(4)
+        builder.StartTable(7)
+        builder.AddBool(6, HasLocalModifier(varDecl, TokenKind.DEMODE))
         builder.AddU32(3, initializer)
         builder.AddBool(2, varDecl.isMemberParam)
         builder.AddBool(1, varDecl.isConst)
@@ -1306,14 +1341,16 @@ public class ASTWriter <: Resource {
     // ExprWriter.cpp:33-43 PackNodeInfo.
     private func PackNodeInfo(node: Node): NodeInfo {
         let ty = if (let Some(nodeTy) <- node.GetTy()) { SaveType(nodeTy) } else { 0u32 }
-        return NodeInfo(PositionBytes(node.begin), PositionBytes(node.end), ty)
+        let info = NodeInfo(PositionBytes(node.begin), PositionBytes(node.end), ty)
+        info.mode = OptionalMode(node.resolvedMode)
+        return info
     }
 
     // ExprWriter.cpp:23-31 SaveBasicNodeInfo, expressed through the generated CreateExpr binding.
     private func SaveBasicNodeInfo(kind: UInt16, operands: FlatBufferOffset, infoType: UInt8,
         exprInfo: FlatBufferOffset, info: NodeInfo): FlatBufferOffset {
         return CreateExpr(builder, kind, info.begin, info.end, info.mapExpr, operands, info.ty, info.ov,
-            infoType, exprInfo)
+            infoType, exprInfo, tyMode: info.mode)
     }
 
     // Recursive EXPR-serialization dispatcher. Mirrors ASTWriter::ASTWriterImpl::SaveExpr
@@ -1384,6 +1421,11 @@ public class ASTWriter <: Resource {
         }
         if (let Some(tce) <- (realExpr as TypeConvExpr)) {
             return SaveExpression(tce, nodeInfo)
+        }
+        if (let Some(ex) <- (realExpr as ExclaveExpr)) {
+            let operands = ArrayList<UInt32>()
+            operands.add(SaveExpr(ex.body.getOrThrow()))
+            return SaveBasicNodeInfo(39u16, builder.CreateVectorU32(operands), 0u8, 0u32, nodeInfo)
         }
         if (let Some(te) <- (realExpr as ThrowExpr)) {
             return SaveExpression(te, nodeInfo)
@@ -2676,13 +2718,29 @@ public class ASTWriter <: Resource {
         return CreateSemaTy(builder, TypeKindToFlat(ty.kind), 0u32, MF_SEMA_TY_INFO_NONE, 0u32)
     }
 
+    private func OptionalMode(mode: ASTMode): FlatBufferOffset {
+        return if (mode == ASTMode.NOT) { 0u32 } else { SaveMode(mode) }
+    }
+
+    private func SaveMode(mode: ASTMode): FlatBufferOffset {
+        builder.StartTable(1)
+        builder.AddU8(0, mode.WireValue())
+        return builder.EndTable()
+    }
+
     private func SaveFuncTyInfo(funcTy: FuncTy): FlatBufferOffset {
         let ret = SaveType(funcTy.retTy)
-        builder.StartTable(3)
-        builder.AddBool(2, funcTy.hasVariableLenArg)
-        builder.AddBool(1, funcTy.isC)
-        builder.AddU32(0, ret)
-        return builder.EndTable()
+        var params = 0u32
+        for (i in 0..funcTy.paramTys.size) {
+            if (funcTy.ParamMode(i) != ASTMode.NOT) {
+                let slots = ArrayList<FlatBufferOffset>()
+                for (j in 0..funcTy.paramTys.size) { slots.add(SaveMode(funcTy.ParamMode(j))) }
+                params = builder.CreateVectorOffsets(slots)
+                break
+            }
+        }
+        let result = if (funcTy.retMode == ASTMode.NOT) { 0u32 } else { SaveMode(funcTy.retMode) }
+        return CreateFuncTyInfo(builder, ret, funcTy.isC, funcTy.hasVariableLenArg, paramModes: params, retMode: result)
     }
 
     private func SaveGenericTyInfo(genericTy: GenericsTy): FlatBufferOffset {
@@ -2966,6 +3024,7 @@ private func CjoVersionBytes(): ArrayList<UInt8> {
 }
 
 private func DeclKindToFlat(decl: Decl): UInt16 {
+    if (decl is ThisParam) { return 14u16 }
     if ((decl as ClassDecl).isSome()) { return 1u16 }
     if ((decl as InterfaceDecl).isSome()) { return 2u16 }
     if ((decl as FuncDecl).isSome()) { return 3u16 }
@@ -2983,6 +3042,7 @@ private func DeclKindToFlat(decl: Decl): UInt16 {
 }
 
 private func DeclInfoTypeToFlat(decl: Decl): UInt8 {
+    if (decl is ThisParam) { return 0u8 }
     if ((decl as ClassDecl).isSome()) { return 1u8 }
     if ((decl as InterfaceDecl).isSome()) { return 2u8 }
     if ((decl as StructDecl).isSome()) { return 3u8 }
