@@ -87,8 +87,10 @@ func DiagnoseLocalTarget(ci: CompilerInstance, pkg: Package, hit: Position): Uni
         StoredDiagPosition(file, hit)
     } else if (hit != DEFAULT_POSITION && !hit.IsZero()) {
         hit
+    } else if (!pkg.files.isEmpty()) {
+        pkg.files[0].begin
     } else {
-        PackageDiagnosticPosition(pkg)
+        DEFAULT_POSITION
     }
     ci.diag.Diagnose(DiagCategory.SEMA, pos, "local mode lowering is only supported on Linux x86_64 GNU targets")
 }
