@@ -1709,7 +1709,8 @@ extend ParserImpl {
             param.begin = lookahead.Begin()
             if (Skip(TokenKind.COLON)) {
                 param.colonPos = lastToken.Begin()
-                param.typeNode = ParseType()
+                // A lambda parameter is a parameter slot: Sema checks its mode like a function parameter's.
+                param.typeNode = ParseType(compileOptions.IsLocalModeAnalysis())
                 if (let Some(typeNode) <- param.typeNode) {
                     param.end = typeNode.end
                 }
