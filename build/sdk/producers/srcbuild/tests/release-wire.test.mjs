@@ -16,30 +16,13 @@ const nativeKeys = declaredKeys.filter(key => getReleasePlatform(key).archiveKey
 const releaseWorkflow = async () => loadYaml(await workflow('release.yml'));
 const jobsOf = release => Object.entries(release.jobs).map(([id, job]) => ({...job, id}));
 const packageJobsOf = release => jobsOf(release)
-  .filter(job => job.uses === './.github/workflows/build-release-package.yml');
+  .filter(job => (job.uses === './.github/workflows/sdk-build.yml' && job.with?.mode === 'package'));
 
 const platforms = allTargets();
 
-test('explicit runtime pair reaches every source, package and cross-runtime pin loader', async () => {
-  const names = ['native_llvm_ref','native_runtime_ref','native_host_version'];
-  for (const file of ['release.yml','release-matrix.yml','arm-soak.yml','srcbuild.yml']) {
-    const parsed = loadYaml(await workflow(file));
-    for (const job of Object.values(parsed.jobs)) {
-      if (!/^\.\/\.github\/workflows\/(srcbuild|srcbuild-target|build-release-package|build-windows-runtime)\.yml$/.test(job.uses || '')) continue;
-      for (const name of names) assert.equal(job.with[name], '${{ inputs.'+name+' }}', file+': '+name);
-    }
-  }
-  for (const file of ['srcbuild-target.yml','build-release-package.yml','build-windows-runtime.yml']) {
-    const parsed = loadYaml(await workflow(file));
-    const loaders = Object.values(parsed.jobs).flatMap(job => job.steps || []).filter(step => step.run?.includes('ci/load_runtime_pin.mjs'));
-    assert.ok(loaders.length, file);
-    for (const step of loaders) for (const name of names)
-      assert.equal(step.env['CJCJ_'+name.toUpperCase()], '${{ inputs.'+name+' }}', file+': '+name);
-  }
-});
 
 test('srcbuild exposes reusable inputs, artifact uploads, and the runtime override chain', async () => {
-  const sourceBuild = await workflow('srcbuild-target.yml');
+  const sourceBuild = await workflow('sdk-build-target.yml');
   for (const contract of [
     'workflow_call:',
     'runtime_ref:',
@@ -53,7 +36,7 @@ test('srcbuild exposes reusable inputs, artifact uploads, and the runtime overri
 
 test('release connects each platform row to its same-platform final std', async () => {
   const release = await releaseWorkflow();
-  assert.ok(jobsOf(release).some(job => job.uses === './.github/workflows/srcbuild.yml'));
+  assert.ok(jobsOf(release).some(job => (job.uses === './.github/workflows/sdk-build.yml' && job.with?.mode !== 'package')));
   assert.ok(jobsOf(release).some(job => job.with?.runtime_ref === '${{ inputs.runtime_ref }}'));
   // The pairing, not the row that used to carry it. Phase control replaced the
   // matrix with one job per phase, so platform and std_artifact now sit on
@@ -85,7 +68,7 @@ test('release cross packages depend on their native phase and cross producer wit
   });
   assert.deepEqual(cross.map(job => job.with?.release_key).sort(), rows.map(row => row.release_key).sort(),
     'every non-native package must have an explicit cross contract');
-  const sources = jobsOf(release).filter(job => job.uses === './.github/workflows/srcbuild.yml');
+  const sources = jobsOf(release).filter(job => (job.uses === './.github/workflows/sdk-build.yml' && job.with?.mode !== 'package'));
   const jobId = job => job.id;
   for (const row of rows) {
     const {release_key: key, platform: host} = row;
@@ -122,7 +105,7 @@ test('release cross packages depend on their native phase and cross producer wit
 });
 
 test('component provenance, final std, and Python inputs are fail-closed in the native package consumer', async () => {
-  const consumer = loadYaml(await workflow('build-release-package.yml'));
+  const consumer = loadYaml(await workflow('sdk-build.yml'));
   const steps = consumer.jobs.package.steps;
   const download = steps.find(step => step.name === 'Download complete native SDK');
   assert.equal(download.with.name, 'cjcj-srcbuild-${{ inputs.platform }}-${{ inputs.version }}');
@@ -141,7 +124,7 @@ test('component provenance, final std, and Python inputs are fail-closed in the 
   const stdx = await fs.readFile(path.join(root, 'build/lib/installed-stdx-inputs.mjs'), 'utf8');
   for (const gate of ['STDX_BUILD_INPUTS', "fail('FULL_CONFIGURATION"])
     assert.ok(stdx.includes(gate), gate);
-  assert.doesNotMatch(await workflow('build-release-package.yml'), /setup_sdk|install_cjpm_artifact|install_hle_artifact|prepare_base_sdk|build_cjcj/);
+  assert.doesNotMatch(await workflow('sdk-build.yml'), /setup_sdk|install_cjpm_artifact|install_hle_artifact|prepare_base_sdk|build_cjcj/);
 });
 
 test('private toolchain setup retains base SDK provenance and content-addressed bytes', async () => {
@@ -160,7 +143,7 @@ test('private toolchain setup retains base SDK provenance and content-addressed 
 });
 
 test('release package runs the packaged std checker as a bounded fail-closed step', async () => {
-  const consumer = await workflow('build-release-package.yml');
+  const consumer = await workflow('sdk-build.yml');
   const compose = await fs.readFile(path.join(root, 'build/sdk/producers/release/compose-package.mjs'), 'utf8');
   const checks = await fs.readFile(path.join(root, 'build/sdk/producers/release/verify_native_release.mjs'), 'utf8');
   assert.ok(consumer.includes('run: node build/sdk/producers/release/compose-package.mjs'));
@@ -173,8 +156,8 @@ test('release package runs the packaged std checker as a bounded fail-closed ste
 });
 
 test('all package cells consume the produced cjpm bytes inside the native SDK', async () => {
-  const sourceBuild = await workflow('srcbuild-target.yml');
-  const consumer = await workflow('build-release-package.yml');
+  const sourceBuild = await workflow('sdk-build-target.yml');
+  const consumer = await workflow('sdk-build.yml');
   const checks = await fs.readFile(path.join(root, 'build/sdk/producers/release/native-release-inputs.mjs'), 'utf8');
   assert.ok(sourceBuild.includes('build/sdk/producers/srcbuild/steps/package-install.mjs'));
   assert.ok(consumer.includes('name: cjcj-srcbuild-${{ inputs.platform }}-${{ inputs.version }}'));
@@ -183,32 +166,6 @@ test('all package cells consume the produced cjpm bytes inside the native SDK', 
     assert.ok(checks.includes(check), check);
 });
 
-test('release has one LLVM producer per tuple', async () => {
-  const [release, tuples] = await Promise.all([releaseWorkflow(), workflow('platform-tuples.yml')]);
-  assert.ok(!jobsOf(release).some(job => job.with?.platform_set === 'windows-only'));
-  const native = loadYaml(await workflow('srcbuild-target.yml'));
-  assert.equal(native.jobs['fixed-llvm'].if, "inputs.native_runtime_artifact == ''");
-  assert.equal(native.jobs['native-cjdb'].if, "inputs.native_build_inputs_artifact != '' && needs.plan.outputs.llvm_platforms != 'windows_x86_64'");
-  const install=native.jobs['native-windows-sdk'].steps.find(s=>s.name==='Receive optional completed N and AST installation');
-  assert.equal(install.if,"inputs.native_build_inputs_artifact != ''");
-  assert.equal(install.with['run-id'],'${{ inputs.native_build_inputs_run_id }}');
-  assert.ok(native.jobs['native-cjdb'].steps.some(step => step.run?.includes('native-cjdb-job.mjs build')));
-  assert.ok(jobsOf(release).some(job => job.uses === './.github/workflows/srcbuild.yml' && job.with?.targets === 'windows-x64'));
-  assert.ok(!jobsOf(release).some(job => job.with?.platform_set === 'darwin-windows'));
-  assert.ok(!jobsOf(release).some(job => job.uses === './.github/workflows/build-fixed-llc.yml'));
-  assert.equal(loadYaml(tuples).jobs['build-tuple'].uses, './.github/workflows/build-llvm-tools.yml');
-  assert.equal(loadYaml(tuples).jobs['build-tuple'].with.platform_set, "${{ inputs.platform_set || 'all' }}");
-
-  const artifacts = [
-    ...platforms.map(platform => `fixed-llvm-tools-${getTarget(platform).spec.llvmPlatform}`),
-    ...platforms.map(platform => `final-std-${platform}`),
-    ...platforms.filter(platform => !getTarget(platform).spec.crossCompile).map(platform => `source-cjpm-${platform}`),
-    ...platforms.map(platform => `pkg-${platform}`),
-    ...platforms.filter(platform => getTarget(platform).spec.crossCompile).flatMap(platform =>
-      [`runtime-install-${getTarget(platform).spec.llvmPlatform}`, `patched-cjpm-${getTarget(platform).spec.llvmPlatform}`]),
-  ];
-  assert.equal(new Set(artifacts).size, artifacts.length);
-});
 
 test('release packages select the installed final compiler in each native phase', async () => {
   const release = await releaseWorkflow();
@@ -218,7 +175,7 @@ test('release packages select the installed final compiler in each native phase'
   for (const gate of ['metadata.compilerCommit !== sourceSha', 'metadata.runtimeCommit !== runtimeRef',
     'installedStageOutput(sdk, metadata.phase)', 'compiler.compilerSha256 !== output.lineage.compilerSha256'])
     assert.ok(checks.includes(gate), gate);
-  assert.ok((await workflow('build-release-package.yml')).includes('CJCJ_RELEASE_SOURCE_SHA: ${{ github.sha }}'));
+  assert.ok((await workflow('sdk-build.yml')).includes('CJCJ_RELEASE_SOURCE_SHA: ${{ github.sha }}'));
 });
 
 // The release package's tool set is the one the source matrix builds. Three
@@ -233,8 +190,8 @@ test('every source-built tool is staged, installed, and declared by the same lis
   const {sourceToolOutputs} = await import('../../../../srcbuild/install-tools.mjs');
   const {buildConfig} = await import('../../../../lib/config.mjs');
   const {releaseSelection} = await import('../../release/native-release-inputs.mjs');
-  const source = await workflow('srcbuild-target.yml');
-  const consumer = await workflow('build-release-package.yml');
+  const source = await workflow('sdk-build-target.yml');
+  const consumer = await workflow('sdk-build.yml');
   for (const platform of platforms) {
     const config = buildConfig({targetKey:platform});
     const produced = sourceToolOutputs(config).map(row => row.name.replace(/\.exe$/, '')).sort();
@@ -257,7 +214,7 @@ test('every source-built tool is staged, installed, and declared by the same lis
 // a hand-written directory in either place names something no build produces, and
 // nothing notices until the artifact is missing at release time.
 test('the cross-tool step and the source installation name the same tool paths', async () => {
-  const source = await workflow('srcbuild-target.yml');
+  const source = await workflow('sdk-build-target.yml');
   const installTools = await fs.readFile(path.join(root, 'build/srcbuild/tool-layout.mjs'), 'utf8');
   // The native installation's own relative paths, read from the producer module.
   const declared = [...installTools.matchAll(/\['([A-Za-z0-9-]+)','([^']+)'\]/g)]

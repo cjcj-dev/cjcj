@@ -22,7 +22,7 @@ do not claim to execute GitHub's scheduler or compile the SDKs.
 
 The same registry owns CI build/provision runners and the platform smoke matrix.
 `node ci/target-matrix.mjs ci|platform|arm-soak` exports those workflow inputs;
-ARM soak explicitly passes its selected source target to `srcbuild.yml`.
+ARM soak explicitly passes its selected source target to `sdk-build.yml`.
 `spec.packageHost` identifies the native package machine, separately from
 `spec.nodePlatform`/`nodeArch`, which describe the source build host (Windows
 packages run on Windows while their source target is cross-built on Linux).

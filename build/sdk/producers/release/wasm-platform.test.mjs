@@ -110,14 +110,3 @@ test('wasm import reader lists module/field pairs of a linked module', () => {
   assert.deepEqual(wasmImports(bytes), [{module: 'wasi_snapshot_preview1', field: 'fd_write', kind: 0}]);
 });
 
-test('source-wasm job runs the formal producer and uploads final-std-wasm32-wasi', () => {
-  const workflow = fs.readFileSync(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
-  const job = workflow.slice(workflow.indexOf('\n  source-wasm:\n'), workflow.indexOf('\n  source-ohos:\n'));
-  assert.match(job, /if: contains\(needs\.plan\.outputs\.llvm_platforms, 'linux_x86_64'\) && inputs\.build_wasm/);
-  assert.match(job, /requirement: wasi-sysroot/);
-  assert.match(job, /run: node build\/sdk\/producers\/srcbuild\/steps\/build-wasm-final-std\.mjs/);
-  assert.match(job, /name: final-std-wasm32-wasi/);
-  for (const file of ['srcbuild.yml', 'release-matrix.yml']) {
-    assert.match(fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8'), /build_wasm/);
-  }
-});

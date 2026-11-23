@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {load} from '../../../../../ci/vendor/js-yaml/js-yaml.mjs';
 const root=path.resolve(import.meta.dirname,'../../../../..');
-const workflow=load(fs.readFileSync(path.join(root,'.github/workflows/srcbuild-target.yml'),'utf8'));
+const workflow=load(fs.readFileSync(path.join(root,'.github/workflows/sdk-build-target.yml'),'utf8'));
 // This is a workflow environment/CMake initialization contract. No runtime,
 // final std, Apple SDK or target compiler is built by this small configuration.
 for(const family of ['android','ohos','ios']) test(`${family} cross workflow selects sccache in real CMake initialization`,()=>{

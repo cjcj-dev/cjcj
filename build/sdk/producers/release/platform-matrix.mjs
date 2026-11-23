@@ -2,7 +2,7 @@
 // The release matrix, derived from build/lib/targets.mjs (cjcj#73, P24).
 //
 //   plan  [--platforms all|k1,k2] [--github-output FILE] [--summary FILE]
-//         Emit the matrices release-matrix.yml fans out over: source cells,
+//         Emit the matrices the release DAG fans out over: source cells,
 //         package cells, blocked cells (a platform some tuple or capability has
 //         no producer for -- it gets a job that fails naming the gap, never a
 //         silent skip), and excluded keys. An empty selection is an error.

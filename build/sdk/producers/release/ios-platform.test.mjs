@@ -36,7 +36,7 @@ test('iOS matrix CLI carries three cross runtimes and final stds into package ar
 
 test('iOS release workflow consumes the same tuple artifacts and requires package success', () => {
   const root = path.resolve(import.meta.dirname, '../../../..');
-  const source = fs.readFileSync(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
+  const source = fs.readFileSync(path.join(root, '.github/workflows/sdk-build-target.yml'), 'utf8');
   const release = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
   const jobs = release.split(/\n  (?=[a-z0-9-]+:\n)/);
   const job = jobs.find(entry => entry.includes('release_key: darwin-arm64-ios')) ?? '';

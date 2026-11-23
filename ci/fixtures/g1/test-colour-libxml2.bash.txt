@@ -10,7 +10,7 @@ good=${3:-}
 mkdir "$work"
 cd "$root"
 
-yml=.github/workflows/build-llvm-tools.yml
+yml=.github/workflows/sdk-build-target.yml
 src=tools/srcbuild_kkk2.sh
 checker=ci/assert_no_libxml2_needed.sh
 token='-DLLVM_ENABLE_LIBXML2=OFF'

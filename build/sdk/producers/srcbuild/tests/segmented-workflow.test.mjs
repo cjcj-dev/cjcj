@@ -6,7 +6,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {sourceBuildCells} from '../../../../lib/targets.mjs';
 
-const file = path.resolve(import.meta.dirname, '../../../../../.github/workflows/srcbuild-target.yml');
+const file = path.resolve(import.meta.dirname, '../../../../../.github/workflows/sdk-build-target.yml');
 const workflow = await fs.readFile(file, 'utf8');
 const jobs = new Map([...workflow.matchAll(/^  ([\w-]+):\n([\s\S]*?)(?=^  [\w-]+:\n|$(?![\s\S]))/gm)]
   .map(([, name, body]) => [name, body]));
@@ -70,8 +70,8 @@ test('G2 freezes before portable SDK files dirty the checkout, then retains iden
 });
 
 test('each source target has an independent reusable job chain with the same standard-runner table', async () => {
-  const caller = await fs.readFile(path.resolve(import.meta.dirname, '../../../../../.github/workflows/srcbuild.yml'), 'utf8');
-  assert.match(caller, /uses: \.\/\.github\/workflows\/srcbuild-target.yml/);
+  const caller = await fs.readFile(path.resolve(import.meta.dirname, '../../../../../.github/workflows/sdk-build.yml'), 'utf8');
+  assert.match(caller, /uses: \.\/\.github\/workflows\/sdk-build-target.yml/);
   assert.match(caller, /targets: \$\{\{ matrix.target \}\}/);
   assert.match(caller, /fail-fast: false/);
   for (const text of [caller, workflow]) {

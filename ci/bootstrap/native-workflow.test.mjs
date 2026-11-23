@@ -20,7 +20,7 @@ const workflow=name=>load(fs.readFileSync(path.join(repo,'.github/workflows',nam
 const selectedEnv=wf=>Object.fromEntries(Object.entries(wf.env).map(([k,v])=>[k,v.replace(/\$\{\{ inputs\.(\w+) \}\}/g,(_,name)=>inputs[name]??'')]));
 function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'native-workflow-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root;}
 function plan(t,target,extra={}) {
- const wf=workflow('srcbuild-target.yml'),root=fixture(t),file=path.join(root,'outputs');
+ const wf=workflow('sdk-build-target.yml'),root=fixture(t),file=path.join(root,'outputs');
  const step=wf.jobs.plan.steps.find(s=>s.id==='select');
  const r=spawnSync('bash',['-e','-c',step.run],{cwd:repo,encoding:'utf8',env:{...process.env,...selectedEnv(wf),REQUESTED:target,GITHUB_OUTPUT:file,...extra}});
  const output=fs.existsSync(file)?Object.fromEntries(fs.readFileSync(file,'utf8').trim().split('\n').map(l=>{const i=l.indexOf('=');return[l.slice(0,i),l.slice(i+1)];})):{};
@@ -39,11 +39,11 @@ test('formal native planner rejects missing producer event and incomplete pair; 
  for(const field of ['CJCJ_NATIVE_RUNTIME_RUN_ID','CJCJ_NATIVE_INPUTS_RUN_ID','CJCJ_NATIVE_BUILD_INPUTS_RUN_ID','CJCJ_NATIVE_LLVM_REF']) {
   const r=plan(t,'linux-aarch64',{[field]:''});assert.equal(r.status,1);assert.match(r.stderr,/NATIVE_.*(?:REQUIRED|PAIR)/);
  }
- const blank=Object.fromEntries(Object.keys(selectedEnv(workflow('srcbuild-target.yml'))).map(k=>[k,'']));
+ const blank=Object.fromEntries(Object.keys(selectedEnv(workflow('sdk-build-target.yml'))).map(k=>[k,'']));
  const r=plan(t,'linux-aarch64',blank);assert.equal(r.status,1);assert.match(r.stderr,/issues\/763/);
 });
 test('native workflow builds N via the existing producer and transports installation before host/configure',()=>{
- const wf=workflow('srcbuild-target.yml'),producer=wf.jobs['native-cjdb'],consumer=wf.jobs['source-stage0'];
+ const wf=workflow('sdk-build-target.yml'),producer=wf.jobs['native-cjdb'],consumer=wf.jobs['source-stage0'];
  assert.ok(consumer.needs.includes('native-cjdb'));
  const scripts=producer.steps.map(s=>s.run||'').join('\n');
  assert.match(scripts,/node ci\/bootstrap\/native-cjdb-job.mjs build/);
@@ -64,7 +64,7 @@ test('native Windows install/unpack consumer uses native build target; Linux cro
  assert.equal(packageConsumption(getBuildTarget('windows-x64',{platform:'linux',arch:'x64'})).status,'NOT_RUN');
 });
 test('ordinary stdx source selection preserves distinct full sources and actual native AST/runtime',()=>{
- const env=selectedEnv(workflow('srcbuild-target.yml'));
+ const env=selectedEnv(workflow('sdk-build-target.yml'));
  const base=workflowSourceSelection(env);assert.equal(base.STDX_REF,'b10784b27a5b3f815c9542d28f3ba02f48db48d5');
  const tools=/^TOOLS_REF=([a-f0-9]{40})$/m.exec(fs.readFileSync(path.join(repo,'ci/source_pin.env'),'utf8'))[1];
  assert.equal(base.TOOLS_REF,tools);
@@ -110,23 +110,9 @@ test('public installation unpack transports original facts and refuses an existi
  assert.equal(again.status,1);assert.match(again.stderr,/EEXIST/);
 });
 
-test('private Windows checkout receives only its named secret across both matrix calls',()=>{
- const name='WINDOWS_TOOLS_READ_TOKEN',matrix=workflow('release-matrix.yml'),outer=workflow('srcbuild.yml'),inner=workflow('srcbuild-target.yml');
- for(const [caller,callee,file] of [[matrix.jobs.source,outer,'srcbuild.yml'],[outer.jobs.srcbuild,inner,'srcbuild-target.yml']]){
-  assert.equal(caller.uses,'./.github/workflows/'+file);
-  assert.deepEqual(caller.secrets,{[name]:"${{ github.event.repository.private && matrix.target == 'windows-x64' && secrets.WINDOWS_TOOLS_READ_TOKEN || '' }}"});
-  assert.deepEqual(callee.on.workflow_call.secrets[name],{required:false});
- }
- for(const [key,job] of Object.entries(matrix.jobs)){
-  if(key!=='source'&&job.uses){assert.notEqual(job.secrets,'inherit');assert.ok(!job.secrets?.[name]);}
- }
- const uses=inner.jobs['native-windows-sdk'].steps.filter(step=>step.with?.token==='${{ secrets.WINDOWS_TOOLS_READ_TOKEN }}');
- assert.equal(uses.length,1);assert.match(uses[0].uses,/^actions\/checkout@/);
- assert.equal(uses[0].with['persist-credentials'],false);
-});
 
 test('Windows source plan, upload and package receive the same native std for pinned and explicit pairs',t=>{
- const wf=workflow('build-release-package.yml'),job=wf.jobs.package,source=workflow('srcbuild-target.yml');
+ const wf=workflow('sdk-build.yml'),job=wf.jobs.package,source=workflow('sdk-build-target.yml');
  const release=workflow('release.yml'),caller=release.jobs['package-p3-windows-x64'].with;
  const root=fixture(t),entry=job.steps.find(s=>s.id==='package-inputs');
  const gate=job.steps.find(s=>s.name==='Validate same-platform final std contract');

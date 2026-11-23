@@ -1,6 +1,6 @@
 # Fixed LLVM artifacts
 
-`build-llvm-tools.yml` owns the only `fixed-llvm-tools-<platform>` upload job.
+`sdk-build-target.yml` owns the only `fixed-llvm-tools-<platform>` upload job.
 `platform-tuples.yml` forwards its subset to that workflow, including calls from
 `platform-matrix.yml`, `release.yml`, and `release-matrix.yml`. Both paths use the
 same pin, cache key, payload recipe and upload definition for a given platform.

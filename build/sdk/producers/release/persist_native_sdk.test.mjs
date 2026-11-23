@@ -149,15 +149,15 @@ test('accepted candidate is persisted, read back through the consumer and never 
   assert.equal(selected.stdout, `artifact=456\nversion=${VERSION}\ntag=${TAG}\n`, selected.stderr);
 }));
 
-test('a directly dispatched srcbuild.yml run is an allowed producer', () => fixture(({dir, run}) => {
+test('a directly dispatched sdk-build.yml run is an allowed producer', () => fixture(({dir, run}) => {
   const out = path.join(dir, 'out');
   const result = run(['publish', 'linux-x64', out],
-    {PRODUCER_PATH: '.github/workflows/srcbuild.yml', JOB_NAME: 'linux-x64 / source SDK / linux-x64 / srcbuild'});
+    {PRODUCER_PATH: '.github/workflows/sdk-build.yml', JOB_NAME: 'linux-x64 / source SDK / linux-x64 / srcbuild'});
   assert.equal(result.status, 0, result.stderr + result.stdout);
   const provenance = JSON.parse(fs.readFileSync(path.join(out, 'provenance.json'), 'utf8'));
   assert.deepEqual([provenance.producer.workflow, provenance.producer.event, provenance.producer.attempt, provenance.producer.job.name,
     provenance.producer.job.attempt, provenance.producer.commit],
-    ['.github/workflows/srcbuild.yml', 'workflow_dispatch', 2, 'linux-x64 / source SDK / linux-x64 / srcbuild', 2, SHA]);
+    ['.github/workflows/sdk-build.yml', 'workflow_dispatch', 2, 'linux-x64 / source SDK / linux-x64 / srcbuild', 2, SHA]);
 }));
 
 for (const [label, extra, options, code] of [

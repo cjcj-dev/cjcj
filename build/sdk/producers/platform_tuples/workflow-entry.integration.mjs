@@ -10,7 +10,7 @@ const repo = path.resolve(import.meta.dirname, '../../../..');
 const evidence = process.env.G2_WORKFLOW_EVIDENCE;
 assert.ok(evidence && path.isAbsolute(evidence), 'private G2_WORKFLOW_EVIDENCE required');
 fs.mkdirSync(evidence);
-const workflow = load(fs.readFileSync(path.join(repo, '.github/workflows/build-llvm-tools.yml'), 'utf8'));
+const workflow = load(fs.readFileSync(path.join(repo, '.github/workflows/sdk-build-target.yml'), 'utf8'));
 const step = workflow.jobs['build-tools'].steps.find(item => item.name === 'Build Windows LLVM tools');
 assert.equal(step.shell, 'msys2 {0}');
 assert.equal(step.if, "runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'");

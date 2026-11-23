@@ -25,7 +25,7 @@ const RUN_ID = 42420002;
 // Keep all declared platform obligations, including blocked source recipes.
 const RELEASE_WORKFLOW = loadYaml(readFileSync('.github/workflows/release.yml', 'utf8'));
 const CONTRACTS = Object.values(RELEASE_WORKFLOW.jobs)
-  .filter(job => job.uses === './.github/workflows/build-release-package.yml')
+  .filter(job => (job.uses === './.github/workflows/sdk-build.yml' && job.with?.mode === 'package'))
   .map(job => getReleasePlatform(job.with.release_key));
 const PLATFORMS = CONTRACTS.map(p => p.archiveKey);
 const hostFor = platform => CONTRACTS.find(p => p.archiveKey === platform).host;
@@ -125,10 +125,10 @@ async function fixture() {
   // Package job names come from the actual caller and callee, independently
   // of the archive consumer's naming/uniqueness logic.
   const workflow = loadYaml(await fs.readFile('.github/workflows/release.yml', 'utf8'));
-  const callee = loadYaml(await fs.readFile('.github/workflows/build-release-package.yml', 'utf8'));
+  const callee = loadYaml(await fs.readFile('.github/workflows/sdk-build.yml', 'utf8'));
   const calleeJob = Object.values(callee.jobs).find(job => job.name?.includes('Build release package'));
   let id = 100000;
-  for (const job of Object.values(workflow.jobs).filter(job => job.uses === './.github/workflows/build-release-package.yml')) {
+  for (const job of Object.values(workflow.jobs).filter(job => (job.uses === './.github/workflows/sdk-build.yml' && job.with?.mode === 'package'))) {
     const name = `${job.name} / ${calleeJob.name.replace('${{ inputs.platform }}', job.with.platform)}`;
     jobs.push({id: ++id, name, conclusion: 'success', html_url: `https://github.com/cjcj-dev/cjcj/actions/runs/${RUN_ID}/job/${id}`});
   }

@@ -9,7 +9,7 @@
 | pcre/stdx链接独立于compiler别名 | 正式package保pcre；实际packageStdx和archiveInstall解包后读链接 | 同上，要求完整stdx真实安装；NOT_RUN |
 | 原生必需路径缺失、恢复 | 真实C ABI控制只让正式CLI到达path parity，删/恢复模块路径精确拒绝/重新到达缺stage事实 | 真实installed门对完整SDK路径、ABI、hello/cjpm/宏、final std及安装事实；NOT_RUN |
 | Linux仅排除指定Windows可选根 | 正式CLI精确路径反例，类似前缀仍拒绝 | 同上Linux目标真实正向；NOT_RUN |
-| Windows完整target库/modules | 正式CLI拒缺原生cjc.exe；独立现役assertSdkPathParity保两类必需路径坏/恢复 | srcbuild-target.yml Windows原生producer→package-install→receive_native_sdk→verify_native_release及原平台验收；NOT_RUN；Linux有限门不替Windows |
+| Windows完整target库/modules | 正式CLI拒缺原生cjc.exe；独立现役assertSdkPathParity保两类必需路径坏/恢复 | sdk-build-target.yml Windows原生producer→package-install→receive_native_sdk→verify_native_release及原平台验收；NOT_RUN；Linux有限门不替Windows |
 | 额外外部链接 | 正式CLI在path parity精确拒绝，恢复后到达缺stage事实 | 真实installed门对完整目录的路径/解包隔离；NOT_RUN |
 | Cangjie工具源码产物、默认/显式/原位/别名/复制 | 正式CLI保实际被选择目录、九工具launcher/retained products；缺任一工具拒绝；无stage事实拒绝 | 完整原生工具安装→installedInputs→真实installed门；NOT_RUN |
 | compose-sdk-entry：stage3及local/GHA原始来源/run/parent/std、最终归档bytes | 正式compose配置缺失与实际installed stage缺失分别拒绝，无产物；已存在final-compiler.test/windows-final-compiler.test继续核来源/run/std/bytes | srcbuild-target正式package-install在真实stage3安装上产出final-compiler；真实installed门及release compose复核最终归档；NOT_RUN |

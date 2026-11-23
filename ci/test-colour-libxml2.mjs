@@ -7,7 +7,7 @@ await entry(async () => {
   const work = path.resolve(requireArgument(0, ...requiredArguments[0]));
   const bad = cliArgs[1] || '', good = cliArgs[2] || '';
   await run(['mkdir', work]);
-  const yml = '.github/workflows/build-llvm-tools.yml';
+  const yml = '.github/workflows/sdk-build-target.yml';
   // Updated contract: srcbuild now acquires verified bytes. This is the active
   // tuple producer; its flag cut is new relative to the retired Bash test data.
   const src = 'build/sdk/producers/platform_tuples/build_tuple.mjs';

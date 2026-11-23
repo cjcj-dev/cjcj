@@ -31,34 +31,6 @@ for(const [name,extra,reason] of [['partial',{CJCJ_NATIVE_LLVM_REF:llvm},'NATIVE
   const result=run(extra);assert.equal(result.status,1);assert.ok(result.stderr.includes(reason));assert.equal(fs.existsSync(output),false);
  }));
 }
-test('formal native workflow passes source pair through cache and layout producer',()=>{
- const entry=yaml.load(fs.readFileSync('.github/workflows/build-fixed-llc.yml','utf8'));
- const producer=yaml.load(fs.readFileSync('.github/workflows/build-llvm-tools.yml','utf8'));
- for(const key of ['llvm_ref','runtime_ref']) assert.equal(entry.jobs.tuple.with[key],`\${{ inputs.${key} }}`);
- for(const job of ['build-tools','static-tuple']) {
-  const load=producer.jobs[job].steps.find(step=>step.run==='node ci/native-llvm-inputs.mjs');assert.ok(load,job);
-  assert.equal(load.env.CJCJ_NATIVE_LLVM_REF,'${{ inputs.llvm_ref }}');assert.equal(load.env.CJCJ_NATIVE_RUNTIME_REF,'${{ inputs.runtime_ref }}');
- }
- const cache=producer.jobs['build-tools'].steps.find(step=>step.id==='cache');assert.match(cache.with.key,/steps\.llvm-pin\.outputs\.runtime_sha/);
- const layout=producer.jobs['static-tuple'].steps.find(step=>step.name==='Publish the shared ten-payload layout');
- assert.doesNotMatch(layout.run,/source ci\/llvm_pin.env/);assert.match(layout.run,/ci\/llvm-tuple-layout.mjs/);
-});
-test('formal native entry passes the complete pair and platform subset to the dylib producer',()=>{
- const producer=yaml.load(fs.readFileSync('.github/workflows/build-llvm-tools.yml','utf8'));
- const dylib=yaml.load(fs.readFileSync('.github/workflows/build-llvm-dylib.yml','utf8'));
- for(const key of ['llvm_ref','runtime_ref','platforms','platform_set']) {
-  assert.equal(producer.jobs['in-process-dylib'].with[key],`\${{ inputs.${key} }}`);
-  assert.ok(dylib.on.workflow_call.inputs[key]);
- }
- const load=dylib.jobs.dylib.steps.find(step=>step.id==='pin');
- assert.equal(load.run,'node ci/native-llvm-inputs.mjs');
- assert.equal(load.env.CJCJ_NATIVE_LLVM_REF,'${{ inputs.llvm_ref }}');
- assert.equal(load.env.CJCJ_NATIVE_RUNTIME_REF,'${{ inputs.runtime_ref }}');
- const build=dylib.jobs.dylib.steps.find(step=>step.name==='Build three-target shared LLVM');
- assert.match(build.run,/ci\/fetch-llvm-runtime.mjs paired-runtime/);
- assert.match(build.run,/ci\/llvm-dylib\/record-manifest.mjs depot\/dylib llvm-fork paired-runtime/);
- assert.match(dylib.jobs.dylib.steps.find(step=>step.uses==='./.github/actions/sccache').with.pin,/runtime_sha/);
-});
 test('dylib matrix selects only requested native producers and uses native library names',()=>fixture(({output})=>{
  const run=requested=>spawnSync(process.execPath,['ci/llvm-tools-matrix.mjs'],{encoding:'utf8',
   env:{...process.env,REQUESTED:requested,PLATFORM_SET:'',GITHUB_OUTPUT:output}});

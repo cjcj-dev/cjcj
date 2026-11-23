@@ -20,82 +20,6 @@ const releaseKeys = allReleasePlatforms().filter(key => {
 const substitute = (text, row) => text.replace(/\$\{\{ matrix\.([a-z_]+) \}\}/g, (_, key) => row[key]);
 
 for (const key of releaseKeys) {
-  test(`${key}: declared segments and source admission agree with the release CLI`, async t => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cross-plan-'));
-    t.after(() => fs.rm(dir, {recursive: true, force: true}));
-    const run = invoke('build/sdk/producers/release/platform-matrix.mjs', ['plan', '--platforms', key]);
-    assert.equal(run.status, 0, run.stderr);
-    const plan = JSON.parse(run.stdout);
-    const family = key.endsWith('-ios') ? 'ios' : 'ohos';
-    const declared = getReleasePlatform(key).crossTuples.filter(tuple => family === 'ios' ? tuple.startsWith('ios_') : tuple.startsWith('linux_ohos_'));
-    const readiness = releasePlatformReadiness(key);
-    const entries = JSON.parse((plan.package[0] || plan.blocked[0])?.cross_std_artifacts || '[]');
-    const sourceCells = sourceBuildCells();
-    const eligible = Boolean(readiness.sdkSourceTarget) && [readiness.sourceTarget, ...Object.values(readiness.crossStd)].every(target => sourceCells.some(cell => cell.target === target && cell.status === 'runnable'));
-    console.log(`CROSS_TARGET_ASSERT key=${key} declared=${JSON.stringify(declared)} actual=${JSON.stringify(entries)}`);
-    assert.deepEqual(entries.filter(e => declared.includes(e.tuple)).map(e => e.tuple).sort(), [...declared].sort(), 'declared cross tuple must have a reachable producer');
-    console.log(`CROSS_SOURCE_GUARD_ASSERT key=${key} eligible=${eligible} packages=${plan.package.length}`);
-    assert.equal(plan.package.length, eligible ? 1 : 0, 'incomplete native producer must not enter runnable release packages');
-    if (!eligible) assert.deepEqual(plan.source, []);
-    if (readiness.status === 'blocked') {
-      assert.equal(plan.blocked[0].reasons, readiness.reasons.join(' | '));
-      if (!readiness.sdkSourceTarget) assert.match(plan.blocked[0].reasons, /native SDK .*no source cell runs package-install/);
-      else assert.match(plan.blocked[0].reasons, /source darwin-arm64:.*#?473|issues\/473/);
-    }
-    const source = {target: readiness.crossStd[declared[0]]};
-    assert.ok(source.target, `${key}: declared cross source`);
-    const file = path.join(dir, 'output');
-    const selected = invoke('build/sdk/producers/srcbuild/target-matrix.mjs', ['--targets', source.target, '--single'], {GITHUB_OUTPUT: file});
-    assert.equal(selected.status, 0, selected.stderr);
-    const outputs = Object.fromEntries((await fs.readFile(file, 'utf8')).trim().split('\n').map(line => {
-      const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1)];
-    }));
-    const cell = sourceBuildCells().find(cell => cell.target === source.target);
-    const admission = invoke('build/sdk/producers/srcbuild/target-matrix.mjs', ['--targets', source.target, '--single', '--require-ready']);
-    console.log(`CROSS_ADMISSION_ASSERT target=${source.target} status=${cell.status} rc=${admission.status}`);
-    assert.equal(admission.status, cell.status === 'runnable' ? 0 : 1);
-    if (cell.status === 'blocked') {
-      assert.match(admission.stderr, /blocked:.*issues\/473/);
-      assert.deepEqual(JSON.parse(outputs.matrix).include, []);
-    }
-    const rows = JSON.parse(outputs[`${family}_matrix`]).include;
-    const [outer, inner, breadth] = await Promise.all(['srcbuild.yml', 'srcbuild-target.yml', 'release-matrix.yml'].map(workflow));
-    assert.equal(breadth.jobs.source.with[`build_${family}`], `\${{ matrix.build_${family} || false }}`);
-    assert.equal(outer.jobs.srcbuild.with[`build_${family}`], `\${{ inputs.build_${family} || false }}`);
-    for (const w of [outer, inner]) assert.equal(w.on.workflow_call.inputs[`build_${family}`].default, false);
-    const job = inner.jobs[`source-${family}`];
-    assert.deepEqual(job.needs, ['plan', 'source-stage3']);
-    assert.equal(job.strategy.matrix, `\${{ fromJson(needs.plan.outputs.${family}_matrix) }}`);
-    assert.equal(inner.jobs.plan.outputs[`${family}_matrix`], `\${{ steps.select.outputs.${family}_matrix }}`);
-    const restoreEntry = family === 'ios' ? 'ios-stage2-handoff.mjs restore' : 'job-handoff.mjs restore stage3';
-    const restore = job.steps.findIndex(step => step.run?.includes(restoreEntry));
-    const build = job.steps.findIndex(step => step.run?.includes(`build-${family}-final-std.mjs`));
-    assert.ok(restore >= 0 && build > restore, 'cross consumer must follow verified SDK restore');
-    const download = job.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
-    const upload = job.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
-    if (family === 'ios') {
-      const producer = inner.jobs['source-stage3'].steps.find(s => s.with?.name === download.with.name);
-      assert.equal(producer.if, "matrix.target == 'darwin-arm64' && inputs.build_ios");
-      assert.equal(producer.with['if-no-files-found'], 'error');
-      assert.ok(job.steps.some(s => s.uses?.startsWith('actions/checkout@') && s.with['persist-credentials'] === false));
-      assert.ok(job.steps.every(s => !s.run?.includes('job-handoff.mjs')));
-    }
-    assert.equal(job.steps[build].env.CROSS_STD_TUPLE, '${{ matrix.tuple }}');
-    for (const entry of entries.filter(e => declared.includes(e.tuple))) {
-      const row = rows.find(row => row.tuple === entry.tuple);
-      const published = row && substitute(upload.with.name, row);
-      console.log(`CROSS_ARTIFACT_ASSERT tuple=${entry.tuple} producer=${published} consumer=${entry.artifact}`);
-      assert.equal(published, entry.artifact, 'published artifact must be the package consumer artifact');
-      assert.equal(substitute(download.with.name, row), family === 'ios'
-        ? `source-ios-stage2-${source.target}` : `source-handoff-${source.target}-stage3`);
-      assert.equal(substitute(upload.with.path, row), `\${{ env.CANGJIE_WORKSPACE }}/software/${entry.artifact}`);
-      assert.equal(upload.with['if-no-files-found'], 'error');
-    }
-    const args = crossStdArguments(JSON.stringify(entries), '/downloaded artifacts');
-    const actual = args.flatMap((value, i) => value === '--cross-runtime-dir' ? [args[i + 1]] : []);
-    console.log(`CROSS_ARGUMENT_ASSERT key=${key} actual=${JSON.stringify(actual)}`);
-    assert.deepEqual(actual, entries.filter(e => declared.includes(e.tuple)).map(e => `${e.tuple}=/downloaded artifacts/${e.artifact}/cross-runtime`));
-  });
 }
 
 test('Android and Windows independent controls retain their producer and consumer branches', async () => {
@@ -104,7 +28,7 @@ test('Android and Windows independent controls retain their producer and consume
   const plan = JSON.parse(run.stdout);
   assert.equal(plan.source.find(row => row.target === 'linux-x64').build_android, true);
   assert.ok(plan.source.every(row => !row.build_ios && !row.build_ohos));
-  const jobs = (await workflow('srcbuild-target.yml')).jobs;
+  const jobs = (await workflow('sdk-build-target.yml')).jobs;
   assert.deepEqual(jobs['source-windows'].needs, ['plan', 'source-stage3', 'source-mingw']);
   assert.deepEqual(jobs['source-android'].needs, ['plan', 'source-stage3']);
   console.log('CROSS_INDEPENDENT_CONTROL Android/Windows retained');

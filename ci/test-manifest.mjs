@@ -28,8 +28,6 @@ export const REGISTERED = Object.freeze(JSON.parse(fs.readFileSync(new URL('./te
 // This workflow must execute this candidate, including its registered native
 // boundary test. The checker rejects missing, branch or foreign checkouts.
 export const WORKFLOW_TEST_SOURCES = Object.freeze([
-  {workflow:'darwin-input-consumers.yml', source_ref:'${{ github.sha }}',
-    gating:['build/sdk/producers/release/darwin_consumer_boundary.test.mjs']},
 ]);
 
 // The second axis, and the reason it exists. The name patterns above cannot see
@@ -60,7 +58,6 @@ export const GATING = Object.freeze([
   'ci/bootstrap/sdk-installed-string.test.mjs',
   'ci/bootstrap/sdk-std-barrier-resume.test.mjs',
   'ci/check-colour-tlab.test.mjs',
-  'build/sdk/producers/release/darwin_workflow_entry.test.mjs',
   'build/sdk/producers/release/darwin_consumer_boundary.test.mjs',
   'build/sdk/producers/release/darwin_llvm.test.mjs',
   'ci/bootstrap/compiler-identity.integration.test.mjs',
@@ -74,15 +71,12 @@ export const GATING = Object.freeze([
   'ci/native-llvm-inputs.test.mjs',
   'build/sdk/producers/platform_matrix/native_runtime.test.mjs',
   'build/sdk/producers/srcbuild/tests/cross-runtime-cache.test.mjs',
-  'ci/llvm-dylib/record-manifest.test.mjs',
   'ci/colour-runtime/platform.test.mjs',
   'build/sdk/producers/release/acquire_fixed_tuple.test.mjs',
   'ci/abi-migration.test.mjs',
   'ci/llvm-runtime-input.test.mjs',
   'build/test/source-matrix.test.mjs',
-  'build/sdk/producers/platform_matrix/summarize_scope.test.mjs',
   'build/sdk/producers/platform_matrix/llvm-tuple.test.mjs',
-  'build/sdk/producers/platform_matrix/native_llvm_consumer.test.mjs',
   'build/sdk/producers/release/g8.test.mjs',
   'build/test/archive.test.mjs',
   'build/test/cangjie-test-preparation.test.mjs',
@@ -122,7 +116,6 @@ export const GATING = Object.freeze([
   'ci/ast-support-toolchain.test.mjs',
   'ci/idle-writer-policy.test.mjs',
   'ci/llvm-tools-manifest.test.mjs',
-  'ci/objc_darwin/run_e2e.test.mjs',
   'ci/patched-runtime-diagnostics.test.mjs',
   'ci/patched-runtime-language-defer.test.mjs',
   'ci/official-runtime-isolation.test.mjs',
@@ -141,7 +134,6 @@ export const GATING = Object.freeze([
   'build/sdk/producers/release/darwin_runtime.test.mjs',
   'build/sdk/producers/release/host_llvm.test.mjs',
   'build/sdk/producers/release/prepare_llvm_dylib.test.mjs',
-  'build/sdk/producers/release/publish_bootstrap_inputs.test.mjs',
   'build/sdk/producers/release/package_checksums.test.mjs',
   'build/sdk/producers/release/platform-matrix.test.mjs',
   'build/sdk/producers/release/native-sdk-producer.test.mjs',

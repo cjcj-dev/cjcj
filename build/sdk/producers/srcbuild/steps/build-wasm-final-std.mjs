@@ -90,7 +90,7 @@ async function main(argv) {
     options = {sdk: o.sdk, stdlibSource: o['stdlib-source'], boundscheckSource: o['boundscheck-source'], pcre2Source: o['pcre2-source'],
       clang: o.clang, llvmAr: o['llvm-ar'], finalStd: o['final-std'], work: o.work, runtimeRef: o['runtime-ref'], fallbackOpt: o['fallback-opt'] === 'default'};
   } else {
-    // srcbuild-target.yml source-wasm job.
+    // sdk-build-target.yml source-wasm job.
     const env = name => { if (!process.env[name]) throw new Error(`${name} is required`); return process.env[name]; };
     if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('wasm producer requires the linux-x64 source cell');
     const workspace = path.resolve(env('CANGJIE_WORKSPACE'));

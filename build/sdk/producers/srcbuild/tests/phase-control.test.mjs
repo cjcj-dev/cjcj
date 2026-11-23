@@ -97,7 +97,7 @@ async function artifactUploads(name) {
         for (const row of CROSS_STD_BUILDS.filter(row => row.family === family)) {
           found.push([artifact.replace(/\$\{\{ matrix\.artifact \}\}/g, row.artifact), `${name}/${id}`]);
         }
-      } else if (name === 'srcbuild-target.yml' && job.strategy?.matrix === '${{ fromJson(needs.plan.outputs.matrix) }}') {
+      } else if (name === 'sdk-build-target.yml' && job.strategy?.matrix === '${{ fromJson(needs.plan.outputs.matrix) }}') {
         // The target workflow is invoked for a single cell. Expand addressable
         // names only for jobs that can actually coexist in the release run.
         const inputs = {build_ios:true,build_ohos:true,build_android:true,native_runtime_artifact:'fixture',native_build_inputs_artifact:'fixture'};
@@ -118,7 +118,7 @@ async function artifactUploads(name) {
 }
 
 test('Windows and optional iOS source paths reach only their own packaging jobs', async () => {
-  const workflow = loadYaml(await readWorkflow('srcbuild-target.yml'));
+  const workflow = loadYaml(await readWorkflow('sdk-build-target.yml'));
   const cells = sourceBuildCells({nativeInputs:true});
   const results = ['success','skipped','failure','cancelled'];
   for (const cell of cells) for (const build_ios of [false,true]) {
@@ -143,7 +143,7 @@ test('policy contract 1: the five package phases run in the policy order, one af
   // Android packages running on these hosts (package-key.mjs consumes both).
   const nativeKeys = ['linux-x64', 'linux-arm64', 'win32-x64', 'darwin-arm64', 'darwin-x64'];
   const packages = [...release].filter(([, job]) =>
-    /uses:\s*\.\/\.github\/workflows\/build-release-package\.yml/.test(job) &&
+    (/uses:\s*\.\/\.github\/workflows\/sdk-build\.yml/.test(job) && /mode:\s*package/.test(job)) &&
     nativeKeys.includes(scalar(job, 'release_key')));
   assert.equal(packages.length, PHASES.length,
     `expected one package job per phase, found ${packages.length}: ${packages.map(([n]) => n)}`);
@@ -167,7 +167,7 @@ test('policy contract 1: the five package phases run in the policy order, one af
 
 test('policy contract 2: source producers are gated by the same phases, not all at once', async () => {
   const release = jobs(await readWorkflow('release.yml'));
-  const sources = [...release].filter(([, job]) => /uses:\s*\.\/\.github\/workflows\/srcbuild\.yml/.test(job));
+  const sources = [...release].filter(([, job]) => (/uses:\s*\.\/\.github\/workflows\/sdk-build\.yml/.test(job) && !/mode:\s*package/.test(job)));
   assert.ok(sources.length > 1,
     'a single srcbuild call builds every target at once, so four expensive source jobs start before phase 1 reports');
   const byPhase = new Map(sources.map(([name, job]) => [phaseOf(job), name]));
@@ -181,7 +181,7 @@ test('policy contract 2: source producers are gated by the same phases, not all 
 test('policy contract 3: Windows work waits for the Windows phase', async () => {
   const release = jobs(await readWorkflow('release.yml'));
   const windowsJobs = [...release].filter(([name, job]) =>
-    /windows/i.test(name) && !/uses:\s*\.\/\.github\/workflows\/srcbuild\.yml/.test(job));
+    /windows/i.test(name) && !(/uses:\s*\.\/\.github\/workflows\/sdk-build\.yml/.test(job) && !/mode:\s*package/.test(job)));
   assert.ok(windowsJobs.length > 0, 'no Windows jobs found');
   for (const [name, job] of windowsJobs) {
     assert.ok(needsOf(job).length > 0,
@@ -206,8 +206,7 @@ test('policy contract 4: a STOP leaves later phases skipped, with no condition t
 
 test('policy contract 5: each artifact name has exactly one producer in the run', async () => {
   const produced = [];
-  for (const workflow of ['release.yml', 'srcbuild.yml', 'srcbuild-target.yml', 'build-release-package.yml',
-    'platform-tuples.yml', 'build-cjpm.yml', 'build-windows-runtime.yml']) {
+  for (const workflow of ['release.yml', 'sdk-build.yml', 'sdk-build-target.yml']) {
     produced.push(...await artifactUploads(workflow));
   }
   const counts = new Map();
@@ -247,7 +246,7 @@ test('policy contract 5: each artifact name has exactly one producer in the run'
 // phase that dies has to leave something to read, or the stop-loss buys a stop
 // with no diagnosis.
 test('policy failure capture: a package cell that dies leaves evidence behind', async () => {
-  const text = uncommented(await readWorkflow('build-release-package.yml'));
+  const text = uncommented(await readWorkflow('sdk-build.yml'));
   assert.match(text, /if:\s*failure\(\)\s*\n\s*uses:\s*actions\/upload-artifact@/,
     'no failure-only upload: the pkg-* upload runs only after everything before it succeeded');
   const upload = text.split(/\n\s*- name: /).find(step => step.startsWith('Upload failure diagnostics\n'));
@@ -261,7 +260,7 @@ test('policy failure capture: a package cell that dies leaves evidence behind', 
 });
 
 test('policy failure capture: smoke workspaces survive the failure that needs them', async () => {
-  const text = uncommented(await readWorkflow('build-release-package.yml'));
+  const text = uncommented(await readWorkflow('sdk-build.yml'));
   // `trap '... rm -rf ...' EXIT` fires on the failure path too, so the evidence
   // is gone before any upload step can see it.
   const unconditional = [...text.matchAll(/trap\s+'([^']*)'\s+EXIT/g)]
@@ -274,7 +273,7 @@ test('policy failure capture: smoke workspaces survive the failure that needs th
 // Execute the same CLI that the workflow uses, and read its GITHUB_ENV output;
 // stdout alone would miss a broken producer-to-Actions environment handoff.
 for (const hasProducer of [true, false]) test(`policy failure capture: package identity ${hasProducer ? 'reaches GITHUB_ENV for declared SDK producers' : 'rejects cells without a complete SDK producer'}`, async t => {
-  const workflow = uncommented(await readWorkflow('build-release-package.yml'));
+  const workflow = uncommented(await readWorkflow('sdk-build.yml'));
   assert.match(workflow, /RELEASE_PLATFORM:\s*\$\{\{ inputs\.platform \}\}/);
   assert.match(workflow, /RELEASE_KEY:\s*\$\{\{ inputs\.release_key \}\}/);
   assert.ok(workflow.indexOf('run: node build/sdk/producers/release/package-key.mjs') > 0);
@@ -330,7 +329,7 @@ function diagnosticNames(template, cells) {
 }
 
 test('policy failure capture: diagnostic names distinguish same-host packages and attempts', async () => {
-  const text = uncommented(await readWorkflow('build-release-package.yml'));
+  const text = uncommented(await readWorkflow('sdk-build.yml'));
   const upload = text.split(/\n\s*- name: /).find(step => step.startsWith('Upload failure diagnostics\n'));
   const names = diagnosticNames(scalar(upload, 'name'), allReleasePlatforms().map(getReleasePlatform));
   assert.ok(names.includes('pkg-diagnosis-linux-x64-android-1'));

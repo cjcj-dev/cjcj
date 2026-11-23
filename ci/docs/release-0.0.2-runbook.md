@@ -81,7 +81,7 @@ API 404、`jq` 非 0、reviewer 为空或 `prevent_self_review != true` 都是 `
 
 ### 1.3 同一 artifact 的机械绑定
 
-- 全部已声明（packageDeclared） 格在 `build-release-package.yml` 用 `actions/upload-artifact@v7` 各上传唯一 `pkg-<platform>`，并显式 `retention-days: 90`。人工审批的操作 SLA 是 30 天；超过 30 天一律拒绝本 run，90 天 retention 留足复核与事故取证余量。
+- 全部已声明（packageDeclared） 格在 `sdk-build.yml` 用 `actions/upload-artifact@v7` 各上传唯一 `pkg-<platform>`，并显式 `retention-days: 90`。人工审批的操作 SLA 是 30 天；超过 30 天一律拒绝本 run，90 天 retention 留足复核与事故取证余量。
 - upload-artifact v4+ 的 artifact 不可原地修改；覆盖会产生新 artifact ID。复核记录固定每个 artifact 的 `id + name + digest + expired`。
 - publish 使用 `actions/download-artifact@v8`，显式传 `repository: github.repository` 与 `run-id: github.run_id`，并只匹配 `pkg-*`。所以批准后下载源仍是当前候选 run，不存在第二次 producer 构建。
 - 批准前必须再次抓 artifact 清单并与复核时的 TSV 字节比较；ID 或 digest 任一变化就拒绝批准。

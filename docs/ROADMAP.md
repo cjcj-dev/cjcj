@@ -47,7 +47,7 @@ v0.0.2 的目标是把已经完成的自举编译器变成可重复验证的多�
 - 发布前冻结 SDK、runtime、LLVM 与 cjpm 的来源 SHA，并在 release 元数据中保留。
 
 验收入口以 `.github/workflows/release.yml` 与
-`.github/workflows/build-release-package.yml` 为准。v0.0.1 是当前公开预发布，v0.0.2
+`.github/workflows/sdk-build.yml` 为准。v0.0.1 是当前公开预发布，v0.0.2
 仍处于准备阶段。
 
 ## R2：测试从样本门扩展到结构门
@@ -114,5 +114,5 @@ JOBS=4 CJC_JOBS=1 bash scripts/difftestx_corpus/run.sh
 ```
 
 发布构建与完整源码构建分别以 `.github/workflows/release.yml`、
-`.github/workflows/srcbuild.yml` 为准。命令中的并发度是示例，受共享构建环境约束时应显式
+`.github/workflows/sdk-build.yml` 为准。命令中的并发度是示例，受共享构建环境约束时应显式
 降低外层与编译器内层并发。

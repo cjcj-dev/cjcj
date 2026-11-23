@@ -20,40 +20,27 @@ const jobs = text => new Map(Object.entries(load(text)?.jobs ?? {}));
 // build-release-package: the coloured runtime (ci/build_patched_runtime.mjs).
 // build-windows-runtime: the MinGW cross runtime, flatc, the std-ast object.
 // srcbuild: support libraries, stage3 std FFI, stdx, tools, shim, Windows cross runtime.
-// ci.yml / platform-matrix.yml: the patched runtime on a runtime-cache miss plus
+// ci.yml: the patched runtime on a runtime-cache miss plus
 // the shim objects, per runner (the runtime links the builder's glibc).
 // build-ast-support: libcangjie-ast-support.a via ci/build_ast_support.sh.
 // objc-darwin-e2e: the pinned runtime on macOS before the ObjC fixture.
 const CXX_JOBS = new Map([
-  ['ios-runtime.yml/runtime', {component: 'runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['android-runtime.yml/runtime', {component: 'runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['objc-darwin-e2e.yml/objc-darwin-e2e', {component: 'runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['build-ast-support.yml/build', {component: 'ast-support', pin: /\$\{\{ env\.COMPILER_REF \}\}-\$\{\{ env\.FLATBUFFERS_SHA \}\}/}],
-  ['build-host-llvm.yml/host', {component: 'host-llvm', pin: /steps\.pin\.outputs\.sha/}],
-  ['build-llvm-dylib.yml/dylib', {component: '${{ inputs.cache-component }}', pin: /steps\.pin\.outputs\.sha/}],
-  ['build-llvm-tools.yml/build-tools', {component: 'llvm', pin: /steps\.llvm-pin\.outputs\.sha/}],
-  ['build-windows-runtime.yml/build-runtime', {component: 'windows-runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['windows-runtime-export-contract.yml/native-contract', {component: 'windows-runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['windows-runtime-link.yml/link', {component: 'windows-runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/native-windows-sdk', {component: 'srcbuild-stage0', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/source-stage0', {component: 'srcbuild-stage0', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/source-stage1-initial-std', {component: 'srcbuild-stage1-initial-std', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/source-stage1-std', {component: 'srcbuild-stage1-std', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/source-stage1-compiler', {component: 'srcbuild-stage1-compiler', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/source-stage3', {component: 'srcbuild-stage3', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/srcbuild', {component: 'srcbuild-package', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/source-ohos', {component: 'srcbuild-ohos', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/source-ios', {component: 'srcbuild-ios', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/source-android', {component: 'srcbuild-android', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/source-wasm', {component: 'srcbuild-wasm', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/source-mingw', {component: 'srcbuild-mingw', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['srcbuild-target.yml/source-windows', {component: 'srcbuild-windows', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/fixed-llvm', {component: 'llvm', pin: /steps\.llvm-pin\.outputs\.sha/}],
+  ['sdk-build-target.yml/native-windows-sdk', {component: 'srcbuild-stage0', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/source-stage0', {component: 'srcbuild-stage0', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/source-stage1-initial-std', {component: 'srcbuild-stage1-initial-std', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/source-stage1-std', {component: 'srcbuild-stage1-std', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/source-stage1-compiler', {component: 'srcbuild-stage1-compiler', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/source-stage3', {component: 'srcbuild-stage3', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/srcbuild', {component: 'srcbuild-package', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/source-ohos', {component: 'srcbuild-ohos', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/source-ios', {component: 'srcbuild-ios', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/source-android', {component: 'srcbuild-android', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/source-wasm', {component: 'srcbuild-wasm', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/source-mingw', {component: 'srcbuild-mingw', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['sdk-build-target.yml/source-windows', {component: 'srcbuild-windows', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['ci.yml/build', {component: 'runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['ci.yml/package-tests', {component: 'runtime-shim', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['build-native-runtime.yml/runtime', {component: 'native-runtime', pin: /steps\.pin\.outputs\.runtime_sha/}],
-  ['platform-matrix.yml/darwin-runtime', {component: 'runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['platform-matrix.yml/colour-runtime', {component: 'runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
-  ['platform-matrix.yml/platform', {component: 'runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
 ]);
 
 // What a C/C++ compile looks like in a run: step. Wide on purpose: a match here
@@ -98,14 +85,11 @@ test('every C/C++ compile job starts sccache before compiling and reports after,
     const job = jobs(all.get(file) ?? '').get(jobName);
     assert.ok(job, `${id}: job not found`);
     const steps = stepBlocks(job);
-    const start = steps.findIndex(step => step.uses === './.github/actions/sccache');
-    const report = steps.findIndex(step => step.uses === './.github/actions/sccache-report');
+    const start = steps.findIndex(step => step.uses === './.github/actions/sccache' && step.with?.mode !== 'report');
+    const report = steps.findIndex(step => step.uses === './.github/actions/sccache' && step.with?.mode === 'report');
     const firstCompile = steps.findIndex(compilesIn);
-    if (id === 'build-ast-support.yml/build') {
-      console.log(`AST-SCCACHE-CONTRACT job=${id} start=${start} compile=${firstCompile} report=${report}`);
-    }
     assert.ok(start >= 0, `${id}: no ./.github/actions/sccache step`);
-    assert.ok(report >= 0, `${id}: no ./.github/actions/sccache-report step`);
+    assert.ok(report >= 0, `${id}: no ./.github/actions/sccache report-mode step`);
     assert.ok(firstCompile >= 0, `${id}: no compile step found; CXX_JOBS is stale`);
     assert.ok(start < firstCompile, `${id}: sccache starts at step ${start}, after the first compile at step ${firstCompile}`);
     assert.ok(report > firstCompile, `${id}: sccache reports at step ${report}, before the last compile`);
@@ -117,7 +101,7 @@ test('every C/C++ compile job starts sccache before compiling and reports after,
     assert.match(steps[report].if, /^always\(\)/, `${id}: the report must run when the build failed too`);
     // Enforced on green jobs only: a job that already failed before its first
     // compile must not gain a second, misleading error from the report.
-    assert.match(steps[report].with['require-compiles'], id === 'srcbuild-target.yml/source-mingw'
+    assert.match(steps[report].with['require-compiles'], id === 'sdk-build-target.yml/source-mingw'
       ? /^\$\{\{ job\.status == 'success' && steps\.windows-mingw-cache\.outputs\.cache-hit != 'true' \}\}\s*$/m
       : /^\$\{\{ job\.status == 'success' \}\}\s*$/m,
       `${id}: the report must require compiles exactly when the job is otherwise green`);
@@ -152,7 +136,7 @@ test('the composite actions export both CMake launcher variables, bind key to co
     'uses: mozilla-actions/sccache-action@',
   ]) assert.ok(start.includes(contract), contract);
   assert.match(start, /^\s*version: \$\{\{ inputs\.sccache-version \}\}/m, 'the sccache release is pinned, not latest');
-  const report = await fs.readFile(path.join(root, '.github/actions/sccache-report/action.yml'), 'utf8');
+  const report = await fs.readFile(path.join(root, '.github/actions/sccache/action.yml'), 'utf8');
   assert.ok(report.includes('ci/sccache/report.mjs'));
   assert.ok(report.includes('--require-compiles'));
   assert.ok(report.includes('--summary "$GITHUB_STEP_SUMMARY"'));
@@ -165,7 +149,7 @@ test('the composite actions export both CMake launcher variables, bind key to co
   // The diagnostics upload has to outlive a failing statistics step, which is
   // exactly when its stats.json and error log are worth having.
   const upload = report.slice(report.indexOf('- name: Upload sccache diagnostics'));
-  assert.match(upload.slice(0, upload.indexOf('uses:')), /^\s*if: always\(\)\s*$/m,
+  assert.match(upload.slice(0, upload.indexOf('uses:')), /^\s*if: always\(\) && inputs\.mode == 'report'\s*$/m,
     'the sccache diagnostics upload must run even after the statistics step failed');
 });
 

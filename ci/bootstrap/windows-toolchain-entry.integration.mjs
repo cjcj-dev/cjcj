@@ -25,7 +25,7 @@ async function run(label,argv,env=process.env){
  return{rc:r.status,stdout:await fs.readFile(base+'.stdout','utf8'),stderr:await fs.readFile(base+'.stderr','utf8')};
 }
 test('formal Windows native action selects the fixed MSVCRT package without replacing other source-stage tools',async()=>{
- const wf=load(await fs.readFile(new URL('../../.github/workflows/srcbuild-target.yml',import.meta.url),'utf8'));
+ const wf=load(await fs.readFile(new URL('../../.github/workflows/sdk-build-target.yml',import.meta.url),'utf8'));
  const action=load(await fs.readFile(new URL('../../.github/actions/native-windows-tools/action.yml',import.meta.url),'utf8'));
  const job=wf.jobs['native-cjdb'],selected=job.steps.find(s=>s.uses==='./.github/actions/native-windows-tools');
  assert.equal(selected.with['native-compiler'],'true');assert.equal(action.inputs['native-compiler'].default,'false');

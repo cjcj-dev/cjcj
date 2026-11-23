@@ -20,7 +20,7 @@ const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', na
 const llvmWorkflow = name => loadYaml(fsSync.readFileSync(path.join(root, '.github/workflows', name), 'utf8'));
 
 test('native SDK consumers share the persisted selector and accept candidates by exact artifact ID', () => {
-  for (const [name, jobName, target] of [['ci.yml', 'package-tests', 'linux-x64'], ['platform-matrix.yml', 'colour-runtime', '"$NATIVE_SDK_TARGET"']]) {
+  for (const [name, jobName, target] of [['ci.yml', 'package-tests', 'linux-x64']]) {
     const workflow = llvmWorkflow(name);
     assert.deepEqual(workflow.permissions, {contents: 'read', actions: 'read'});
     const job = workflow.jobs[jobName];
@@ -69,29 +69,29 @@ test('native SDK consumers share the persisted selector and accept candidates by
     assert(persist.steps.indexOf(publish) < persist.steps.indexOf(keep));
   }
   // No other public workflow consumes the full SDK through a repository variable
-  // or a by-name Actions artifact. srcbuild-target.yml uploads it and
-  // build-release-package.yml is the in-run release handoff (workflow_call only).
+  // or a by-name Actions artifact. sdk-build-target.yml uploads it and
+  // sdk-build.yml is the in-run release handoff (workflow_call only).
   const workflows = path.join(root, '.github/workflows');
   for (const file of fsSync.readdirSync(workflows).filter(entry => /\.ya?ml$/.test(entry))) {
     const text = fsSync.readFileSync(path.join(workflows, file), 'utf8');
     assert.doesNotMatch(text, /vars\.CJCJ_NATIVE_SDK_/, file);
-    if (file !== 'srcbuild-target.yml' && file !== 'build-release-package.yml') assert.doesNotMatch(text, /name:\s*cjcj-srcbuild-/, file);
+    if (file !== 'sdk-build-target.yml' && file !== 'sdk-build.yml') assert.doesNotMatch(text, /name:\s*cjcj-srcbuild-/, file);
   }
-  assert.deepEqual(Object.keys(llvmWorkflow('build-release-package.yml').on), ['workflow_call']);
-  const source = llvmWorkflow('srcbuild-target.yml');
+  // Package mode is reachable only through workflow_call: dispatch carries no mode input.
+  assert.equal(llvmWorkflow('sdk-build.yml').on.workflow_dispatch.inputs.mode, undefined);
+  const source = llvmWorkflow('sdk-build-target.yml');
   const producer = Object.values(source.jobs).flatMap(job => job.steps || []).find(step => step.name === 'Upload self-hosted SDK and gate logs');
   assert.equal(producer.with.name, 'cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}');
   assert.match(producer.with.path, /cangjie-sdk-.*-cjcj/);
 });
 
-const producer = llvmWorkflow('build-llvm-tools.yml');
-const wrapper = llvmWorkflow('platform-tuples.yml');
+const producer = llvmWorkflow('sdk-build-target.yml');
 
 function llvmPlanOutputs(requested = 'all', platformSet = '', publishTuple = false) {
   const directory = fsSync.mkdtempSync(path.join(os.tmpdir(), 'llvm-matrix-'));
   const output = path.join(directory, 'output');
   try {
-    const step = producer.jobs.plan.steps.find(entry => entry.id === 'select');
+    const step = producer.jobs['fixed-llvm-plan'].steps.find(entry => entry.id === 'select');
     const result = spawnSync('bash', ['-eu', '-o', 'pipefail', '-c', step.run], {
       cwd: root, encoding: 'utf8',
       env: {...process.env, REQUESTED: requested, PLATFORM_SET: platformSet,
@@ -127,30 +127,13 @@ test('producer emits the real runner and glibc baseline for all five tuples', ()
   ]);
 });
 
-test('both caller subsets reach the same producer matrix and upload identity', () => {
-  const call = wrapper.jobs['build-tuple'];
-  assert.equal(call.uses, './.github/workflows/build-llvm-tools.yml');
-  const allCaller = llvmWorkflow('platform-matrix.yml').jobs;
-  const releaseCaller = llvmWorkflow('release-matrix.yml').jobs;
-  const subset = jobs => {
-    const calls = Object.values(jobs).filter(job => job.uses === './.github/workflows/platform-tuples.yml');
-    assert.equal(calls.length, 1, 'caller has exactly one tuple producer');
-    return calls[0].with?.platform_set || 'all';
-  };
-  const binding = call.with.platform_set;
-  const resolve = value => binding === "${{ inputs.platform_set || 'all' }}" ? value : binding;
-  const allRows = llvmPlan('all', resolve(subset(allCaller)));
-  const windowsRows = llvmPlan('all', resolve(subset(releaseCaller)));
-  console.log(`CALLER_IDENTITY all=${allRows.length} windows=${windowsRows.length}`);
-  assert.equal(allRows.length, 5, 'platform-matrix receives every tuple');
-  assert.equal(windowsRows.length, 1, 'release receives only its Windows tuple');
-  assert.deepEqual(windowsRows[0], allRows.find(row => row.platform === 'windows_x86_64'));
-  const uploads = producer.jobs['build-tools'].steps.filter(step => step.uses?.startsWith('actions/upload-artifact@'));
+test('the fixed LLVM tools job keeps one upload identity per selected tuple', () => {
+  const uploads = producer.jobs['fixed-llvm'].steps.filter(step => step.uses?.startsWith('actions/upload-artifact@'));
   assert.equal(uploads.length, 1);
   assert.equal(uploads[0].with.name, 'fixed-llvm-tools-${{ matrix.platform }}');
   assert.equal(uploads[0].with.path, 'fixed-toolchain/${{ matrix.platform }}');
-  assert.equal(producer.jobs['build-tools'].strategy.matrix, '${{ fromJson(needs.plan.outputs.matrix) }}');
-  assert.equal(producer.jobs['build-tools']['runs-on'], '${{ matrix.runner }}');
+  assert.equal(producer.jobs['fixed-llvm'].strategy.matrix, '${{ fromJson(needs.fixed-llvm-plan.outputs.matrix) }}');
+  assert.equal(producer.jobs['fixed-llvm']['runs-on'], '${{ matrix.runner }}');
 });
 
 test('native callers retain four tuples and explicit selections deduplicate', () => {
@@ -188,8 +171,8 @@ test('the repository has one fixed LLVM artifact uploader and preserves native a
       }
     }
   }
-  assert.deepEqual(uploaders, ['build-llvm-tools.yml']);
-  const steps = producer.jobs['build-tools'].steps;
+  assert.deepEqual(uploaders, ['sdk-build-target.yml']);
+  const steps = producer.jobs['fixed-llvm'].steps;
   const cacheKey = steps.find(step => step.id === 'cache').with.key;
   for (const input of ['ci/llvm_pin.env', 'build/lib/targets.mjs', 'ci/llvm-tools-matrix.mjs', 'build/sdk/producers/platform_tuples/**']) {
     assert.ok(cacheKey.includes(input), `cache identity includes ${input}`);
@@ -237,7 +220,11 @@ function sourcePlans() {
   } finally { fsSync.rmSync(dir, {recursive: true, force: true}); }
 }
 const planTable = (text, job = text) => {
-  if (text.includes('run: node ci/llvm-tools-matrix.mjs')) {
+  // The fixed LLVM tools jobs share sdk-build-target.yml with the source cells, so
+  // the table is chosen by the job's own matrix source, not by the file.
+  const llvmJob = job !== text && /fromJson\(needs\.fixed-llvm-plan\.outputs\.matrix\)/.test(job);
+  if (llvmJob || (job === text && text.includes('run: node ci/llvm-tools-matrix.mjs')
+      && !text.includes('run: node build/sdk/producers/srcbuild/target-matrix.mjs'))) {
     return llvmToolMatrix('all', {platformSet: 'all'}).include;
   }
   if (text.includes('run: node build/sdk/producers/srcbuild/target-matrix.mjs')) {
@@ -302,7 +289,7 @@ async function runArtifacts(entry, sourceTuple) {
   const produced = [];
   for (const name of await invokedWorkflows(entry)) {
     const text = uncommented(await readWorkflow(name));
-    for (const artifact of uploadedArtifacts(text, name==='srcbuild-target.yml'?sourceTuple:undefined)) produced.push([artifact, name]);
+    for (const artifact of uploadedArtifacts(text, name==='sdk-build-target.yml'?sourceTuple:undefined)) produced.push([artifact, name]);
   }
   return produced;
 }
@@ -478,9 +465,9 @@ function substitute(value, inputs) {
 }
 
 test('source-build workflow connects every native runner to its LLVM and std artifact', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
-  const fixed = await fs.readFile(path.join(root, '.github/workflows/build-llvm-tools.yml'), 'utf8');
-  assert.ok(workflow.includes('uses: ./.github/workflows/build-llvm-tools.yml'), 'source build must call the reusable tuple producer');
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/sdk-build-target.yml'), 'utf8');
+  const fixed = await fs.readFile(path.join(root, '.github/workflows/sdk-build-target.yml'), 'utf8');
+  assert.match(workflow, /run: node ci\/llvm-tools-matrix\.mjs/, 'source build must select its own fixed LLVM tuples');
   for (const {target, runner, llvm_platform: llvmPlatform} of sourceBuildCells()) {
     // Whole-tuple equality: a row that pairs the right target with the wrong
     // runner has to fail, which is why this compares the entry and not three
@@ -489,7 +476,7 @@ test('source-build workflow connects every native runner to its LLVM and std art
     assert.ok(row, `srcbuild plan has no row for ${target}`);
     assert.equal(row.runner, runner, `${target} runner`);
     assert.equal(row.llvm_platform, llvmPlatform, `${target} llvm_platform`);
-    const tuple = planTable(fixed).find(entry => entry.platform === llvmPlatform);
+    const tuple = planTable(fixed, jobs(fixed).get('fixed-llvm')).find(entry => entry.platform === llvmPlatform);
     assert.ok(tuple, `LLVM producer plan has no tuple for ${llvmPlatform}`);
     assert.equal(tuple.runner, target === 'linux-aarch64' ? 'ubuntu-22.04-arm' : runner, `${llvmPlatform} runner`);
   }
@@ -519,106 +506,9 @@ test('source-build workflow connects every native runner to its LLVM and std art
   }
 });
 
-test('arm soak produces every artifact its package job downloads, each exactly once', async () => {
-  const armSoak = await readWorkflow('arm-soak.yml');
-  const soakJobs = jobs(armSoak);
-
-  // A needs: pointing at a job that no longer exists is rejected by Actions before
-  // anything runs, and renaming a producer job is the easy way to introduce one.
-  for (const [name, job] of soakJobs) {
-    for (const need of needsOf(job)) assert.ok(soakJobs.has(need), `job ${name} needs missing job ${need}`);
-  }
-
-  // What the package job asks for, resolved through arm-soak's own dispatch defaults.
-  const packageJob = soakJobs.get('package');
-  assert.ok(packageJob, 'arm-soak has no package job');
-  const command = scalar(soakJobs.get('matrix-plan'), 'run');
-  const output = execFileSync('bash', ['-e', '-c', command], {
-    cwd: root, encoding: 'utf8', env: {...process.env, GITHUB_OUTPUT: ''},
-  });
-  const plan = Object.fromEntries(output.trim().split('\n').map(line => line.split('=')));
-  const callerInputs = new Map([...mapping(block(packageJob, /^\s*with:\s*$/))].map(([key, value]) => [
-    key,
-    value.replace(/\$\{\{\s*inputs\.(\w+)\s*\|\|\s*needs.matrix-plan.outputs.(\w+)\s*\}\}/g, (_, name, outputName) => {
-      const declared = block(armSoak, new RegExp(String.raw`^ {6}${name}:\s*$`));
-      assert.ok(declared, `arm-soak declares no dispatch input ${name}`);
-      const fallback = scalar(declared, 'default');
-      assert.ok(fallback !== undefined, `dispatch input ${name} has no default`);
-      return unquote(fallback) || plan[outputName];
-    }).replace(/\$\{\{\s*needs.matrix-plan.outputs.(\w+)\s*\}\}/g, (_, name) => plan[name]),
-  ]));
-
-  const platform = callerInputs.get('platform');
-  const demanded = callerInputs.get('std_artifact');
-
-  // Execute the consumer's actual same-platform gate. Whole-value equality:
-  // a correctly produced name passes and the same name plus -BROKEN fails.
-  const consumer = await readWorkflow('build-release-package.yml');
-  const gate = loadYaml(consumer).jobs.package.steps.find(step => step.name === 'Validate same-platform final std contract');
-  assert.ok(gate, 'package consumer declares its final std gate');
-  const resolved = effectiveInputs(consumer, callerInputs);
-  const gateEnv = {SELECTED_STD_ARTIFACT:substitute(gate.env.SELECTED_STD_ARTIFACT, resolved)};
-  assert.equal(gate.env.EXPECTED_STD_ARTIFACT,'${{ steps.package-inputs.outputs.std_artifact }}');
-  const keyWork=fsSync.mkdtempSync(path.join(os.tmpdir(),'std-consumer-'));
-  try {
-    const out=path.join(keyWork,'outputs');
-    execFileSync(process.execPath,['build/sdk/producers/release/package-key.mjs'],{cwd:root,env:{...process.env,RELEASE_PLATFORM:platform,GITHUB_ENV:path.join(keyWork,'env'),GITHUB_OUTPUT:out}});
-    gateEnv.EXPECTED_STD_ARTIFACT=fsSync.readFileSync(out,'utf8').trim().slice('std_artifact='.length);
-    assert.equal(gateEnv.EXPECTED_STD_ARTIFACT,`final-std-${platform}`);
-  } finally {fsSync.rmSync(keyWork,{recursive:true,force:true});}
-  assert.equal(gateEnv.SELECTED_STD_ARTIFACT, demanded);
-  for (const [selected, expected] of [[demanded, 0], [`${demanded}-BROKEN`, 1]]) {
-    const checked = spawnSync('bash', ['-eu', '-o', 'pipefail', '-c', gate.run], {
-      cwd: root, encoding: 'utf8', env: {...process.env, ...gateEnv, SELECTED_STD_ARTIFACT: selected},
-    });
-    assert.equal(checked.status, expected, checked.stderr);
-    assert.equal(checked.signal, null);
-    assert.ifError(checked.error);
-    console.log(`FINAL_STD_CONSUMER_GATE selected=${selected} rc=${checked.status}`);
-  }
-  assert.equal(demanded, `final-std-${platform}`);
-
-  // Every download the package job will reach on this platform and die on if absent.
-  const required = failClosedDownloads(consumer, callerInputs);
-  assert.ok(required.includes(demanded), `std artifact ${demanded} is not among ${required}`);
-
-  const sourceCall = soakJobs.get('source-final-std');
-  const producerVersion = unquote(mapping(block(sourceCall, /^\s*with:\s*$/)).get('cangjie_ref'));
-  assert.equal(normalizeCangjieVersion(producerVersion), callerInputs.get('version'), 'source and consumer SDK versions must match');
-  const sourceWorkflow = await readWorkflow('srcbuild-target.yml');
-  assert.ok(sourceWorkflow.includes('REQUESTED_REF: ${{ inputs.cangjie_ref }}'));
-  assert.ok(sourceWorkflow.includes('--cangjie-version \"$REQUESTED_REF\" print-version'));
-  assert.equal(mapping(block(sourceCall, /^\s*with:\s*$/)).get('targets'),'${{ needs.matrix-plan.outputs.targets }}');
-  assert.equal(plan.targets,platform);
-  const tuple=plan.llvm_platform;assert.equal(tuple,sourceBuildCells().find(cell=>cell.target===platform).llvm_platform);
-  const produced = (await runArtifacts('arm-soak.yml',tuple)).map(([name, owner]) =>
-    [name.replaceAll('${{ steps.version.outputs.value }}', producerVersion), owner]);
-  const producersOf = artifact => produced.filter(([name]) => name === artifact).map(([, source]) => source);
-
-  // The point of the whole test: demanded and produced have to be the same set.
-  for (const artifact of required) assert.equal(producersOf(artifact).length, 1, `producers of ${artifact}`);
-  assert.deepEqual(producersOf(demanded), ['srcbuild-target.yml']);
-
-  // upload-artifact rejects a name already uploaded in the same run, so two callers
-  // of one producer workflow break the run rather than merging.
-  const names = produced.map(([artifact]) => artifact);
-  assert.deepEqual(names.filter((artifact, index) => names.indexOf(artifact) !== index), []);
-
-  // The package job must wait for whichever job actually builds those artifacts.
-  const producerJobs = [];
-  for (const [name, job] of soakJobs) {
-    const called = scalar(job, 'uses')?.match(/^\.\/\.github\/workflows\/([\w.-]+\.yml)$/);
-    if (!called) continue;
-    const uploads = (await runArtifacts(called[1],tuple)).map(([artifact]) => artifact);
-    if (uploads.includes(demanded)) producerJobs.push(name);
-  }
-  assert.equal(producerJobs.length, 1, `jobs producing ${demanded}: ${producerJobs}`);
-  assert.ok(needsOf(packageJob).includes(producerJobs[0]),
-    `package needs ${needsOf(packageJob)} but ${demanded} is built by ${producerJobs[0]}`);
-});
 
 test('source-build leaves the sccache GHA backend off and persists the disk cache as one entry per target', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/sdk-build-target.yml'), 'utf8');
   const action = await fs.readFile(path.join(root, '.github/actions/sccache/action.yml'), 'utf8');
   // The per-object backend was measured, not assumed: run 31551077927 got 230 hits
   // against 6585 misses while spending 4162 s on writes, and the repository cache
@@ -632,26 +522,14 @@ test('source-build leaves the sccache GHA backend off and persists the disk cach
   assert.ok(!workflow.includes('SCCACHE_MULTILEVEL_CHAIN'),
     'multi-level chain only means something with a durable backend enabled');
   assert.ok(workflow.includes('uses: ./.github/actions/sccache\n'), 'srcbuild starts sccache through the shared action');
-  assert.ok(workflow.includes('uses: ./.github/actions/sccache-report'), 'and reports through it');
+  assert.match(workflow, /uses: \.\/\.github\/actions\/sccache\n(?:\s+if: [^\n]*\n)?\s+with:\n\s+mode: report\n/, 'and reports through it');
   // The diagnostics stay: they are how the next measurement gets taken.
-  const report = await fs.readFile(path.join(root, '.github/actions/sccache-report/action.yml'), 'utf8');
+  const report = await fs.readFile(path.join(root, '.github/actions/sccache/action.yml'), 'utf8');
   assert.ok(action.includes('SCCACHE_ERROR_LOG=$RUNNER_TEMP/sccache-$COMPONENT-error.log'));
   assert.ok(report.includes('--stats-format=json'));
   assert.ok(report.includes('name: sccache-${{ inputs.component }}-${{ inputs.platform }}-${{ github.run_attempt }}'));
 });
 
-test('Windows MinGW product cache has one bounded rate-limit retry', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/build-windows-runtime.yml'), 'utf8');
-  const start = workflow.indexOf('- name: Restore official MinGW toolchain');
-  const end = workflow.indexOf('- name: Cross-build pinned Windows runtime');
-  assert.ok(start >= 0 && end > start);
-  const cacheBlock = workflow.slice(start, end);
-  assert.equal(cacheBlock.match(/uses: actions\/cache\/save@v6/g)?.length, 2);
-  assert.equal(cacheBlock.match(/lookup-only: true/g)?.length, 2);
-  assert.equal(cacheBlock.match(/run: sleep 5/g)?.length, 1);
-  assert.ok(cacheBlock.includes("steps.mingw-cache-probe.outputs.cache-hit != 'true'"));
-  assert.ok(cacheBlock.includes('still absent after one bounded retry'));
-});
 
 test('native build environments use configured architecture, OpenSSL, and loader', () => {
   const oldDryRun = process.env.CANGJIE_BUILD_DRY_RUN;
@@ -728,7 +606,7 @@ function sdkWithToolsLibOnly(workspace) {
 }
 
 test('source build keeps the pinned plain host runtime across both bootstrap halves', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/sdk-build-target.yml'), 'utf8');
   const jobs=loadYaml(workflow).jobs,stage0=jobs['source-stage0'].steps.map(s=>s.name);
   const provision=stage0.indexOf('Provision uncoloured host SDK'),bootstrap0=stage0.indexOf('Bootstrap stage0 compiler');
   assert.ok(provision>=0 && bootstrap0>provision);
@@ -818,7 +696,7 @@ test('Darwin selfhost link uses the source SDK dylib and libc++', () => {
 });
 
 test('Windows final std is cross-built by the stage2 Linux host compiler', async () => {
-  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/sdk-build-target.yml'), 'utf8');
   const producer = await fs.readFile(path.join(root, 'build/sdk/producers/srcbuild/steps/build-windows-final-std.mjs'), 'utf8');
   for (const edge of [
     "if: matrix.target == 'linux-x64'",
@@ -871,7 +749,7 @@ test('final std install roots satisfy package_sdk layout (a) on every release ta
 test('an omitted optional input reads the way Actions reads it, not as undefined', async () => {
   // Cross artifacts are a JSON list. An omitted input resolves to its declared
   // empty list, so it must skip the download exactly as Actions does.
-  const consumer = await readWorkflow('build-release-package.yml');
+  const consumer = await readWorkflow('sdk-build.yml');
   // failClosedDownloads yields the artifact names the job will demand.
   const gated = 'final-std-windows-x64';
   // Every input the surviving download steps interpolate into their names.
@@ -912,11 +790,11 @@ test('an input the caller omits and the workflow does not default is a failure, 
 });
 
 test('dynamic cross matrices produce exactly the artifacts declared by release consumers', async () => {
-  const workflow = await readWorkflow('srcbuild-target.yml');
+  const workflow = await readWorkflow('sdk-build-target.yml');
   const actual = uploadedArtifacts(workflow);
   const release = loadYaml(await readWorkflow('release.yml'));
   const requested = new Set(Object.values(release.jobs)
-    .filter(job => job.uses === './.github/workflows/build-release-package.yml')
+    .filter(job => (job.uses === './.github/workflows/sdk-build.yml' && job.with?.mode === 'package'))
     .flatMap(job => JSON.parse(job.with.cross_std_artifacts || '[]'))
     .filter(row => /^(linux_ohos_|ios_)/.test(row.tuple)).map(row => row.artifact));
   for (const artifact of requested) {

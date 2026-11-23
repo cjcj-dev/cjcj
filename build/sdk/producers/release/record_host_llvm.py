@@ -1,4 +1,4 @@
-# Manifest producer used by build-host-llvm.yml.
+# Manifest producer for the host LLVM build (its probe workflow was retired).
 import hashlib, json, os, sys
 from pathlib import Path
 root = Path(sys.argv[1])

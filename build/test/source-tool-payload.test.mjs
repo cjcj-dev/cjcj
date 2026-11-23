@@ -320,7 +320,7 @@ for(const [platform,suffix,libraries]of [
 });
 
 test('A8 workflow native callers provide their actual SDK input',()=>{
- const source=fs.readFileSync(path.join(root,'.github/workflows/srcbuild-target.yml'),'utf8');
+ const source=fs.readFileSync(path.join(root,'.github/workflows/sdk-build-target.yml'),'utf8');
  const calls=[...source.matchAll(/node build\/sdk\/producers\/release\/prepare_tools_artifact\.mjs \\\n((?:[^\n]*\\\n)*[^\n]*--outdir[^\n]*)/g)]
   .map(match=>match[1]).filter(text=>text.includes('${{ matrix.target }}'));
  assert.equal(calls.length,8);

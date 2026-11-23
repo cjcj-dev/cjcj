@@ -89,21 +89,21 @@ test('selection handles whitespace, duplicates and mixed readiness without losin
 });
 
 test('srcbuild workflow selection executes the shared planner', t => {
-  const result = run(t, ['all'], workflowStep('srcbuild.yml', 'Select the requested targets'));
+  const result = run(t, ['all'], workflowStep('sdk-build.yml', 'Select the requested targets'));
   assert.equal(result.status, 0);
   assert.deepEqual(JSON.parse(result.outputs.matrix).include.map(cell => cell.target), ['linux-x64']);
   assert.equal(JSON.parse(result.outputs.cells).include.length, 4);
 });
 
 test('srcbuild blocked reporting executes and fails with every blocked owner', t => {
-  const result = run(t, ['all'], workflowStep('srcbuild.yml', 'Report missing source inputs'));
+  const result = run(t, ['all'], workflowStep('sdk-build.yml', 'Report missing source inputs'));
   assert.equal(result.status, 1, 'blocked reporting must fail the workflow');
   assert.match(result.stderr, /issues\/473/);
   assert.match(result.stderr, /issues\/763/);
 });
 
 test('direct target workflow rejects blocked inputs at its real plan entry', t => {
-  const command = workflowStep('srcbuild-target.yml', 'Select the requested targets');
+  const command = workflowStep('sdk-build-target.yml', 'Select the requested targets');
   const result = run(t, ['linux-aarch64'], command);
   assert.equal(result.status, 1, 'target consumer must enforce readiness before fixed-llvm');
   assert.match(result.summary, /linux-aarch64 \| blocked/);
@@ -117,15 +117,17 @@ test('release preflight executes before the phased build and reports all platfor
 });
 
 test('workflow dependency edges gate expensive dispatch and retain visible blocked reporting', () => {
-  const source = fs.readFileSync(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
-  const target = fs.readFileSync(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
+  const source = fs.readFileSync(path.join(root, '.github/workflows/sdk-build.yml'), 'utf8');
+  const target = fs.readFileSync(path.join(root, '.github/workflows/sdk-build-target.yml'), 'utf8');
   const release = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
   const job = (text, name) => text.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0] || '';
   assert.match(job(source, 'srcbuild'), /needs: plan\n    if: needs.plan.outputs.has_runnable == 'true'/);
   assert.match(job(source, 'srcbuild'), /matrix: \$\{\{ fromJson\(needs.plan.outputs.matrix\) \}\}/);
   assert.match(job(source, 'blocked'), /needs: plan\n    if: needs.plan.outputs.has_blocked == 'true'/);
-  assert.match(job(target, 'fixed-llvm'), /needs: plan/);
-  assert.match(job(target, 'source-stage0'), /needs: \[plan, fixed-llvm, native-cjdb\]/);
+  assert.match(job(target, 'fixed-llvm-plan'), /needs: plan\n/);
+  assert.match(job(target, 'fixed-llvm'), /needs: fixed-llvm-plan\n/);
+  assert.match(job(target, 'source-stage0'), /needs: \[plan, fixed-llvm-plan, fixed-llvm, native-cjdb\]/);
+  assert.match(job(target, 'source-stage0'), /needs\.fixed-llvm-plan\.result == 'success' \|\| needs\.fixed-llvm-plan\.result == 'skipped'/);
   assert.match(job(target, 'source-stage0'), /needs\.native-cjdb\.result == 'success' \|\| needs\.native-cjdb\.result == 'skipped'/);
   assert.match(job(release, 'source-p1-linux-x64'), /needs: plan/);
   for (const text of [source, target]) assert.doesNotMatch(text, /all='\[/);

@@ -754,7 +754,7 @@ function runTests(context, files) {
 
 async function evaluateG4(context) {
   const release = await readFile(context, '.github/workflows/release.yml');
-  const sourceCalls = release.match(/uses:\s*\.\/\.github\/workflows\/srcbuild\.yml/g)?.length || 0;
+  const sourceCalls = release.match(/uses:\s*\.\/\.github\/workflows\/sdk-build\.yml/g)?.length || 0;
   const phases = [...release.matchAll(/^  source-p(\d+)-[^:]+:\s*$/gm)].map(match => Number(match[1]));
   const uniquePhases = new Set(phases);
   const tests = runTests(context, [
@@ -779,7 +779,7 @@ function stepBlock(workflow, name) {
 async function evaluateG5(context) {
   const [checker, workflow] = await Promise.all([
     readFile(context, 'build/sdk/producers/package/check_packaged_std.mjs'),
-    readFile(context, '.github/workflows/build-release-package.yml'),
+    readFile(context, '.github/workflows/sdk-build.yml'),
   ]);
   const [nativeConsumer, composer] = workflow.includes('run: node build/sdk/producers/release/compose-package.mjs')
     ? await Promise.all([readFile(context, 'build/sdk/producers/release/verify_native_release.mjs'), readFile(context, 'build/sdk/producers/release/compose-package.mjs')]) : ['', ''];
@@ -1517,7 +1517,7 @@ async function releaseScope(context) {
     throw new GateInputError('NOT_MET', 'release workflow jobs must be a mapping');
   }
   const jobs = Object.entries(workflow.jobs)
-    .filter(([, job]) => job?.uses === './.github/workflows/build-release-package.yml')
+    .filter(([, job]) => (job?.uses === './.github/workflows/sdk-build.yml' && job?.with?.mode === 'package'))
     .map(([id, job]) => ({id, key: job.with?.release_key, host: job.with?.platform,
       llvm_platform: job.with?.llvm_platform}));
   // Static workflow declarations include source-blocked recipes. Admission is
@@ -1596,7 +1596,7 @@ async function evaluateG10(context) {
 async function evaluateG15(context) {
   const [python, packageWorkflow, scope] = await Promise.all([
     readFile(context, 'build/lib/python-bundle.mjs'),
-    readFile(context, '.github/workflows/build-release-package.yml'),
+    readFile(context, '.github/workflows/sdk-build.yml'),
     releaseScope(context),
   ]);
   const [nativeConsumer, composer] = packageWorkflow.includes('run: node build/sdk/producers/release/compose-package.mjs')

@@ -575,5 +575,5 @@ jobs:
           echo 'main(): Int64 { println("provision ok"); return 0 }' > "$RUNNER_TEMP/p.cj"
           cjc "$RUNNER_TEMP/p.cj" -o "$RUNNER_TEMP/p" && "$RUNNER_TEMP/p"
 
-# Adding a build platform requires a matching matrix item in build-fixed-llc.yml and
+# Adding a build platform requires a matching row in ci/llvm-tools-matrix.mjs (the fixed-llvm jobs of sdk-build-target.yml) and
 # downloading that platform's fixed-llvm-tools artifact above.

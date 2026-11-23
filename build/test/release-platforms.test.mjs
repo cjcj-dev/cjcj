@@ -117,7 +117,7 @@ test('release.yml package jobs agree with the release platform table', () => {
   const release = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
   assert.match(release, /run: node build\/sdk\/producers\/srcbuild\/target-matrix.mjs --targets all --require-ready/);
   assert.match(release, /source-p1-linux-x64:\n    needs: plan/);
-  const jobs = release.split(/\n  (?=[a-z0-9-]+:\n)/).filter(job => job.includes('uses: ./.github/workflows/build-release-package.yml'));
+  const jobs = release.split(/\n  (?=[a-z0-9-]+:\n)/).filter(job => (job.includes('uses: ./.github/workflows/sdk-build.yml') && job.includes('mode: package')));
   assert.equal(jobs.length, allReleasePlatforms().filter(key => !getReleasePlatform(key).excluded && !getReleasePlatform(key).crossCompiledHost).length);
   const scalar = (job, key) => job.match(new RegExp(String.raw`^\s*${key}: '?([^'\n]*)'?\s*$`, 'm'))?.[1];
   const seen = [];
@@ -151,36 +151,6 @@ test('every runner SDK requirement has a DAG stage that installs and probes it',
   }
 });
 
-test('each requirement producer resolves to a real job in release-matrix.yml that installs and probes', () => {
-  const workflow = fs.readFileSync(path.join(root, '.github/workflows/release-matrix.yml'), 'utf8');
-  // Split on job boundaries so a job name cannot be matched in a comment or in
-  // another job's body. assert.ok(re.test(...)) keeps a failure one line long
-  // instead of dumping the whole workflow.
-  const jobs = new Map(workflow.split(/\n  (?=[a-z0-9-]+:\n)/).map(job => {
-    const name = /^\s*([a-z0-9-]+):\n/.exec(job)?.[1];
-    return [name, job];
-  }));
-  for (const [requirement, producer] of Object.entries(DAG_REQUIREMENT_PRODUCERS)) {
-    const job = jobs.get(producer.job);
-    assert.ok(job, `${requirement}: release-matrix.yml has no job '${producer.job}'`);
-    const checks = [
-      [`uses: ${producer.action}`, 'does not use the setup action'],
-      ['matrix: ${{ fromJson(needs.plan.outputs.prerequisite_matrix) }}', 'is not fanned out over prerequisite_matrix'],
-      ['requirement: ${{ matrix.requirement }}', 'does not pass matrix.requirement to the action'],
-      ['verify-runner-sdk.mjs "$SDK_REQUIREMENT"', 'does not run the causal probe harness'],
-    ];
-    for (const [needle, why] of checks) {
-      assert.ok(job.includes(needle), `${requirement}: job '${producer.job}' ${why} (looking for ${needle})`);
-    }
-  }
-  // And the plan must be what emits that matrix, in two places: the plan job
-  // forwards it as a step output, and the step writes it into GITHUB_OUTPUT.
-  assert.ok(workflow.includes('prerequisite_matrix: ${{ steps.plan.outputs.prerequisite_matrix }}'),
-    'the plan job does not forward prerequisite_matrix');
-  const matrix = fs.readFileSync(path.join(root, 'build/sdk/producers/release/platform-matrix.mjs'), 'utf8');
-  assert.ok(matrix.includes('`prerequisite_matrix=${JSON.stringify({include: plan.prerequisites})}`'),
-    'the plan step does not write prerequisite_matrix into GITHUB_OUTPUT');
-});
 
 test('the action behind a requirement producer runs both the installer and the probe', () => {
   for (const [requirement, producer] of Object.entries(DAG_REQUIREMENT_PRODUCERS)) {

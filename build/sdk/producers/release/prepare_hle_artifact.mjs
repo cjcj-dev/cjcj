@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // srcbuild already builds hle from source (build/srcbuild/stages/tools.mjs) and
-// throws the binary away: srcbuild.yml uploads only source-cjpm-* and
+// throws the binary away: sdk-build.yml uploads only source-cjpm-* and
 // final-std-*. The stock hle that ships instead is not coloured, so it
 // dereferences the coloured pointers a rebuilt std and the fork runtime hand it
 // and dies. Staging it here mirrors prepare_cjpm_artifact.mjs.

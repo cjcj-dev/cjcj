@@ -236,18 +236,6 @@ test('no workflow runs a test file the manifest does not gate', async () => {
   assert.deepEqual(offenders, [], `\n  ${offenders.join('\n  ')}`);
 });
 
-test('candidate-source workflow registration rejects missing or drifting checkout and stays scoped', async () => {
-  const name = 'darwin-input-consumers.yml';
-  const text = (await workflows()).get(name);
-  assert.deepEqual(sourceGating(name, text), ['build/sdk/producers/release/darwin_consumer_boundary.test.mjs']);
-  assert.deepEqual(sourceGating('other.yml', text), []);
-  for (const withValue of [undefined, {ref: 'master'},
-    {ref: '0'.repeat(40)}, {ref: WORKFLOW_TEST_SOURCES[0].source_ref, path: 'other-source'}]) {
-    const parsed = loadYaml(text);
-    parsed.jobs['native-input'].steps[0].with = withValue;
-    assert.throws(() => sourceGating(name, dumpYaml(parsed)), /WORKFLOW_TEST_SOURCE_CHECKOUT/);
-  }
-});
 
 
 test('manifest CLI hands every gating file to the workflow consumer', () => {

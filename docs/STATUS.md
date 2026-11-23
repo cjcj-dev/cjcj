@@ -35,7 +35,7 @@ v0.0.1 已由 GitHub Releases 公开为预发布。release workflow 当前覆盖
 
 每个平台发布一个可重定位 SDK 压缩包和一个同名 `.sha256`。SDK 中的编译器入口是
 `bin/cjc`，Windows 为 `bin/cjc.exe`。工作流定义见 `.github/workflows/release.yml` 与
-`.github/workflows/build-release-package.yml`；v0.0.2 的发布准备继续沿用这五个平台。
+`.github/workflows/sdk-build.yml`；v0.0.2 的发布准备继续沿用这五个平台。
 
 ## 一致性与测试
 
@@ -61,7 +61,7 @@ bcgate 主要比较单文件语料的逐函数 bitcode，不能替代所有用�
 - `build/cli.mjs`：源码构建 CLI；
 - `build/srcbuild/stages/*.mjs`：compiler、runtime、stdlib、stdx、tools、package、verify；
 - `build/toolchain/*.mjs`：平台依赖、静态库、sccache、MinGW 与 target Python；
-- `.github/workflows/srcbuild.yml`：完整源码构建；
+- `.github/workflows/sdk-build.yml`：完整源码构建；
 - `.github/workflows/ci.yml`：日常 master/PR 构建与 smoke。
 
 统一调用 zx 8：`npx --yes zx@8 <script>.mjs`。迁移提交为 `dc5d6fef`；旧 Python

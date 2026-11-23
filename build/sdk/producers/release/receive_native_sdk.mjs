@@ -1,5 +1,5 @@
 #!/usr/bin/env zx
-// Consume the ordinary package-install archive emitted by srcbuild-target.yml.
+// Consume the ordinary package-install archive emitted by sdk-build-target.yml.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';

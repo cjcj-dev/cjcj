@@ -309,7 +309,7 @@ export function assertHostContract(key, {
 // What the P01-P23 chain produces today. Host SDKs: every key in the target
 // registry, each producing final-std-<target> for its own runtime tuple. Cross
 // std: build/sdk/producers/srcbuild/steps/build-windows-final-std.mjs runs on the linux-x64
-// source cell only (srcbuild-target.yml source-mingw/source-android), so the
+// source cell only (sdk-build-target.yml source-mingw/source-android), so the
 // Windows and Android tuples are produced by the Linux source cell; Android
 // runtime and final std use build/sdk/producers/srcbuild/steps/build-android-final-std.mjs.
 // Shared by release artifact selection and segmented cross jobs. Each row names
@@ -365,7 +365,7 @@ export const RELEASE_REQUIREMENTS = Object.freeze({
 
 // Which DAG stage installs each requirement and probes it on its own runner.
 // Same shape as DAG_CROSS_STD_PRODUCERS: the entry names a real job in
-// release-matrix.yml, and build/test/release-platforms.test.mjs fails if that job
+// the retired release-matrix workflow, and build/test/release-platforms.test.mjs fails if that job
 // or its action stops installing and probing, so this table cannot drift away
 // from the workflow into a claim the pipeline does not honour.
 export const DAG_REQUIREMENT_PRODUCERS = Object.freeze({
@@ -528,7 +528,7 @@ export function releasePlatformReadiness(key, {nativeInputs=false}={}) {
   for (const requirement of platform.requires) {
     const contract = RELEASE_REQUIREMENTS[requirement];
     if (!contract) throw new ConfigError(`release platform ${key} names unknown requirement '${requirement}'`);
-    // Installed and probed by a DAG stage (release-matrix.yml `prerequisites`),
+    // Installed and probed by a DAG stage (the retired release-matrix workflow's `prerequisites`),
     // so the gap is not "nobody provides it" any more. What may still be missing
     // is the cross-built tuple above, which is reported on its own line.
     if (DAG_REQUIREMENT_PRODUCERS[requirement]) continue;

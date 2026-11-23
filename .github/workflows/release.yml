@@ -623,6 +623,6 @@ jobs:
           mapfile -t assets < <(find dist -type f \( -name '*.tar.gz' -o -name '*.sha256' -o -name '*.zip' -o -name '*.RELEASE-MANIFEST.jsonl' -o -name '*.SHA256SUMS' \) | sort)
           gh release create "v${{ inputs.version }}" "${flags[@]}" "${assets[@]}"
 
-# Source-build owns the four native LLVM artifacts; platform-tuples.yml owns
+# Source-build owns the four native LLVM artifacts; the platform_tuples producer (build/sdk/producers/platform_tuples) owns
 # only the Windows tuple. Each release cell consumes final-std-${platform} from
 # the same matrix row, and artifact download failure is intentionally gating.

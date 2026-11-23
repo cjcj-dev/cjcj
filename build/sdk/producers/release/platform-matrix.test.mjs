@@ -56,17 +56,6 @@ test('Linux native runtime qualifies teardown tools before invoking the gate', t
   assert.match(fs.readFileSync(log, 'utf8'), /GC_UNIT_TEARDOWN_TOOL_FAIL tool=gdb rc=127 reason=not-found/);
 });
 
-test('platform failure artifacts preserve the gate and teardown raw logs', () => {
-  const workflow = fs.readFileSync(path.resolve(import.meta.dirname, '../../../../.github/workflows/platform-matrix.yml'), 'utf8');
-  const upload = workflow.slice(workflow.indexOf('- name: Upload diagnostics and key products'));
-  assert.match(upload, /if: always\(\)/);
-  assert.match(upload, /\.platform-ci\/logs\/\*\*/);
-  assert.match(workflow, /name: Preserve runtime gate diagnostics\n\s+if: always\(\) && runner.os != 'Windows'\n\s+run: node build\/sdk\/producers\/platform_matrix\/collect_runtime_gate_logs\.mjs/);
-  const early = workflow.slice(workflow.indexOf('- name: Upload runtime gate diagnostics before compiler build'), workflow.indexOf('- name: Upload runtime gate diagnostics before compiler build') + 500);
-  assert.match(early, /if: always\(\) && runner.os != 'Windows'/);
-  assert.match(early, /path: \.platform-ci\/logs\/\*\*/);
-  assert.ok(workflow.indexOf('- name: Upload runtime gate diagnostics before compiler build') < workflow.indexOf('build/sdk/producers/platform_matrix/build_cjcj.mjs'));
-});
 
 test('runtime diagnostics entry preserves teardown rc and raw gate output byte for byte', t => {
   const root = path.resolve(import.meta.dirname, '../../../..');
@@ -198,7 +187,7 @@ test('plan excludes incomplete native producers from runnable source and package
   }
 });
 
-test('package rows carry exactly the inputs build-release-package.yml takes, spelled as release.yml spells them', () => {
+test('package rows carry exactly the inputs sdk-build.yml takes, spelled as release.yml spells them', () => {
   const rows = new Map(planMatrix('all').package.map(row => [row.release_key, row]));
   assert.deepEqual(rows.get('linux-x64'), {
     release_key: 'linux-x64', platform: 'linux-x64', runner: 'ubuntu-24.04', llvm_platform: 'linux_x86_64',

@@ -403,7 +403,7 @@ jobs:
           REQUESTED: ${{ inputs.targets }}
         run: node build/sdk/producers/srcbuild/target-matrix.mjs --targets "$REQUESTED" --require-ready
 
-  # Package mode (formerly build-release-package.yml): one release package from
+  # Package mode (formerly a separate package workflow): one release package from
   # the SDK a build-mode call of this workflow produced in the same run.
   # Whole native SDKs are produced by srcbuild-target's package-install step.
   # Component artifacts below are comparison inputs only, never install overlays.

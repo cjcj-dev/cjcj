@@ -35,13 +35,6 @@
     "reason": "Requires an assembled stage1 target SDK with separately bound host libraries and pinned coloured target runtime, not the official host SDK."
   },
   {
-    "file": "build/sdk/producers/release/test_darwin_runtime_controls.sh",
-    "executor": "bash",
-    "args": [
-      "{output}"
-    ]
-  },
-  {
     "file": "build/sdk/producers/release/test_language_tuple.py",
     "executor": "python3",
     "args": []
@@ -63,9 +56,8 @@
   },
   {
     "file": "ci/test-codegen-layout-sync.mjs",
-    "executor": "workflow",
-    "workflow": ".github/workflows/test-llvm-tuple.yml",
-    "interpreter": "npx --yes zx@8"
+    "executor": "manual",
+    "reason": "Its only executor, .github/workflows/test-llvm-tuple.yml, was retired when the workflows collapsed to ci/release/sdk-build/sdk-build-target; run it by hand with the fixed tuple inputs."
   },
   {
     "file": "ci/test-codegen-runtime-layout.mjs",
@@ -95,16 +87,9 @@
     ]
   },
   {
-    "file": "ci/test-llvm-tuple-wiring.test.mjs",
-    "executor": "workflow",
-    "workflow": ".github/workflows/test-llvm-tuple.yml",
-    "interpreter": "npx --yes zx@8"
-  },
-  {
     "file": "ci/test-runtime-layout.mjs",
-    "executor": "workflow",
-    "workflow": ".github/workflows/test-llvm-tuple.yml",
-    "interpreter": "npx --yes zx@8"
+    "executor": "manual",
+    "reason": "Its only executor, .github/workflows/test-llvm-tuple.yml, was retired when the workflows collapsed to ci/release/sdk-build/sdk-build-target; run it by hand with the fixed tuple inputs."
   },
   {
     "file": "ci/test_ast_host_workflow.py",
@@ -552,11 +537,6 @@
     "reason": "Standalone compiler regression built by test/named_struct_factory/build.sh with explicitly selected candidate SDK."
   },
   {
-    "file": "build/sdk/producers/platform_matrix/tests/runtime_core_diagnostics.py",
-    "executor": "manual",
-    "reason": "Requires a same-build runtime unit ELF/SO pair, PyYAML, GDB and real core evidence; generates a core if none supplied, which is prohibited on kkk2."
-  },
-  {
     "file": "test/store_strength/test_checker.py",
     "executor": "python3",
     "args": []
@@ -594,7 +574,7 @@
   {
     "file": "ci/bootstrap/sdk-host-inputs.integration.test.mjs",
     "executor": "workflow",
-    "workflow": ".github/workflows/test-host-identities.yml",
+    "workflow": ".github/workflows/sdk-build-target.yml",
     "interpreter": "node",
     "args": []
   },
@@ -646,7 +626,7 @@
   {
     "file": "build/test/source-tool-install-contract.integration.test.mjs",
     "executor": "workflow",
-    "workflow": ".github/workflows/srcbuild-target.yml",
+    "workflow": ".github/workflows/sdk-build-target.yml",
     "interpreter": "node",
     "args": []
   },
@@ -904,18 +884,6 @@
     "file": "packages/chir/src/ReachingDefinitionAnalysis_test.cj",
     "executor": "cjpm",
     "member": "packages/chir"
-  },
-  {
-    "file": "build/sdk/producers/release/test_darwin_loader_controls.mjs",
-    "executor": "workflow",
-    "workflow": ".github/workflows/darwin-input-consumers.yml",
-    "interpreter": "node"
-  },
-  {
-    "file": "build/sdk/producers/release/test_darwin_llvm_controls.mjs",
-    "executor": "workflow",
-    "workflow": ".github/workflows/darwin-input-consumers.yml",
-    "interpreter": "node"
   },
   {
     "file": "build/test/static-libs-native.integration.mjs",

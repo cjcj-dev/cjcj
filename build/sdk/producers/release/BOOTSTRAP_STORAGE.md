@@ -18,7 +18,7 @@ GitHub documents the per-file 2 GiB limit at
 https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases.
 
 The existing dispatchable publishing entry point confines `contents: write` to its publish
-job. Existing read-only callers use `build-llvm-tools.yml` and remain read-only;
+job. Existing read-only callers use `sdk-build-target.yml` and remain read-only;
 reusable workflows cannot elevate a caller's token permissions:
 https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations.
 
@@ -92,7 +92,7 @@ checked by the shared `bootstrap_tuple.mjs` consumer, including the existing
 `acquire_fixed_tuple.mjs DESTINATION FIXED_TOOLS` entry. No retired shell
 consumer is restored.
 
-`build-fixed-llc.yml` -> `build-llvm-tools.yml` selects exactly the requested
+`build-fixed-llc.yml` -> `sdk-build-target.yml` selects exactly the requested
 native platforms, builds tools with the existing sccache action, and creates
 one `static-llvm-tuple-<platform>` artifact per selected Linux/Darwin host.
 Darwin preserves `ld64.lld` through compressed tools, executable tuple and
@@ -108,7 +108,7 @@ uncompleted acceptance obligations.
 
 ## Full native SDK
 
-This is the complete source-built SDK (`srcbuild-target.yml` artifact
+This is the complete source-built SDK (`sdk-build-target.yml` artifact
 `cjcj-srcbuild-<target>-<version>`), not an LLVM component prerelease and not
 the qualified language SDK above. Its upload step runs under `always()`, so an
 artifact existing is not evidence that the SDK passed its gates.
@@ -122,7 +122,7 @@ default consumers.
 
 Producer binding (`persist_native_sdk.mjs`, applied both when a candidate is
 received and again before publication): the producer run is a completed
-`workflow_dispatch` run of this repository of `srcbuild.yml` itself or of an
+`workflow_dispatch` run of this repository of `sdk-build.yml` itself or of an
 allowed srcbuild caller (`release.yml`, `release-matrix.yml`, `arm-soak.yml`).
 In that run's current
 attempt, exactly one `<target> / srcbuild` job ran with that attempt number and

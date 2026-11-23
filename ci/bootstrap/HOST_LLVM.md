@@ -42,7 +42,7 @@ apparatus only, not a complete stage1 compilation.
 | darwin-arm64 | darwin_aarch64 | libLLVM.dylib |
 | darwin-x64 | darwin_x86_64 | libLLVM.dylib |
 
-`srcbuild.yml` loads the artifact and run IDs with `host_llvm.mjs env`, downloads
+`sdk-build.yml` loads the artifact and run IDs with `host_llvm.mjs env`, downloads
 that artifact, and passes its directory as `CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT`.
 The preparation CLI uses `CJCJ_SRCBUILD_TARGET` (or the native Node platform and
 architecture for local callers) to select the platform declaration. Every source

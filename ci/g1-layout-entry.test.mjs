@@ -67,7 +67,7 @@ before(async () => {
     runtimeRef: pin('runtime_pin.env').RUNTIME_REF, llvmRef: pin('llvm_pin.env').LLVM_SHA}, null, 2));
 });
 
-// These are the two CLI commands in test-llvm-tuple.yml. Both arms consume
+// These are the two CLI commands the retired LLVM-tuple test workflow ran. Both arms consume
 // complete real pinned Git objects; no compiler, SDK or LLVM build is run.
 for (const name of ['test-runtime-layout', 'test-codegen-layout-sync']) {
   test(`G1 workflow layout entry parity: ${name}`, () => {

@@ -29,7 +29,7 @@ export function nativeSdkPin(repository, target) {
   const matches = Object.entries(registry.artifacts || {}).filter(([, pin]) => pin?.native_sdk?.target === target);
   if (matches.length === 0) {
     throw new Error(`NATIVE_SDK_PERSISTENT_PIN_MISSING target=${target}: no accepted full native SDK is persisted; `
-      + 'producer srcbuild-target.yml cjcj-srcbuild-<target>-<version> must pass ci.yml package-tests in candidate mode '
+      + 'producer sdk-build-target.yml cjcj-srcbuild-<target>-<version> must pass ci.yml package-tests in candidate mode '
       + 'and persist-native-sdk before a reviewed registry entry can be committed');
   }
   if (matches.length !== 1) throw new Error(`NATIVE_SDK_PERSISTENT_PIN_AMBIGUOUS target=${target} count=${matches.length}`);

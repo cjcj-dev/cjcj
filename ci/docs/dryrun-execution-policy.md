@@ -33,7 +33,7 @@ publish job 内的 `required_reviewers` 查询是对仓库 environment 配置的
 旧版政策识别出的两个装置缺口已经在今天的 master 上闭合：
 
 1. `.github/workflows/release.yml` 以五个具名 package job 固定 §3 顺序；Phase N 的 source/package 通过 `needs` 等待 Phase N-1 package 成功。source workflow 接收单个 `targets`，不会在 Phase 1 尚未报告时预启后续昂贵 source build。
-2. `.github/workflows/build-release-package.yml` 的 Unix/Windows smoke 只在成功时清理 workspace，并用 `if: failure()` 上传逐平台 `pkg-diagnosis-*`；`.github/workflows/srcbuild.yml` 继续上传逐 target `srcbuild-diagnosis-*`。
+2. `.github/workflows/sdk-build.yml` 的 Unix/Windows smoke 只在成功时清理 workspace，并用 `if: failure()` 上传逐平台 `pkg-diagnosis-*`；`.github/workflows/sdk-build.yml` 继续上传逐 target `srcbuild-diagnosis-*`。
 3. `build/sdk/producers/srcbuild/tests/phase-control.test.mjs` 静态锁定五条顺序契约和两条失败证据契约，并由 `ci/test-manifest.mjs` 接入 `ci.yml` 的不可吞错测试 step；`.github/workflows/needs-semantics-probe.yml` 单独测量 `needs` 的 skip 语义。
 
 因此本文不再把 phase control 或 failure capture 列为执行前代码阻塞。剩余阻塞是外向执行尚未得到用户批准，以及具体 campaign 的 freeze/身份门尚未产生。

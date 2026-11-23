@@ -6,7 +6,7 @@ import test from 'node:test';
 // A caller passing an input the callee never declared is rejected by Actions at
 // dispatch, and a callee reading an input it never declared silently gets the
 // empty string -- which is how `targets` came to exist in release.yml, be read in
-// srcbuild.yml, and be declared nowhere: every phase asked for its own target and
+// sdk-build.yml, and be declared nowhere: every phase asked for its own target and
 // every phase would have built all four. actionlint catches both, and it already
 // runs in ci.yml, but nothing here treated it as a judge. These two assertions
 // are the same rule, close enough to the contracts to fail with them.

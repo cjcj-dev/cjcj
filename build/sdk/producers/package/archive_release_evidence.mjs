@@ -22,7 +22,7 @@ const RELEASE_PLATFORMS = allReleasePlatforms().map(releasePlatformReadiness)
 const PLATFORMS = RELEASE_PLATFORMS.map(platform => platform.archiveKey);
 const PLATFORM_CONTRACTS = new Map(RELEASE_PLATFORMS.map(platform => [platform.archiveKey, platform]));
 
-// Caller names: release.yml; callee name: build-release-package.yml:81.
+// Caller names: release.yml; callee name: sdk-build.yml:81.
 const PHASES = new Map([
   ['linux-x64', 1], ['linux-aarch64', 2], ['windows-x64', 3],
   ['darwin-arm64', 4], ['darwin-x64', 5],
@@ -33,7 +33,7 @@ function packageJobName(platform) {
   return `${caller} / Build release package / ${host} / Build release package`;
 }
 
-// Only these conditional jobs may skip (build-llvm-tools.yml:15-24,48,366).
+// Only these conditional jobs may skip (sdk-build-target.yml:15-24,48,366).
 // Exact full names prevent an unrelated job with the same suffix being exempted.
 const OPTIONAL_SKIPPED_JOBS = new Set(
   [...PHASES].filter(([host]) => host !== 'windows-x64').flatMap(([host, phase]) => {

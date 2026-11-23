@@ -41,7 +41,7 @@ test('workflow pin producers export the canonical pair consumed by checkout and 
     assert.equal(row.exported.RUNTIME_REF,undefined,'retired environment alias is not exported');
     assert.equal(row.exported.RUNTIME_VERSION,runtime.RUNTIME_VERSION);
   };
-  const workflows=['platform-matrix','darwin-input-consumers','ci','objc-darwin-e2e','verify-darwin-runtime','std-input-evidence'];
+  const workflows=['ci','sdk-build-target','sdk-build','release'];
   let callers=0;
   for(const name of workflows)for(const [jobName,job]of Object.entries(loadYaml(read('.github/workflows/'+name+'.yml')).jobs)) {
     const steps=job.steps??[],index=steps.findIndex(step=>step.run?.includes('node ci/load_runtime_pin.mjs'));
@@ -56,8 +56,9 @@ test('workflow pin producers export the canonical pair consumed by checkout and 
     }
     console.log('CANONICAL_WORKFLOW_TARGET',name,jobName,loaded.exported.CJCJ_NATIVE_RUNTIME_REF);
   }
-  assert.equal(callers,9,'all migrated raw-pin callers are exercised');
-  const command=loadYaml(read('.github/workflows/platform-matrix.yml')).jobs['darwin-runtime'].steps.find(step=>step.name==='Load runtime pin').run;
+  // After the four-workflow collapse the raw-pin callers are ci.yml build and package-tests.
+  assert.equal(callers,2,'all migrated raw-pin callers are exercised');
+  const command=loadYaml(read('.github/workflows/ci.yml')).jobs.build.steps.find(step=>step.name==='Load runtime pin').run;
   const explicit={CJCJ_NATIVE_LLVM_REF:'a'.repeat(40),CJCJ_NATIVE_RUNTIME_REF:'b'.repeat(40)};
   assertPair(execute(command,explicit),{llvm:explicit.CJCJ_NATIVE_LLVM_REF,runtime:explicit.CJCJ_NATIVE_RUNTIME_REF});
   const half=execute(command,{CJCJ_NATIVE_RUNTIME_REF:explicit.CJCJ_NATIVE_RUNTIME_REF});

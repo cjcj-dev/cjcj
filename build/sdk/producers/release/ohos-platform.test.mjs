@@ -52,7 +52,7 @@ for (const key of keys) {
 
 test('OHOS real release workflow selects the shared SDK probe and both source artifacts', () => {
   const root = path.resolve(import.meta.dirname, '../../../..');
-  const source = fs.readFileSync(path.join(root, '.github/workflows/srcbuild-target.yml'), 'utf8');
+  const source = fs.readFileSync(path.join(root, '.github/workflows/sdk-build-target.yml'), 'utf8');
   assert.match(source, /requirement: ohos-sdk/);
   assert.match(source, /run: npx --yes zx@8 build\/sdk\/producers\/srcbuild\/steps\/build-ohos-final-std\.mjs/);
   assert.match(source, /matrix: \$\{\{ fromJson\(needs.plan.outputs.ohos_matrix\) \}\}/);

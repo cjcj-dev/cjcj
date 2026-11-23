@@ -85,7 +85,7 @@ test('G5 distinguishes an unwired checker from the same checker wired fail-close
   git(fixture, 'init', '-q');
   await write(fixture, 'build/sdk/producers/package/check_packaged_std.mjs',
     "const CLASS_NAMES = ['cjo', 'bc', 'static-ffi', 'shared', 'provenance'];\n");
-  await write(fixture, '.github/workflows/build-release-package.yml', [
+  await write(fixture, '.github/workflows/sdk-build.yml', [
     'jobs:',
     '  package:',
     '    steps:',
@@ -94,7 +94,7 @@ test('G5 distinguishes an unwired checker from the same checker wired fail-close
     '',
   ].join('\n'));
   const before = commit(fixture, 'checker exists but has no consumer');
-  await write(fixture, '.github/workflows/build-release-package.yml', [
+  await write(fixture, '.github/workflows/sdk-build.yml', [
     'jobs:',
     '  package:',
     '    steps:',
@@ -315,7 +315,7 @@ test('comments do not create jobs and excluded or blocked rows keep their reason
   const root = await platformFixture(t);
   const before = gate(root, 'G7');
   await mutateFile(root, '.github/workflows/release.yml', source => source +
-    '\n# uses: ./.github/workflows/build-release-package.yml\n');
+    '\n# uses: ./.github/workflows/sdk-build.yml\n');
   const after = gate(root, 'G7');
   assert.equal(after.result.status, before.result.status);
   assert.deepEqual(after.value.scope, before.value.scope);

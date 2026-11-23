@@ -189,7 +189,7 @@ export async function writeStdProvenance({
     ? resolved(probedCommit)
     : probedState === 'absent'
       // Probed and found nothing: the binary carries no CJCJ-COMMIT stamp, which
-      // srcbuild injects (srcbuild.yml, "Inject selfhost compiler version"). So the
+      // srcbuild injects (sdk-build.yml, "Inject selfhost compiler version"). So the
       // compiler is not an srcbuild product — that is a fact worth saying out loud.
       ? unresolved(`compiler ${path.basename(compiler)} carries no CJCJ-COMMIT stamp (not an srcbuild product)`)
       : unresolved(`compiler ${path.basename(compiler)} is stamped CJCJ-COMMIT:${probedCommit}, `

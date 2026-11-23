@@ -47,7 +47,7 @@ test('source host producer exports one canonical root through first and repeated
  } finally {await fs.writeFile(work+'/commands.json',JSON.stringify(records,null,2));}
 });
 test('explicit native host is selected before freeze and old host steps retain their default branch',async()=>{
- const workflow=load(await fs.readFile(new URL('../../.github/workflows/srcbuild-target.yml',import.meta.url),'utf8'));
+ const workflow=load(await fs.readFile(new URL('../../.github/workflows/sdk-build-target.yml',import.meta.url),'utf8'));
  const steps=workflow.jobs['source-stage0'].steps;
  const at=name=>steps.findIndex(step=>step.name===name);
  const receive=at('Receive selected native inputs before choosing the host'),select=at('Select actual native host and freeze the same inputs');
@@ -62,7 +62,7 @@ test('explicit native host is selected before freeze and old host steps retain t
  assert.equal(steps[select].env?.CJCJ_NATIVE_SOURCE_SELECTION,undefined);
  const configure=steps.find(step=>step.name==='Configure native bootstrap from actual repositories and target installations');
  assert.equal(configure.env?.CJCJ_NATIVE_SOURCE_SELECTION,undefined);
- for(const name of ['srcbuild.yml','release.yml','release-matrix.yml','arm-soak.yml']){
+ for(const name of ['sdk-build.yml','release.yml']){
   const outer=load(await fs.readFile(new URL('../../.github/workflows/'+name,import.meta.url),'utf8'));
   for(const job of Object.values(outer.jobs))if(job.with?.native_inputs_artifact)
    assert.equal(job.with.native_source_selection,undefined,name);

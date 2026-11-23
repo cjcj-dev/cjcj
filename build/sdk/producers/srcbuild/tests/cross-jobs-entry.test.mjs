@@ -145,7 +145,7 @@ test('public iOS caller consumes its installed Darwin compiler and AST inputs be
 // owns checkout, build/install argv, artifact layout, assembly and reception.
 test('source-ios products enter the same SDK that compose receives after relocation', async () => {
   const workflow = async name => yaml(await fs.readFile(new URL('../../../../../.github/workflows/' + name, import.meta.url), 'utf8'));
-  const {jobs} = await workflow('srcbuild-target.yml');
+  const {jobs} = await workflow('sdk-build-target.yml');
   const source = jobs['source-ios'], packaging = jobs.srcbuild;
   const step = (job, match) => job.steps.find(s => s.run?.includes(match));
   const upload = source.steps.find(s => s.uses?.startsWith('actions/upload-artifact@'));
@@ -249,7 +249,7 @@ test('source-ios products enter the same SDK that compose receives after relocat
   await fs.rename(sdk,sdk+'-unavailable');
   await fs.mkdir(archiveDir);
   for (const file of uploadPaths) await fs.copyFile(file,path.join(archiveDir,path.basename(file)));
-  const compose = entry(step((await workflow('build-release-package.yml')).jobs.package, 'compose-package.mjs').run);
+  const compose = entry(step((await workflow('sdk-build.yml')).jobs.package, 'compose-package.mjs').run);
   const consume = label => run(label,[process.execPath,compose],{env:{...process.env,
     NATIVE_SDK_ARTIFACT_DIR:archiveDir,NATIVE_SDK_INSTALL_DIR:path.join(work,'received '+label),RELEASE_PLATFORM:recipe.platform,
     CJCJ_NATIVE_SDK_VERSION:version,CJCJ_RELEASE_SOURCE_SHA:sourceSha,CJCJ_NATIVE_RUNTIME_REF:runtimeRef,

@@ -50,41 +50,7 @@ test('CI build and provision dispatch consume the registry runner and experiment
   assert.equal(ciBuildCells().find(cell => cell.runner === 'ubuntu-26.04').experimental, true);
 });
 
-test('platform dispatch consumes every registry runner with its LLVM and runtime tuple', t => {
-  const {text, outputs} = plan(t, 'platform-matrix.yml');
-  assert.deepEqual(matrix(text, 'platform', outputs), platformTestCells(), 'platform dispatch rows');
-});
 
-test('ARM caller requests only ARM and package fields consume the same plan', t => {
-  const {text, outputs} = plan(t, 'arm-soak.yml');
-  const resolve = value => value.replace(/\$\{\{ needs.matrix-plan.outputs.(\w+) \}\}/g, (_, key) => outputs[key]);
-  const source = job(text, 'source-final-std');
-  const requested = resolve(source.match(/^      targets: (.+)$/m)?.[1] || 'all');
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'arm-source-'));
-  t.after(() => fs.rmSync(temp, {recursive: true, force: true}));
-  const output = path.join(temp, 'output');
-  const result = spawnSync(process.execPath, ['build/sdk/producers/srcbuild/target-matrix.mjs', '--targets', requested], {
-    cwd: root, encoding: 'utf8', env: {...process.env, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: ''},
-  });
-  assert.equal(result.status, 0, result.stderr);
-  const cells = JSON.parse(fs.readFileSync(output, 'utf8').match(/^cells=(.+)$/m)[1]).include;
-  console.log(`ARM_REQUEST requested=${requested} result=${JSON.stringify(cells)}`);
-  assert.deepEqual(cells.map(cell => cell.target), ['linux-aarch64'], 'ARM caller excludes unrelated source cells');
-  assert.match(result.stdout, /issues\/763/);
-  assert.doesNotMatch(result.stdout, /issues\/473/);
-  const {spec, sourceBuild} = getTarget('linux-aarch64');
-  const expected = {runner: sourceBuild.runner, platform: spec.key, llvm_platform: spec.llvmPlatform,
-    sdk_runtime_dir: spec.runtimeTuple};
-  const packageJob = job(text, 'package');
-  assert.doesNotMatch(packageJob, /compiler_artifact:/, 'complete native SDK input replaces the separate compiler artifact');
-  const consumer = fs.readFileSync(path.join(root, '.github/workflows/build-release-package.yml'), 'utf8');
-  assert.match(consumer, /name: cjcj-srcbuild-\$\{\{ inputs.platform \}\}-\$\{\{ inputs.version \}\}/);
-  for (const [key, value] of Object.entries(expected)) {
-    assert.equal(resolve(packageJob.match(new RegExp(`^      ${key}: (.+)$`, 'm'))[1]), value, key);
-  }
-  assert.match(packageJob, /std_artifact: \$\{\{ inputs.std_artifact \|\| needs.matrix-plan.outputs.std_artifact \}\}/);
-  assert.equal(outputs.std_artifact, `final-std-${spec.key}`);
-});
 
 test('every target mapping reaches archive naming, runtime lookup and native host selection', async t => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'target-spec-'));
@@ -163,16 +129,16 @@ test('all audited spec consumers reference registry fields without independent t
     for (const field of fields) assert.ok(text.includes(field), `${file} consumes ${field}`);
     assert.doesNotMatch(text, /['"](?:linux-x64|linux-aarch64|darwin-arm64|darwin-x64|windows-x64)['"]:\s*(?:\[|\{|['"])/, file);
   }
-  const text = workflow('srcbuild-target.yml');
+  const text = workflow('sdk-build-target.yml');
   assert.match(text, /TARGET_LLVM_PLATFORM: \$\{\{ matrix.llvm_platform \}\}/);
   assert.match(text, /pin\['platform'\] == os.environ\['TARGET_LLVM_PLATFORM'\]/);
   assert.doesNotMatch(text, /platforms = \{/);
 });
 
 test('source workflows drop unused final outputs while retaining artifact upload steps', () => {
-  for (const file of ['srcbuild.yml', 'srcbuild-target.yml']) {
+  for (const file of ['sdk-build.yml', 'sdk-build-target.yml']) {
     assert.doesNotMatch(workflow(file), /final_(?:std|compiler)_|artifact-contract:/);
   }
-  assert.match(workflow('srcbuild-target.yml'), /name: final-compiler-\$\{\{ matrix.target \}\}/);
-  assert.match(workflow('srcbuild-target.yml'), /name: final-std-\$\{\{ matrix.target \}\}/);
+  assert.match(workflow('sdk-build-target.yml'), /name: final-compiler-\$\{\{ matrix.target \}\}/);
+  assert.match(workflow('sdk-build-target.yml'), /name: final-std-\$\{\{ matrix.target \}\}/);
 });
