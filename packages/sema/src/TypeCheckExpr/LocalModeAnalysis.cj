@@ -585,6 +585,11 @@ class LocalModeAnalysis {
             } else if (let Some(call) <- index.desugarExpr) {
                 index.resolvedMode = call.resolvedMode
             }
+        } else if (let Some(binary) <- (node as BinaryExpr)) {
+            // An overloaded operator is lowered to a member call (`a.+(b)`); the operator expression
+            // carries the mode of the selected overload's result, as a lowered subscript does
+            // (HLT local_mode h02: `s = s + "x"` with `s: String @local!`).
+            if (let Some(call) <- binary.desugarExpr) { binary.resolvedMode = call.resolvedMode }
         } else if (let Some(paren) <- (node as ParenExpr)) {
             if (let Some(inner) <- paren.expr) { node.resolvedMode = inner.resolvedMode }
         } else if (let Some(arg) <- (node as FuncArg)) {
