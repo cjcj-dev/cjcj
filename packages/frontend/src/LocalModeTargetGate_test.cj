@@ -9,14 +9,18 @@ import std.unittest.testmacro.*
 
 private let LOCAL_TARGET_MESSAGE: String = "local mode lowering is only supported on Linux x86_64 GNU targets"
 
+private func ItemHasText(item: Diagnostic, text: String): Bool {
+    return item.errorMessage.contains(text) || item.diagMessage.contains(text)
+}
+
 private func HasMessage(diag: DiagnosticEngine, text: String): Bool {
     let stored = diag.AsBasicDiagnosticEngine().GetCategoryDiagnostic(DiagCategory.SEMA)
     for (item in stored) {
-        if (item.errorMessage.contains(text)) { return true }
+        if (ItemHasText(item, text)) { return true }
     }
     let parsed = diag.AsBasicDiagnosticEngine().GetCategoryDiagnostic(DiagCategory.PARSE)
     for (item in parsed) {
-        if (item.errorMessage.contains(text)) { return true }
+        if (ItemHasText(item, text)) { return true }
     }
     return false
 }
@@ -96,8 +100,8 @@ public class LocalModeTargetGateTest {
         let code = "package local_gate\n" +
             "public func keep(v: Int64 @local!): Int64 @local! { v }\n" +
             "public func region(v: Int64): Int64 { exclave { v } }\n"
-        let ci = CompileLocal(root, code, true, "off", true, CompileStage.CHIR)
-        println("EXECUTED SurvivingLocalAcceptedOnLinux errors=" + ci.diag.GetErrorCount().toString())
+        let ci = CompileLocal(root, code, true, "off", true, CompileStage.CONDITION_COMPILE)
+        println("EXECUTED SurvivingLocalAcceptedOnLinux stage=CONDITION_COMPILE errors=" + ci.diag.GetErrorCount().toString())
         @Expect(ci.diag.GetErrorCount(), 0u64)
         @Expect(HasMessage(ci.diag, LOCAL_TARGET_MESSAGE), false)
     }

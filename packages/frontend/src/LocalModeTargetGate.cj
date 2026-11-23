@@ -33,17 +33,35 @@ func NodeNeedsLocalLowering(node: Node): Bool {
     return false
 }
 
-func FileHasSurvivingLocalMode(file: File): Bool {
-    let hits = ArrayList<Int64>()
+func FirstSurvivingLocalPosition(file: File): Option<Position> {
+    let hits = ArrayList<Position>()
     let walker = Walker(file, visitPre: { node: Node =>
         if (NodeNeedsLocalLowering(node)) {
-            hits.add(1)
+            hits.add(node.begin)
             return VisitAction.STOP_NOW
         }
         VisitAction.WALK_CHILDREN
     })
     walker.Walk()
-    return !hits.isEmpty()
+    if (hits.isEmpty()) {
+        return None
+    }
+    return Some(hits[0])
+}
+
+func StoredDiagPosition(file: File, hit: Position): Position {
+    if (hit != DEFAULT_POSITION && !hit.IsZero()) {
+        return hit
+    }
+    if (file.begin != DEFAULT_POSITION && !file.begin.IsZero()) {
+        return file.begin
+    }
+    for (decl in file.decls) {
+        if (decl.begin != DEFAULT_POSITION && !decl.begin.IsZero()) {
+            return decl.begin
+        }
+    }
+    return DEFAULT_POSITION
 }
 
 func CheckLocalModeLoweringTarget(ci: CompilerInstance): Bool {
@@ -51,8 +69,8 @@ func CheckLocalModeLoweringTarget(ci: CompilerInstance): Bool {
     if (!opts.enableLocalMode || opts.SupportsLocalModeLowering()) { return true }
     for (pkg in ci.GetSourcePackages()) {
         for (file in pkg.files) {
-            if (FileHasSurvivingLocalMode(file)) {
-                ci.diag.Diagnose(DiagCategory.SEMA, DEFAULT_POSITION,
+            if (let Some(hit) <- FirstSurvivingLocalPosition(file)) {
+                ci.diag.Diagnose(DiagCategory.SEMA, StoredDiagPosition(file, hit),
                     "local mode lowering is only supported on Linux x86_64 GNU targets")
                 return false
             }
