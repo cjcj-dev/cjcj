@@ -6,6 +6,7 @@ import cjcj::chir.CHIRContext
 import cjcj::chir.CHIRBuilder
 import cjcj::chir.ClassType
 import cjcj::chir.GlobalValue
+import cjcj::chir.LocalLoweringTargetChecker
 import cjcj::chir.NoHeapAllocChecker
 import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.Package
@@ -60,6 +61,7 @@ public class CGPkgContext {
     private let chirBuilder: CHIRBuilder
     private let noHeapAllocChecker: NoHeapAllocChecker
     private let noWriteBarrierRecChecker: NoWriteBarrierRecChecker
+    private let localLoweringChecker: LocalLoweringTargetChecker
     private let enableIncrement: Bool
     private let correctedCachedMangleMap: CachedMangleMap = CachedMangleMap()
     private let cgMods: ArrayList<CGModule> = ArrayList<CGModule>()
@@ -72,9 +74,12 @@ public class CGPkgContext {
 
     public init(chirData: CHIRData, options: GlobalOptions, enableIncrement: Bool,
         noHeapAllocChecker: NoHeapAllocChecker, noWriteBarrierRecChecker: NoWriteBarrierRecChecker,
-        cachedMangleMap: CachedMangleMap) {
+        cachedMangleMap: CachedMangleMap,
+        localLoweringChecker!: Option<LocalLoweringTargetChecker> = None) {
         this.chirData = chirData
         this.options = options
+        this.localLoweringChecker = localLoweringChecker ??
+            LocalLoweringTargetChecker(options.SupportsLocalModeLowering())
         chirBuilder = CHIRBuilder(chirData.GetCHIRContext())
         this.noHeapAllocChecker = noHeapAllocChecker
         this.noWriteBarrierRecChecker = noWriteBarrierRecChecker
@@ -117,6 +122,10 @@ public class CGPkgContext {
 
     public func GetNoHeapAllocChecker(): NoHeapAllocChecker {
         return noHeapAllocChecker
+    }
+
+    public func GetLocalLoweringChecker(): LocalLoweringTargetChecker {
+        return localLoweringChecker
     }
 
     public func GetCHIRPackage(): Package {

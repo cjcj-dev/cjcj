@@ -20,6 +20,7 @@ import cjcj::chir.Function
 import cjcj::chir.GetMethodIdxInAutoEnvObject
 import cjcj::chir.IntLiteral
 import cjcj::chir.IntrinsicKind
+import cjcj::chir.IsLocalLoweringSymbol
 import cjcj::chir.LiteralValue
 import cjcj::chir.Load
 import cjcj::chir.LocalVar
@@ -830,6 +831,23 @@ public class IRBuilder2 <: Resource {
     public func GetCGContext(): CGContext { return cgMod.GetCGContext() }
     public func GetLLVMContext(): LLVMContextHandle { return cgMod.GetLLVMContext() }
     public func GetBuilder(): LLVMBuilderHandle { return builder }
+
+    // The single emission choke point for Local Mode symbols (CGPkgContext.GetLocalLoweringChecker). It runs
+    // before LLVMLookupIntrinsicID or the runtime declaration, so an unsupported target never sees the name.
+    public func GuardLocalLowering(symbol: String): Unit {
+        if (!IsLocalLoweringSymbol(symbol)) { return }
+        let checker = GetCGContext().GetCGPkgContext().GetLocalLoweringChecker()
+        if (checker.IsSupported()) { return }
+        var chirFunction: Option<Function> = None
+        if (let Some(currentFunction) <- cgFunction) {
+            chirFunction = (currentFunction.GetOriginal() as Function)
+        }
+        var currentExpression: Option<Expression> = None
+        if (let Some(exprWrapper) <- chirExpr) {
+            currentExpression = Some(exprWrapper.GetExpression())
+        }
+        checker.Check(symbol, chirFunction, currentExpression)
+    }
 
     public func CheckNoHeapAlloc(operation: String): Unit {
         let currentFunction = cgFunction ?? return
@@ -3136,6 +3154,7 @@ public class IRBuilder2 <: Resource {
 
     public func GetOrInsertIntrinsicDeclaration(intrinsicName: String,
         overloadedTypes: ArrayList<LLVMTypeRef>): LLVMValueRef {
+        GuardLocalLowering(intrinsicName)
         let intrinsicID = LookupIntrinsicID(intrinsicName)
         if (intrinsicID == 0u32) {
             ReportUnknownLLVMIntrinsic(intrinsicName)
@@ -3376,6 +3395,7 @@ public class IRBuilder2 <: Resource {
     public func CallIntrinsicFunction(retType: LLVMTypeRef, name: String, parameters: ArrayList<CGValue>,
         attributes: ArrayList<String>): LLVMValueRef {
         CJC_ASSERT(!retType.isNull())
+        GuardLocalLowering(name)
         let parameterTypes = BuildIntrinsicFunctionParamTypes(name, parameters)
         let hasSRet = IntrinsicFunctionNeedsSRet(retType)
         let functionType = BuildIntrinsicFunctionType(retType, parameterTypes, hasSRet)

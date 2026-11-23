@@ -559,8 +559,7 @@ public class CompilerInstance {
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "condcomp")
         }
-        if (!ret) { return false }
-        return CheckLocalModeLoweringTarget(this)
+        return ret
     }
 
     public func PerformImportPackage(): Bool {
@@ -591,8 +590,7 @@ public class CompilerInstance {
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "macroexp")
         }
-        if (!ret) { return false }
-        return CheckLocalModeLoweringTarget(this)
+        return ret
     }
 
     public func ExpandDecl(decl: Decl): ArrayList<Decl> {
@@ -909,7 +907,6 @@ public class CompilerInstance {
     }
 
     public func PerformCHIRCompilation(): Bool {
-        if (!CheckLocalModeLoweringTarget(this)) { return false }
         mangler.ClearManglerCtxTable()
         typeManager.getOrThrow().ReleasePostSemaCaches()
         chirData.getOrThrow().ClearRealPackages()

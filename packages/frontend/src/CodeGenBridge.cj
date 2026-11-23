@@ -45,6 +45,8 @@ import cjcj::chir.INVALID_LOCATION as CHIR_INVALID_LOCATION
 import cjcj::chir.MergeBlocks
 import cjcj::chir.MergeEffectMap
 import cjcj::chir.NoHeapAllocChecker
+import cjcj::chir.LocalLoweringTargetChecker
+import cjcj::chir.LocalLoweringUnsupportedException
 import cjcj::chir.NoSideEffectMarker
 import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.OptFuncRetType
@@ -1235,8 +1237,21 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
     noHeapAllocChecker.RunOnPackage(realPackage)
     let noWriteBarrierRecChecker = NoWriteBarrierRecChecker(instance.diag.AsBasicDiagnosticEngine())
     noWriteBarrierRecChecker.RunOnPackage(realPackage)
-    let packageModules = CodegenGenPackageModules(codegenData, codegenOptions, enableIncrement,
-        noHeapAllocChecker, noWriteBarrierRecChecker, cachedMangleMap: cachedMangleMap)
+    // Option.cj SupportsLocalModeLowering: the authoritative Local Mode target gate is CodeGen's own
+    // emission point, so it sees exactly the IR that SetMemRegion and ModalWrite selection produced.
+    let localLoweringChecker = LocalLoweringTargetChecker(instance.invocation.globalOptions.SupportsLocalModeLowering())
+    let packageModules = try {
+        CodegenGenPackageModules(codegenData, codegenOptions, enableIncrement,
+            noHeapAllocChecker, noWriteBarrierRecChecker, cachedMangleMap: cachedMangleMap,
+            localLoweringChecker: localLoweringChecker)
+    } catch (_: LocalLoweringUnsupportedException) {
+        for (report in localLoweringChecker.GetReports()) {
+            let position = if (report.position[0]) { report.position[1].begin } else { DEFAULT_POSITION }
+            instance.diag.Diagnose(DiagCategory.CHIR, position, report.Message())
+        }
+        instance.diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
+        return llvmModules
+    }
     var transferred = false
     var failed = false
     try {
