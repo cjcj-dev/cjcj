@@ -1,6 +1,6 @@
 #!/usr/bin/env zx
 import {embeddedStamp} from '../../build/lib/toolchain-identity.mjs';
-import {NATIVE_TOOLS_ADAPTER_FILES} from './deploy-native-tools.mjs';
+import {rejectPrivateTools} from './deploy-native-tools.mjs';
 import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {visibleOptionsOnly,requireOptionVisibility} from './compiler-option-visibility.mjs';
@@ -194,13 +194,9 @@ async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,
       mismatch('Windows commands');
     return {product,configuration:facts,buildResult};
   }
-  if(native.os!=='linux') {
-    if(!tools.privateRoot||!Array.isArray(commands)||commands.length!==1
-      ||commands[0].rc!==0||commands[0].signal||commands[0].cwd!==h1.repository
-      ||commands[0].argv?.[1]!==path.join(path.resolve(tools.privateRoot),'ts/src/sharedbuild/cjcj-stage1.mjs'))
-      mismatch('native command');
-    return {product,configuration:facts,buildResult};
-  }
+  // Linux and Darwin share the public cjpm H1 producer below; the retired
+  // private Darwin command shape is never accepted.
+  rejectPrivateTools(tools);
 
   const hostRuntimeFile=path.join(host.install,'runtime/lib',native.tuple,'libcangjie-runtime'+native.shared);
   const hostRuntimeSupportsConfigV1=(await nativeSymbolRows(hostRuntimeFile,{platform,runtime:true,defined:true})).includes('CJ_MRT_CjRuntimeInitWithConfigV1');
@@ -391,14 +387,9 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     rows.h1={...rows.h1,...await installedH1(installations.h1,{h1:rows.h1,host,llvm:rows.llvm,
       platform,optionVisibility,tools,windowsShimInstall:rows.compiler.shimInstall})};
   }
-  // Only the Darwin producer still consumes private tools.
-  // Linux preparation and H1 reuse must not require retired private scripts.
-  if(native.os==='darwin'&&!installations.stage2) {
-    if(!tools.privateRoot)throw Error('NATIVE_H1_PRIVATE_PRODUCER_REQUIRED');
-    tools.privateRoot=path.resolve(tools.privateRoot);
-    for(const rel of NATIVE_TOOLS_ADAPTER_FILES)
-      await fs.stat(path.join(tools.privateRoot,rel));
-  }
+  // No host consumes private tools: Linux and Darwin build H1 through the
+  // public in-repo cjpm path, Windows through its own public producer.
+  rejectPrivateTools(tools);
   const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,visibleOptionsOnly:optionVisibility,
     ...(descriptor.stdLocalModeApi!==undefined?{stdLocalModeApi:descriptor.stdLocalModeApi}:{}),
     ...(descriptor.stdDependencies?{stdDependencies:await stdDependencyInputs(descriptor.stdDependencies)}:{}),

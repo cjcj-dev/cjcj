@@ -5,12 +5,14 @@
 //   native-inputs-<target>                  host SDK + N/R/AST installs + locations.json
 // This module is the single source of the host set and assembles the
 // native-inputs root on the producing runner. It never invents a component:
-// a missing installation or a missing public Unix adapter fails closed.
+// a missing installation fails closed. N/LLVM and AST are built on each host by
+// the public in-repo producers and installed here (install-llvm / install-ast);
+// no private tools adapter is part of any native input.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {NATIVE_TOOLS_ADAPTER_FILES} from '../../../../ci/bootstrap/deploy-native-tools.mjs';
+import {sdkPlatform, stdxChirMembers} from '../../../../ci/bootstrap/sdk-platform.mjs';
 import {load as loadYaml} from '../../../../ci/vendor/js-yaml/js-yaml.mjs';
 import {g4SourcePhases} from '../../../../ci/release-gates.mjs';
 
@@ -62,20 +64,74 @@ function installation(root, name, manifest) {
     sha256: sha256(buildResult)};
 }
 
-// The Darwin H1 producer consumes the two adapter modules. They must already be
-// deployed into <root>/adapter by deploy-native-tools.mjs from a public pinned
-// commit; Linux and Windows inputs must not carry them.
+// Fixed source identities of one host's N/LLVM + AST build. All three are
+// explicit 40-hex commits (LLVM fork, its paired runtime, the compiler that owns
+// the AST support target); nothing defaults.
+export function componentCommits(env = process.env) {
+  const commits = {llvm: env.PREPARE_LLVM_COMMIT, runtime: env.PREPARE_RUNTIME_COMMIT, compiler: env.PREPARE_COMPILER_COMMIT};
+  for (const [name, value] of Object.entries(commits))
+    if (!SHA40.test(String(value ?? ''))) throw new Error(`PREPARE_COMPONENT_COMMIT ${name}`);
+  return commits;
+}
+function freshComponent(root, name) {
+  const install = path.join(root, name);
+  if (fs.existsSync(install)) throw new Error(`NATIVE_INPUTS_COMPONENT_EXISTS ${name}`);
+  fs.mkdirSync(install, {recursive: true});
+  return install;
+}
+function copyMember(from, rel, install, to = rel) {
+  const source = path.join(from, rel);
+  if (!fs.existsSync(source) || !fs.statSync(source).isFile() || !fs.statSync(source).size)
+    throw new Error(`NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING ${rel}`);
+  const destination = path.join(install, to);
+  fs.mkdirSync(path.dirname(destination), {recursive: true});
+  fs.copyFileSync(source, destination);
+  return {sha256: sha256(destination), bytes: fs.statSync(destination).size};
+}
+
+// Install the in-process LLVM library built on this host (Unix: the
+// LLVM_BUILD_LLVM_DYLIB CMake build of the pinned fork; Windows: the
+// platform_tuples build) at the location every native reader resolves:
+// llvm/third_party/llvm/<llvmDirectory>/<llvmLibrary> + llvm/BUILD-INPUTS.json.
+export function installLlvm({root, target, from, commits, producer}) {
+  const platform = prepareHost(target).llvm_platform, native = sdkPlatform(platform);
+  const install = freshComponent(root, 'llvm');
+  const file = `third_party/llvm/${native.llvmDirectory}/${native.llvmLibrary}`;
+  const row = copyMember(from, native.llvmLibrary, install, file);
+  const facts = {schema: 'cjcj-prepare-llvm-v1', platform, commits,
+    configuration: {producer, library: file, targets: 'X86;ARM;AArch64'},
+    llvmLibrary: {file, sha256: row.sha256}};
+  fs.writeFileSync(path.join(install, 'BUILD-INPUTS.json'), JSON.stringify(facts, null, 2) + '\n');
+  return facts;
+}
+
+// Install the ci/build_ast_support.sh output (cangjie-ast-support, std
+// support ON) in the shape readInstalledNativeAst consumes after transport.
+export function installAst({root, target, from, commits}) {
+  const platform = prepareHost(target).llvm_platform, native = sdkPlatform(platform);
+  const install = freshComponent(root, 'ast');
+  const library = `lib/${native.tuple}/libcangjie-ast-support.a`;
+  const flatc = `third_party/flatbuffers/bin/flatc${native.exe}`;
+  const files = {[library]: copyMember(from, 'libcangjie-ast-support.a', install, library)};
+  for (const rel of ['schema/StdAstFormat.fbs', 'include/flatbuffers/StdAstFormat_generated.h', ...stdxChirMembers, flatc])
+    files[rel] = copyMember(from, rel, install);
+  const build = {target: 'cangjie-ast-support', configuration: {stdSupport: 'ON', producer: 'ci/build_ast_support.sh'}};
+  const facts = {schema: 'cjcj-prepare-ast-v1', platform, commits: {compiler: commits.compiler, llvm: commits.llvm},
+    configuration: build.configuration,
+    astInstallation: {platform, source: {commit: commits.compiler}, library, files, build}};
+  fs.writeFileSync(path.join(install, 'BUILD-INPUTS.json'), JSON.stringify(facts, null, 2) + '\n');
+  return facts;
+}
+
+// No native input carries a tools adapter: the retired private
+// ts/src/sharedbuild modules are not an input of any host, and a stray
+// adapter directory fails closed instead of being forwarded.
 export function assembleNativeInputs({root, target, hostVersion, env = process.env, pins}) {
   const host = prepareHost(target);
   const provenance = prepareProvenance(env, pins);
   if (!fs.existsSync(path.join(root, 'host'))) throw new Error('NATIVE_INPUTS_COMPONENT_MISSING host');
   if (!/^[0-9A-Za-z.+-]+$/.test(hostVersion || '')) throw new Error('PREPARE_HOST_VERSION');
-  const darwin = target.startsWith('darwin-');
-  const adapter = path.join(root, 'adapter');
-  if (darwin) {
-    for (const rel of NATIVE_TOOLS_ADAPTER_FILES)
-      if (!fs.existsSync(path.join(adapter, rel))) throw new Error(`NATIVE_TOOLS_ADAPTER_MISSING ${rel}`);
-  } else if (fs.existsSync(adapter)) throw new Error('NATIVE_TOOLS_ADAPTER_UNEXPECTED');
+  if (fs.existsSync(path.join(root, 'adapter'))) throw new Error('NATIVE_TOOLS_ADAPTER_UNEXPECTED');
   const locations = {
     platform: host.llvm_platform,
     host: {install: 'host', archive: 'host-archive', version: hostVersion},
@@ -84,7 +140,7 @@ export function assembleNativeInputs({root, target, hostVersion, env = process.e
       runtime: installation(root, 'runtime', 'NATIVE-INPUTS.json'),
       ast: installation(root, 'ast', 'BUILD-INPUTS.json'),
     },
-    tools: darwin ? {privateRoot: 'adapter'} : {},
+    tools: {},
   };
   fs.writeFileSync(path.join(root, 'locations.json'), JSON.stringify(locations, null, 2) + '\n');
   const record = {schema: 'cjcj-prepare-native-inputs-v1', target, llvm_platform: host.llvm_platform, runner: host.runner,
@@ -119,9 +175,47 @@ export function prepareWorkflowProblems({release, sdkBuild, target}) {
     if (!uploads.includes(name)) problems.push(`prepare-native does not upload ${name}`);
   const text = JSON.stringify(job.steps || []);
   for (const program of ['build/sdk/producers/platform_matrix/build_runtime.mjs', 'build/sdk/producers/platform_matrix/native_runtime_package.mjs',
-    'build/sdk/producers/release/prepare_native_inputs.mjs assemble', 'ci/bootstrap/deploy-native-tools.mjs'])
+    'build/sdk/producers/release/prepare_native_inputs.mjs assemble'])
     if (!text.includes(program)) problems.push(`prepare-native does not run ${program}`);
+  problems.push(...prepareComponentProblems(job.steps || []));
+  if (/deploy-native-tools|sharedbuild|privateRoot/.test(text)) problems.push('prepare-native consumes the retired private tools adapter');
   if (/gh release|softprops\/action-gh-release|ci\/release-publish\.mjs/.test(text)) problems.push('prepare-native publishes');
+  return problems;
+}
+
+// Per-host N/LLVM and AST producers. A step applies to a host when its `if`
+// is empty or a plain runner.os (in)equality that admits the host's OS; every
+// host needs its producer markers and the install step in its applicable steps.
+export const PREPARE_COMPONENT_STEPS = Object.freeze({
+  llvm: Object.freeze({
+    Linux: ['ci/fetch-llvm-runtime.mjs', '-DLLVM_BUILD_LLVM_DYLIB=ON', 'prepare_native_inputs.mjs install-llvm'],
+    macOS: ['ci/fetch-llvm-runtime.mjs', '-DLLVM_BUILD_LLVM_DYLIB=ON', 'prepare_native_inputs.mjs install-llvm'],
+    Windows: ['build/sdk/producers/platform_tuples/fetch_sources.mjs', 'build/sdk/producers/platform_tuples/build_tuple.mjs',
+      'prepare_native_inputs.mjs install-llvm'],
+  }),
+  ast: Object.freeze({
+    Linux: ['ci/build_ast_support.sh', 'prepare_native_inputs.mjs install-ast'],
+    macOS: ['ci/build_ast_support.sh', 'prepare_native_inputs.mjs install-ast'],
+    Windows: ['ci/build_ast_support.sh', 'prepare_native_inputs.mjs install-ast'],
+  }),
+});
+const hostOs = target => target.startsWith('windows-') ? 'Windows' : target.startsWith('darwin-') ? 'macOS' : 'Linux';
+export function stepAppliesTo(step, os) {
+  const condition = String(step?.if ?? '').trim();
+  if (!condition) return true;
+  const match = /^runner\.os (==|!=) '(Linux|macOS|Windows)'$/.exec(condition);
+  if (!match) return false;
+  return match[1] === '==' ? match[2] === os : match[2] !== os;
+}
+export function prepareComponentProblems(steps) {
+  const problems = [];
+  for (const host of PREPARE_HOSTS) {
+    const os = hostOs(host.target);
+    const text = steps.filter(step => stepAppliesTo(step, os)).map(step => String(step.run ?? '')).join('\n');
+    for (const [component, markers] of Object.entries(PREPARE_COMPONENT_STEPS))
+      for (const marker of markers[os])
+        if (!text.includes(marker)) problems.push(`prepare-native host ${host.target} lacks ${component} producer ${marker}`);
+  }
   return problems;
 }
 
@@ -132,6 +226,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (command === 'provenance') console.log(JSON.stringify(prepareProvenance()));
     else if (command === 'assemble') console.log(JSON.stringify(assembleNativeInputs({root: path.resolve(option('root') || ''),
       target: option('target'), hostVersion: option('host-version')}).record));
-    else throw new Error('usage: prepare_native_inputs.mjs provenance | assemble --root DIR --target T --host-version V');
+    else if (command === 'install-llvm') console.log(JSON.stringify(installLlvm({root: path.resolve(option('root') || ''),
+      target: option('target'), from: path.resolve(option('from') || ''), commits: componentCommits(), producer: option('producer')})));
+    else if (command === 'install-ast') console.log(JSON.stringify(installAst({root: path.resolve(option('root') || ''),
+      target: option('target'), from: path.resolve(option('from') || ''), commits: componentCommits()})));
+    else throw new Error('usage: prepare_native_inputs.mjs provenance | assemble --root DIR --target T --host-version V'
+      + ' | install-llvm|install-ast --root DIR --target T --from DIR');
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

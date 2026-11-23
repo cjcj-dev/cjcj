@@ -4,6 +4,7 @@ import path from 'node:path';
 // workspace and package options, including after Windows W2 restores the root.
 // Keep this generator limited to cjc-specific objects and platform libraries.
 const linkOptionPattern = /^(\s*link-option\s*=\s*)"([^"]*)"(\s*)$/m;
+const darwinTargetLinkPattern = /^(\[target\.(?:aarch64|x86_64)-apple-darwin\]\s*\n\s*link-option\s*=\s*)"[^"]*"/gm;
 
 export function assembleCjcLinkOption(
   platform, cangjieHome, currentLinkOption, llvmLinkRsp = '', mingwCxxLinkRsp = '') {
@@ -49,5 +50,8 @@ export function platformizeCjcToml(
   const linkOption = assembleCjcLinkOption(
     platform, cangjieHome, match[2], llvmLinkRsp, mingwCxxLinkRsp);
   if (linkOption === match[2]) return cjpmToml;
-  return cjpmToml.replace(linkOptionPattern, `$1"${linkOption}"$3`);
+  // The generated value is the complete platform link; the manifest's own
+  // [target.*-apple-darwin] Mach-O inputs would be linked a second time.
+  const replaced = cjpmToml.replace(linkOptionPattern, `$1"${linkOption}"$3`);
+  return platform === 'darwin' ? replaced.replace(darwinTargetLinkPattern, '$1""') : replaced;
 }

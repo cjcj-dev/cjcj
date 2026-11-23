@@ -25,6 +25,7 @@ import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.m
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {materializeNativeSource, nativeSourceOptions} from './sdk-source.mjs';
 import {visibleOptionsOnly,configureOptionVisibility} from './compiler-option-visibility.mjs';
+import {rewriteEffectiveLinkOptions} from './cjc-link-sections.mjs';
 export {acceptInstalledStd} from './sdk-std-resume.mjs';
 // Runtime inputs are a private build input snapshot, not an install overlay.
 // Re-entry may reuse equal bytes or publish a complete new snapshot. Keep the
@@ -259,10 +260,12 @@ export async function nativeStage(options, {signal} = {}) {
       catch(error){if(error.code!=='EEXIST'||await fs.readlink(linkFile)!==llvmLibraryFile)throw error;}
       const hostLLVM='${CANGJIE_HOME}/third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary;
       let llvmInputs=0;
-      packageCompiled=Buffer.from(packageBefore.toString().replace(/^(\s*link-option\s*=\s*)"([^"\n]*)"/gm,
-        (_,prefix,value)=>prefix+JSON.stringify(value.split(/\s+/)
+      // Only [package] and this host's [target.<triple>] link-option apply;
+      // the other platforms' sections are left verbatim.
+      packageCompiled=Buffer.from(rewriteEffectiveLinkOptions(packageBefore.toString(),platform,
+        value=>value.split(/\s+/)
           .filter(token=>hostRuntimeSupportsConfigV1||token!=='--wrap=CJ_MRT_CjRuntimeInitWithConfigV1')
-          .map(token=>{if(token!==hostLLVM)return token;llvmInputs++;return path.relative(source,linkFile);}).join(' '))));
+          .map(token=>{if(token!==hostLLVM)return token;llvmInputs++;return path.relative(source,linkFile);}).join(' ')));
       if(llvmInputs!==1)throw Error('H1_PACKAGE_LLVM_LINK_INPUT');
       await fs.writeFile(packageManifest,packageCompiled);
       await fs.writeFile(manifest,text);
