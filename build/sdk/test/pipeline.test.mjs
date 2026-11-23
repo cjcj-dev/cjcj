@@ -13,8 +13,10 @@ import {makeSdk} from './fixture.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-pipeline-'));
 
-test('pipeline: the self-hosting chain is Stage0 -> Stage2 -> final std -> Stage3 -> install', () => {
-  assert.deepEqual(STAGES, ['runtime-input', 'ast-input', 'stage2-bootstrap', 'stage2', 'std-generator', 'stdlib', 'stage3-generator', 'stage3', 'install']);
+test('pipeline: the self-hosting chain is Stage0 -> Stage1 -> same-source std -> Stage2 -> final std -> Stage3 -> install', () => {
+  assert.deepEqual(STAGES, ['runtime-input', 'ast-input', 'stage1-bootstrap', 'stage1', 'stage1-generator', 'std-bootstrap-view',
+    'std-bootstrap', 'stage1-initial', 'stage1-std', 'stage1-std-sdk', 'stage2', 'stage2-generator', 'final-std', 'stage3-generator',
+    'stage3', 'install']);
   const l = layout('/w');
   assert.equal(l.sdk, '/w/cangjie');
   assert.equal(new Set(Object.values(l)).size, Object.keys(l).length);
