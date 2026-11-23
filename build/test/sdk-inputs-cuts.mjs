@@ -48,7 +48,7 @@ const cuts = [
   {name: 'cjpm-overlay', file: 'ci/source_pin.env',
     from: `TOOLS_REF=${expectedCjpm}`,
     to: `TOOLS_REF=${cutCjpm}`,
-    cases: 'tools-package', target: /CJPM_SUBTREE_ASSERTION_REACHED/, failure: /complete selected packages/cjpm tree/, control: 'h-default'},
+    cases: 'tools-package', target: /CJPM_SUBTREE_ASSERTION_REACHED/, failure: /complete selected packages\/cjpm tree/, control: 'h-default'},
   {name: 'handoff-origin', file: 'build/lib/git.mjs',
     from: "const origin = remotes.includes('origin') ? await query('remote', 'get-url', 'origin') : null;",
     to: "const origin = await query('remote', 'get-url', 'origin');",
