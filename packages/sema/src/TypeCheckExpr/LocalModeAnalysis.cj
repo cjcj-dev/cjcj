@@ -403,8 +403,11 @@ class LocalModeAnalysis {
                 }
             } else if (!scopes.isEmpty() && (let Some(owner) <- scopes[scopes.size - 1].funcDecl)) {
                 let actual = GetReceiverMode(owner)
+                // The implicit `super()` (COMPILER_ADD) of a constructor runs before its written
+                // `exclave { ... }` body; it is part of the constructor, not a call outside the exclave.
+                let prologue = call.TestAttr(Attribute.COMPILER_ADD) && owner.TestAttr(Attribute.CONSTRUCTOR)
                 if (!(owner.outerDecl.map({ d => CopyNode(d) }) ?? false) &&
-                    (!actual.IsSubMode(mode) || (mode == ASTMode.FULL && ExclaveOwner().isNone()))) {
+                    (!actual.IsSubMode(mode) || (mode == ASTMode.FULL && ExclaveOwner().isNone() && !prologue))) {
                     DiagMismatchedTypesWithFoundTy(diag, call, "receiver" + mode.Suffix(), "this" + actual.Suffix())
                 }
             }
