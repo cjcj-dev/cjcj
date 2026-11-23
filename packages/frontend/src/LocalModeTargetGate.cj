@@ -1,5 +1,7 @@
 package cjcj::frontend
 
+import std.collection.*
+
 func ModalSurvives(modal: Option<ASTModalInfo>): Bool {
     if (let Some(info) <- modal) {
         return info.local != ASTMode.NOT
