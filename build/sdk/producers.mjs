@@ -1,7 +1,8 @@
 // Production wiring of the 15 formal release assets onto their real producers in build/sdk/producers.
 // The table names, per cross tuple, the source job that builds its final std, the artifact it hands to
 // the package job and the producer steps that job runs; checkProductionWiring proves the table against
-// the actual workflows (release -> per-host source workflow -> package workflow).
+// the actual workflows: release.yml calls sdk-build.yml once per host (build mode, fanning out to
+// sdk-build-target.yml) and once per asset (package mode).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,8 +13,11 @@ import {ASSETS, HOSTS} from './targets.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const WORKFLOWS = Object.freeze({release: '.github/workflows/release.yml',
-  source: '.github/workflows/srcbuild-target.yml', package: '.github/workflows/build-release-package.yml'});
+  source: '.github/workflows/sdk-build-target.yml', package: '.github/workflows/sdk-build.yml'});
 export const PRODUCERS_DIR = 'build/sdk/producers';
+// The whole workflow and composite-action surface; anything else under .github is a stray probe.
+export const WORKFLOW_FILES = Object.freeze(['ci.yml', 'release.yml', 'sdk-build-target.yml', 'sdk-build.yml']);
+export const ACTION_DIRS = Object.freeze(['native-windows-tools', 'sccache', 'setup-release-sdk']);
 
 // release.yml calls the source workflow once per host carrier.
 export const HOST_SOURCE_JOBS = Object.freeze({'linux-x64': 'source-p1-linux-x64', 'linux-aarch64': 'source-p2-linux-aarch64',
@@ -72,7 +76,13 @@ export function checkProductionWiring({workflows = loadWorkflows(), exists = f =
   plan = planOutputs} = {}) {
   const {release, source} = workflows, jobs = release?.jobs ?? {}, plans = new Map();
   const planFor = host => { if (!plans.has(host)) plans.set(host, plan(host)); return plans.get(host); };
-  const packages = Object.entries(jobs).filter(([, j]) => String(j.uses ?? '').endsWith('/build-release-package.yml'));
+  const callsSdkBuild = j => String(j?.uses ?? '').endsWith('/sdk-build.yml');
+  const packages = Object.entries(jobs).filter(([, j]) => callsSdkBuild(j) && j.with?.mode === 'package');
+  const pkgJob = workflows.package?.jobs?.package;
+  if (!/inputs\.mode == 'package'/.test(String(pkgJob?.if ?? '')) || !(pkgJob?.steps ?? []).length)
+    fail('WIRING_PACKAGE_JOB', `${WORKFLOWS.package} jobs.package`);
+  if (!String(workflows.package?.jobs?.srcbuild?.uses ?? '').endsWith('/sdk-build-target.yml'))
+    fail('WIRING_SOURCE_CALL', `${WORKFLOWS.package} jobs.srcbuild`);
   const keys = packages.map(([, j]) => j.with?.release_key);
   for (const asset of ASSETS) if (!keys.includes(asset.key)) fail('WIRING_PACKAGE_MISSING', asset.key);
   if (packages.length !== ASSETS.length || new Set(keys).size !== keys.length) fail('WIRING_PACKAGE_SET', keys.join(','));
@@ -85,7 +95,7 @@ export function checkProductionWiring({workflows = loadWorkflows(), exists = f =
     const asset = ASSETS.find(a => a.key === job.with.release_key);
     if (!publishNeeds.has(name)) fail('WIRING_PUBLISH_NEEDS', name);
     const hostJob = HOST_SOURCE_JOBS[asset.host];
-    if (!String(jobs[hostJob]?.uses ?? '').endsWith('/srcbuild.yml') || jobs[hostJob]?.with?.targets !== asset.host)
+    if (!callsSdkBuild(jobs[hostJob]) || (jobs[hostJob]?.with?.mode ?? 'build') !== 'build' || jobs[hostJob]?.with?.targets !== asset.host)
       fail('WIRING_HOST_SOURCE', `${asset.key} ${hostJob}`);
     if (!publishNeeds.has(hostJob)) fail('WIRING_PUBLISH_NEEDS', hostJob);
     if (!before(name).has(hostJob)) fail('WIRING_PRODUCER_NEEDS', `${name} ${hostJob}`);

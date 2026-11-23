@@ -3,7 +3,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {ASSETS} from '../targets.mjs';
-import {CROSS_PRODUCERS, PRODUCERS_DIR, checkProductionWiring, loadWorkflows, planOutputs} from '../producers.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {ACTION_DIRS, CROSS_PRODUCERS, PRODUCERS_DIR, WORKFLOW_FILES, checkProductionWiring, loadWorkflows, planOutputs}
+  from '../producers.mjs';
 
 const plans = new Map(), plan = host => { if (!plans.has(host)) plans.set(host, planOutputs(host)); return plans.get(host); };
 const real = loadWorkflows();
@@ -50,6 +55,14 @@ const CONTROLS = [
     w.release.jobs.publish.needs = w.release.jobs.publish.needs.filter(n => n !== 'package-win32-x64-wasm'); }],
   ['a package no longer orders after its producer', /WIRING_PRODUCER_NEEDS package-linux-x64-android/, w => {
     w.release.jobs['package-linux-x64-android'].needs = []; }],
+  ['a package call loses its package mode', /WIRING_PACKAGE_MISSING linux-x64-wasm/, w => {
+    delete w.release.jobs['package-linux-x64-wasm'].with.mode; }],
+  ['a host source call leaves build mode', /WIRING_HOST_SOURCE darwin-x64 source-p5-darwin-x64/, w => {
+    w.release.jobs['source-p5-darwin-x64'].with.mode = 'llvm-tools'; }],
+  ['sdk-build.yml stops gating its package job on package mode', /WIRING_PACKAGE_JOB/, w => {
+    delete w.package.jobs.package.if; }],
+  ['sdk-build.yml fans out to a different target workflow', /WIRING_SOURCE_CALL/, w => {
+    w.package.jobs.srcbuild.uses = './.github/workflows/srcbuild-target.yml'; }],
 ];
 for (const [name, code, mutate] of CONTROLS) test(`control arm: ${name}`, () => {
   assert.throws(() => check(mutate), code);
@@ -59,4 +72,56 @@ for (const [name, code, mutate] of CONTROLS) test(`control arm: ${name}`, () => 
 test('control arm: a producer step file is missing', () => {
   const gone = `${PRODUCERS_DIR}/srcbuild/steps/build-android-final-std.mjs`;
   assert.throws(() => check(() => {}, f => f !== gone), /WIRING_STEP_MISSING build\/sdk\/producers\/srcbuild\/steps\/build-android-final-std\.mjs/);
+});
+
+// The collapse to four workflows and three composite actions is itself the contract: a probe workflow or a
+// second report action coming back must turn this red, and every local `uses:` must resolve in the tree.
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const surface = (root = REPO) => ({
+  workflows: fs.readdirSync(path.join(root, '.github/workflows')).sort(),
+  actions: fs.readdirSync(path.join(root, '.github/actions')).sort(),
+});
+const localUses = (root = REPO) => {
+  const out = [];
+  for (const f of surface(root).workflows) for (const m of fs.readFileSync(path.join(root, '.github/workflows', f), 'utf8')
+    .matchAll(/uses:\s*(\.\/\.github\/[^\s#]+)/g)) out.push([f, m[1]]);
+  for (const a of surface(root).actions) for (const m of fs.readFileSync(path.join(root, '.github/actions', a, 'action.yml'), 'utf8')
+    .matchAll(/uses:\s*(\.\/\.github\/[^\s#]+)/g)) out.push([a, m[1]]);
+  return out;
+};
+const checkSurface = (root = REPO) => {
+  const {workflows, actions} = surface(root);
+  if (JSON.stringify(workflows) !== JSON.stringify([...WORKFLOW_FILES].sort())) throw new Error(`SURFACE_WORKFLOWS ${workflows}`);
+  if (JSON.stringify(actions) !== JSON.stringify([...ACTION_DIRS].sort())) throw new Error(`SURFACE_ACTIONS ${actions}`);
+  for (const [from, use] of localUses(root)) {
+    const target = path.join(root, use.replace(/^\.\//, ''));
+    if (!fs.existsSync(use.endsWith('.yml') ? target : path.join(target, 'action.yml'))) throw new Error(`SURFACE_USES ${from} ${use}`);
+  }
+  return {workflows, actions, uses: localUses(root).length};
+};
+
+test('the workflow surface is exactly ci, release, sdk-build and sdk-build-target with three actions', () => {
+  const s = checkSurface();
+  assert.deepEqual(s.workflows, ['ci.yml', 'release.yml', 'sdk-build-target.yml', 'sdk-build.yml']);
+  assert.deepEqual(s.actions, ['native-windows-tools', 'sccache', 'setup-release-sdk']);
+  assert.ok(s.uses >= 20, `only ${s.uses} local uses`);
+});
+
+const scratch = mutate => {
+  const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'surface-'));
+  fs.cpSync(path.join(REPO, '.github'), path.join(dir, '.github'), {recursive: true});
+  try { mutate(dir); return checkSurface(dir); } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+};
+test('control arm: a probe workflow comes back', () => {
+  assert.throws(() => scratch(d => fs.writeFileSync(path.join(d, '.github/workflows/arm-soak.yml'), 'on: workflow_dispatch\n')),
+    /SURFACE_WORKFLOWS .*arm-soak\.yml/);
+});
+test('control arm: the separate sccache-report action comes back', () => {
+  assert.throws(() => scratch(d => { fs.mkdirSync(path.join(d, '.github/actions/sccache-report'));
+    fs.writeFileSync(path.join(d, '.github/actions/sccache-report/action.yml'), 'name: x\n'); }), /SURFACE_ACTIONS .*sccache-report/);
+});
+test('control arm: a local uses points at a deleted workflow', () => {
+  assert.throws(() => scratch(d => { const f = path.join(d, '.github/workflows/ci.yml');
+    fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('./.github/workflows/sdk-build-target.yml', './.github/workflows/build-llvm-tools.yml')); }),
+    /SURFACE_USES ci\.yml \.\/\.github\/workflows\/build-llvm-tools\.yml/);
 });

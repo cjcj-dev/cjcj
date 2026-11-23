@@ -53,12 +53,14 @@ on:
         default: '{}'
       native_inputs_artifact:
         description: Explicit complete native N/R/AST installations and exported paired tools with locations.json
-        required: true
+        required: false
         type: string
+        default: ''
       native_inputs_run_id:
         description: Original run producing the selected native installations
-        required: true
+        required: false
         type: string
+        default: ''
       cangjie_ref:
         description: Optional SDK version label; source repository revisions remain pinned
         required: false
@@ -112,6 +114,11 @@ on:
         required: false
         type: boolean
         default: false
+      llvm_tools_only:
+        description: Run only the fixed LLVM tools jobs (ci.yml); every source target job is skipped.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -146,7 +153,15 @@ jobs:
       llvm_platforms: ${{ steps.select.outputs.llvm_platforms }}
       ohos_matrix: ${{ steps.select.outputs.ohos_matrix }}
       ios_matrix: ${{ steps.select.outputs.ios_matrix }}
+    if: ${{ !inputs.llvm_tools_only }}
     steps:
+      - name: Require the fixed native input artifact
+        env:
+          NATIVE_INPUTS_ARTIFACT: ${{ inputs.native_inputs_artifact }}
+          NATIVE_INPUTS_RUN_ID: ${{ inputs.native_inputs_run_id }}
+        run: |
+          test -n "$NATIVE_INPUTS_ARTIFACT" || { echo '::error::native_inputs_artifact is required'; exit 1; }
+          test -n "$NATIVE_INPUTS_RUN_ID" || { echo '::error::native_inputs_run_id is required'; exit 1; }
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -159,16 +174,355 @@ jobs:
           REQUESTED: ${{ inputs.targets }}
         run: node build/sdk/producers/srcbuild/target-matrix.mjs --targets "$REQUESTED" --single --require-ready
 
-  fixed-llvm:
-    name: Build native LLVM tools
+  # Fixed LLVM tools (formerly the reusable build-llvm-tools.yml). A release phase
+  # pays for its own tuple and no one else's, so the matrix is selected first;
+  # ci.yml calls this workflow with llvm_tools_only to run just these two jobs.
+  fixed-llvm-plan:
+    name: Select native LLVM tools
     needs: plan
-    if: inputs.native_runtime_artifact == ''
-    uses: ./.github/workflows/build-llvm-tools.yml
-    with:
-      platforms: ${{ needs.plan.outputs.llvm_platforms }}
-      rebuild: ${{ inputs.rebuild_llvm || false }}
-      llvm_ref: ${{ inputs.native_llvm_ref }}
-      runtime_ref: ${{ inputs.native_runtime_ref }}
+    if: ${{ !cancelled() && (inputs.llvm_tools_only || (needs.plan.result == 'success' && inputs.native_runtime_artifact == '')) }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate native source pair before starting producers
+        env:
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+        run: node ci/native-llvm-inputs.mjs
+      - name: Select the requested tuples
+        id: select
+        env:
+          REQUESTED: ${{ needs.plan.outputs.llvm_platforms || 'all' }}
+          PUBLISH_TUPLE: 'false'
+          PLATFORM_SET: ''
+        run: node ci/llvm-tools-matrix.mjs
+
+  fixed-llvm:
+    name: Build native LLVM tools / ${{ matrix.platform }}
+    needs: fixed-llvm-plan
+    if: ${{ !cancelled() && needs.fixed-llvm-plan.result == 'success' }}
+    permissions:
+      contents: read
+    timeout-minutes: ${{ matrix.platform == 'windows_x86_64' && 350 || 120 }}
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJson(needs.fixed-llvm-plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.22.1'
+      - name: Select native build capacity
+        if: runner.os != 'Windows'
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import os from 'node:os';
+          import {buildCapacity, selectBuildJobs} from './ci/build-resources.mjs';
+          const capacity = await buildCapacity();
+          const jobs = await selectBuildJobs(undefined, process.env, capacity);
+          const disk = fs.statfsSync('.');
+          console.log('NATIVE_BUILD_CAPACITY ' + JSON.stringify({...capacity, jobs, linkJobs: 1,
+            freeMemory: os.freemem(), diskAvailable: disk.bavail * disk.bsize}));
+          fs.appendFileSync(process.env.GITHUB_ENV, 'CMAKE_BUILD_PARALLEL_LEVEL=' + jobs + '\n');
+          NODE
+      - name: Load native LLVM source pair
+        id: llvm-pin
+        env:
+          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+        run: node ci/native-llvm-inputs.mjs
+
+      # `rebuild` salts the key with the run id so the restore misses and the
+      # post-step still saves the fresh tools under a key nothing else will read.
+      # The salt is a prefix: the cache service matches stored keys by prefix,
+      # so a suffix salt would let later unsalted lookups restore the salted
+      # entry (release-matrix run 35718484244 restored ...-rebuild-35717971557).
+      - name: Restore LLVM tools cache
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: fixed-toolchain/${{ matrix.platform }}
+          key: ${{ inputs.rebuild_llvm && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ steps.llvm-pin.outputs.runtime_sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('ci/llvm_pin.env', 'ci/source_pin.env', 'ci/runtime_pin.env', 'ci/fetch-llvm-runtime.mjs', '.github/workflows/sdk-build-target.yml', 'ci/llvm-tools-manifest.mjs', 'build/lib/targets.mjs', 'ci/llvm-tools-matrix.mjs', 'ci/native-llvm-inputs.mjs', 'build/sdk/producers/platform_tuples/**', 'build/lib/srcbuild_git.sh', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
+
+      # Every C++ compile below (llc, opt, flatc, the shim object) goes through
+      # sccache; the report step at the end fails the job if none did.
+      - name: Start sccache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/sccache
+        with:
+          component: llvm
+          platform: ${{ matrix.platform }}
+          pin: ${{ steps.llvm-pin.outputs.sha }}
+          cache-size: 3G
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang ninja-build cmake
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS' && steps.cache.outputs.cache-hit != 'true'
+        run: brew install ninja
+
+      - name: Checkout source repositories
+        if: runner.os != 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git init llvm-fork
+          git -C llvm-fork remote add origin "$LLVM_URL"
+          git -C llvm-fork fetch --depth=1 origin "$CJCJ_NATIVE_LLVM_REF"
+          git -C llvm-fork checkout --detach FETCH_HEAD
+          test "$(git -C llvm-fork rev-parse HEAD)" = "$CJCJ_NATIVE_LLVM_REF"
+
+          git clone --filter=blob:none --no-checkout "$CANGJIE_COMPILER_URL" cangjie-compiler
+          git -C cangjie-compiler sparse-checkout set schema
+          git -C cangjie-compiler fetch --depth=1 origin "$CANGJIE_COMPILER_SHA"
+          git -C cangjie-compiler checkout --detach "$CANGJIE_COMPILER_SHA"
+          test "$(git -C cangjie-compiler rev-parse HEAD)" = "$CANGJIE_COMPILER_SHA"
+
+          git clone --filter=blob:none --no-checkout "$FLATBUFFERS_URL" flatbuffers
+          git -C flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
+          git -C flatbuffers checkout --detach "$FLATBUFFERS_SHA"
+          test "$(git -C flatbuffers rev-parse HEAD)" = "$FLATBUFFERS_SHA"
+
+      - name: Build LLVM tools
+        if: runner.os != 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          npx --yes zx@8 ci/fetch-llvm-runtime.mjs paired-runtime
+          cmake -G Ninja -S llvm-fork/llvm -B llc-build \
+            -DCANGJIE_RUNTIME_SOURCE_DIR="$PWD/paired-runtime" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=OFF \
+            -DLLVM_PARALLEL_COMPILE_JOBS="$CMAKE_BUILD_PARALLEL_LEVEL" -DLLVM_PARALLEL_LINK_JOBS=1 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DLLVM_LINK_LLVM_DYLIB=OFF \
+            -DLLVM_BUILD_LLVM_DYLIB=OFF \
+            -DLLVM_ENABLE_RTTI=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_TARGETS_TO_BUILD="${{ matrix.llvm-targets }}" \
+            -DLLVM_ENABLE_PROJECTS="lld" \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_CXX_FLAGS="-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string"
+          cmake --build llc-build --parallel "$CMAKE_BUILD_PARALLEL_LEVEL" --target llc opt lld
+          mkdir -p "fixed-toolchain/${{ matrix.platform }}"
+          case "${{ matrix.platform }}" in
+            darwin_*) lld_tool=ld64.lld ;;
+            *) lld_tool=ld.lld ;;
+          esac
+          gzip -n -c -9 llc-build/bin/llc > "fixed-toolchain/${{ matrix.platform }}/llc.gz"
+          gzip -n -c -9 llc-build/bin/opt > "fixed-toolchain/${{ matrix.platform }}/opt.gz"
+          gzip -n -c -9 "llc-build/bin/$lld_tool" > "fixed-toolchain/${{ matrix.platform }}/$lld_tool.gz"
+          lld_version="$(llc-build/bin/$lld_tool --version | awk '
+            /LLVM version |^LLD / {
+              sub(/^[[:space:]]+/, "")
+              print
+              found = 1
+              exit
+            }
+            END { if (!found) exit 1 }
+          ')"
+          if command -v sha256sum >/dev/null; then
+            llc_sha="$(sha256sum llc-build/bin/llc | awk '{print $1}')"
+            opt_sha="$(sha256sum llc-build/bin/opt | awk '{print $1}')"
+            lld_sha="$(sha256sum "llc-build/bin/$lld_tool" | awk '{print $1}')"
+          else
+            llc_sha="$(shasum -a 256 llc-build/bin/llc | awk '{print $1}')"
+            opt_sha="$(shasum -a 256 llc-build/bin/opt | awk '{print $1}')"
+            lld_sha="$(shasum -a 256 "llc-build/bin/$lld_tool" | awk '{print $1}')"
+          fi
+          {
+            printf 'PLATFORM=%s\n' '${{ matrix.platform }}'
+            printf 'LLVM_SHA=%s\n' "$CJCJ_NATIVE_LLVM_REF"
+            printf 'CANGJIE_COMPILER_SHA=%s\n' "$CANGJIE_COMPILER_SHA"
+            printf 'FLATBUFFERS_SHA=%s\n' "$FLATBUFFERS_SHA"
+            printf 'LLC_SHA256=%s\n' "$llc_sha"
+            printf 'OPT_SHA256=%s\n' "$opt_sha"
+            printf 'LLD_TOOL=%s\n' "$lld_tool"
+            printf 'LLD_SOURCE=%s\n' "tuple:$CJCJ_NATIVE_LLVM_REF"
+            printf 'LLD_VERSION=%s\n' "$lld_version"
+            printf 'LLD_SHA256=%s\n' "$lld_sha"
+          } > "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+
+      - name: Generate LLVM shim
+        if: runner.os != 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cmake -G Ninja -S flatbuffers -B flatbuffers-build \
+            -DFLATBUFFERS_BUILD_TESTS=OFF \
+            -DFLATBUFFERS_BUILD_FLATLIB=OFF \
+            -DFLATBUFFERS_BUILD_SHAREDLIB=OFF
+          cmake --build flatbuffers-build --parallel "$CMAKE_BUILD_PARALLEL_LEVEL" --target flatc
+          mkdir -p shim-generated/flatbuffers
+          flatbuffers-build/flatc --no-warnings -c -o shim-generated/flatbuffers \
+            cangjie-compiler/schema/CjoFormat.fbs
+          ${SCCACHE_PATH:+"$SCCACHE_PATH"} clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
+            -Illvm-fork/llvm/include -Illc-build/include \
+            -Iflatbuffers/include -Ishim-generated \
+            -c runtime_shim/cjselfhost_llvmshim.cpp \
+            -o "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
+          if command -v sha256sum >/dev/null; then
+            shim_sha="$(sha256sum "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
+          else
+            shim_sha="$(shasum -a 256 "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
+          fi
+          printf 'SHIM_SHA256=%s\n' "$shim_sha" >> \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          for tool in llc opt; do
+            version="$(llc-build/bin/$tool --version | awk '/LLVM version / {sub(/^[[:space:]]+/, ""); print; found=1; exit} END {if (!found) exit 1}')"
+            prefix=$(printf '%s' "$tool" | tr '[:lower:]' '[:upper:]')
+            printf '%s_SOURCE=tuple:%s\n%s_VERSION=%s\n' "$prefix" "$CJCJ_NATIVE_LLVM_REF" "$prefix" "$version" >> \
+              "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          done
+
+      - name: Prepare MSYS2/MinGW LLVM toolchain
+        if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          path-type: inherit
+          install: >-
+            git gzip unzip file binutils
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-ninja
+
+      - name: Build Windows LLVM tools
+        if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        env:
+          TUPLE_PLATFORM: ${{ matrix.platform }}
+          LLVM_TARGETS: ${{ matrix.llvm-targets }}
+          TUPLE_ROOT: .tuple-build
+        run: |
+          npx --yes zx@8 build/sdk/producers/platform_tuples/fetch_sources.mjs
+          npx --yes zx@8 build/sdk/producers/platform_tuples/build_tuple.mjs
+
+      - name: Report sccache
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/sccache
+        with:
+          mode: report
+          component: llvm
+          platform: ${{ matrix.platform }}
+          require-compiles: ${{ job.status == 'success' }}
+
+      - name: Verify LLVM tools
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p "$RUNNER_TEMP/fixed-llvm-tools"
+          case "${{ matrix.platform }}" in
+            darwin_*) lld_tool=ld64.lld ;;
+            *) lld_tool=ld.lld ;;
+          esac
+          for tool in llc opt "$lld_tool"; do
+            gunzip -c "fixed-toolchain/${{ matrix.platform }}/${tool}.gz" \
+              > "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            chmod +x "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            file "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            if [ "${{ runner.os }}" = macOS ]; then
+              otool -L "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            else
+              ldd_output="$(ldd "$RUNNER_TEMP/fixed-llvm-tools/$tool")"
+              printf '%s\n' "$ldd_output"
+              test -z "$(printf '%s\n' "$ldd_output" | grep 'not found' || true)"
+            fi
+            bash ci/assert_no_libxml2_needed.sh "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            "$RUNNER_TEMP/fixed-llvm-tools/$tool" --version | head -5
+          done
+          lld_version="$("$RUNNER_TEMP/fixed-llvm-tools/$lld_tool" --version | awk '
+            /LLVM version |^LLD / {
+              sub(/^[[:space:]]+/, "")
+              print
+              found = 1
+              exit
+            }
+            END { if (!found) exit 1 }
+          ')"
+          if command -v sha256sum >/dev/null; then
+            llc_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/llc" | awk '{print $1}')"
+            opt_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/opt" | awk '{print $1}')"
+            lld_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/$lld_tool" | awk '{print $1}')"
+          else
+            llc_sha="$(shasum -a 256 "$RUNNER_TEMP/fixed-llvm-tools/llc" | awk '{print $1}')"
+            opt_sha="$(shasum -a 256 "$RUNNER_TEMP/fixed-llvm-tools/opt" | awk '{print $1}')"
+            lld_sha="$(shasum -a 256 "$RUNNER_TEMP/fixed-llvm-tools/$lld_tool" | awk '{print $1}')"
+          fi
+          grep -Fx "PLATFORM=${{ matrix.platform }}" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLVM_SHA=$CJCJ_NATIVE_LLVM_REF" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "CANGJIE_COMPILER_SHA=$CANGJIE_COMPILER_SHA" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "FLATBUFFERS_SHA=$FLATBUFFERS_SHA" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLC_SHA256=$llc_sha" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "OPT_SHA256=$opt_sha" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLD_TOOL=$lld_tool" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLD_SOURCE=tuple:$CJCJ_NATIVE_LLVM_REF" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLD_VERSION=$lld_version" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLD_SHA256=$lld_sha" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          file "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
+          if command -v sha256sum >/dev/null; then
+            shim_sha="$(sha256sum "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
+          else
+            shim_sha="$(shasum -a 256 "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
+          fi
+          grep -Fx "SHIM_SHA256=$shim_sha" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          node ci/llvm-tools-manifest.mjs validate tuple \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          for tool in llc opt; do
+            version="$("$RUNNER_TEMP/fixed-llvm-tools/$tool" --version | awk '/LLVM version / {sub(/^[[:space:]]+/, ""); print; found=1; exit} END {if (!found) exit 1}')"
+            prefix=$(printf '%s' "$tool" | tr '[:lower:]' '[:upper:]')
+            grep -Fx "${prefix}_VERSION=$version" "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          done
+          shim_exports="$(nm -C "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" \
+            | grep -cE ' T _?(LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
+          test "$shim_exports" -ge 90
+          echo "shim exported symbols: $shim_exports"
+          for file in llc.gz opt.gz "$lld_tool.gz" llvm-tools.manifest cjselfhost_llvmshim.o; do
+            if command -v sha256sum >/dev/null; then
+              sha256sum "fixed-toolchain/${{ matrix.platform }}/$file"
+            else
+              shasum -a 256 "fixed-toolchain/${{ matrix.platform }}/$file"
+            fi
+          done
+
+      - name: Verify Windows LLVM payload
+        if: runner.os == 'Windows'
+        env:
+          TUPLE_PLATFORM: ${{ matrix.platform }}
+        run: |
+          for payload in llc.gz opt.gz ld.lld.gz llvm-tools.manifest cjselfhost_llvmshim.o llvm-static-libs.txt llvm-system-libs.txt; do
+            test -s "fixed-toolchain/$TUPLE_PLATFORM/$payload"
+          done
+          node ci/llvm-tools-manifest.mjs validate tuple "fixed-toolchain/$TUPLE_PLATFORM/llvm-tools.manifest"
+
+      - name: Upload LLVM tools
+        uses: actions/upload-artifact@v7
+        with:
+          name: fixed-llvm-tools-${{ matrix.platform }}
+          path: fixed-toolchain/${{ matrix.platform }}
+          if-no-files-found: error
+          retention-days: 14
 
   native-cjdb:
     name: ${{ matrix.target }} / native CMake install
@@ -235,17 +589,18 @@ jobs:
             ${{ runner.temp }}/native-cjdb/install/BUILD-INPUTS.json
             ${{ runner.temp }}/native-cjdb/python/producer-commands.json
           if-no-files-found: warn
-      - uses: ./.github/actions/sccache-report
+      - uses: ./.github/actions/sccache
         if: always()
         with:
+          mode: report
           component: native-cjdb
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
 
   source-stage0:
     name: ${{ matrix.target }} / source-stage0
-    needs: [plan, fixed-llvm, native-cjdb]
-    if: always() && needs.plan.outputs.llvm_platforms != 'windows_x86_64' && needs.plan.result == 'success' && (needs.fixed-llvm.result == 'success' || needs.fixed-llvm.result == 'skipped') && (needs.native-cjdb.result == 'success' || needs.native-cjdb.result == 'skipped')
+    needs: [plan, fixed-llvm-plan, fixed-llvm, native-cjdb]
+    if: always() && needs.plan.outputs.llvm_platforms != 'windows_x86_64' && needs.plan.result == 'success' && (needs.fixed-llvm-plan.result == 'success' || needs.fixed-llvm-plan.result == 'skipped') && (needs.fixed-llvm.result == 'success' || needs.fixed-llvm.result == 'skipped') && (needs.native-cjdb.result == 'success' || needs.native-cjdb.result == 'skipped')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -765,8 +1120,9 @@ jobs:
 
       - name: Report sccache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-stage0
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
@@ -851,8 +1207,9 @@ jobs:
 
       - name: Report sccache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-stage1-initial-std
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
@@ -937,8 +1294,9 @@ jobs:
 
       - name: Report sccache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-stage1-std
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
@@ -1023,8 +1381,9 @@ jobs:
 
       - name: Report sccache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-stage1-compiler
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
@@ -1158,8 +1517,9 @@ jobs:
 
       - name: Report sccache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-stage3
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
@@ -1583,8 +1943,9 @@ jobs:
       # compile would otherwise report a second, misleading error.
       - name: Report sccache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-package
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
@@ -1686,8 +2047,9 @@ jobs:
 
       - name: Report sccache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-android
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
@@ -1788,8 +2150,9 @@ jobs:
 
       - name: Report sccache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-wasm
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
@@ -1882,8 +2245,9 @@ jobs:
 
       - name: Report sccache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-ohos
           platform: ${{ matrix.runtime_target }}
           require-compiles: ${{ job.status == 'success' }}
@@ -1968,8 +2332,9 @@ jobs:
 
       - name: Report sccache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-ios
           platform: ${{ matrix.runtime_target }}
           require-compiles: ${{ job.status == 'success' }}
@@ -2066,8 +2431,9 @@ jobs:
 
       - name: Report sccache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-mingw
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' && steps.windows-mingw-cache.outputs.cache-hit != 'true' }}
@@ -2336,8 +2702,9 @@ jobs:
 
       - name: Report sccache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-windows
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}
@@ -2458,8 +2825,9 @@ jobs:
             ${{ env.CANGJIE_WORKSPACE }}/software/**/lsp-macro/**/requests.lsp
       - name: Report Windows source compilation cache
         if: always()
-        uses: ./.github/actions/sccache-report
+        uses: ./.github/actions/sccache
         with:
+          mode: report
           component: srcbuild-stage0
           platform: ${{ matrix.target }}
           require-compiles: ${{ job.status == 'success' }}

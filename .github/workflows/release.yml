@@ -123,7 +123,7 @@ jobs:
   source-p1-linux-x64:
     needs: plan
     name: phase 1 · linux-x64 / source SDK and final std (also cross-builds the Windows std)
-    uses: ./.github/workflows/srcbuild.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
       cangjie_ref: ${{ inputs.version }}
       native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
@@ -147,7 +147,7 @@ jobs:
 
   source-p2-linux-aarch64:
     name: phase 2 · linux-aarch64 / source SDK and final std
-    uses: ./.github/workflows/srcbuild.yml
+    uses: ./.github/workflows/sdk-build.yml
     needs: package-p1-linux-x64
     with:
       cangjie_ref: ${{ inputs.version }}
@@ -169,7 +169,7 @@ jobs:
 
   source-p3-windows-x64:
     name: phase 3 · windows-x64 / source SDK and final std
-    uses: ./.github/workflows/srcbuild.yml
+    uses: ./.github/workflows/sdk-build.yml
     needs: package-p2-linux-aarch64
     secrets:
       WINDOWS_TOOLS_READ_TOKEN: ${{ secrets.WINDOWS_TOOLS_READ_TOKEN }}
@@ -193,7 +193,7 @@ jobs:
 
   source-p4-darwin-arm64:
     name: phase 4 · darwin-arm64 / source SDK and final std
-    uses: ./.github/workflows/srcbuild.yml
+    uses: ./.github/workflows/sdk-build.yml
     needs: package-p3-windows-x64
     with:
       cangjie_ref: ${{ inputs.version }}
@@ -216,7 +216,7 @@ jobs:
 
   source-p5-darwin-x64:
     name: phase 5 · darwin-x64 / source SDK and final std
-    uses: ./.github/workflows/srcbuild.yml
+    uses: ./.github/workflows/sdk-build.yml
     needs: package-p4-darwin-arm64
     with:
       cangjie_ref: ${{ inputs.version }}
@@ -249,8 +249,9 @@ jobs:
   package-p1-linux-x64:
     name: phase 1 · linux-x64 / Build release package
     needs: [source-p1-linux-x64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
@@ -270,8 +271,9 @@ jobs:
   package-p2-linux-aarch64:
     name: phase 2 · linux-aarch64 / Build release package
     needs: [source-p2-linux-aarch64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
@@ -291,8 +293,9 @@ jobs:
   package-p3-windows-x64:
     name: phase 3 · windows-x64 / Build release package
     needs: [source-p3-windows-x64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
@@ -312,8 +315,9 @@ jobs:
   package-p4-darwin-arm64:
     name: phase 4 · darwin-arm64 / Build release package
     needs: [source-p4-darwin-arm64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
@@ -333,8 +337,9 @@ jobs:
   package-p5-darwin-x64:
     name: phase 5 · darwin-x64 / Build release package
     needs: [source-p5-darwin-x64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
@@ -354,8 +359,9 @@ jobs:
   package-linux-x64-android:
     name: linux-x64-android / Build release package
     needs: [package-p1-linux-x64, source-p1-linux-x64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
@@ -375,8 +381,9 @@ jobs:
   package-darwin-arm64-android:
     name: darwin-arm64-android / Build release package
     needs: [package-p4-darwin-arm64, source-p1-linux-x64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
@@ -396,8 +403,9 @@ jobs:
   package-win32-x64-android:
     name: win32-x64-android / Build release package
     needs: [package-p3-windows-x64, source-p3-windows-x64, source-p1-linux-x64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
@@ -417,8 +425,9 @@ jobs:
   package-linux-x64-wasm:
     name: linux-x64-wasm / Build release package
     needs: [package-p1-linux-x64, source-p1-linux-x64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
       native_host_version: ${{ inputs.native_host_version }}
@@ -437,8 +446,9 @@ jobs:
   package-darwin-arm64-wasm:
     name: darwin-arm64-wasm / Build release package
     needs: [package-p4-darwin-arm64, source-p1-linux-x64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
       native_host_version: ${{ inputs.native_host_version }}
@@ -457,8 +467,9 @@ jobs:
   package-win32-x64-wasm:
     name: win32-x64-wasm / Build release package
     needs: [package-p3-windows-x64, source-p1-linux-x64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
       native_host_version: ${{ inputs.native_host_version }}
@@ -477,8 +488,9 @@ jobs:
   package-linux-x64-ohos:
     name: linux-x64-ohos / Build release package
     needs: [package-p1-linux-x64, source-p1-linux-x64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
@@ -498,8 +510,9 @@ jobs:
   package-darwin-arm64-ohos:
     name: darwin-arm64-ohos / Build release package
     needs: [package-p4-darwin-arm64, source-p1-linux-x64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
@@ -519,8 +532,9 @@ jobs:
   package-darwin-arm64-ios:
     name: darwin-arm64-ios / Build release package
     needs: [package-p4-darwin-arm64, source-p4-darwin-arm64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
@@ -540,8 +554,9 @@ jobs:
   package-win32-x64-ohos:
     name: win32-x64-ohos / Build release package
     needs: [package-p3-windows-x64, source-p3-windows-x64, source-p1-linux-x64]
-    uses: ./.github/workflows/build-release-package.yml
+    uses: ./.github/workflows/sdk-build.yml
     with:
+      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}

@@ -2,7 +2,7 @@
 #
 # Backend: sccache's local disk cache, persisted as ONE actions/cache entry per
 # (component, platform, pin). sccache's own GitHub Actions backend writes one
-# cache entry per object file; srcbuild.yml records the measurement that made it
+# cache entry per object file; sdk-build-target.yml records the measurement that made it
 # unusable here (27840 entries, 6.9 GB of the 10 GB cap, 3% hits, 4162 s of
 # writes). A single tarball per component keeps the entry count in the tens,
 # binds the key to the pin so a pin bump still restores the previous pin's
@@ -11,9 +11,16 @@
 # The primary key ends in run id and attempt, so every run that compiled
 # something saves a fresh entry and the newest prefix match is what the next run
 # restores. Entries the prefix no longer matches are evicted by GitHub's LRU.
-name: sccache start
-description: Install sccache, restore this component's disk cache, export the CMake compiler launcher.
+name: sccache
+description: >-
+  mode start (default) installs sccache, restores this component's disk cache and
+  exports the CMake compiler launcher; mode report prints the statistics, records
+  the hit rate in the job summary and saves the disk cache.
 inputs:
+  mode:
+    description: start (open the session) or report (close it out at the end of the job).
+    required: false
+    default: start
   component:
     description: What is being compiled (llvm, llvm-tuple, runtime, windows-runtime, srcbuild). Names the cache and the report.
     required: true
@@ -21,8 +28,9 @@ inputs:
     description: LLVM platform or target key the objects are for; part of the cache key.
     required: true
   pin:
-    description: Pin string the objects depend on (LLVM_SHA, RUNTIME_REF, ...); part of the cache key.
-    required: true
+    description: Start mode. Pin string the objects depend on (LLVM_SHA, RUNTIME_REF, ...); part of the cache key.
+    required: false
+    default: ''
   cache-size:
     description: SCCACHE_CACHE_SIZE for this component's disk cache.
     required: false
@@ -31,6 +39,17 @@ inputs:
     description: sccache release tag to install.
     required: false
     default: v0.18.0
+  require-compiles:
+    description: >-
+      Report mode. Fail when sccache saw zero compile requests. Pass 'true' whenever the C++
+      build actually ran in this job; a whole-artifact cache hit that skipped the
+      build passes 'false'.
+    required: false
+    default: 'true'
+  save:
+    description: Report mode. Persist the disk cache when it changed. Pass 'false' to only report.
+    required: false
+    default: 'true'
 outputs:
   restored-key:
     description: The actions/cache key that was restored, empty on a cold cache.
@@ -42,12 +61,14 @@ runs:
   using: composite
   steps:
     - name: Install sccache
+      if: inputs.mode != 'report'
       uses: mozilla-actions/sccache-action@v0.0.11
       with:
         version: ${{ inputs.sccache-version }}
         disable_annotations: 'true'
 
     - name: Configure sccache disk cache and CMake launcher
+      if: inputs.mode != 'report'
       shell: bash
       env:
         COMPONENT: ${{ inputs.component }}
@@ -74,6 +95,7 @@ runs:
         } >> "$GITHUB_ENV"
 
     - name: Restore sccache disk cache
+      if: inputs.mode != 'report'
       id: restore
       uses: actions/cache/restore@v6
       with:
@@ -84,6 +106,7 @@ runs:
           sccache-${{ inputs.component }}-${{ inputs.platform }}-
 
     - name: Start sccache server on the restored cache
+      if: inputs.mode != 'report'
       shell: bash
       env:
         RESTORED_KEY: ${{ steps.restore.outputs.cache-matched-key }}
@@ -109,3 +132,64 @@ runs:
           echo "sccache: cold start, no entry matched sccache-${{ inputs.component }}-${{ inputs.platform }}-"
         fi
         "$SCCACHE_PATH" --show-stats | grep -E '^(Cache location|Cache size|Max cache size|Version)'
+
+    # ---- mode: report ----
+    # Close out the session start mode opened: print the
+    # statistics, write the hit rate into the step summary, fail the job when a
+    # C++ build never reached the launcher, and persist the disk cache.
+    - name: sccache statistics
+      if: inputs.mode == 'report'
+      id: stats
+      shell: bash
+      env:
+        COMPONENT: ${{ inputs.component }}
+        PLATFORM: ${{ inputs.platform }}
+        REQUIRE_COMPILES: ${{ inputs.require-compiles }}
+      run: |
+        set -euo pipefail
+        # No SCCACHE_PATH means start mode never completed. On a job that
+        # is otherwise green that is the failure this action exists to catch; on
+        # one that already failed (the start step itself died, e.g. the sccache
+        # download returning HTTP 500) it would only add a second, misleading
+        # error, so say it as a warning and leave the original failure alone.
+        if [ -z "${SCCACHE_PATH:-}" ]; then
+          if [ "$REQUIRE_COMPILES" = true ]; then
+            echo "::error::SCCACHE_PATH is unset: .github/actions/sccache (start mode) did not run in this job"
+            exit 1
+          fi
+          echo "::warning::SCCACHE_PATH is unset: .github/actions/sccache (start mode) did not complete; no sccache statistics for this job"
+          exit 0
+        fi
+        stats="$RUNNER_TEMP/sccache-$COMPONENT-stats.json"
+        "$SCCACHE_PATH" --show-stats
+        "$SCCACHE_PATH" --show-stats --stats-format=json > "$stats"
+        # A plain string, not an array: macOS runners ship bash 3.2, where an
+        # empty array under set -u is an unbound-variable error.
+        require_flag=""
+        if [ "$REQUIRE_COMPILES" = true ]; then require_flag=--require-compiles; fi
+        node "$GITHUB_ACTION_PATH/../../../ci/sccache/report.mjs" \
+          --stats "$stats" --component "$COMPONENT" --platform "$PLATFORM" \
+          --restored-key "${SCCACHE_RESTORED_KEY:-}" \
+          --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT" ${require_flag:+"$require_flag"}
+        "$SCCACHE_PATH" --stop-server >/dev/null 2>&1 || true
+
+    # always(): a composite action stops at the first failing step, so without
+    # this the one case the statistics matter most -- the zero-compile check
+    # turning the job red -- would take its own stats.json and error log with it.
+    - name: Upload sccache diagnostics
+      if: always() && inputs.mode == 'report'
+      uses: actions/upload-artifact@v7
+      with:
+        name: sccache-${{ inputs.component }}-${{ inputs.platform }}-${{ github.run_attempt }}
+        path: |
+          ${{ runner.temp }}/sccache-${{ inputs.component }}-stats.json
+          ${{ runner.temp }}/sccache-${{ inputs.component }}-error.log
+        if-no-files-found: ignore
+        retention-days: 7
+
+    - name: Save sccache disk cache
+      if: inputs.mode == 'report' && inputs.save == 'true' && steps.stats.outputs.save == 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ runner.temp }}/sccache-${{ inputs.component }}
+        key: ${{ env.CJCJ_SCCACHE_KEY }}
