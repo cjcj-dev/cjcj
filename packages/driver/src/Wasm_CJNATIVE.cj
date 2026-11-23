@@ -124,20 +124,45 @@ public class Wasm_CJNATIVE <: Gnu {
  */
 let WASM_NATIVE_STD_DEPS: Array<(String, String)> = [("std.env", "std.process")]
 
-/** Direct plus indirect builtin packages, closed over WASM_NATIVE_STD_DEPS. */
+/**
+ * Full package name of one builtin dependency entry. The frontend hands the driver .cjo
+ * files, not package names: ImportManager keys its std dependencies by the resolved .cjo
+ * path (CompilerInstance.ModularizeCompilation copies those keys), and object-only inputs
+ * become a bare "<package>.cjo". The file stem is the package name, as LinksStdReflect and
+ * FileUtil.ConvertFilenameToLibCangjieBaseFormat already assume.
+ */
+func WasmStdDependencyPackage(dep: String): String {
+    let fileName = FileUtil.GetFileName(dep)
+    let suffix = ".cjo"
+    if (fileName.endsWith(suffix)) {
+        return fileName[0..fileName.size - suffix.size]
+    }
+    return fileName
+}
+
+/**
+ * Direct plus indirect builtin dependencies, closed over WASM_NATIVE_STD_DEPS. Entries the
+ * frontend recorded are kept as given; each package the table adds is appended by its full
+ * package name, which LibCangjieFormat maps to the same archive as its .cjo path would.
+ */
 func WasmStdLinkClosure(direct: Collection<String>, indirect: Collection<String>): HashSet<String> {
+    let deps = HashSet<String>()
+    deps.add(all: direct)
+    deps.add(all: indirect)
     let pkgs = HashSet<String>()
-    pkgs.add(all: direct)
-    pkgs.add(all: indirect)
+    for (dep in deps) {
+        pkgs.add(WasmStdDependencyPackage(dep))
+    }
     var changed = true
     while (changed) {
         changed = false
         for ((from, to) in WASM_NATIVE_STD_DEPS) {
             if (pkgs.contains(from) && !pkgs.contains(to)) {
                 pkgs.add(to)
+                deps.add(to)
                 changed = true
             }
         }
     }
-    return pkgs
+    return deps
 }
