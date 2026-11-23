@@ -196,6 +196,18 @@ export const GATING = Object.freeze([
   'build/sdk/producers/srcbuild/tests/segmented-workflow.test.mjs',
   'scripts/difftest-timeout.test.mjs',
   'ci/bootstrap/sdk-archive-readonly.test.mjs',
+  // Unified SDK production line (node build/cli.mjs sdk ...) and its producers.
+  'build/sdk/test/chain.test.mjs',
+  'build/sdk/test/cross.test.mjs',
+  'build/sdk/test/install-relocate.test.mjs',
+  'build/sdk/test/pins-targets.test.mjs',
+  'build/sdk/test/pipeline.test.mjs',
+  'build/sdk/test/producers.test.mjs',
+  'build/sdk/test/wasm-std.test.mjs',
+  'ci/wasm-std-full-args.test.mjs',
+  'build/sdk/producers/release/windows-source-package.test.mjs',
+  'build/sdk/producers/srcbuild/tests/android-install.test.mjs',
+  'build/sdk/producers/srcbuild/tests/ohos-split-sdk.test.mjs',
 ]);
 
 // Registered, not executed. `needs` is what CI would have to provide; `verified`

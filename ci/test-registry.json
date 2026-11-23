@@ -1184,5 +1184,30 @@
     "file": "packages/driver/src/Windows_native_entry_test.cj",
     "executor": "cjpm",
     "member": "packages/driver"
+  },
+  {
+    "file": "packages/chir/src/ModalClosureBox_test.cj",
+    "executor": "cjpm",
+    "member": "packages/chir"
+  },
+  {
+    "file": "packages/codegen/src/LocalLoweringTarget_test.cj",
+    "executor": "cjpm",
+    "member": "packages/codegen"
+  },
+  {
+    "file": "packages/compiler_unittest/src/LocalCaptureSource_test.cj",
+    "executor": "cjpm",
+    "member": "packages/compiler_unittest"
+  },
+  {
+    "file": "packages/driver/src/Wasm_std_link_closure_test.cj",
+    "executor": "cjpm",
+    "member": "packages/driver"
+  },
+  {
+    "file": "packages/frontend/src/LocalLoweringDiagnostics_test.cj",
+    "executor": "cjpm",
+    "member": "packages/frontend"
   }
 ]
