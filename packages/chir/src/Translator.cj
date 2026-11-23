@@ -5602,23 +5602,26 @@ public class Translator {
             }
             idx--
         }
-        if (blockGroupStack.isEmpty()) {
-            return None
-        }
-        let group = blockGroupStack[blockGroupStack.size - 1]
-        if (let Some(fn) <- group.GetOwnerFunc()) {
-            if (let Some(returnValue) <- fn.GetReturnValue()) {
-                return Some(returnValue)
+        // Upstream GetReturnValueFromBlockGroup (TranslateReturnExpr.cpp:40-53): a block group owned by
+        // anything but a function or a lambda (e.g. an `exclave { }` body) returns through the enclosing
+        // one, so walk outwards instead of dropping the store of the returned value.
+        var level = blockGroupStack.size - 1
+        while (level >= 0) {
+            let group = blockGroupStack[level]
+            if (let Some(fn) <- group.GetOwnerFunc()) {
+                if (let Some(returnValue) <- fn.GetReturnValue()) {
+                    return Some(returnValue)
+                }
+                return None
             }
-            return None
-        }
-        if (let Some(owner) <- group.GetOwnerExpression()) {
+            let owner = if (let Some(o) <- group.GetOwnerExpression()) { o } else { return None }
             if (let Some(lambda) <- (owner as Lambda)) {
                 if (let Some(returnValue) <- lambda.GetReturnValue()) {
                     return Some(returnValue)
                 }
                 return None
             }
+            level--
         }
         return None
     }
