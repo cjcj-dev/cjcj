@@ -23,6 +23,9 @@ exclave func collect<R>(src: Array<R> @local!, transform: ((R @local!) -> Option
 
 main(): Int64 {
     let src: Array<Item> @local! = [Item() @local!, Item() @local!, Item() @local!]
-    let n = collect<Item>(src, { s: Item @local! => Some(s) })
+    // The parameter is an external local and `Some(s)` builds the @local! result, so the lambda
+    // returns it through an exclave (upstream TypeCheckModal.cpp IsExternalLocal rule 1/2,
+    // CheckCallExpr, CheckReturnModalType); neg_match_fn_plain_lambda keeps the plain body.
+    let n = collect<Item>(src, { s: Item @local! => exclave { Some(s) } })
     if (n == 3) { 0 } else { 1 }
 }

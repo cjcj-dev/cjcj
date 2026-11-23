@@ -10,7 +10,8 @@
 # (std.unittest entry_main.cj:60, testmacro instrumentation.cj:697, macro_state.cj:37); a @local! pipeline
 # result still cannot read a plain-receiver property.
 # A class constructor whose written body is one `exclave { ... }` is accepted beside the implicit
-# `super()`; a lambda parameter may carry `@local!` (ArrayList.filterMap shape, match_fn_result).
+# `super()`; a lambda parameter may carry `@local!` (ArrayList.filterMap shape, match_fn_result); a
+# non-exclave lambda body cannot return `Some(param)` as its @local! result (neg_match_fn_plain_lambda).
 # String literals in a @local! array literal take the array's mode; a plain String value does not.
 set -u
 cjc=$1; out=$2; here=$(cd "$(dirname "$0")" && pwd); mkdir "$out" || exit 2
@@ -46,4 +47,5 @@ check exclave_class_ctor 0 ""
 check neg_class_ctor_stmt 1 "constructor body enclosed in exclave"
 check array_lit_local_strings 0 ""
 check neg_array_lit_plain_var 1 "mismatched types"
+check neg_match_fn_plain_lambda 1 "an internal local argument|an external local return value"
 exit $fail
