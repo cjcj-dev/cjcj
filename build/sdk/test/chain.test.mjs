@@ -62,3 +62,19 @@ test('std-free view control arm: a generator without a target std is refused and
   assert.throws(() => stdFreeView(from, to, TUPLE), /^Error: STD_VIEW_NOTHING_REMOVED /);
   assert.equal(fs.existsSync(to) || fs.existsSync(`${to}.partial`), false);
 });
+
+test('fresh std build tree: only the git-ignored stdlib/build output is removed; an unignored tree is refused', async () => {
+  const {spawnSync} = await import('node:child_process');
+  const {freshStdBuildTree} = await import('../bootstrap.mjs');
+  const repo = tmp(), git = (...a) => spawnSync('git', ['-C', repo, ...a], {encoding: 'utf8'});
+  git('init', '-q');
+  fs.mkdirSync(path.join(repo, 'stdlib/build/build'), {recursive: true});
+  fs.writeFileSync(path.join(repo, 'stdlib/build/build/stale.o'), 'c1');
+  fs.writeFileSync(path.join(repo, 'stdlib/keep.cj'), 'src');
+  assert.throws(() => freshStdBuildTree(repo), /^Error: STD_BUILD_TREE_NOT_IGNORED /);
+  assert.ok(fs.existsSync(path.join(repo, 'stdlib/build/build/stale.o')));
+  fs.writeFileSync(path.join(repo, 'stdlib/.gitignore'), 'build\n');
+  freshStdBuildTree(repo);
+  assert.equal(fs.existsSync(path.join(repo, 'stdlib/build')), false);
+  assert.ok(fs.existsSync(path.join(repo, 'stdlib/keep.cj')));
+});

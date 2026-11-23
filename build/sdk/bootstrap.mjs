@@ -97,6 +97,17 @@ export function stdFreeView(from, to, tuple) {
 }
 
 
+// Every std of the chain is built from the same source checkout, whose stdlib/build tree (git-ignored
+// build output) would otherwise let ninja keep objects compiled by the previous step's compiler. The
+// H1 chain gets this from one checkout per std step; here each std step starts from an empty tree.
+export function freshStdBuildTree(runtimeSource) {
+  const tree = path.join(runtimeSource, 'stdlib', 'build');
+  const ignored = spawnSync('git', ['-C', runtimeSource, 'check-ignore', '-q', 'stdlib/build/build'], {encoding: 'utf8'});
+  if (ignored.status !== 0) throw new Error(`STD_BUILD_TREE_NOT_IGNORED ${tree}`);
+  fs.rmSync(tree, {recursive: true, force: true});
+  return tree;
+}
+
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const git = (dir, ...argv) => {
@@ -188,6 +199,7 @@ export async function runBootstrap({config, runner, cli}) {
       const view = stdFreeView(step.from, step.output, tuple);
       if (fs.existsSync(`${step.output}/${core}`) || !fs.existsSync(`${step.output}/.compiler-exec`)) throw new Error(`STD_VIEW_LAYOUT ${view.from}`);
     } else {
+      if (!fs.existsSync(`${step.output}/PROVENANCE.txt`)) freshStdBuildTree(src.runtime);
       if (!fs.existsSync(`${step.output}/PROVENANCE.txt`)) runner.run(step.id, [node, st, '--kind', 'std', '--source', src.runtime, '--commit', k.runtime,
         '--sdk', step.sdk, '--runtime', config.runtimeInstall, '--output', step.output, '--compiler-runtime', 'target', '--build-type', 'release',
         '--std-dependencies', JSON.stringify(deps.std), ...stdProducerArgs(tuple, {localModeApi: config.localModeApi === true}), ...stdArgs], {cwd: work});
