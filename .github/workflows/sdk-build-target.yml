@@ -180,7 +180,7 @@ jobs:
   fixed-llvm-plan:
     name: Select native LLVM tools
     needs: plan
-    if: always() && (inputs.llvm_tools_only || (needs.plan.result == 'success' && inputs.native_runtime_artifact == ''))
+    if: "!cancelled() && (inputs.llvm_tools_only || (needs.plan.result == 'success' && inputs.native_runtime_artifact == ''))"
     permissions:
       contents: read
     runs-on: ubuntu-24.04
@@ -205,7 +205,7 @@ jobs:
   fixed-llvm:
     name: Build native LLVM tools / ${{ matrix.platform }}
     needs: fixed-llvm-plan
-    if: always() && needs.fixed-llvm-plan.result == 'success'
+    if: "!cancelled() && needs.fixed-llvm-plan.result == 'success'"
     permissions:
       contents: read
     timeout-minutes: ${{ matrix.platform == 'windows_x86_64' && 350 || 120 }}

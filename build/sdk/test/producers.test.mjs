@@ -125,3 +125,13 @@ test('control arm: a local uses points at a deleted workflow', () => {
     fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('./.github/workflows/sdk-build-target.yml', './.github/workflows/build-llvm-tools.yml')); }),
     /SURFACE_USES ci\.yml \.\/\.github\/workflows\/build-llvm-tools\.yml/);
 });
+
+test('fixed-llvm-plan and fixed-llvm use !cancelled() and not always()', () => {
+  const jobs = loadWorkflows().source.jobs;
+  const bad = [];
+  for (const name of ['fixed-llvm-plan', 'fixed-llvm']) {
+    const cond = String(jobs[name]?.if ?? '');
+    if (!cond.includes('!cancelled()') || cond.includes('always()')) bad.push(`${name} if=${cond}`);
+  }
+  assert.deepEqual(bad, [], `LLVM_CANCEL_IF ${bad.join(' || ')}`);
+});
