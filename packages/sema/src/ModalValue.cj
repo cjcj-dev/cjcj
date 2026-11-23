@@ -32,7 +32,7 @@ public func BindingResultMode(tm: TypeManager, value: Expr, receiver: ASTMode): 
     if (!results.isEmpty()) {
         return JoinResultModes(tm, results, { e => BindingResultMode(tm, e, receiver) })
     }
-    return CallSiteMode(value, receiver, HashSet<Decl>())
+    return CallSiteMode(tm, value, receiver, HashSet<Decl>())
 }
 
 public func BindPatternMode(pattern: Pattern, mode: ASTMode): Unit {

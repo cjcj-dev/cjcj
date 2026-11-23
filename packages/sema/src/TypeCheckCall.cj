@@ -1292,20 +1292,28 @@ private func FilterOverriden(typeManager: TypeManager, candidates: ArrayList<Fun
 
 // Type checking selects an overload before the whole-body lifetime walk. Inspect the
 // declared slot or a local initializer without changing the shared semantic data type.
-public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Option<ASTMode> {
+public func CallSiteMode(typeManager: TypeManager, expr: Expr, receiver: ASTMode,
+    seen: HashSet<Decl>): Option<ASTMode> {
+    if (let Some(array) <- (expr as ArrayLit)) {
+        if (let Some(expected) <- array.expectedLocalMode) { return expected }
+        return CallSiteAggregateMode(typeManager, array.children, receiver, seen)
+    }
+    if (let Some(tuple) <- (expr as TupleLit)) {
+        return CallSiteAggregateMode(typeManager, tuple.children, receiver, seen)
+    }
     if (let Some(paren) <- (expr as ParenExpr)) {
-        if (let Some(inner) <- paren.expr) { return CallSiteMode(inner, receiver, seen) }
+        if (let Some(inner) <- paren.expr) { return CallSiteMode(typeManager, inner, receiver, seen) }
     }
     if (let Some(block) <- (expr as Block)) {
         if ((let Some(last) <- block.GetLastExprOrDecl()) && (let Some(value) <- (last as Expr))) {
-            return CallSiteMode(value, receiver, seen)
+            return CallSiteMode(typeManager, value, receiver, seen)
         }
     }
     if (let Some(index) <- (expr as SubscriptExpr)) {
         if (index.isTupleAccess || index.IsVArrayAccess()) {
-            if (let Some(base) <- index.baseExpr) { return CallSiteMode(base, receiver, seen) }
+            if (let Some(base) <- index.baseExpr) { return CallSiteMode(typeManager, base, receiver, seen) }
         }
-        if (let Some(lowered) <- index.desugarExpr) { return CallSiteMode(lowered, receiver, seen) }
+        if (let Some(lowered) <- index.desugarExpr) { return CallSiteMode(typeManager, lowered, receiver, seen) }
         if ((let Some(target) <- index.GetTarget()) && (let Some(fd) <- (target as FuncDecl)) &&
             (let Some(ty) <- fd.GetTy()) && (let Some(ft) <- (ty as FuncTy))) { return ft.retMode }
     }
@@ -1326,7 +1334,7 @@ public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Op
         if (let Some(pd) <- (target as PropDecl)) { return PropertyMode(pd) }
         if (target is VarDecl && IsInstanceMember(target) && !HasLocalModifier(target, TokenKind.DEMODE)) {
             let base = ma.baseExpr ?? return None;
-            return CallSiteMode(base, receiver, seen)
+            return CallSiteMode(typeManager, base, receiver, seen)
         }
         return target.resolvedMode
     }
@@ -1345,7 +1353,9 @@ public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Op
             if (let Some(initValue) <- vd.initializer) {
                 if (seen.contains(vd)) { return None }
                 seen.add(vd)
-                return CallSiteMode(initValue, receiver, seen)
+                let mode = CallSiteMode(typeManager, initValue, receiver, seen)
+                seen.remove(vd)
+                return mode
             }
         }
         return target.resolvedMode
@@ -1355,9 +1365,9 @@ public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Op
         // (throw/return, type Nothing) contributes no value, so the result has the mode of `a`.
         if (be.op == TokenKind.COALESCING) {
             let left = be.leftExpr ?? return None;
-            let leftMode = CallSiteMode(left, receiver, seen)
+            let leftMode = CallSiteMode(typeManager, left, receiver, seen)
             let rightMode = if (let Some(right) <- be.rightExpr) {
-                if ((let Some(rt) <- right.GetTy()) && rt.IsNothing()) { leftMode } else { CallSiteMode(right, receiver, seen) }
+                if ((let Some(rt) <- right.GetTy()) && rt.IsNothing()) { leftMode } else { CallSiteMode(typeManager, right, receiver, seen) }
             } else { leftMode }
             if ((let Some(l) <- leftMode) && (let Some(r) <- rightMode) && l == r) { return l }
             return None
@@ -1382,21 +1392,37 @@ public func CallSiteMode(expr: Expr, receiver: ASTMode, seen: HashSet<Decl>): Op
         var joined: Option<ASTMode> = None
         for (branch in branches) {
             if ((let Some(bt) <- branch.GetTy()) && bt.IsNothing()) { continue }
-            let m = CallSiteMode(branch, receiver, seen) ?? return None;
+            let m = CallSiteMode(typeManager, branch, receiver, seen) ?? return None;
             joined = if (let Some(j) <- joined) { if (j == m) { j } else { ASTMode.HALF } } else { m }
         }
         return joined
     }
     // `x as T` is a view of x itself (socket_util.cj:77 `(socketAddress as IPSocketAddress) ?? return`).
     if (let Some(ae) <- (expr as AsExpr)) {
-        if (let Some(inner) <- ae.leftExpr) { return CallSiteMode(inner, receiver, seen) }
+        if (let Some(inner) <- ae.leftExpr) { return CallSiteMode(typeManager, inner, receiver, seen) }
     }
     if (expr is LitConstExpr || expr.resolvedMode != ASTMode.NOT) { return expr.resolvedMode }
     // Sugar lowered before or during type checking (a trailing closure, `|>`/`~>`, `quote(...)`,
     // `?.`) has the mode of its lowering: std.unittest entry_main.cj:48 `Framework.launch(...) { }`,
     // testmacro instrumentation.cj:690 `... |> collectHashSet`, macro_state.cj:23 `quote(@Attribute[)`.
-    if (let Some(lowered) <- expr.desugarExpr) { return CallSiteMode(lowered, receiver, seen) }
+    if (let Some(lowered) <- expr.desugarExpr) { return CallSiteMode(typeManager, lowered, receiver, seen) }
     return None
+}
+
+// Use the same join as the lifetime walk, but do not guess a region for a
+// value whose mode is still unknown during type checking.
+private func CallSiteAggregateMode(typeManager: TypeManager, values: ArrayList<Expr>, receiver: ASTMode,
+    seen: HashSet<Decl>): Option<ASTMode> {
+    for (value in values) {
+        if (value.GetTy().isNone()) { return None }
+    }
+    var allKnown = true
+    let joined = JoinResultModes(typeManager, values, { value =>
+        let mode = CallSiteMode(typeManager, value, receiver, seen)
+        allKnown = allKnown && mode.isSome()
+        mode
+    })
+    return if (allKnown) { Some(joined) } else { None }
 }
 
 private func ModeArgumentIndex(fd: FuncDecl, call: CallExpr, i: Int64): Int64 {
@@ -1430,7 +1456,7 @@ private func PermitsModalCall(typeManager: TypeManager, unit: FunctionMatchingUn
         var actual: Option<ASTMode> = Some(receiver)
         var receiverTy = fd.outerDecl.flatMap({ d => d.GetTy() })
         if ((let Some(ma) <- (base as MemberAccess)) && (let Some(obj) <- ma.baseExpr)) {
-            actual = CallSiteMode(obj, receiver, HashSet<Decl>())
+            actual = CallSiteMode(typeManager, obj, receiver, HashSet<Decl>())
             receiverTy = obj.GetTy()
         }
         if ((let Some(m) <- actual) && !m.IsSubMode(GetReceiverMode(fd)) &&
@@ -1447,7 +1473,7 @@ private func PermitsModalCall(typeManager: TypeManager, unit: FunctionMatchingUn
             }
             let slot = LocalParameterMode(fd, ModeArgumentIndex(fd, call, i))
             let actual = if (i < unit.argumentModes.size && unit.argumentModes[i].isSome()) { unit.argumentModes[i] }
-                else { CallSiteMode(value, receiver, HashSet<Decl>()) }
+                else { CallSiteMode(typeManager, value, receiver, HashSet<Decl>()) }
             if ((let Some(m) <- actual) && !m.IsSubMode(slot)) { return false }
         }
     }
@@ -1476,13 +1502,13 @@ private func MoreSpecificModes(left: FuncDecl, right: FuncDecl, ce: CallExpr): B
 
 // Match the implicit or explicit receiver before comparing the ordinary parameter list.
 // A Copyable argument does not make a less specific receiver as good as an exact one.
-private func FilterReceiverModes(call: CallExpr, enclosing: ASTMode,
+private func FilterReceiverModes(typeManager: TypeManager, call: CallExpr, enclosing: ASTMode,
     candidates: ArrayList<FunctionMatchingUnit>, marks: ArrayList<Bool>): Unit {
     let base = call.baseFunc ?? return;
     if (!(base is NameReferenceExpr)) { return }
     var actual: Option<ASTMode> = Some(enclosing)
     if ((let Some(member) <- (base as MemberAccess)) && (let Some(obj) <- member.baseExpr)) {
-        actual = CallSiteMode(obj, enclosing, HashSet<Decl>())
+        actual = CallSiteMode(typeManager, obj, enclosing, HashSet<Decl>())
     }
     let m = actual ?? ASTMode.NOT
     var exact = false
@@ -1551,7 +1577,7 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
         for (i in 0..candidates.size) {
             if (targetMark[i]) { targetMark[i] = PermitsModalCall(typeManager, candidates[i], ce, receiver) }
         }
-        FilterReceiverModes(ce, receiver, candidates, targetMark)
+        FilterReceiverModes(typeManager, ce, receiver, candidates, targetMark)
     }
     var idx: Int64 = 0
     while (idx < candidates.size) {

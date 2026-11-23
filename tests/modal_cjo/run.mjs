@@ -92,5 +92,33 @@ typeUse('aliasPlain', 'aliassigs.Plain', keep('Plain'), []);
 typeUse('aliasUnused', 'aliassigs.Callback', 'public func keep(): Int64 { 0 }', []);
 typeUse('aliasEnabled', 'aliassigs.Callback', keep('Callback'), enabled);
 typeUse('aliasNestedEnabled', 'aliassigs.Visitor', keep('Visitor'), enabled);
+// A tuple projection inherits the mode of its tuple, including when the projected
+// receiver and its overloads come from a conditional interface in a different package.
+const aggregateSource = fileURLToPath(new URL('./aggregate_receivers.cj', import.meta.url));
+function aggregateConsumer(name, decl, producer, options, diag) {
+  const file = path.join(root, name + '.cj');
+  fs.writeFileSync(file, 'package client\nimport modalaggregatereceivers.CjoAggregateBag\n' + decl + '\n');
+  compile(name, file, [...options, '--import-path', producer], diag);
+}
+for (const api of ['off', 'on']) {
+  const producer = compile('aggregateProducer-' + api, aggregateSource,
+    [...enabled, '--cfg', 'local_mode_api=' + api], undefined, 'modalaggregatereceivers');
+  for (const [mode, options] of [['default', []], ['local', enabled]]) {
+    const label = api + '-' + mode;
+    const projected = 'let bag = CjoAggregateBag()\nlet pair = (bag, bag)\n';
+    aggregateConsumer('aggregateSize-' + label,
+      'public func check(): Int64 {\n' + projected + 'pair[0].size\n}', producer, options);
+    aggregateConsumer('aggregateMethod-' + label,
+      'public func check(): Bool {\n' + projected + 'pair[0].isEmpty()\n}', producer, options);
+  }
+  // A known local receiver still requires a compatible getter, even for an Int64 result.
+  aggregateConsumer('knownLocalSize-' + api, 'public func check(bag: CjoAggregateBag @local!): Int64 { bag.size }',
+    producer, enabled, api === 'off' ? /'size' is not a member/ : undefined);
+  if (api === 'on') {
+    aggregateConsumer('aggregateLocalCtor', 'public func check(): Int64 { let bag = CjoAggregateBag() @local!\nbag.size }',
+      producer, enabled);
+  }
+}
+
 assert.deepEqual(failures, []);
 console.log('CJO cross-package signature controls passed');

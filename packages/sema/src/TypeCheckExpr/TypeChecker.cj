@@ -7741,7 +7741,7 @@ extend TypeChecker {
         if (let Some(e) <- value) {
             let receiver = GetCurFuncBody(ctx, e.scopeName).flatMap({ b => b.funcDecl })
                 .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
-            return CallSiteMode(e, receiver, HashSet<Decl>())
+            return CallSiteMode(impl.typeManager, e, receiver, HashSet<Decl>())
         }
         return None
     }
@@ -8412,7 +8412,7 @@ extend TypeChecker {
         if (!ae.isCompound) {
             let receiver = GetCurFuncBody(ctx, ae.scopeName).flatMap({ b => b.funcDecl })
                 .map({ fd => GetReceiverMode(fd) }) ?? ASTMode.NOT
-            if (let Some(mode) <- CallSiteMode(leftExpr, receiver, HashSet<Decl>())) {
+            if (let Some(mode) <- CallSiteMode(impl.typeManager, leftExpr, receiver, HashSet<Decl>())) {
                 SetExpectedResultMode(rightExpr, mode)
             }
         }
