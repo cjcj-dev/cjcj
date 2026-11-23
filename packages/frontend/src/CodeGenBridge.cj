@@ -329,7 +329,10 @@ private class ToCHIR {
     // CHIR.cpp:1318-1356: translation owns its phase recorder.
     private func TranslateToCHIR(): Bool {
         try (recorder = ProfileRecorder("CHIR", "AST to CHIR Translation")) {
-            let chirType = CHIRType(builder, CHIRTypeCache(), localSlots: instance.invocation.globalOptions.IsLocalModeAnalysis())
+            // CHIRType.cpp:271-297 @63bf237b translates every AST::ModalTy without consulting the local-mode
+            // option. Deserialized std declarations built with --local-mode-api keep their modal slots even
+            // when this package does not enable local mode; Sema still rejects user-written modes.
+            let chirType = CHIRType(builder, CHIRTypeCache(), localSlots: true)
             let ast2chir = FaithfulAST2CHIR(builder, chirType, instance.GetSourceManager(),
                 gim: instance.gim,
                 importedPkgs: instance.importManager.getOrThrow().GetAllImportedPackages(),

@@ -10370,11 +10370,11 @@ public class Translator {
                 baseValGenericTy.GetInstMap(instMap, builder)
             }
             var targetBaseTy = chirTy.TranslateType(targetBaseAstTy.getOrThrow())
-            if (opts.IsLocalModeAnalysis()) {
-                // An unqualified member uses the implicit receiver; an explicit projection uses its base.
-                let mode = if (base.isNone()) { strippedBaseValueTy.GetModalInfo() } else { targetBaseMode }
-                targetBaseTy = builder.WithModal(targetBaseTy, mode)
-            }
+            // TranslateMemberAccess.cpp:506,528 @63bf237b: the target base keeps its mode regardless of the
+            // local-mode option. An unqualified member uses the implicit receiver; an explicit projection
+            // uses its base.
+            let mode = if (base.isNone()) { strippedBaseValueTy.GetModalInfo() } else { targetBaseMode }
+            targetBaseTy = builder.WithModal(targetBaseTy, mode)
             if (targetBaseTy.GetRefDims() > baseValRefDims) {
                 baseValRefDims = targetBaseTy.GetRefDims()
             }
