@@ -4247,8 +4247,25 @@ public class IRBuilder2 <: Resource {
         return call
     }
 
+    // The callee name of a direct call instruction, or "" for any other value.
+    private func DirectCalleeName(value: LLVMValueRef): String {
+        if (value.isNull() || unsafe { LLVMIsAInstruction(value) }.isNull() ||
+            unsafe { LLVMGetInstructionOpcode(value) } != 34) { return "" } // 34: LLVMCall
+        let callee = unsafe { LLVMGetCalledValue(value) }
+        if (callee.isNull()) { return "" }
+        return LLVMCStringToString(unsafe { LLVMGetValueName(callee) }) ?? ""
+    }
+
     public func CallGCReadGeneric(dest: LLVMValueRef, baseObject: LLVMValueRef, source: LLVMValueRef,
         size: LLVMValueRef): LLVMValueRef {
+        // A value read out of a local generic box is local as well, although its CHIR type may have lost the mode
+        // (the (K, V) element of an `Array<(K, V)> @local!` in generic code). Its fresh destination box joins the
+        // region instead of the heap, where the runtime escape check (StoreMaybeLocalRef) rejects the local
+        // references the read copies (modal_std_collection forin_tuple_local).
+        if (DirectCalleeName(dest) == ALLOCA_GENERIC_INTRINSIC_NAME &&
+            DirectCalleeName(baseObject) == "llvm.cj.alloca.local.generic") {
+            unsafe { LLVMSetOperand(dest, 2u32, LLVMGetCalledValue(baseObject)) } // 2: callee after (ti, size)
+        }
         let args = ArrayList<LLVMValueRef>()
         args.add(dest)
         args.add(CreatePointerCast(baseObject, CGType.GetRefType(GetLLVMContext()), name: "gcread.generic.base"))
