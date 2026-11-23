@@ -349,10 +349,17 @@ public func DesugarStrInterpolationExpr(typeManager: TypeManager, pkg: Package, 
         }
     }
 
-    let toStringDecls = if (let Some(file) <- litConstExpr.curFile) {
+    var toStringDecls = if (let Some(file) <- litConstExpr.curFile) {
         MatchToStringImpl(typeManager, pkg, file, sbTy, context: context)
     } else {
         ArrayList<Decl>()
+    }
+    // The local-mode std.core StringBuilder declares both `toString()` and
+    // `exclave toString(this @local?)`; the builder temp is a plain heap value,
+    // so keep the plain-receiver overload (same rule as the interpolated parts).
+    if (toStringDecls.size > 1) {
+        let filtered = FilterToStringImpl(toStringDecls, ASTMode.NOT)
+        if (!filtered.isEmpty()) { toStringDecls = filtered }
     }
     if (toStringDecls.size == 1) {
         let toStringDecl = toStringDecls[0]
