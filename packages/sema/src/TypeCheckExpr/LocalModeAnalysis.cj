@@ -126,7 +126,7 @@ class LocalModeAnalysis {
                 DiagMismatchedTypesWithFoundTy(diag, fd, "a concrete local function signature", "exclave")
             }
             if (!whole && fd.TestAttr(Attribute.CONSTRUCTOR) && GetReceiverMode(fd) != ASTMode.NOT &&
-                (let Some(block) <- body.body) && (block.body.size != 1 || !(block.body[0] is ExclaveExpr))) {
+                (let Some(block) <- body.body) && !IsExclaveOnlyBody(block)) {
                 DiagMismatchedTypesWithFoundTy(diag, fd, "constructor body enclosed in exclave", fd.identifier.Val())
             }
         }
@@ -145,6 +145,18 @@ class LocalModeAnalysis {
         }
         CheckSlot(body, ft.retTy, ft.retMode)
         if (let Some(ret) <- body.retType) { ret.resolvedMode = ft.retMode }
+    }
+
+    // The written body is one `exclave { ... }`; nodes the compiler adds (the implicit `super()`
+    // of a class constructor) are not part of it.
+    private func IsExclaveOnlyBody(block: Block): Bool {
+        var exclaves = 0
+        for (node in block.body) {
+            if (node.TestAttr(Attribute.COMPILER_ADD)) { continue }
+            if (!(node is ExclaveExpr)) { return false }
+            exclaves++
+        }
+        return exclaves == 1
     }
 
     private func Check(value: Node, expected: ASTMode): Unit {
