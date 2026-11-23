@@ -19,7 +19,19 @@ import {execute} from '../../../../ci/bootstrap/sdk-io.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
-export const PREPARE_LLVM_TARGETS = Object.freeze(['LLVM', 'llc', 'llvm-as', 'llvm-dis', 'llvm-nm', 'lldb']);
+// clang-resource-headers populates <build>/lib/clang/<version>/include, the
+// resource tree N carries at third_party/llvm/lib/clang for its native clang
+// (ci/bootstrap/sdk-targets.mjs installation copies 'N clang resources').
+export const PREPARE_LLVM_TARGETS = Object.freeze(['LLVM', 'llc', 'llvm-as', 'llvm-dis', 'llvm-nm', 'lldb',
+  'clang-resource-headers']);
+export const PREPARE_CLANG_RESOURCES = 'clang-resources';
+// The resource tree is lib/clang/<version>/include with the compiler builtin headers.
+export function clangResourceProblems(root) {
+  const versions = fs.existsSync(root) ? fs.readdirSync(root).filter(name => /^\d+(\.\d+)*$/.test(name)) : [];
+  if (versions.length !== 1) return ['lib/clang must hold exactly one version directory: ' + versions.join(',')];
+  return ['stddef.h', 'stdint.h', 'stdarg.h'].filter(name => !fs.existsSync(path.join(root, versions[0], 'include', name)))
+    .map(name => `lib/clang/${versions[0]}/include/${name} missing`);
+}
 // cjdb is LLDB of the same tree (upstream compiler third_party/cmake/BuildCJDB.cmake
 // enables lldb with CANGJIE_ROOT=<compiler source>); libedit/curses stay off.
 export const PREPARE_LLDB_ARGS = Object.freeze(['-DLLVM_ENABLE_PROJECTS=clang;lldb', '-DLLDB_INCLUDE_TESTS=OFF',
@@ -30,7 +42,14 @@ export const PREPARE_LLDB_ARGS = Object.freeze(['-DLLVM_ENABLE_PROJECTS=clang;ll
 // (sdk-cjdb-python.mjs verifyRelocatedCjdbPython). It is a fixed archive whose
 // prefix is relocatable (bin/python3.11, include/python3.11, lib/libpython3.11.so).
 // The darwin/windows python-versions archives are .pkg/.exe installers, not a
-// prefix; those hosts keep LLDB Python off until a prefix producer exists.
+// prefix. Those hosts use the relocatable install_only CPython 3.11.9 prefix
+// archives of python-build-standalone 20240726 (top directory python/): the
+// Darwin prefix has the Unix layout above; the Windows prefix has python.exe,
+// python311.dll, include/ and libs/python311.lib, which sdk-cjdb-python.mjs
+// pythonConfiguration selects on Windows.
+const PBS = 'https://github.com/astral-sh/python-build-standalone/releases/download/20240726/cpython-3.11.9+20240726-';
+export const PREPARE_PYTHON_WINDOWS_MEMBERS = Object.freeze(['python.exe', 'pythonw.exe', 'python3.dll', 'python311.dll',
+  'vcruntime140.dll', 'vcruntime140_1.dll', 'DLLs', 'Lib', 'include', 'libs', 'LICENSE.txt']);
 export const PREPARE_PYTHON = Object.freeze({
   linux_x86_64: Object.freeze({version: '3.11.9', size: 118991790,
     url: 'https://github.com/actions/python-versions/releases/download/3.11.9-9947079978/python-3.11.9-linux-22.04-x64.tar.gz',
@@ -38,18 +57,31 @@ export const PREPARE_PYTHON = Object.freeze({
   linux_aarch64: Object.freeze({version: '3.11.9', size: 117137740,
     url: 'https://github.com/actions/python-versions/releases/download/3.11.9-9947079978/python-3.11.9-linux-24.04-arm64.tar.gz',
     sha256: '3681d081b289bc53eecacb306442b530c25456dc6268d37ac60c201fa67073be'}),
+  darwin_x86_64: Object.freeze({version: '3.11.9', size: 18164076, url: PBS + 'x86_64-apple-darwin-install_only.tar.gz',
+    sha256: 'dc3174666a30f4c38d04e79a80c3159b4b3aa69597c4676701c8386696811611', prefix: 'python'}),
+  darwin_aarch64: Object.freeze({version: '3.11.9', size: 17789090, url: PBS + 'aarch64-apple-darwin-install_only.tar.gz',
+    sha256: 'cbdac9462bab9671c8e84650e425d3f43b775752a930a2ef954a0d457d5c00c3', prefix: 'python'}),
+  windows_x86_64: Object.freeze({version: '3.11.9', size: 40891838, url: PBS + 'x86_64-pc-windows-msvc-install_only.tar.gz',
+    sha256: 'f694be48bdfec1dace6d69a19906b6083f4dd7c7c61f1138ba520e433e5598f8', prefix: 'python',
+    members: PREPARE_PYTHON_WINDOWS_MEMBERS}),
 });
 export const PREPARE_PYTHON_MEMBERS = Object.freeze(['bin', 'lib', 'include', 'share']);
+export const preparePythonMembers = platform => PREPARE_PYTHON[platform]?.members ?? PREPARE_PYTHON_MEMBERS;
 // With Python on, the same build tree's lldb Python package (target lldb-python,
 // lib/python3.11/site-packages/lldb with its _lldb binding) is what cjdb imports.
 export const PREPARE_LLDB_PYTHON_TARGET = 'lldb-python';
 export const PREPARE_LLDB_PYTHON_PACKAGE = 'lib/python3.11/site-packages/lldb';
-export function lldbPythonArgs(python) {
+// In the build tree LLDB places the package at the selected Python's platlib
+// relative path: Lib/site-packages on Windows. Installed N keeps one location.
+export const lldbPythonBuildPackage = os => os === 'win32' ? 'Lib/site-packages/lldb' : PREPARE_LLDB_PYTHON_PACKAGE;
+export function lldbPythonArgs(python, os) {
   if (!python) return ['-DLLDB_ENABLE_PYTHON=OFF'];
   for (const key of ['executable', 'include', 'library'])
     if (!python[key]) throw new Error('PREPARE_LLDB_PYTHON_SELECTION ' + key);
-  return ['-DLLDB_ENABLE_PYTHON=ON', `-DPython3_EXECUTABLE=${python.executable}`, `-DPython3_INCLUDE_DIR=${python.include}`,
-    `-DPython3_LIBRARY=${python.library}`, '-DLLDB_EMBED_PYTHON_HOME=OFF'];
+  // CMake -D values keep forward slashes on Windows.
+  const value = key => os === 'win32' ? python[key].replace(/\\/g, '/') : python[key];
+  return ['-DLLDB_ENABLE_PYTHON=ON', `-DPython3_EXECUTABLE=${value('executable')}`, `-DPython3_INCLUDE_DIR=${value('include')}`,
+    `-DPython3_LIBRARY=${value('library')}`, '-DLLDB_EMBED_PYTHON_HOME=OFF'];
 }
 export function llvmConfigureArgs({source, build, runtime, sha, jobs, os, compiler, python}) {
   if (!compiler) throw new Error('PREPARE_LLVM_COMPILER_SOURCE');
@@ -62,7 +94,7 @@ export function llvmConfigureArgs({source, build, runtime, sha, jobs, os, compil
     // On Unix llc/llvm-as/llvm-dis link the in-process library itself, so the
     // installed readers load the installed N (sdk-native-input-check.mjs ldd domain).
     '-DBUILD_SHARED_LIBS=OFF', '-DLLVM_BUILD_LLVM_DYLIB=ON', `-DLLVM_LINK_LLVM_DYLIB=${os === 'win32' ? 'OFF' : 'ON'}`,
-    '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', ...PREPARE_LLDB_ARGS, ...lldbPythonArgs(python), `-DCANGJIE_ROOT=${compiler}`,
+    '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', ...PREPARE_LLDB_ARGS, ...lldbPythonArgs(python, os), `-DCANGJIE_ROOT=${compiler}`,
     ...(os === 'win32' ? ['-DLLVM_ENABLE_ZLIB=OFF', '-DLLVM_ENABLE_LIBXML2=OFF'] : []),
     '-DCMAKE_CXX_FLAGS=-include cstdint -include unordered_map -include map -include vector -include string'];
 }
@@ -126,13 +158,17 @@ export function buildPrepareLlvm({platform, sha, out, compiler, python, work = p
     if (!lldbLibraries.length) throw new Error('PREPARE_LLDB_LIBRARY_MISSING');
     fs.mkdirSync(path.join(out, 'lldb-lib'), {recursive: true});
     for (const name of lldbLibraries) fs.copyFileSync(path.join(libDir, name), path.join(out, 'lldb-lib', name));
+    const resources = path.join(build, 'lib', 'clang'), resourceProblems = clangResourceProblems(resources);
+    if (resourceProblems.length) throw new Error('PREPARE_CLANG_RESOURCES ' + resourceProblems.join('; '));
+    fs.cpSync(resources, path.join(out, PREPARE_CLANG_RESOURCES), {recursive: true, verbatimSymlinks: true});
     if (python) {
-      const pkg = path.join(build, PREPARE_LLDB_PYTHON_PACKAGE);
+      const pkg = path.join(build, lldbPythonBuildPackage(native.os));
       if (!fs.existsSync(pkg) || !fs.readdirSync(pkg).some(name => name.startsWith('_lldb')))
-        throw new Error('PREPARE_LLDB_PYTHON_PACKAGE_MISSING ' + PREPARE_LLDB_PYTHON_PACKAGE);
+        throw new Error('PREPARE_LLDB_PYTHON_PACKAGE_MISSING ' + lldbPythonBuildPackage(native.os));
       fs.cpSync(pkg, path.join(out, 'lldb-python/lldb'), {recursive: true, verbatimSymlinks: true});
     }
-    return {platform, sha, library: native.llvmLibrary, tools: ['llc', 'llvm-as', 'llvm-dis'], cjdb: 'bin/lldb' + native.exe, lldbLibraries, build};
+    return {platform, sha, library: native.llvmLibrary, tools: ['llc', 'llvm-as', 'llvm-dis'], cjdb: 'bin/lldb' + native.exe, lldbLibraries,
+      clangResources: PREPARE_CLANG_RESOURCES, build};
   } finally {
     fs.writeFileSync(path.join(out, 'BUILD-COMMANDS.json'), JSON.stringify(records, null, 2) + '\n');
   }
@@ -154,7 +190,13 @@ export async function preparePython({platform, out, download = async (url, file)
   fs.mkdirSync(root, {recursive: true});
   await download(pin.url, archive);
   if (fs.statSync(archive).size !== pin.size || sha256File(archive) !== pin.sha256) throw new Error('PREPARE_PYTHON_ARCHIVE_IDENTITY');
-  const extracted = run('tar', ['-xzf', archive, '-C', root, ...PREPARE_PYTHON_MEMBERS.map(name => './' + name)], {stdio: 'inherit'});
+  const members = preparePythonMembers(platform), top = pin.prefix ?? '.';
+  // The archive and prefix are siblings, so tar sees no drive-letter path; on
+  // Windows the system bsdtar extracts (as prepare_native_inputs.mjs SYSTEM_TAR).
+  const tar = process.platform === 'win32'
+    ? path.join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+  const extracted = run(tar, ['-xzf', path.join('..', path.basename(archive)), ...(pin.prefix ? ['--strip-components=1'] : []),
+    ...members.map(name => top + '/' + name)], {stdio: 'inherit', cwd: root});
   if (extracted.error || extracted.status !== 0) throw new Error('PREPARE_PYTHON_EXTRACT');
   fs.rmSync(archive);
   // The archive's sysconfig LIBDIR names its build prefix; select by the

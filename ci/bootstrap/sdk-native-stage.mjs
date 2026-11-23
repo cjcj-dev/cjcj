@@ -101,6 +101,16 @@ export function h1PackageLinkOptions(text,{platform,source,linkFile,llvmLibraryF
   // Either Darwin shape: nothing of the ELF link survives into ld64.
   if(darwin&&effective.some(token=>token==='--export-dynamic'||token==='-lstdc++'||token.includes('libLLVM-15.so')))
     throw Error('H1_PACKAGE_DARWIN_ELF_REFERENCE');
+  // Either Darwin shape links exactly the Mach-O contract (DARWIN_CJC_LINK with
+  // N's library and directory; the fixed H1 source also links its own runtime
+  // configuration object). Any other token fails closed, whichever shape.
+  if(darwin) {
+    const expected=['runtime_shim/cjselfhost_llvmshim.o','-headerpad_max_install_names','-export_dynamic',link,'-lc++',
+      '-rpath',nativeDirectory,...(fromElf?['runtime_shim/cjc_runtime_config.o']:[])];
+    const sorted=tokens=>[...tokens].sort().join('\n');
+    if(sorted(effective)!==sorted(expected))
+      throw Error('H1_PACKAGE_DARWIN_LINK_SET '+effective.filter(token=>!expected.includes(token)).join(' '));
+  }
   return result;
 }
 // H1's own heap-default object is a link input only where the effective

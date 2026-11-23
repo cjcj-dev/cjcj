@@ -16,7 +16,8 @@ import {spawnSync} from 'node:child_process';
 import {sdkPlatform, stdxChirMembers} from '../../../../ci/bootstrap/sdk-platform.mjs';
 import {readHostToolchainPin} from '../../../../ci/host-toolchain-pin.mjs';
 import {readSourcePins} from '../../../../ci/native-llvm-inputs.mjs';
-import {PREPARE_PYTHON, PREPARE_PYTHON_MEMBERS, PREPARE_LLDB_PYTHON_PACKAGE} from './build_prepare_llvm.mjs';
+import {PREPARE_PYTHON, preparePythonMembers, PREPARE_LLDB_PYTHON_PACKAGE, PREPARE_CLANG_RESOURCES,
+  clangResourceProblems} from './build_prepare_llvm.mjs';
 import {workflowSourceSelection} from '../srcbuild/source-selection.mjs';
 import {baseSdkDownload} from '../../../lib/release-component-provenance.mjs';
 import {allTargets, getTarget} from '../../../lib/targets.mjs';
@@ -122,6 +123,9 @@ export function installLlvm({root, target, from, commits, producer, shimCommit})
     tools[rel] = copyMember(from, `bin/${tool}${native.exe}`, install, rel);
     if (native.os !== 'win32') fs.chmodSync(path.join(install, rel), 0o755);
   }
+  // The same build's clang resource tree, at the location stage0-run's
+  // installation recipe copies as 'N clang resources' (sdk-targets.mjs).
+  const clangResources = installClangResources({from, install});
   // The compiler-owned LLVM shim object of this LLVM build (build_prepare_llvm.mjs
   // shim) at the path ci/bootstrap/native-shim-inputs.mjs reads, with its record.
   const shimRecordFile = path.join(from, 'fixed-llc/SHIM-BUILD.json');
@@ -150,7 +154,7 @@ export function installLlvm({root, target, from, commits, producer, shimCommit})
   const python = installPython({from, install, platform, lldbNames});
   const facts = {schema: 'cjcj-prepare-llvm-v1', platform, commits: {...commits, shim: shimCommit},
     configuration: {producer, library: file, targets: 'X86;ARM;AArch64', tools: PREPARE_LLVM_TOOLS, projects: 'clang;lldb'},
-    llvmLibrary: {file, sha256: row.sha256}, tools,
+    llvmLibrary: {file, sha256: row.sha256}, tools, clangResources,
     nativeShim: {source: {commit: shimCommit, file: 'runtime_shim/cjselfhost_llvmshim.cpp'},
       compiler: {commit: commits.compiler, schema: 'schema/CjoFormat.fbs'}, llvm: {commit: commits.llvm},
       object: {path: PREPARE_SHIM_OBJECT, ...shim}, symbols: shimRecord.symbols,
@@ -159,6 +163,26 @@ export function installLlvm({root, target, from, commits, producer, shimCommit})
     ...python};
   fs.writeFileSync(path.join(install, 'BUILD-INPUTS.json'), JSON.stringify(facts, null, 2) + '\n');
   return facts;
+}
+export const PREPARE_CLANG_RESOURCE_DIR = 'third_party/llvm/lib/clang';
+function installClangResources({from, install}) {
+  const source = path.join(from, PREPARE_CLANG_RESOURCES);
+  if (!fs.existsSync(source)) throw new Error('NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING ' + PREPARE_CLANG_RESOURCES);
+  const problems = clangResourceProblems(source);
+  if (problems.length) throw new Error('PREPARE_CLANG_RESOURCES ' + problems.join('; '));
+  const destination = path.join(install, PREPARE_CLANG_RESOURCE_DIR);
+  fs.cpSync(source, destination, {recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false});
+  const files = {};
+  const walk = rel => {
+    for (const entry of fs.readdirSync(path.join(destination, rel), {withFileTypes: true})) {
+      const child = rel ? rel + '/' + entry.name : entry.name;
+      if (entry.isDirectory()) walk(child);
+      else if (entry.isFile()) files[child] = sha256(path.join(destination, child));
+      else throw new Error('PREPARE_CLANG_RESOURCES non-regular member ' + child);
+    }
+  };
+  walk('');
+  return {path: PREPARE_CLANG_RESOURCE_DIR, version: fs.readdirSync(destination)[0], files};
 }
 export const PREPARE_PYTHON_RECORD = 'third_party/llvm/PYTHON-BUILD-INPUTS.json';
 function installPython({from, install, platform, lldbNames}) {
@@ -176,7 +200,7 @@ function installPython({from, install, platform, lldbNames}) {
   for (const key of ['executable', 'include', 'library', 'suffix'])
     if (!configured.selected?.[key] || !configured.actual?.[key]) throw new Error('PREPARE_PYTHON_CONFIGURED ' + key);
   const nativeRoot = path.join(install, 'third_party/llvm');
-  for (const name of PREPARE_PYTHON_MEMBERS) {
+  for (const name of preparePythonMembers(platform)) {
     const source = path.join(from, 'python', name);
     if (fs.existsSync(source)) fs.cpSync(source, path.join(nativeRoot, name), {recursive: true, verbatimSymlinks: true,
       errorOnExist: true, force: false});
@@ -192,7 +216,12 @@ function installPython({from, install, platform, lldbNames}) {
   fs.cpSync(pkg, installedPackage, {recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false});
   const binding = fs.readdirSync(installedPackage).find(name => name.startsWith('_lldb'));
   const real = binding && fs.existsSync(path.join(installedPackage, binding)) && fs.realpathSync(path.join(installedPackage, binding));
-  if (!real || !real.startsWith(fs.realpathSync(nativeRoot) + path.sep) || !lldbNames.includes(path.basename(real)))
+  // Unix: _lldb links to the same build's liblldb. Windows LLDB copies liblldb.dll
+  // to _lldb*.pyd, so there the binding must be that library byte for byte.
+  const sameLibrary = real && (sdkPlatform(platform).os === 'win32'
+    ? lldbNames.some(name => sha256(path.join(from, 'lldb-lib', name)) === sha256(real))
+    : lldbNames.includes(path.basename(real)));
+  if (!real || !real.startsWith(fs.realpathSync(nativeRoot) + path.sep) || !sameLibrary)
     throw new Error('PREPARE_LLDB_PYTHON_BINDING ' + (binding || 'missing'));
   fs.copyFileSync(record, path.join(install, PREPARE_PYTHON_RECORD));
   return {python: {configured}, pythonInstallationInput: {record: PREPARE_PYTHON_RECORD, sha256: sha256(path.join(install, PREPARE_PYTHON_RECORD))}};

@@ -15,6 +15,7 @@ import {promisify, isDeepStrictEqual} from 'node:util';
 import {randomUUID} from 'node:crypto';
 import {atomicJson, readJson, privateRoot, fileDigest} from './sdk-flow.mjs';
 import {FIXED_INPUTS,backendArtifactPath} from './sdk-targets.mjs';
+import {h1HeapDefaultsBuild} from './sdk-native-stage.mjs';
 import {sdkPlatform,stdxChirMembers} from './sdk-platform.mjs';
 import {javaInteropInput} from './sdk-java-interop.mjs';
 import {stage2Input} from './sdk-stage2-input.mjs';
@@ -126,6 +127,9 @@ export async function installedFinalStd(supplied, input) {
   }
   return {install, commands};
 }
+const MACRO_SOURCE='packages/macro/src/InvokeUtil.cj';
+// Git blob of MACRO_SOURCE at FIXED_INPUTS.h1 (8390179).
+export const FIXED_H1_MACRO_BLOB='2d51c6f26491adc07fed754bc94b64ca8a7c8430';
 // Check source compatibility before opening installations, and again when a
 // saved build graph is consumed. Ordinary CJPM has no H1 execution node.
 async function validateSourceTrees(input, env) {
@@ -141,7 +145,17 @@ async function validateSourceTrees(input, env) {
     // installed compiler still must satisfy the current macro source contract;
     // normal bootstrap and historical C2 retain their H1 compatibility check.
     if(name==='compiler'||name==='h1'&&input.stage2?.mode!=='ordinary-cjpm') {
-      const {stdout}=await execute('git',['-C',row.repository,'show',row.commit+':packages/macro/src/InvokeUtil.cj']);
+      // The approved fixed H1 predates the current macro runtime contract and
+      // only runs the transitional stages, which never serve as a macro SDK
+      // (sdk-targets.mjs macroSdk 'UNSUPPORTED'). Its macro source is bound to
+      // its own approved blob; every other H1 and every compiler must carry
+      // the candidate's macro source byte for byte.
+      if(name==='h1'&&row.commit===FIXED_INPUTS.h1) {
+        const {stdout}=await execute('git',['-C',row.repository,'rev-parse',row.commit+':'+MACRO_SOURCE]);
+        if(stdout.trim()!==FIXED_H1_MACRO_BLOB)throw new Error('NATIVE_MACRO_SOURCE '+name);
+        continue;
+      }
+      const {stdout}=await execute('git',['-C',row.repository,'show',row.commit+':'+MACRO_SOURCE]);
       if(workingText(stdout)!==workingText(expectedMacro))throw new Error('NATIVE_MACRO_SOURCE '+name);
     }
   }
@@ -218,12 +232,18 @@ async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,
   // Neither the number of rows nor leftover files may pick the legacy shape.
   const git=(...args)=>execute('git',['-C',h1.repository,...args]).then(result=>result.stdout);
   const chirInterface=Boolean((await git('ls-tree',h1.commit,'--',compilerChirSchema)).trim());
-  if(!Array.isArray(commands)||commands.length!==(chirInterface?4:3)
+  // The heap-default object is compiled exactly where the producer compiles it:
+  // when the pinned H1 manifests name it (sdk-native-stage.mjs h1HeapDefaultsBuild).
+  const heapBuilt=h1HeapDefaultsBuild({workspaceText:await git('show',h1.commit+':cjpm.toml'),
+    packageText:await git('show',h1.commit+':packages/cjc/cjpm.toml'),platform,
+    sourcePresent:Boolean((await git('ls-tree',h1.commit,'--','runtime_shim/cjc_heap_defaults.c')).trim())});
+  if(!Array.isArray(commands)||commands.length!==2+Number(heapBuilt)+Number(chirInterface)
     ||commands.some(row=>row?.rc!==0||row.signal||row.error||row.cancelled
       ||row.cwd!==facts.sourceRoot||!Array.isArray(row.argv)||row.argv.some(arg=>typeof arg!=='string')))
     mismatch('command results');
 
-  const [config,heap,cjpm,generate]=commands.map(row=>row.argv);
+  const argvs=commands.map(row=>row.argv);
+  const config=argvs.shift(), heap=heapBuilt?argvs.shift():undefined, [cjpm,generate]=argvs;
   const shimDir=path.join(facts.sourceRoot,'runtime_shim');
   const compile=(name,defines)=>['-std=c11','-O2','-fPIC',...defines,
     '-c',path.join(shimDir,name+'.c'),'-o',path.join(shimDir,name+'.o')];
@@ -234,8 +254,8 @@ async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,
       &&isDeepStrictEqual(argv.slice(prefix),args);
   };
   if(!compilerArgs(config,compile('cjc_runtime_config',['-D_POSIX_C_SOURCE=200809L','-DCJCJ_COMMIT="'+h1.commit+'"']))
-    ||!compilerArgs(heap,compile('cjc_heap_defaults',hostRuntimeSupportsConfigV1?[]:['-DCJCJ_LEGACY_HOST_RUNTIME']))
-    ||config[0]!==heap[0]||config[1]!==heap[1]
+    ||heapBuilt&&(!compilerArgs(heap,compile('cjc_heap_defaults',hostRuntimeSupportsConfigV1?[]:['-DCJCJ_LEGACY_HOST_RUNTIME']))
+      ||config[0]!==heap[0]||config[1]!==heap[1])
     ||cjpm[0]!==path.join(host.install,'tools/bin/cjpm')||cjpm[1]!=='build'||!/^-j[1-9]\d*$/.test(cjpm.at(-1))
     ||!(cjpm.length===3||cjpm.length===5&&cjpm[2]==='--target-dir'&&path.isAbsolute(cjpm[3])))
     mismatch('compiler commands');

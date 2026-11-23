@@ -10,7 +10,7 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {h1PackageLinkOptions, h1HeapDefaultsBuild} from './sdk-native-stage.mjs';
 import {FIXED_INPUTS} from './sdk-targets.mjs';
-import {h1ShimInstall} from './sdk-inputs.mjs';
+import {h1ShimInstall, validateSourceInputs, FIXED_H1_MACRO_BLOB} from './sdk-inputs.mjs';
 import {effectiveLinkOptions, linkOptionLines, effectiveSections, DARWIN_CJC_LINK, LEGACY_LINUX_CJC_LINK} from './cjc-link-sections.mjs';
 
 const manifest = await fs.readFile(new URL('../../packages/cjc/cjpm.toml', import.meta.url), 'utf8');
@@ -192,4 +192,47 @@ test('the Unix H1 producer gates the heap-defaults compile on that decision', as
   assert.match(unix, /const heapDefaults=h1HeapDefaultsBuild\(\{workspaceText:before\.toString\(\),packageText:packageBefore\.toString\(\),platform,/);
   assert.match(unix, /if\(heapDefaults\)await command\(/);
   assert.equal((unix.match(/cjc_heap_defaults\.c/g) || []).length, 1);
+});
+
+test('either Darwin manifest shape fails closed on any link token outside the Mach-O contract', () => {
+  // The reviewer's counterexample: 2 manifests x 2 Darwin hosts x 4 single extra tokens.
+  const inject = (text, token) => text.replace(/^(\s*link-option\s*=\s*"[^"\n]*)"/m, `$1 ${token}"`);
+  for (const [shape, text] of Object.entries({'FIXED_INPUTS.h1': h1Manifest, 'candidate HEAD': manifest}))
+    for (const platform of ['darwin_x86_64', 'darwin_aarch64']) {
+      rewrite(platform, text); // control: the unmodified manifest links
+      for (const token of ['--wrap=review', '-Wl,--gc-sections', '/lib/libextra.so', '--gc-sections'])
+        assert.throws(() => rewrite(platform, inject(text, token)), /H1_PACKAGE_DARWIN_(ELF_TOKEN|LINK_SET)/,
+          `${shape} ${platform} ${token}`);
+    }
+});
+
+const repository = fileURLToPath(new URL('../..', import.meta.url));
+const gitOut = (...args) => spawnSync('git', ['-C', repository, ...args], {encoding: 'utf8'});
+const fixedObject = gitOut('cat-file', '-e', FIXED_INPUTS.h1 + '^{commit}').status === 0;
+const SAME_BLOB_OTHER_COMMIT = 'b14420bd35868433349d26c5c5d0c4ff58f159f5'; // parent of a74bcfa8aa (first later macro change)
+test('the default Unix H1 passes the macro gate by its approved blob; other H1s and every compiler still need the candidate macro',
+  {skip: !fixedObject && 'FIXED_INPUTS.h1 object absent (shallow clone)'}, async () => {
+  const row = commit => ({repository, commit, tree: gitOut('rev-parse', commit + '^{tree}').stdout.trim()});
+  const head = row(gitOut('rev-parse', 'HEAD').stdout.trim()), fixed = row(FIXED_INPUTS.h1);
+  assert.equal(gitOut('rev-parse', FIXED_INPUTS.h1 + ':packages/macro/src/InvokeUtil.cj').stdout.trim(), FIXED_H1_MACRO_BLOB);
+  // The fixed H1 macro source differs from the candidate's: the old gate's first error.
+  assert.notEqual(gitOut('rev-parse', 'HEAD:packages/macro/src/InvokeUtil.cj').stdout.trim(), FIXED_H1_MACRO_BLOB);
+  const base = {llvm: head, runtime: head, ast: head, compiler: head};
+  await validateSourceInputs({...base, h1: fixed});
+  // Identity, not content: the same macro blob at another commit is refused.
+  assert.equal(gitOut('rev-parse', SAME_BLOB_OTHER_COMMIT + ':packages/macro/src/InvokeUtil.cj').stdout.trim(), FIXED_H1_MACRO_BLOB);
+  await assert.rejects(validateSourceInputs({...base, h1: row(SAME_BLOB_OTHER_COMMIT)}), /NATIVE_MACRO_SOURCE h1/);
+  // The compiler is never admitted by the H1 blob; a forged tree is refused first.
+  await assert.rejects(validateSourceInputs({...base, h1: fixed, compiler: fixed}), /NATIVE_MACRO_SOURCE compiler/);
+  await assert.rejects(validateSourceInputs({...base, h1: {...fixed, tree: head.tree}}), /NATIVE_SOURCE_TREE h1/);
+});
+
+test('installed-H1 reuse reads the heap decision from the pinned H1 manifests: none for FIXED_INPUTS.h1 on any Unix host',
+  {skip: !fixedObject && 'FIXED_INPUTS.h1 object absent (shallow clone)'}, () => {
+  const show = rel => gitOut('show', FIXED_INPUTS.h1 + ':' + rel).stdout;
+  const sourcePresent = gitOut('ls-tree', FIXED_INPUTS.h1, '--', 'runtime_shim/cjc_heap_defaults.c').stdout.trim() !== '';
+  assert.equal(sourcePresent, false);
+  for (const platform of UNIX)
+    assert.equal(h1HeapDefaultsBuild({workspaceText: show('cjpm.toml'), packageText: show('packages/cjc/cjpm.toml'), platform, sourcePresent}),
+      false, platform);
 });

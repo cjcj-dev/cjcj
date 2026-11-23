@@ -2972,6 +2972,7 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-swig
       # The compiler source the consumer compares against (explicit selection or
       # ci/source_pin.env) feeds LLDB/cjdb in the LLVM build (CANGJIE_ROOT), the
       # shim's CjoFormat schema and the AST support build (b2701d39
@@ -2999,10 +3000,10 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then
             sudo apt-get update -qq
             # swig generates the lldb Python binding (LLDB_ENABLE_PYTHON=ON with
-            # the pinned Python prefix build_prepare_llvm.mjs fetches on Linux).
+            # the pinned Python prefix build_prepare_llvm.mjs fetches on every host).
             sudo apt-get install -y -qq clang cmake ninja-build swig
           else
-            brew install ninja
+            brew install ninja swig
           fi
           node build/sdk/producers/release/build_prepare_llvm.mjs --platform "$NATIVE_PLATFORM" \
             --sha "${{ steps.pin.outputs.sha }}" --compiler "$PWD/compiler" --out "$RUNNER_TEMP/llvm-out"

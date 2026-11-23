@@ -110,6 +110,17 @@ const trackedDirectories = tracked => {
   for (const rel of tracked) for (let dir = path.posix.dirname(rel); dir !== '.' && !dirs.has(dir); dir = path.posix.dirname(dir)) dirs.add(dir);
   return dirs;
 };
+// A tracked source directory (one holding tracked source files) owns its whole
+// subtree: a new untracked source file at any depth below it (e.g. a new
+// directory under a package's src/) is source the pinned commit does not have.
+const sourceDirectories = tracked => new Set([...tracked].filter(rel => SOURCE_FILE.test(rel))
+  .map(rel => path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel)));
+const underSourceDirectory = (directories, rel) => {
+  for (let dir = path.posix.dirname(rel); ; dir = path.posix.dirname(dir)) {
+    if (directories.has(dir === '.' ? '' : dir)) return true;
+    if (dir === '.' || dir === '/' || dir === '') return false;
+  }
+};
 const headBlob = (dir, rel) => {
   const r = spawnSync('git', ['-C', dir, 'show', `HEAD:${rel}`], {encoding: 'utf8', maxBuffer: 1 << 30});
   if (r.status !== 0) throw new Error(`handoff cannot read pinned ${rel}`);
@@ -119,7 +130,7 @@ async function payloadPlan(root, entries, excluded) {
   const head = checkoutHead(root);
   if (!head || !SHA40.test(head)) throw new Error('handoff workspace is not a pinned Git checkout');
   const repos = [{prefix: '', tracked: trackedPaths(root)}];
-  const workflowDirectories = trackedDirectories(repos[0].tracked);
+  const workflowDirectories = trackedDirectories(repos[0].tracked), workflowSources = sourceDirectories(repos[0].tracked);
   const checkouts = [], files = [], overlay = new Map(), derivations = [];
   const addOverlay = async (prefix, dir) => {
     for (const rel of modifiedPaths(dir)) {
@@ -148,7 +159,8 @@ async function payloadPlan(root, entries, excluded) {
       if (tracked(rel)) return;
       const owner = repos.filter(repo => repo.prefix === '' || rel.startsWith(repo.prefix + '/'))
         .sort((a, b) => b.prefix.length - a.prefix.length)[0];
-      if (owner?.prefix === '' && SOURCE_FILE.test(rel) && workflowDirectories.has(path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel)))
+      if (owner?.prefix === '' && SOURCE_FILE.test(rel) && (workflowDirectories.has(path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel))
+        || underSourceDirectory(workflowSources, rel)))
         throw new Error(`handoff untracked source: ${rel}`);
       files.push(rel);
       return;

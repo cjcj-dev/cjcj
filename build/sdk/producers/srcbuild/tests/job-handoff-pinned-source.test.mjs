@@ -185,7 +185,9 @@ test('red cut: an edited, a new untracked or a deleted source file fails the pac
   const edited = f.run('pack');
   assert.equal(edited.rc, 1, edited.output);
   assert.match(edited.output, /handoff modified tracked source: packages\/cjc\/src\/main\.cj/);
-  for (const rel of ['packages/cjc/src/extra.cj', 'runtime_shim/extra_shim.c', 'packages/cjc/src/extra.h']) {
+  // Including a new directory (one or more levels) under a tracked source directory.
+  for (const rel of ['packages/cjc/src/extra.cj', 'runtime_shim/extra_shim.c', 'packages/cjc/src/extra.h',
+    'packages/cjc/src/newdir/extra.cj', 'packages/cjc/src/a/b/deep.cj', 'runtime_shim/sub/extra_shim.c']) {
     const g = await fixture(t);
     await write(path.join(g.root, rel), 'untracked source\n');
     const added = g.run('pack');
