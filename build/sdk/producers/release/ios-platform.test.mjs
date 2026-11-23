@@ -56,7 +56,10 @@ test('iOS release workflow consumes the same tuple artifacts and requires packag
   assert.equal(scalar(producer, 'build_ios'), 'true');
   const publish = jobs.find(entry => entry.startsWith('publish:')) ?? '';
   assert.ok(scalar(publish, 'needs')?.includes('package-darwin-arm64-ios'));
-  assert.ok(publish.includes("needs.package-darwin-arm64-ios.result == 'success'"));
+  // Publication requires success through default needs semantics (no always()) plus the
+  // explicit all-needs check of ci/release-publish.mjs.
+  assert.ok(!publish.includes('always()'));
+  assert.ok(publish.includes('node ci/release-publish.mjs verify-needs'));
 });
 
 test('plain Darwin host selection does not request iOS builds', () => {

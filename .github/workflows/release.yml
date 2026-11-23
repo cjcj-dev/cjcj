@@ -599,8 +599,8 @@ jobs:
   publish:
     name: Publish release
     needs: [source-p1-linux-x64, source-p2-linux-aarch64, source-p3-windows-x64, source-p4-darwin-arm64, source-p5-darwin-x64, package-p1-linux-x64, package-p2-linux-aarch64, package-p3-windows-x64, package-p4-darwin-arm64, package-p5-darwin-x64, package-linux-x64-android, package-darwin-arm64-android, package-win32-x64-android, package-linux-x64-wasm, package-darwin-arm64-wasm, package-win32-x64-wasm, package-linux-x64-ohos, package-darwin-arm64-ohos, package-win32-x64-ohos, package-darwin-arm64-ios]
-    # No always(): any failed, cancelled or skipped upstream job skips publication, and the
-    # first step re-checks all 20 direct needs explicitly.
+    # Default needs semantics: any failed, cancelled or skipped upstream job skips
+    # publication, and the first step re-checks all 20 direct needs explicitly.
     if: inputs.phase == 'publish' && !inputs.dry_run
     runs-on: ubuntu-24.04
     timeout-minutes: 20
