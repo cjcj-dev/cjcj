@@ -334,6 +334,17 @@ public open class GlobalOptions <: Option {
     // Parsed source, semantic lifetime checking and CHIR region placement share one selection.
     public func IsLocalModeAnalysis(): Bool { return enableLocalMode }
 
+    public func SupportsLocalModeLowering(): Bool {
+        return target.os == OSType.LINUX && target.arch == ArchType.X86_64 && target.env == EnvironmentType.GNU
+    }
+
+    private func PassedLocalModeApiOn(): Bool {
+        for ((key, value) in passedWhenKeyValue) {
+            if (key == "local_mode_api" && value == "on") { return true }
+        }
+        return false
+    }
+
     public var enableEH: Bool = false
     public var mock: MockMode = MockMode.DEFAULT
     public var diagFormat: DiagFormat = DiagFormat.DEFAULT
@@ -1324,6 +1335,10 @@ public open class GlobalOptions <: Option {
             enIncrementalCompilation || compileCjd || !commonPartChirs.isEmpty() ||
             IsEmitCHIREnable())) {
             Errorln("local mode requires CJNATIVE source compilation without interpreter, incremental compilation, declaration files, common-part CHIR, or CHIR emission")
+            return false
+        }
+        if (enableLocalMode && !SupportsLocalModeLowering() && PassedLocalModeApiOn()) {
+            Errorln("local mode lowering is only supported on Linux x86_64 GNU targets")
             return false
         }
         if (outputMode == OutputMode.CJO && (backend != BackendType.CJNATIVE || target.os != OSType.LINUX ||

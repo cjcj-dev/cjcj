@@ -182,9 +182,9 @@ export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Sou
     } else {
       fs.mkdirSync(pw, {recursive: true});
       const out = path.join(pw, name);
-      const args = [target, ...WASM_LOCAL_MODE_CJC_ARGS, '-O2', '--no-sub-pkg', '-p', pkg.dir, '--output-type=staticlib', `--output=${out}`,
+      const subpkg = name === 'std' ? [] : ['--no-sub-pkg'];
+      const args = [target, ...WASM_LOCAL_MODE_CJC_ARGS, '-O2', ...subpkg, '-p', pkg.dir, '--output-type=staticlib', `--output=${out}`,
         `--import-path=${path.join(sdk, 'modules', WASM_TARGET_DIR)}`, '-Woff', 'all'];
-      if (name === 'std') args.splice(2, 1); // the aggregate root package only re-exports
       const errors = out => (out.match(/error[^\n]*(\n[^\n]*){0,3}/g) || [out]).slice(0, 4).join(' | ').slice(0, 900);
       let r = run(cjc, args, {cwd: pw, env});
       rec.opt = 'O2';
