@@ -5,7 +5,8 @@
 # Comparable<T> and Equatable<T> reaches each of them twice. A modal default that is the same declaration on
 # both paths must not be reported as "interface function '!=' must be implemented" (default mode cannot even
 # spell the override); neither may a modal default that overrides another along an interface chain (Comparable<T>'s
-# `==(this @local?)` over Equal<T>'s). Negative controls: the plain-member
+# `==(this @local?)` over Equal<T>'s). Such an accepted override must also be the implementation that runs, in either
+# supertype order, through extends and generic interfaces (local_*_dispatch, std_local_dispatch). Negative controls: the plain-member
 # rule, unrelated modal defaults, and truly missing abstract members are still diagnosed, each with exactly one error.
 set -u
 cjc=$1; out=$2; here=$(cd "$(dirname "$0")" && pwd); mkdir "$out" || exit 2
@@ -50,7 +51,11 @@ pos swapped_order local "false true true" "${local_flags[@]}"
 pos comparable_and_equal default "true true true"
 pos std_chains default "4 true 3"
 pos local_same_modal_default local "2 7" "${local_flags[@]}"
-pos local_chain_override local "2 8" "${local_flags[@]}"
+pos local_chain_override local "2 8 2 8" "${local_flags[@]}"
+pos local_chain_dispatch local "11 11 11 11 11 3 4" "${local_flags[@]}"
+pos std_local_dispatch local "cmp cmp eq eq true true true" "${local_flags[@]}"
+pos local_extend_dispatch local "11 11 11 5 6 7" "${local_flags[@]}"
+pos local_generic_dispatch local "21 21 21 3 1 2" "${local_flags[@]}"
 neg neg_plain_diamond default "interface function '!=' must be implemented in 'P'"
 neg neg_missing_abstract default "implementation of function or property is needed in 'M'"
 neg neg_missing_eq default "implementation of function or property is needed in 'E'"

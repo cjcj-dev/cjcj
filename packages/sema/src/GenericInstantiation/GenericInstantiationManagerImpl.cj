@@ -560,12 +560,28 @@ class GenericInstantiationManagerImpl {
             let isInDiffDecl = !SameDeclOptions(implFunc.outerDecl,
                 Some(GetGeneralDecl(fd.outerDecl.getOrThrow(), getOriginal: true)))
             let matchedInstTy = resolver.GetMatchedFuncInstTyByGivenTarget(candidate, fd, targetBaseTy)
-            if (!isInDiffDecl || !Ty.IsTyCorrect(matchedInstTy)) {
+            if (!isInDiffDecl || !Ty.IsTyCorrect(matchedInstTy) || IsOverriddenByTarget(implFunc, fd)) {
                 continue
             }
             return FindFuncInGenericInstantiatedDecl(ty, fd, implFunc, matchedInstTy)
         }
         return fd
+    }
+
+    // A member of a strict ancestor of fd's declaring type is what fd overrides, never its implementation. The type
+    // may reach that ancestor along another path (`S <: I2 & I1` with I1 <: I0 overriding I0's modal default, I2 <: I0),
+    // so the candidates list it; taking it first would call I0's default instead of the selected I1 override.
+    private func IsOverriddenByTarget(implFunc: FuncDecl, fd: FuncDecl): Bool {
+        let implOuter = implFunc.outerDecl ?? return false
+        let targetOuter = GetGeneralDecl(fd.outerDecl.getOrThrow(), getOriginal: true)
+        let ancestor = GetGeneralDecl(implOuter, getOriginal: true)
+        let inheritable = (targetOuter as InheritableDecl) ?? return false
+        for (superDecl in inheritable.GetAllSuperDecls()) {
+            if (SameDecl(superDecl, ancestor) && !SameDecl(superDecl, targetOuter)) {
+                return true
+            }
+        }
+        return false
     }
 
     private func ReinstantiatedPartialMemberDecl(genericInfo: GenericInfo, structDecl: Decl, genericMember: Decl,
