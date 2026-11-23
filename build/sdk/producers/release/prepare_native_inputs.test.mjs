@@ -8,9 +8,11 @@ import test from 'node:test';
 import crypto from 'node:crypto';
 import {PREPARE_HOSTS, PROVENANCE_KEYS, assembleNativeInputs, prepareProvenance, prepareWorkflowProblems,
   installLlvm, installAst, componentCommits, prepareComponentProblems, installHost, prepareHostVersion,
-  packNativeInputs, compilerSource, PREPARE_LLVM_TOOLS} from './prepare_native_inputs.mjs';
+  packNativeInputs, compilerSource, PREPARE_LLVM_TOOLS, installHle, hleCjbindAsset, HLE_CJBIND, PREPARE_SHIM_OBJECT} from './prepare_native_inputs.mjs';
+import {configureHleInput, readHleDependencies} from '../../../../ci/bootstrap/hle-input.mjs';
+import {readInstalledNativeShim} from '../../../../ci/bootstrap/native-shim-inputs.mjs';
 import {unpackNativeArtifact} from '../../../../ci/bootstrap/native-artifact-archive.mjs';
-import {buildPrepareLlvm, llvmConfigureArgs} from './build_prepare_llvm.mjs';
+import {buildPrepareLlvm, llvmConfigureArgs, buildPrepareShim, shimRequiredSymbols, shimSymbolProblems, PREPARE_LLVM_TARGETS} from './build_prepare_llvm.mjs';
 import {nativeInstallationLocations} from '../../../../ci/bootstrap/native-installation-locations.mjs';
 import {readInstalledNativeAst} from '../../../../ci/bootstrap/installed-native-ast.mjs';
 import {sdkPlatform, stdxChirMembers} from '../../../../ci/bootstrap/sdk-platform.mjs';
@@ -91,7 +93,8 @@ function inputs(t, {darwin = false, skip, hostTarget} = {}) {
   const put = (rel, body) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), {recursive: true}); fs.writeFileSync(path.join(dir, rel), body); };
   putHost(dir, PREPARE_HOSTS.find(h => h.target === (hostTarget || 'linux-aarch64')).llvm_platform);
   for (const [name, file] of [['llvm', 'BUILD-INPUTS.json'], ['runtime', 'NATIVE-INPUTS.json'], ['ast', 'BUILD-INPUTS.json']])
-    if (name !== skip) put(`${name}/${file}`, JSON.stringify({configuration: {name}}));
+    if (name !== skip) put(`${name}/${file}`, JSON.stringify({configuration: {name}, ...(name === 'llvm' && skip !== 'shim' ? {nativeShim: {}} : {})}));
+  if (skip !== 'hle') put('hle/hle-dependencies.json', '{}');
   if (darwin) for (const rel of ['ts/src/sharedbuild/cjcj-stage1.mjs', 'ts/src/sharedbuild/stage1-transform.mjs']) put('adapter/' + rel, '//');
   return dir;
 }
@@ -101,7 +104,9 @@ test('assemble binds the real installations and every provenance identity', t =>
   const {locations, record} = assembleNativeInputs({root: dir, target: 'linux-aarch64', hostVersion: '1.1.0', env, pins});
   assert.equal(locations.platform, 'linux_aarch64');
   assert.deepEqual(locations.host, {install: 'host', archive: 'host-archive/cangjie-sdk-fixture-1.1.0.tar.gz', version: '1.1.0'});
-  assert.deepEqual(Object.keys(locations.installations), ['llvm', 'runtime', 'ast']);
+  assert.deepEqual(Object.keys(locations.installations), ['llvm', 'runtime', 'ast', 'shim']);
+  assert.deepEqual(locations.installations.shim, {install: 'llvm'});
+  assert.equal(locations.hleDependencies, 'hle/hle-dependencies.json');
   assert.deepEqual(locations.tools, {});
   for (const key of PROVENANCE_KEYS) assert.ok(record[key], key);
   assert.equal(record.tools_ref, pins.TOOLS_REF);
@@ -111,6 +116,10 @@ test('assemble binds the real installations and every provenance identity', t =>
 test('assemble fails closed on a missing installation, adapter or identity', t => {
   assert.throws(() => assembleNativeInputs({root: inputs(t, {skip: 'ast', hostTarget: 'linux-x64'}), target: 'linux-x64', env, pins}),
     /NATIVE_INPUTS_COMPONENT_MISSING ast/);
+  assert.throws(() => assembleNativeInputs({root: inputs(t, {skip: 'hle', hostTarget: 'linux-x64'}), target: 'linux-x64', env, pins}),
+    /NATIVE_INPUTS_COMPONENT_MISSING hle/);
+  assert.throws(() => assembleNativeInputs({root: inputs(t, {skip: 'shim', hostTarget: 'linux-x64'}), target: 'linux-x64', env, pins}),
+    /NATIVE_INPUTS_COMPONENT_MISSING shim/);
   for (const target of ['windows-x64', 'darwin-arm64', 'linux-x64'])
     assert.throws(() => assembleNativeInputs({root: inputs(t, {darwin: true, hostTarget: target}), target, env, pins}),
       /NATIVE_TOOLS_ADAPTER_UNEXPECTED/);
@@ -129,14 +138,21 @@ test('red cut: dropping one host family\'s N/LLVM or AST step names exactly that
   const cuts = [
     ['  - name: Build the pinned in-process LLVM and its tools on this Windows host\n        if: runner.os == \'Windows\'',
       '  - name: Build the pinned in-process LLVM and its tools on this Windows host\n        if: runner.os == \'Linux\'',
-      ['windows-x64 lacks llvm producer build/sdk/producers/release/build_prepare_llvm.mjs']],
+      ['windows-x64 lacks llvm producer build/sdk/producers/release/build_prepare_llvm.mjs --platform']],
     ['  - name: Build AST support on this Unix host\n        if: runner.os != \'Windows\'', '  - name: Build AST support on this Unix host\n        if: runner.os == \'Linux\'',
       ['darwin-arm64 lacks ast producer ci/build_ast_support.sh', 'darwin-x64 lacks ast producer ci/build_ast_support.sh']],
     ['  - name: Build the pinned in-process LLVM and its tools on this Unix host\n        if: runner.os != \'Windows\'',
       '  - name: Build the pinned in-process LLVM and its tools on this Unix host\n        if: runner.os == \'macOS\'',
-      ['linux-x64 lacks llvm producer build/sdk/producers/release/build_prepare_llvm.mjs',
-        'linux-aarch64 lacks llvm producer build/sdk/producers/release/build_prepare_llvm.mjs']],
+      ['linux-x64 lacks llvm producer build/sdk/producers/release/build_prepare_llvm.mjs --platform',
+        'linux-aarch64 lacks llvm producer build/sdk/producers/release/build_prepare_llvm.mjs --platform']],
     ['install-ast \\\n', 'echo-ast \\\n', PREPARE_HOSTS.map(h => `${h.target} lacks ast producer prepare_native_inputs.mjs install-ast`)],
+    ['prepare_native_inputs.mjs install-hle\n', 'prepare_native_inputs.mjs echo-hle\n',
+      PREPARE_HOSTS.map(h => `${h.target} lacks hle producer prepare_native_inputs.mjs install-hle`)],
+    ['  - name: Compile the LLVM shim object against this LLVM build on this Unix host\n        if: runner.os != \'Windows\'',
+      '  - name: Compile the LLVM shim object against this LLVM build on this Unix host\n        if: runner.os == \'Linux\'',
+      ['darwin-arm64 lacks shim producer build/sdk/producers/release/build_prepare_llvm.mjs shim',
+        'darwin-x64 lacks shim producer build/sdk/producers/release/build_prepare_llvm.mjs shim']],
+    ['--shim-commit "$GITHUB_SHA"', '', PREPARE_HOSTS.map(h => `${h.target} lacks shim producer --shim-commit`)],
   ];
   for (const [from, to, want] of cuts) {
     const problems = prepareComponentProblems(job(once(read('sdk-build-target'), from, to)).steps)
@@ -152,7 +168,17 @@ test('red cut: re-adding the private adapter deployment to prepare-native is ref
 });
 
 // ---- end-to-end mock layout: producer output -> native-inputs -> downstream readers ----
-const LLVM = commit('1'), RUNTIME = commit('2'), COMPILER = commit('3');
+const LLVM = commit('1'), RUNTIME = commit('2'), COMPILER = commit('3'), SHIM = commit('a');
+// build_prepare_llvm.mjs output shape for the shim object (shim step) and cjdb.
+function putShimCjdb(out, native, label) {
+  const put = (rel, body) => { fs.mkdirSync(path.dirname(path.join(out, rel)), {recursive: true}); fs.writeFileSync(path.join(out, rel), body); };
+  const object = Buffer.from('shim object ' + label);
+  put('fixed-llc/cjselfhost_llvmshim.o', object);
+  put('fixed-llc/SHIM-BUILD.json', JSON.stringify({object: 'fixed-llc/cjselfhost_llvmshim.o', bytes: object.length,
+    sha256: crypto.createHash('sha256').update(object).digest('hex'), symbols: ['LLVMSelfhost', 'CJOF'], argv: ['clang++']}));
+  put(`bin/lldb${native.exe}`, 'lldb ' + label);
+  put(native.os === 'win32' ? 'lldb-lib/liblldb.dll' : native.os === 'darwin' ? 'lldb-lib/liblldb.15.dylib' : 'lldb-lib/liblldb.so.15', 'liblldb');
+}
 function produced(t, target) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-e2e-'));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
@@ -160,12 +186,14 @@ function produced(t, target) {
   const put = (rel, body) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), {recursive: true}); fs.writeFileSync(path.join(dir, rel), body); };
   put('llvm-out/' + native.llvmLibrary, 'llvm bytes ' + target);
   for (const tool of PREPARE_LLVM_TOOLS) put(`llvm-out/bin/${tool}${native.exe}`, `${tool} ${target}`);
+  putShimCjdb(path.join(dir, 'llvm-out'), native, target);
+  put('root/hle/hle-dependencies.json', '{}');
   for (const rel of ['libcangjie-ast-support.a', 'schema/StdAstFormat.fbs', 'include/flatbuffers/StdAstFormat_generated.h',
     ...stdxChirMembers, 'third_party/flatbuffers/bin/flatc' + native.exe]) put('ast-out/' + rel, 'ast ' + rel);
   putHost(path.join(dir, 'root'), PREPARE_HOSTS.find(h => h.target === target).llvm_platform);
   put('root/runtime/NATIVE-INPUTS.json', JSON.stringify({configuration: {runtime: RUNTIME}}));
   const root = path.join(dir, 'root'), commits = {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER};
-  installLlvm({root, target, from: path.join(dir, 'llvm-out'), commits, producer: 'test'});
+  installLlvm({root, target, from: path.join(dir, 'llvm-out'), commits, producer: 'test', shimCommit: SHIM});
   installAst({root, target, from: path.join(dir, 'ast-out'), commits});
   return {dir, root, native};
 }
@@ -183,6 +211,13 @@ for (const host of PREPARE_HOSTS) test(`${host.target}: prepare output is read b
   assert.equal(llvmFacts.commits.compiler, COMPILER);
   assert.equal(llvmFacts.commits.llvm, LLVM);
   assert.ok(fs.existsSync(path.join(resolved.llvm.install, 'third_party/llvm', native.llvmDirectory, native.llvmLibrary)));
+  // sdk-inputs.mjs shapes.llvm members and the real shim reader on the N install.
+  for (const rel of [PREPARE_SHIM_OBJECT, 'tools/bin/cjdb' + native.exe]) assert.ok(fs.existsSync(path.join(resolved.llvm.install, rel)), rel);
+  assert.equal(resolved.shim.install, resolved.llvm.install);
+  const shim = await readInstalledNativeShim({install: resolved.shim.install});
+  assert.equal(shim.source.commit, SHIM); assert.equal(shim.compiler.commit, COMPILER); assert.equal(shim.llvm.commit, LLVM);
+  fs.appendFileSync(path.join(resolved.llvm.install, PREPARE_SHIM_OBJECT), 'x');
+  await assert.rejects(readInstalledNativeShim({install: resolved.llvm.install}), /NATIVE_SHIM_INSTALLED_BYTES/);
   const ast = await readInstalledNativeAst({install: resolved.ast.install, buildResult: resolved.ast.buildResult,
     platform: locations.platform, commit: COMPILER, llvmCommit: LLVM});
   assert.equal(ast.library, `lib/${native.tuple}/libcangjie-ast-support.a`);
@@ -299,11 +334,15 @@ test('every native-inputs consumer unpacks the tar before the host or runtime is
 });
 
 // ---- N/LLVM producer: the same dylib build with its tools on all hosts ----
-test('the N/LLVM producer configures the dylib build and installs library and tools', t => {
-  const args = llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'win32'});
-  for (const flag of ['-DLLVM_BUILD_LLVM_DYLIB=ON', '-DLLVM_LINK_LLVM_DYLIB=OFF', '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', '-DLLVM_ENABLE_ZLIB=OFF'])
+test('the N/LLVM producer configures the dylib build and installs library and tools', async t => {
+  const args = llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'win32', compiler: 'c'});
+  for (const flag of ['-DLLVM_BUILD_LLVM_DYLIB=ON', '-DLLVM_LINK_LLVM_DYLIB=OFF', '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', '-DLLVM_ENABLE_ZLIB=OFF',
+    '-DLLVM_ENABLE_PROJECTS=clang;lldb', '-DCANGJIE_ROOT=c', '-DLLDB_INCLUDE_TESTS=OFF'])
     assert.ok(args.includes(flag), flag);
-  assert.ok(!llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'linux'}).includes('-DLLVM_ENABLE_ZLIB=OFF'));
+  assert.ok(!args.includes('-DLLVM_ENABLE_PROJECTS='), 'the LLVM build enables lldb');
+  assert.ok(PREPARE_LLVM_TARGETS.includes('lldb'));
+  assert.throws(() => llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'linux'}), /PREPARE_LLVM_COMPILER_SOURCE/);
+  assert.ok(!llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'linux', compiler: 'c'}).includes('-DLLVM_ENABLE_ZLIB=OFF'));
   for (const platform of ['linux_x86_64', 'windows_x86_64', 'darwin_aarch64']) {
     const native = sdkPlatform(platform), work = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-llvm-'));
     t.after(() => fs.rmSync(work, {recursive: true, force: true}));
@@ -316,23 +355,60 @@ test('the N/LLVM producer configures the dylib build and installs library and to
         const build = all[2];
         fs.mkdirSync(path.join(build, native.llvmDirectory), {recursive: true}); fs.mkdirSync(path.join(build, 'bin'), {recursive: true});
         fs.writeFileSync(path.join(build, native.llvmDirectory, native.llvmLibrary), 'lib');
-        for (const tool of ['llc', 'llvm-as', 'llvm-dis', 'llvm-nm']) fs.writeFileSync(path.join(build, 'bin', tool + native.exe), tool);
+        for (const tool of ['llc', 'llvm-as', 'llvm-dis', 'llvm-nm', 'lldb']) fs.writeFileSync(path.join(build, 'bin', tool + native.exe), tool);
+        fs.mkdirSync(path.join(build, 'lib'), {recursive: true});
+        fs.writeFileSync(path.join(build, native.os === 'win32' ? 'bin' : 'lib', native.os === 'win32' ? 'liblldb.dll' : 'liblldb.so.15'), 'liblldb');
       }
       if (all[0].endsWith('llvm-nm' + native.exe)) return {status: 0, stdout: '0000 T LLVMInitializeX86TargetInfo\n'};
       return {status: 0, stdout: ''};
     };
     const out = path.join(work, 'out');
-    buildPrepareLlvm({platform, sha: LLVM, out, work, env: {}, run});
-    assert.ok(seen.some(line => line.startsWith('cmake --build') && line.includes('LLVM llc llvm-as llvm-dis llvm-nm')), platform);
+    const compiler = path.join(work, 'compiler'); fs.mkdirSync(path.join(compiler, 'schema'), {recursive: true});
+    fs.writeFileSync(path.join(compiler, 'schema/CjoFormat.fbs'), 'schema');
+    assert.throws(() => buildPrepareLlvm({platform, sha: LLVM, out, work, env: {}, run}), /PREPARE_LLVM_COMPILER_SOURCE/);
+    buildPrepareLlvm({platform, sha: LLVM, out, work, env: {}, run, compiler});
+    assert.ok(seen.some(line => line.startsWith('cmake --build') && line.includes('LLVM llc llvm-as llvm-dis llvm-nm lldb')), platform);
+    assert.ok(seen.some(line => line.startsWith('cmake -G') && line.includes('-DLLVM_ENABLE_PROJECTS=clang;lldb') && line.includes('-DCANGJIE_ROOT=')), platform);
+    assert.ok(fs.existsSync(path.join(out, 'bin', 'lldb' + native.exe)));
+    const objectBytes = Buffer.from('compiled shim ' + platform);
+    fs.mkdirSync(path.join(work, 'dylib-build/include/llvm/Config'), {recursive: true});
+    fs.writeFileSync(path.join(work, 'dylib-build/include/llvm/Config/llvm-config.h'), '');
+    fs.writeFileSync(path.join(work, 'flatc'), 'flatc');
+    const shimRun = nm => (file, argv) => {
+      if (file === 'clang++') fs.writeFileSync(argv[argv.indexOf('-o') + 1], objectBytes);
+      if (file.endsWith('llvm-nm' + native.exe)) return {status: 0, stdout: nm};
+      return {status: 0, stdout: ''};
+    };
+    const prefix = native.os === 'darwin' ? '_' : '';
+    // red cut: an object without the CJOF entry points is not installed
+    assert.throws(() => buildPrepareShim({platform, compiler, flatc: path.join(work, 'flatc'), out, work, env: {},
+      run: shimRun(`0000 T ${prefix}LLVMSelfhostLoopInfoCreate\n0000 T ${prefix}LLVMGlobalObjectAddStringAttribute\n`)}), /PREPARE_SHIM_SYMBOLS CJOF$/);
+    assert.deepEqual(shimRequiredSymbols(fs.readFileSync(path.resolve(import.meta.dirname, '../../../../runtime_shim/cjselfhost_llvmshim.cpp'), 'utf8')),
+      ['LLVMGlobalObjectAddStringAttribute', 'LLVMSelfhost', 'CJOF']);
+    assert.deepEqual(shimSymbolProblems('0000 T _LLVMGlobalObjectAddStringAttributeX\n', ['LLVMGlobalObjectAddStringAttribute']), ['LLVMGlobalObjectAddStringAttribute']);
+    const shimRecord = buildPrepareShim({platform, compiler, flatc: path.join(work, 'flatc'), out, work, env: {},
+      run: shimRun(`0000 T ${prefix}LLVMSelfhostLoopInfoCreate\n0010 T ${prefix}CJOFPackageView\n0020 T ${prefix}LLVMGlobalObjectAddStringAttribute\n`)});
+    assert.equal(shimRecord.bytes, objectBytes.length);
     assert.ok(fs.existsSync(path.join(out, native.llvmLibrary)));
     for (const tool of PREPARE_LLVM_TOOLS) assert.ok(fs.existsSync(path.join(out, 'bin', tool + native.exe)), tool);
     const root = path.join(work, 'root'); fs.mkdirSync(root);
     const target = PREPARE_HOSTS.find(h => h.llvm_platform === platform).target;
-    const facts = installLlvm({root, target, from: out, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER}, producer: 'llvm-dylib'});
+    assert.throws(() => installLlvm({root, target, from: out, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER}, producer: 'llvm-dylib'}),
+      /PREPARE_COMPONENT_COMMIT shim/);
+    const facts = installLlvm({root, target, from: out, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER}, producer: 'llvm-dylib', shimCommit: SHIM});
     assert.deepEqual(Object.keys(facts.tools), PREPARE_LLVM_TOOLS.map(tool => `third_party/llvm/bin/${tool}${native.exe}`));
+    assert.equal(facts.nativeShim.object.path, PREPARE_SHIM_OBJECT);
+    assert.equal(facts.cjdb.file, 'tools/bin/cjdb' + native.exe);
+    await readInstalledNativeShim({install: path.join(root, 'llvm')});
+    // red cuts: no shim object or no lldb executable means no N install
+    for (const [rel, message] of [['fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/cjselfhost_llvmshim\\.o'], [`bin/lldb${native.exe}`, `bin/lldb${native.exe.replace('.', '\\.')}`]]) {
+      const copy = path.join(work, 'out-' + path.basename(rel)); fs.cpSync(out, copy, {recursive: true}); fs.rmSync(path.join(copy, rel));
+      assert.throws(() => installLlvm({root: path.join(work, 'root-' + path.basename(rel)), target, from: copy,
+        commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER}, producer: 'x', shimCommit: SHIM}), new RegExp(`NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING ${message}`));
+    }
     // red cut: a missing tool is never installed
     fs.rmSync(path.join(out, 'bin', 'llvm-dis' + native.exe));
-    assert.throws(() => installLlvm({root: path.join(work, 'root2'), target, from: out, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER}, producer: 'x'}),
+    assert.throws(() => installLlvm({root: path.join(work, 'root2'), target, from: out, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER}, producer: 'x', shimCommit: SHIM}),
       new RegExp(`NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING bin/llvm-dis${native.exe.replace('.', '\\.')}`));
   }
   assert.throws(() => buildPrepareLlvm({platform: 'linux_x86_64', sha: 'main', out: os.tmpdir(), env: {}, run: () => ({status: 0})}), /PREPARE_LLVM_SHA/);
@@ -346,4 +422,72 @@ test('the AST compiler source is the consumer job\'s source selection', () => {
   assert.deepEqual(compilerSource(explicit), {repository: 'https://example.invalid/compiler.git', commit: commit('9')});
   assert.throws(() => compilerSource({CJCJ_SOURCE_SELECTION: JSON.stringify({compiler: {url: 'https://example.invalid/c.git', tag: 'main'}})}),
     /WORKFLOW_FIXED_SOURCE_REQUIRED compiler/);
+});
+
+// ---- HLE dependency package: the real configureHleInput reads assemble output ----
+test('install-hle yields the hleDependencies the real configureHleInput accepts, and fails closed', async t => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-hle-'));
+  t.after(() => fs.rmSync(work, {recursive: true, force: true}));
+  const parser = path.join(work, 'dtsparser'); fs.mkdirSync(parser);
+  // the pinned tools dtsparser/package.json dependency spellings
+  fs.writeFileSync(path.join(parser, 'package.json'), JSON.stringify({dependencies: {typescript: 'npm:typescript@4.9.5', 'https-proxy-agent': '7.0.6 '}}));
+  const cjbind = path.join(work, 'cjbind-fixture'); fs.writeFileSync(cjbind, 'cjbind bytes');
+  const asset = {name: 'cjbind-fixture', size: 12, sha256: crypto.createHash('sha256').update('cjbind bytes').digest('hex'),
+    version: HLE_CJBIND.version, url: HLE_CJBIND.base + 'cjbind-fixture'};
+  const modules = (versions = {}) => (prefix, specs) => {
+    for (const spec of specs) {
+      const name = spec.slice(0, spec.lastIndexOf('@', spec.length) > 0 ? spec.indexOf('@', 1) : undefined);
+      const version = versions[name] ?? spec.replace(/^.*@/, '').trim();
+      fs.mkdirSync(path.join(prefix, 'node_modules', name), {recursive: true});
+      fs.writeFileSync(path.join(prefix, 'node_modules', name, 'package.json'), JSON.stringify({name, version}));
+    }
+    fs.mkdirSync(path.join(prefix, 'node_modules/.bin'), {recursive: true});
+    return ['npm', 'install', ...specs];
+  };
+  const root = path.join(work, 'root'); fs.mkdirSync(root);
+  putHost(root, 'linux_x86_64');
+  for (const [name, file] of [['llvm', 'BUILD-INPUTS.json'], ['runtime', 'NATIVE-INPUTS.json'], ['ast', 'BUILD-INPUTS.json']]) {
+    fs.mkdirSync(path.join(root, name)); fs.writeFileSync(path.join(root, name, file), JSON.stringify({configuration: {name}, nativeShim: {}}));
+  }
+  const descriptor = await installHle({root, target: 'linux-x64', parser, cjbindFile: cjbind, asset, installModules: modules()});
+  assert.deepEqual(descriptor.modules.packages, {typescript: '4.9.5', 'https-proxy-agent': '7.0.6'});
+  assert.equal(descriptor.node.version, process.version);
+  assert.ok(!fs.existsSync(path.join(root, 'hle/modules/.bin')));
+  const {locations} = assembleNativeInputs({root, target: 'linux-x64', hostVersion: '1.1.0', env, pins});
+  assert.equal(locations.hleDependencies, 'hle/hle-dependencies.json');
+  const envFile = path.join(work, 'github-env');
+  const selected = await configureHleInput(root, 'linux_x86_64', envFile);
+  assert.equal(selected, fs.realpathSync(path.join(root, 'hle/hle-dependencies.json')));
+  assert.equal(fs.readFileSync(envFile, 'utf8'), `CJCJ_HLE_DEPENDENCIES=${selected}\n`);
+  const read = await readHleDependencies(selected, 'linux_x86_64');
+  assert.equal(read.cjbind.path, path.join(fs.realpathSync(root), 'hle/cjbind/cjbind'));
+  assert.ok(fs.statSync(read.modules.path).isDirectory());
+  // red cuts at the consumer: escaping descriptor, escaping or missing member
+  const locationsFile = path.join(root, 'locations.json'), saved = fs.readFileSync(locationsFile, 'utf8');
+  fs.writeFileSync(locationsFile, JSON.stringify({...locations, hleDependencies: '../hle/hle-dependencies.json'}));
+  await assert.rejects(configureHleInput(root, 'linux_x86_64'), /GHA_HLE_ARTIFACT_PATH/);
+  fs.writeFileSync(locationsFile, saved);
+  const descriptorFile = path.join(root, 'hle/hle-dependencies.json'), original = fs.readFileSync(descriptorFile, 'utf8');
+  const outside = path.join(work, 'outside-node'); fs.writeFileSync(outside, 'node');
+  fs.writeFileSync(descriptorFile, JSON.stringify({...descriptor, node: {...descriptor.node, path: outside}}));
+  await assert.rejects(configureHleInput(root, 'linux_x86_64'), /GHA_HLE_ARTIFACT_MEMBER/);
+  fs.writeFileSync(descriptorFile, original);
+  for (const member of ['cjbind/cjbind', 'node/node', 'modules']) {
+    const file = path.join(root, 'hle', member), aside = file + '.aside';
+    fs.renameSync(file, aside);
+    await assert.rejects(configureHleInput(root, 'linux_x86_64'), /ENOENT/, member);
+    fs.renameSync(aside, file);
+  }
+  await configureHleInput(root, 'linux_x86_64');
+  // red cuts at the producer: unpinned cjbind bytes, unavailable asset, wrong module tree
+  const again = path.join(work, 'again');
+  for (const [options, message] of [[{cjbindFile: outside, asset}, /HLE_CJBIND_IDENTITY/],
+    [{cjbindFile: cjbind, asset, installModules: modules({typescript: '5.0.0'})}, /HLE_MODULES_VERSION typescript/]]) {
+    fs.rmSync(again, {recursive: true, force: true}); fs.mkdirSync(again);
+    await assert.rejects(installHle({root: again, target: 'linux-x64', parser, installModules: modules(), ...options}), message);
+  }
+  fs.rmSync(again, {recursive: true, force: true}); fs.mkdirSync(again);
+  await assert.rejects(installHle({root: again, target: 'darwin-x64', parser, installModules: modules()}), /HLE_CJBIND_UNAVAILABLE darwin_x86_64/);
+  for (const platform of ['linux_x86_64', 'linux_aarch64', 'windows_x86_64', 'darwin_aarch64'])
+    assert.match(hleCjbindAsset(platform).url, /^https:\/\/gitcode\.com\/Cangjie-SIG\/cjbind-cangjie\/releases\/download\/v1\.1\.0-alpha\.53\.1\//);
 });

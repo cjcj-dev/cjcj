@@ -107,7 +107,9 @@ const SYSTEM_TAR = () => process.platform === 'win32'
 // Windows under MSYS2 MINGW64; build_prepare_llvm.mjs) at the location every
 // native reader resolves: llvm/third_party/llvm/<llvmDirectory>/<llvmLibrary>,
 // llvm/third_party/llvm/bin/<tool> + llvm/BUILD-INPUTS.json.
-export function installLlvm({root, target, from, commits, producer}) {
+export const PREPARE_SHIM_OBJECT = 'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o';
+export function installLlvm({root, target, from, commits, producer, shimCommit}) {
+  if (!SHA40.test(String(shimCommit ?? ''))) throw new Error('PREPARE_COMPONENT_COMMIT shim');
   const platform = prepareHost(target).llvm_platform, native = sdkPlatform(platform);
   const install = freshComponent(root, 'llvm');
   const file = `third_party/llvm/${native.llvmDirectory}/${native.llvmLibrary}`;
@@ -118,9 +120,35 @@ export function installLlvm({root, target, from, commits, producer}) {
     tools[rel] = copyMember(from, `bin/${tool}${native.exe}`, install, rel);
     if (native.os !== 'win32') fs.chmodSync(path.join(install, rel), 0o755);
   }
-  const facts = {schema: 'cjcj-prepare-llvm-v1', platform, commits,
-    configuration: {producer, library: file, targets: 'X86;ARM;AArch64', tools: PREPARE_LLVM_TOOLS},
-    llvmLibrary: {file, sha256: row.sha256}, tools};
+  // The compiler-owned LLVM shim object of this LLVM build (build_prepare_llvm.mjs
+  // shim) at the path ci/bootstrap/native-shim-inputs.mjs reads, with its record.
+  const shimRecordFile = path.join(from, 'fixed-llc/SHIM-BUILD.json');
+  if (!fs.existsSync(shimRecordFile)) throw new Error('NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING fixed-llc/SHIM-BUILD.json');
+  const shimRecord = JSON.parse(fs.readFileSync(shimRecordFile, 'utf8'));
+  const shim = copyMember(from, 'fixed-llc/cjselfhost_llvmshim.o', install, PREPARE_SHIM_OBJECT);
+  if (shimRecord.sha256 !== shim.sha256 || shimRecord.bytes !== shim.bytes || !shimRecord.symbols?.length)
+    throw new Error('PREPARE_SHIM_BUILD_RECORD');
+  // cjdb is the lldb executable of the same CMake build, installed with its
+  // liblldb at the tools/bin location of sdk-inputs.mjs shapes.llvm.
+  const cjdbFile = `tools/bin/cjdb${native.exe}`;
+  const cjdb = copyMember(from, `bin/lldb${native.exe}`, install, cjdbFile);
+  if (native.os !== 'win32') fs.chmodSync(path.join(install, cjdbFile), 0o755);
+  const lldbDir = path.join(from, 'lldb-lib');
+  const lldbNames = fs.existsSync(lldbDir) ? fs.readdirSync(lldbDir).sort() : [];
+  if (!lldbNames.length) throw new Error('NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING lldb-lib');
+  const libraries = {};
+  for (const name of lldbNames) {
+    const rel = `tools/${native.os === 'win32' ? 'bin' : 'lib'}/${name}`;
+    libraries[rel] = copyMember(from, `lldb-lib/${name}`, install, rel);
+  }
+  const facts = {schema: 'cjcj-prepare-llvm-v1', platform, commits: {...commits, shim: shimCommit},
+    configuration: {producer, library: file, targets: 'X86;ARM;AArch64', tools: PREPARE_LLVM_TOOLS, projects: 'clang;lldb'},
+    llvmLibrary: {file, sha256: row.sha256}, tools,
+    nativeShim: {source: {commit: shimCommit, file: 'runtime_shim/cjselfhost_llvmshim.cpp'},
+      compiler: {commit: commits.compiler, schema: 'schema/CjoFormat.fbs'}, llvm: {commit: commits.llvm},
+      object: {path: PREPARE_SHIM_OBJECT, ...shim}, symbols: shimRecord.symbols,
+      configuration: {producer: 'build/sdk/producers/release/build_prepare_llvm.mjs shim', argv: shimRecord.argv}},
+    cjdb: {file: cjdbFile, ...cjdb, libraries, configuration: {projects: 'clang;lldb', target: 'lldb'}}};
   fs.writeFileSync(path.join(install, 'BUILD-INPUTS.json'), JSON.stringify(facts, null, 2) + '\n');
   return facts;
 }
@@ -214,6 +242,86 @@ export function compilerSource(env = process.env) {
   return source;
 }
 
+// HLE dependency package read by ci/bootstrap/hle-input.mjs configureHleInput and
+// build/srcbuild/hle-dependencies.mjs: this runner's own Node executable, the npm
+// tree of the pinned tools dtsparser package.json (--ignore-scripts: its
+// postinstall download is replaced by the pinned cjbind below) and the public
+// cjbind-cangjie release that consumer accepts. That release has no darwin-x64
+// asset, so that host fails closed instead of carrying a foreign cjbind.
+export const HLE_CJBIND = Object.freeze({version: 'v1.1.0-alpha.53.1',
+  base: 'https://gitcode.com/Cangjie-SIG/cjbind-cangjie/releases/download/v1.1.0-alpha.53.1/',
+  assets: Object.freeze({
+    linux_x86_64: Object.freeze({name: 'cjbind-linux-x64', size: 90753504, sha256: '71bf15dbd18a343c366a923a5b25766a373af5d1709a59c25ced545ebc88f21e'}),
+    linux_aarch64: Object.freeze({name: 'cjbind-linux-arm64', size: 82689672, sha256: '18fee7c8d63722f0eb990a5640d877212b195c5d994d78df29e65434d21bb579'}),
+    windows_x86_64: Object.freeze({name: 'cjbind-windows-x64.exe', size: 77087232, sha256: '417c6aac0d2ff448490c2027bbbd619cf09d10b207e1513ebff369d69db9935e'}),
+    darwin_aarch64: Object.freeze({name: 'cjbind-darwin-arm64', size: 92136544, sha256: '4da660c010203be14660edb5ee0e76f4a894214ca7a7c383702159d2f9d4005b'}),
+  })});
+export const HLE_DESCRIPTOR = 'hle/hle-dependencies.json';
+export function hleCjbindAsset(platform) {
+  const asset = HLE_CJBIND.assets[platform];
+  if (!asset) throw new Error(`HLE_CJBIND_UNAVAILABLE ${platform}`);
+  return {...asset, version: HLE_CJBIND.version, url: HLE_CJBIND.base + asset.name};
+}
+export function hleModuleSpecs(parser) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(parser, 'package.json'), 'utf8'));
+  const rows = Object.entries(manifest.dependencies || {});
+  if (!rows.length) throw new Error('HLE_PARSER_DEPENDENCIES');
+  return rows.map(([name, wanted]) => ({name, wanted: String(wanted).trim(), version: String(wanted).trim().replace(/^npm:[^@]+@/, '')}));
+}
+function npmInstall(prefix, specs) {
+  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const argv = ['install', '--prefix', prefix, '--ignore-scripts', '--no-save', '--no-package-lock', '--no-audit', '--no-fund', ...specs];
+  const result = spawnSync(npm, argv, {stdio: 'inherit', shell: process.platform === 'win32'});
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`HLE_MODULES_INSTALL_RC ${result.status}`);
+  return ['npm', ...argv.filter(arg => arg !== prefix && arg !== '--prefix')];
+}
+async function downloadAsset(url, file) {
+  const response = await fetch(url, {redirect: 'follow'});
+  if (!response.ok) throw new Error(`HLE_CJBIND_DOWNLOAD ${response.status} ${url}`);
+  fs.writeFileSync(file, Buffer.from(await response.arrayBuffer()));
+}
+export async function installHle({root, target, parser, node = process.execPath, cjbindFile,
+  installModules = npmInstall, download = downloadAsset, asset: pinned}) {
+  const platform = prepareHost(target).llvm_platform, native = sdkPlatform(platform);
+  const asset = pinned ?? hleCjbindAsset(platform), specs = hleModuleSpecs(parser);
+  const hle = freshComponent(root, 'hle');
+  const nodeRel = `node/node${native.exe}`, cjbindRel = `cjbind/cjbind${native.exe}`;
+  fs.mkdirSync(path.join(hle, 'node'));
+  fs.copyFileSync(node, path.join(hle, nodeRel));
+  const nodeVersion = String(spawnSync(node, ['--version'], {encoding: 'utf8'}).stdout || '').trim();
+  if (!/^v\d+\.\d+\.\d+$/.test(nodeVersion)) throw new Error('HLE_NODE_VERSION');
+  fs.mkdirSync(path.join(hle, 'cjbind'));
+  const cjbind = path.join(hle, cjbindRel);
+  if (cjbindFile) fs.copyFileSync(cjbindFile, cjbind); else await download(asset.url, cjbind);
+  if (fs.statSync(cjbind).size !== asset.size || sha256(cjbind) !== asset.sha256) throw new Error('HLE_CJBIND_IDENTITY');
+  if (native.os !== 'win32') for (const rel of [nodeRel, cjbindRel]) fs.chmodSync(path.join(hle, rel), 0o755);
+  const work = path.join(hle, '.modules');
+  fs.mkdirSync(work);
+  fs.writeFileSync(path.join(work, 'package.json'), '{}\n');
+  const command = installModules(work, specs.map(({name, wanted}) => `${name}@${wanted}`));
+  if (!fs.existsSync(path.join(work, 'node_modules'))) throw new Error('HLE_MODULES_MISSING');
+  fs.renameSync(path.join(work, 'node_modules'), path.join(hle, 'modules'));
+  fs.rmSync(work, {recursive: true, force: true});
+  // The consumer installs the tree without .bin (its cjbind is the one above).
+  fs.rmSync(path.join(hle, 'modules/.bin'), {recursive: true, force: true});
+  const packages = {};
+  for (const {name, version} of specs) {
+    const file = path.join(hle, 'modules', name, 'package.json');
+    const actual = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+    if (actual.name !== name || actual.version !== version) throw new Error(`HLE_MODULES_VERSION ${name}`);
+    packages[name] = version;
+  }
+  const descriptor = {schema: 'cjcj-prepare-hle-v1', platform,
+    node: {path: nodeRel, version: nodeVersion, source: `prepare runner Node ${nodeVersion} ${process.platform}-${process.arch}`,
+      sha256: sha256(path.join(hle, nodeRel))},
+    modules: {path: 'modules', version: Object.entries(packages).map(([name, version]) => `${name}@${version}`).join(' '),
+      source: `npm registry: ${command.join(' ')}`, packages},
+    cjbind: {path: cjbindRel, version: asset.version, source: asset.url, sha256: asset.sha256, size: asset.size}};
+  fs.writeFileSync(path.join(root, HLE_DESCRIPTOR), JSON.stringify(descriptor, null, 2) + '\n');
+  return descriptor;
+}
+
 // Actions artifacts do not keep POSIX modes, so a native-inputs root travels as
 // one tar made here; the consumer (ci/bootstrap/native-artifact-archive.mjs)
 // requires that single archive and extracts it before any member is executed.
@@ -237,13 +345,20 @@ export function assembleNativeInputs({root, target, hostVersion, env = process.e
   if (hostVersion !== undefined && !/^[0-9A-Za-z.+-]+$/.test(hostVersion)) throw new Error('PREPARE_HOST_VERSION');
   const selectedHost = recordedHost(root, host.llvm_platform, hostVersion);
   if (fs.existsSync(path.join(root, 'adapter'))) throw new Error('NATIVE_TOOLS_ADAPTER_UNEXPECTED');
+  if (!fs.existsSync(path.join(root, HLE_DESCRIPTOR))) throw new Error('NATIVE_INPUTS_COMPONENT_MISSING hle');
+  const llvm = installation(root, 'llvm', 'BUILD-INPUTS.json');
+  if (!JSON.parse(fs.readFileSync(path.join(root, llvm.buildResult), 'utf8')).nativeShim)
+    throw new Error('NATIVE_INPUTS_COMPONENT_MISSING shim');
   const locations = {
     platform: host.llvm_platform,
     host: selectedHost,
+    hleDependencies: HLE_DESCRIPTOR,
     installations: {
-      llvm: installation(root, 'llvm', 'BUILD-INPUTS.json'),
+      llvm,
       runtime: installation(root, 'runtime', 'NATIVE-INPUTS.json'),
       ast: installation(root, 'ast', 'BUILD-INPUTS.json'),
+      // The shim object is a member of the same N install (native-shim-inputs.mjs).
+      shim: {install: 'llvm'},
     },
     tools: {},
   };
@@ -286,7 +401,7 @@ export function prepareWorkflowProblems({release, sdkBuild, target}) {
   const text = JSON.stringify(job.steps || []);
   for (const program of ['build/sdk/producers/platform_matrix/build_runtime.mjs', 'build/sdk/producers/platform_matrix/native_runtime_package.mjs',
     'build/sdk/producers/release/prepare_native_inputs.mjs install-host', 'build/sdk/producers/release/prepare_native_inputs.mjs assemble',
-    'build/sdk/producers/release/prepare_native_inputs.mjs pack'])
+    'build/sdk/producers/release/prepare_native_inputs.mjs pack', 'build/sdk/producers/release/prepare_native_inputs.mjs install-hle'])
     if (!text.includes(program)) problems.push(`prepare-native does not run ${program}`);
   problems.push(...prepareComponentProblems(job.steps || []));
   // The host is the original official archive; a cjv install (ci/setup_sdk.mjs,
@@ -304,9 +419,19 @@ export const PREPARE_COMPONENT_STEPS = Object.freeze({
   // One in-process LLVM producer on every host: the static platform_tuples
   // build has no libLLVM-15.dll, so Windows runs the same dylib build.
   llvm: Object.freeze({
-    Linux: ['build/sdk/producers/release/build_prepare_llvm.mjs', 'prepare_native_inputs.mjs install-llvm'],
-    macOS: ['build/sdk/producers/release/build_prepare_llvm.mjs', 'prepare_native_inputs.mjs install-llvm'],
-    Windows: ['build/sdk/producers/release/build_prepare_llvm.mjs', 'prepare_native_inputs.mjs install-llvm'],
+    Linux: ['build/sdk/producers/release/build_prepare_llvm.mjs --platform', 'prepare_native_inputs.mjs install-llvm'],
+    macOS: ['build/sdk/producers/release/build_prepare_llvm.mjs --platform', 'prepare_native_inputs.mjs install-llvm'],
+    Windows: ['build/sdk/producers/release/build_prepare_llvm.mjs --platform', 'prepare_native_inputs.mjs install-llvm'],
+  }),
+  shim: Object.freeze({
+    Linux: ['build/sdk/producers/release/build_prepare_llvm.mjs shim', '--shim-commit'],
+    macOS: ['build/sdk/producers/release/build_prepare_llvm.mjs shim', '--shim-commit'],
+    Windows: ['build/sdk/producers/release/build_prepare_llvm.mjs shim', '--shim-commit'],
+  }),
+  hle: Object.freeze({
+    Linux: ['prepare_native_inputs.mjs install-hle'],
+    macOS: ['prepare_native_inputs.mjs install-hle'],
+    Windows: ['prepare_native_inputs.mjs install-hle'],
   }),
   ast: Object.freeze({
     Linux: ['ci/build_ast_support.sh', 'prepare_native_inputs.mjs install-ast'],
@@ -351,7 +476,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     else if (command === 'pack') console.log(JSON.stringify(packNativeInputs({root: option('root') || '', out: option('out') || ''})));
     else if (command === 'install-llvm') console.log(JSON.stringify(installLlvm({root: path.resolve(option('root') || ''),
-      target: option('target'), from: path.resolve(option('from') || ''), commits: componentCommits(), producer: option('producer')})));
+      target: option('target'), from: path.resolve(option('from') || ''), commits: componentCommits(), producer: option('producer'), shimCommit: option('shim-commit')})));
+    else if (command === 'install-hle') console.log(JSON.stringify(await installHle({root: path.resolve(option('root') || ''),
+      target: option('target'), parser: path.resolve(option('parser') || ''), cjbindFile: option('cjbind-file')})));
     else if (command === 'install-ast') console.log(JSON.stringify(installAst({root: path.resolve(option('root') || ''),
       target: option('target'), from: path.resolve(option('from') || ''), commits: componentCommits()})));
     else throw new Error('usage: prepare_native_inputs.mjs provenance | install-host --root DIR --target T'

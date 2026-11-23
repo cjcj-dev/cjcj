@@ -2972,6 +2972,23 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-ninja
+      # The compiler source the consumer compares against (explicit selection or
+      # ci/source_pin.env) feeds LLDB/cjdb in the LLVM build (CANGJIE_ROOT), the
+      # shim's CjoFormat schema and the AST support build (b2701d39
+      # build-ast-support.yml via ci/build_ast_support.sh).
+      - name: Fetch the selected compiler source for cjdb, the shim and AST support
+        run: |
+          set -euo pipefail
+          set -a; . ci/llvm_pin.env; eval "$(node build/sdk/producers/release/prepare_native_inputs.mjs compiler-source)"; set +a
+          git init compiler
+          git -C compiler remote add origin "$COMPILER_SRC_URL"
+          git -C compiler fetch --depth=1 origin "$COMPILER_REF"
+          git -C compiler checkout --detach FETCH_HEAD
+          test "$(git -C compiler rev-parse HEAD)" = "$COMPILER_REF"
+          git init compiler/third_party/flatbuffers
+          git -C compiler/third_party/flatbuffers remote add origin "$FLATBUFFERS_URL"
+          git -C compiler/third_party/flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
+          git -C compiler/third_party/flatbuffers checkout --detach FETCH_HEAD
       - name: Build the pinned in-process LLVM and its tools on this Unix host
         if: runner.os != 'Windows'
         env:
@@ -2986,7 +3003,7 @@ jobs:
             brew install ninja
           fi
           node build/sdk/producers/release/build_prepare_llvm.mjs --platform "$NATIVE_PLATFORM" \
-            --sha "${{ steps.pin.outputs.sha }}" --out "$RUNNER_TEMP/llvm-out"
+            --sha "${{ steps.pin.outputs.sha }}" --compiler "$PWD/compiler" --out "$RUNNER_TEMP/llvm-out"
       - name: Build the pinned in-process LLVM and its tools on this Windows host
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -2995,24 +3012,7 @@ jobs:
         run: |
           set -euo pipefail
           node build/sdk/producers/release/build_prepare_llvm.mjs --platform "$NATIVE_PLATFORM" \
-            --sha "${{ steps.pin.outputs.sha }}" --out "$(cygpath -m "$RUNNER_TEMP")/llvm-out"
-      # AST: the compiler's cangjie-ast-support target with std support ON
-      # (b2701d39 build-ast-support.yml via ci/build_ast_support.sh) from the
-      # compiler source the consumer compares against (explicit selection or
-      # ci/source_pin.env); the official host SDK above supplies flatc.
-      - name: Fetch the selected compiler source for AST support
-        run: |
-          set -euo pipefail
-          set -a; . ci/llvm_pin.env; eval "$(node build/sdk/producers/release/prepare_native_inputs.mjs compiler-source)"; set +a
-          git init compiler
-          git -C compiler remote add origin "$COMPILER_SRC_URL"
-          git -C compiler fetch --depth=1 origin "$COMPILER_REF"
-          git -C compiler checkout --detach FETCH_HEAD
-          test "$(git -C compiler rev-parse HEAD)" = "$COMPILER_REF"
-          git init compiler/third_party/flatbuffers
-          git -C compiler/third_party/flatbuffers remote add origin "$FLATBUFFERS_URL"
-          git -C compiler/third_party/flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
-          git -C compiler/third_party/flatbuffers checkout --detach FETCH_HEAD
+            --sha "${{ steps.pin.outputs.sha }}" --compiler "$(cygpath -m "$PWD")/compiler" --out "$(cygpath -m "$RUNNER_TEMP")/llvm-out"
       - name: Build AST support on this Unix host
         if: runner.os != 'Windows'
         run: bash ci/build_ast_support.sh compiler ast-build "$RUNNER_TEMP/ast-out" "$RUNNER_TEMP/native-inputs/host"
@@ -3020,6 +3020,22 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: bash ci/build_ast_support.sh compiler ast-build "$RUNNER_TEMP/ast-out" "$RUNNER_TEMP/native-inputs/host"
+      - name: Compile the LLVM shim object against this LLVM build on this Unix host
+        if: runner.os != 'Windows'
+        env:
+          NATIVE_PLATFORM: ${{ matrix.llvm_platform }}
+        run: >-
+          node build/sdk/producers/release/build_prepare_llvm.mjs shim --platform "$NATIVE_PLATFORM"
+          --compiler compiler --flatc "$RUNNER_TEMP/ast-out/third_party/flatbuffers/bin/flatc" --out "$RUNNER_TEMP/llvm-out"
+      - name: Compile the LLVM shim object against this LLVM build on this Windows host
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        env:
+          NATIVE_PLATFORM: ${{ matrix.llvm_platform }}
+        run: >-
+          node build/sdk/producers/release/build_prepare_llvm.mjs shim --platform "$NATIVE_PLATFORM"
+          --compiler compiler --flatc "$(cygpath -m "$RUNNER_TEMP")/ast-out/third_party/flatbuffers/bin/flatc.exe"
+          --out "$(cygpath -m "$RUNNER_TEMP")/llvm-out"
       - name: Install N/LLVM and AST into the native input root
         env:
           PREPARE_LLVM_COMMIT: ${{ steps.pin.outputs.sha }}
@@ -3027,9 +3043,27 @@ jobs:
         run: |
           set -euo pipefail
           node build/sdk/producers/release/prepare_native_inputs.mjs install-llvm \
-            --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}" --from "$RUNNER_TEMP/llvm-out" --producer llvm-dylib
+            --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}" --from "$RUNNER_TEMP/llvm-out" --producer llvm-dylib \
+            --shim-commit "$GITHUB_SHA"
           node build/sdk/producers/release/prepare_native_inputs.mjs install-ast \
             --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}" --from "$RUNNER_TEMP/ast-out"
+      # HLE dependency package (ci/bootstrap/hle-input.mjs): this runner's Node,
+      # the npm tree of the pinned tools dtsparser package.json and the pinned
+      # public cjbind release, under hle/ of the native input root.
+      - name: Check out the fixed HLE parser source
+        run: |
+          set -euo pipefail
+          set -a; . ci/source_pin.env; set +a
+          git init hle-tools
+          git -C hle-tools remote add origin "$TOOLS_SRC_URL"
+          git -C hle-tools fetch --depth=1 origin "$TOOLS_REF"
+          git -C hle-tools checkout --detach FETCH_HEAD
+          test "$(git -C hle-tools rev-parse HEAD)" = "$TOOLS_REF"
+      - name: Install the HLE dependency package into the native input root
+        run: >-
+          node build/sdk/producers/release/prepare_native_inputs.mjs install-hle
+          --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}"
+          --parser hle-tools/packages/hle/src/dtsparser
       - name: Assemble native inputs and bind their provenance
         run: >-
           node build/sdk/producers/release/prepare_native_inputs.mjs assemble
