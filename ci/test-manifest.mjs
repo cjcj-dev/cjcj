@@ -191,6 +191,7 @@ export const GATING = Object.freeze([
   'build/sdk/producers/release/bootstrap_entries.test.mjs',
   'build/sdk/producers/release/bootstrap_host_sdk.test.mjs',
   'build/sdk/producers/release/trimpath.test.mjs',
+  'build/sdk/test/source-isolation.test.mjs',
   'build/sdk/producers/srcbuild/tests/platform-contract.test.mjs',
   'build/sdk/producers/srcbuild/tests/release-wire.test.mjs',
   'build/sdk/producers/srcbuild/tests/segmented-workflow.test.mjs',
