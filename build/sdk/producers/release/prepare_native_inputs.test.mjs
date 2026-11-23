@@ -14,9 +14,11 @@ import {installHleDependencies} from '../../../srcbuild/hle-dependencies.mjs';
 import {readInstalledNativeShim} from '../../../../ci/bootstrap/native-shim-inputs.mjs';
 import {unpackNativeArtifact} from '../../../../ci/bootstrap/native-artifact-archive.mjs';
 import {buildPrepareLlvm, llvmConfigureArgs, buildPrepareShim, shimRequiredSymbols, shimSymbolProblems, PREPARE_LLVM_TARGETS,
-  llvmLibrarySymbolProblems, lldbPythonArgs, PREPARE_PYTHON, pythonCacheConfiguration, lldbPythonBuildPackage} from './build_prepare_llvm.mjs';
+  llvmLibrarySymbolProblems, lldbPythonArgs, PREPARE_PYTHON, pythonCacheConfiguration, lldbPythonBuildPackage,
+  compilerRtLibraries, compilerRtTargets} from './build_prepare_llvm.mjs';
+import {copyOutputs} from '../../../../ci/bootstrap/sdk-flow.mjs';
 import {selectedStdAst} from '../../../../ci/bootstrap/sdk-std-resume.mjs';
-import {createBootstrapTargets, FIXED_INPUTS} from '../../../../ci/bootstrap/sdk-targets.mjs';
+import {createBootstrapTargets, FIXED_INPUTS, nativeTargetLibraryExcludes} from '../../../../ci/bootstrap/sdk-targets.mjs';
 import {spawnSync} from 'node:child_process';
 import {nativeInstallationLocations} from '../../../../ci/bootstrap/native-installation-locations.mjs';
 import {readInstalledNativeAst} from '../../../../ci/bootstrap/installed-native-ast.mjs';
@@ -175,7 +177,12 @@ test('red cut: re-adding the private adapter deployment to prepare-native is ref
 // ---- end-to-end mock layout: producer output -> native-inputs -> downstream readers ----
 const LLVM = commit('1'), RUNTIME = commit('2'), COMPILER = commit('3'), SHIM = commit('a');
 // build_prepare_llvm.mjs output shape for the shim object (shim step) and cjdb.
-function putShimCjdb(out, native, label) {
+// compiler-rt of the same build (build_prepare_llvm.mjs compiler-rt): ar archives,
+// Darwin's lipo'd libclang_rt.osx.a a fat file.
+const rtBytes = (row, label) => Buffer.concat([row.name === 'libclang_rt.osx.a' ? Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 2])
+  : Buffer.from('!<arch>\n'), Buffer.from(`${row.name} ${label}`)]);
+const escape = text => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+function putShimCjdb(out, native, label, platform) {
   const put = (rel, body) => { fs.mkdirSync(path.dirname(path.join(out, rel)), {recursive: true}); fs.writeFileSync(path.join(out, rel), body); };
   const object = Buffer.from('shim object ' + label);
   put('fixed-llc/cjselfhost_llvmshim.o', object);
@@ -185,6 +192,7 @@ function putShimCjdb(out, native, label) {
   put(native.os === 'win32' ? 'lldb-lib/liblldb.dll' : native.os === 'darwin' ? 'lldb-lib/liblldb.15.dylib' : 'lldb-lib/liblldb.so.15', 'liblldb');
   // clang-resource-headers of the same build (build_prepare_llvm.mjs clang-resources)
   for (const name of CLANG_HEADERS) put(`clang-resources/15.0.4/include/${name}`, 'builtin ' + name);
+  for (const row of compilerRtLibraries(platform)) put(`compiler-rt/${row.name}`, rtBytes(row, label));
 }
 const CLANG_HEADERS = ['stddef.h', 'stdint.h', 'stdarg.h'];
 // The pinned Python prefix layout of each host (build_prepare_llvm.mjs PREPARE_PYTHON).
@@ -228,7 +236,7 @@ function produced(t, target) {
   put('llvm-out/' + native.llvmLibrary, Buffer.concat([elf, Buffer.from(`llvm bytes ${target} CJLLVM-COMMIT:${LLVM}\n`)]));
   putPython(path.join(dir, 'llvm-out'), native.platform ?? PREPARE_HOSTS.find(h => h.target === target).llvm_platform);
   for (const tool of PREPARE_LLVM_TOOLS) put(`llvm-out/bin/${tool}${native.exe}`, `${tool} ${target}`);
-  putShimCjdb(path.join(dir, 'llvm-out'), native, target);
+  putShimCjdb(path.join(dir, 'llvm-out'), native, target, PREPARE_HOSTS.find(h => h.target === target).llvm_platform);
   put('root/hle/hle-dependencies.json', '{}');
   for (const rel of ['libcangjie-ast-support.a', 'schema/StdAstFormat.fbs', 'include/flatbuffers/StdAstFormat_generated.h',
     ...stdxChirMembers, ...PREPARE_AST_STD_HEADERS, 'include/cangjie/AST/Node.h', 'third_party/flatbuffers/bin/flatc' + native.exe])
@@ -392,17 +400,18 @@ test('the N/LLVM producer configures the dylib build and installs library and to
   const win = lldbPythonArgs({executable: 'C:\\p\\python.exe', include: 'C:\\p\\include', library: 'C:\\p\\libs\\python311.lib'}, 'win32');
   assert.ok(win.includes('-DPython3_EXECUTABLE=C:/p/python.exe') && win.includes('-DPython3_LIBRARY=C:/p/libs/python311.lib'), win.join(' '));
   for (const flag of ['-DLLVM_BUILD_LLVM_DYLIB=ON', '-DLLVM_LINK_LLVM_DYLIB=OFF', '-DLLDB_ENABLE_PYTHON=OFF', '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', '-DLLVM_ENABLE_ZLIB=OFF',
-    '-DLLVM_ENABLE_PROJECTS=clang;lldb', '-DCANGJIE_ROOT=c', '-DLLDB_INCLUDE_TESTS=OFF'])
+    '-DLLVM_ENABLE_PROJECTS=clang;lldb;compiler-rt', '-DCANGJIE_ROOT=c', '-DLLDB_INCLUDE_TESTS=OFF',
+    '-DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF', '-DCOMPILER_RT_BUILD_LIBFUZZER=OFF', '-DCOMPILER_RT_BUILD_SANITIZERS=OFF'])
     assert.ok(args.includes(flag), flag);
   assert.ok(!args.includes('-DLLVM_ENABLE_PROJECTS='), 'the LLVM build enables lldb');
   assert.ok(PREPARE_LLVM_TARGETS.includes('lldb'));
   assert.throws(() => llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'linux'}), /PREPARE_LLVM_COMPILER_SOURCE/);
   assert.ok(!llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'linux', compiler: 'c'}).includes('-DLLVM_ENABLE_ZLIB=OFF'));
-  for (const platform of ['linux_x86_64', 'windows_x86_64', 'darwin_aarch64']) {
+  for (const platform of PREPARE_HOSTS.map(host => host.llvm_platform)) {
     const native = sdkPlatform(platform), work = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-llvm-'));
     t.after(() => fs.rmSync(work, {recursive: true, force: true}));
     const seen = [];
-    let omitClangResources = false;
+    let omitClangResources = false, omitCompilerRt;
     const run = (file, argv) => { // records argv; the build step leaves the real output shape
       const all = [file, ...argv]; seen.push(all.join(' '));
       if (all[0] === 'git' && all.includes('rev-parse')) return {status: 0, stdout: LLVM + '\n'};
@@ -417,6 +426,12 @@ test('the N/LLVM producer configures the dylib build and installs library and to
         if (all.includes('clang-resource-headers') && !omitClangResources) for (const name of CLANG_HEADERS) {
           fs.mkdirSync(path.join(build, 'lib/clang/15.0.4/include'), {recursive: true});
           fs.writeFileSync(path.join(build, 'lib/clang/15.0.4/include', name), 'builtin ' + name);
+        }
+        // compiler-rt lands in lib/clang/<version>/lib/<os> (PER_TARGET_RUNTIME_DIR=OFF), with a non-required archive beside it
+        if (all.includes('builtins') && !omitClangResources) for (const row of [...compilerRtLibraries(platform), {name: 'x', source: 'other/libclang_rt.extra.a'}]) {
+          if (row.source === omitCompilerRt) continue;
+          const file = path.join(build, 'lib/clang/15.0.4/lib', row.source);
+          fs.mkdirSync(path.dirname(file), {recursive: true}); fs.writeFileSync(file, rtBytes(row, platform));
         }
         if (all.includes('lldb-python')) {
           const pkg = path.join(build, lldbPythonBuildPackage(native.os)), L = pythonLayout(platform);
@@ -444,6 +459,21 @@ test('the N/LLVM producer configures the dylib build and installs library and to
       assert.ok(pythonLayout(platform).copy ? binding.isFile() : binding.isSymbolicLink(), platform);
     }
     for (const name of CLANG_HEADERS) assert.ok(fs.existsSync(path.join(out, 'clang-resources/15.0.4/include', name)), name);
+    // compiler-rt is moved out of the resource tree under its installed names (ExtractRtlib.cmake)
+    assert.deepEqual(fs.readdirSync(path.join(out, 'compiler-rt')).sort(), compilerRtLibraries(platform).map(row => row.name).sort(), platform);
+    for (const row of compilerRtLibraries(platform)) {
+      assert.deepEqual(fs.readFileSync(path.join(out, 'compiler-rt', row.name)), rtBytes(row, platform), row.name);
+      assert.ok(!fs.existsSync(path.join(out, 'clang-resources/15.0.4/lib', row.source)), row.source);
+    }
+    assert.ok(fs.existsSync(path.join(out, 'clang-resources/15.0.4/lib/other/libclang_rt.extra.a')));
+    assert.ok(seen.some(line => line.startsWith('cmake --build') && line.includes(`--target ${compilerRtTargets(native.os).join(' ')} LLVM `)), platform);
+    // red cut: an LLVM build without one required compiler-rt library is not exported, and that one is named
+    omitCompilerRt = compilerRtLibraries(platform).at(-1).source;
+    const noRt = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-llvm-nort-'));
+    t.after(() => fs.rmSync(noRt, {recursive: true, force: true}));
+    assert.throws(() => buildPrepareLlvm({platform, sha: LLVM, out: path.join(noRt, 'out'), work: noRt, env: {}, run, compiler, python}),
+      new RegExp(`^Error: PREPARE_COMPILER_RT_MISSING lib/clang/15\\.0\\.4/lib/${escape(omitCompilerRt)}$`));
+    omitCompilerRt = undefined;
     // red cut: an LLVM build without the clang resource tree is not exported
     omitClangResources = true;
     const noClang = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-llvm-noclang-'));
@@ -489,7 +519,31 @@ test('the N/LLVM producer configures the dylib build and installs library and to
     assert.equal(facts.cjdb.file, 'tools/bin/cjdb' + native.exe);
     await readInstalledNativeShim({install: path.join(root, 'llvm')});
     assert.equal(facts.clangResources.path, 'third_party/llvm/lib/clang');
-    assert.deepEqual(Object.keys(facts.clangResources.files).sort(), CLANG_HEADERS.map(name => '15.0.4/include/' + name).sort());
+    // lib/<tuple> holds the compiler-rt libraries, each recorded with path, sha256 and bytes
+    assert.deepEqual(facts.targetLibraries.map(row => row.path), compilerRtLibraries(platform).map(row => `lib/${native.tuple}/${row.name}`));
+    assert.equal(facts.configuration.projects, 'clang;lldb;compiler-rt');
+    for (const row of facts.targetLibraries) {
+      const bytes = fs.readFileSync(path.join(root, 'llvm', row.path));
+      assert.deepEqual(bytes, fs.readFileSync(path.join(out, 'compiler-rt', path.basename(row.path))), row.path);
+      assert.deepEqual({sha256: row.sha256, bytes: row.bytes}, {sha256: crypto.createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length});
+    }
+    // red cut: an N output without one compiler-rt library is not installed, and that one is named
+    const lastRt = compilerRtLibraries(platform).at(-1).name;
+    const noRtOut = path.join(work, 'out-nort'); fs.cpSync(out, noRtOut, {recursive: true, verbatimSymlinks: true});
+    fs.rmSync(path.join(noRtOut, 'compiler-rt', lastRt));
+    assert.throws(() => installLlvm({root: path.join(work, 'root-nort'), target, from: noRtOut,
+      commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER}, producer: 'x', shimCommit: SHIM}),
+      new RegExp(`^Error: NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING compiler-rt/${escape(lastRt)}$`));
+    // red cut: a compiler-rt member that is not a static library is not installed
+    const firstRt = compilerRtLibraries(platform)[0].name;
+    const textRt = path.join(work, 'out-textrt'); fs.cpSync(out, textRt, {recursive: true, verbatimSymlinks: true});
+    fs.writeFileSync(path.join(textRt, 'compiler-rt', firstRt), 'not an archive');
+    assert.throws(() => installLlvm({root: path.join(work, 'root-textrt'), target, from: textRt,
+      commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER}, producer: 'x', shimCommit: SHIM}),
+      new RegExp(`^Error: PREPARE_COMPILER_RT_NOT_STATIC_LIBRARY compiler-rt/${escape(firstRt)}$`));
+    // the required compiler-rt libraries left the resource tree; a non-required one stays there
+    assert.deepEqual(Object.keys(facts.clangResources.files).sort(),
+      [...CLANG_HEADERS.map(name => '15.0.4/include/' + name), '15.0.4/lib/other/libclang_rt.extra.a'].sort());
     for (const name of CLANG_HEADERS) assert.ok(fs.existsSync(path.join(root, 'llvm/third_party/llvm/lib/clang/15.0.4/include', name)), name);
     // red cut: an N without the clang resource tree is not installed
     const noResources = path.join(work, 'out-noclang'); fs.cpSync(out, noResources, {recursive: true, verbatimSymlinks: true});
@@ -915,4 +969,76 @@ test('Darwin and Windows prepare N carry the pinned Python input and clang resou
     const copy = graph.stages.find(stage => stage.id === 'stage0-run').copies.find(row => row.owner === 'N clang resources');
     assert.ok(copy && fs.existsSync(path.join(copy.from, '15.0.4/include/stddef.h')), target);
   }
+});
+// stage1-initial .. final: every installation recipe that copies N's lib/<tuple>
+// (ci/bootstrap/sdk-targets.mjs installationRecipe) reads it from prepare N, and
+// the real installer (ci/bootstrap/sdk-flow.mjs copyOutputs) installs the
+// compiler-rt libraries the N facts record, on all five hosts.
+for (const host of PREPARE_HOSTS) test(`${host.target}: every installation recipe installs prepare N's lib/<tuple> compiler-rt libraries`, async t => {
+  const platform = host.llvm_platform, native = sdkPlatform(platform), tuple = native.tuple;
+  const {dir, root: prepared} = produced(t, host.target);
+  const {locations} = assembleNativeInputs({root: prepared, target: host.target, hostVersion: '1.1.0', env, pins});
+  const resolved = await nativeInstallationLocations(prepared, locations, {});
+  const facts = JSON.parse(fs.readFileSync(resolved.llvm.buildResult, 'utf8'));
+  const names = compilerRtLibraries(platform).map(row => row.name);
+  assert.deepEqual(facts.targetLibraries.map(row => row.path), names.map(name => `lib/${tuple}/${name}`));
+  const row = (sha, name) => ({commit: sha, tree: 'a'.repeat(40), repository: path.join(prepared, name), install: path.join(prepared, name),
+    configuration: {}, buildResult: path.join(prepared, name, 'BUILD-INPUTS.json'), sourceRoot: path.join(prepared, name)});
+  const runtimeRow = row(RUNTIME, 'runtime');
+  const graph = createBootstrapTargets({platform, work: path.join(dir, 'work'), install: path.join(dir, 'stage'),
+    llvmCommit: LLVM, runtimeCommit: RUNTIME, astCommit: COMPILER,
+    host: {version: FIXED_INPUTS.host, install: path.join(prepared, 'host')},
+    llvm: {...row(LLVM, 'llvm'), ...resolved.llvm, verification: {...resolved.llvm.verification, librarySha256: facts.llvmLibrary.sha256}},
+    runtime: runtimeRow, ast: row(COMPILER, 'ast'), h1: row(FIXED_INPUTS.h1, 'h1'), compiler: row('b'.repeat(40), 'compiler'),
+    stdlib: runtimeRow, tools: {cc: 'clang', cxx: 'clang++', launcher: 'sccache', zx: 'zx'}});
+  const libraryCopy = stage => (stage.copies || []).filter(copy => copy.owner === 'N' && copy.to === 'lib/' + tuple);
+  const consumers = graph.stages.filter(stage => libraryCopy(stage).length);
+  const final = graph.stages.find(stage => stage.output === '${install}');
+  const ids = consumers.map(stage => stage.id);
+  for (const id of ['stage1-initial', final.id]) assert.ok(ids.includes(id), `${host.target} ${id} copies N lib/${tuple}: ${ids}`);
+  console.log(`LIBTUPLE_RECIPE_CONSUMERS ${host.target} final=${final.id} ${ids.join(',')}`);
+  const absent = () => graph.stages.flatMap(stage => (stage.copies || [])
+    .filter(copy => copy.from.startsWith(resolved.llvm.install + '/') && !fs.existsSync(copy.from))
+    .map(copy => stage.id + ' ' + copy.from.slice(resolved.llvm.install.length + 1)));
+  assert.deepEqual(absent(), [], host.target);
+  for (const stage of consumers) {
+    const sdk = path.join(dir, 'sdk-' + stage.id);
+    await copyOutputs(sdk, libraryCopy(stage));
+    assert.deepEqual(fs.readdirSync(path.join(sdk, 'lib', tuple)).sort(), [...names].sort(), stage.id);
+    for (const library of facts.targetLibraries)
+      assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(sdk, library.path))).digest('hex'), library.sha256, stage.id);
+  }
+  // red cut: the prepare N without lib/<tuple> (6683f8e) is absent from exactly these recipes, and the installer stops
+  fs.rmSync(path.join(resolved.llvm.install, 'lib', tuple), {recursive: true});
+  assert.deepEqual(absent(), consumers.map(stage => `${stage.id} lib/${tuple}`), host.target);
+  console.log(`LIBTUPLE_RED_CUT_REACHED ${host.target} ${absent().length} recipes lack lib/${tuple}`);
+  await assert.rejects(copyOutputs(path.join(dir, 'sdk-cut'), libraryCopy(consumers[0])), /ENOENT/);
+});
+// The five-host lib/<tuple> contract is cangjie_compiler's CLANG_RT_LIBS
+// (third_party/CMakeLists.txt, both fixed fixtures) and what the driver links.
+test('prepare N lib/<tuple> is the cangjie_compiler CLANG_RT_LIBS set on each of the five hosts', () => {
+  for (const fixture of ['compiler-174db8f', 'compiler-41b223-windows']) {
+    const cmake = fs.readFileSync(path.join(root, 'build/test/fixtures', fixture, 'third_party/CMakeLists.txt'), 'utf8');
+    for (const line of ['set(LIB_PROFILE_NAME libclang_rt-${LIB_PROFILE}.a)', 'set(LIB_BUILTINS_NAME libclang_rt.osx.a)',
+      'set(LIB_BUILTINS_NAME libclang_rt-${LIB_BUILTINS}.a)', 'set(LIB_FUZZER_NOMAIN_NAME libclang_rt.${LIB_FUZZER_NOMAIN}.a)',
+      'set(LIB_PROFILE profile)', 'set(LIB_FUZZER_NOMAIN fuzzer_no_main)', 'set(LIB_BUILTINS builtins)',
+      'install(FILES ${CLANG_RT_LIBS} DESTINATION lib/${output_lib_dir}${SANITIZER_SUBPATH})'])
+      assert.ok(cmake.includes(line), fixture + ': ' + line);
+    assert.match(cmake, /if\(\$\{CMAKE_SYSTEM_PROCESSOR\} STREQUAL "x86_64" OR DARWIN\)\n\s+list\(APPEND CLANG_RT_LIBS \$\{LIB_BUILTINS_PATH\}\)\n\s+endif\(\)\n\s+list\(APPEND CLANG_RT_LIBS \$\{LIB_PROFILE_PATH\}\)\n\s+if\(NOT WIN32 AND NOT IOS\)\n\s+list\(APPEND CLANG_RT_LIBS \$\{LIB_FUZZER_NOMAIN_PATH\}\)/, fixture);
+  }
+  const installed = Object.fromEntries(PREPARE_HOSTS.map(host => [host.target, compilerRtLibraries(host.llvm_platform).map(row => row.name)]));
+  assert.deepEqual(installed, {
+    'linux-x64': ['libclang_rt-builtins.a', 'libclang_rt-profile.a', 'libclang_rt.fuzzer_no_main.a'],
+    'linux-aarch64': ['libclang_rt-profile.a', 'libclang_rt.fuzzer_no_main.a'],
+    'windows-x64': ['libclang_rt-builtins.a', 'libclang_rt-profile.a'],
+    'darwin-arm64': ['libclang_rt.osx.a', 'libclang_rt-profile.a', 'libclang_rt.fuzzer_no_main.a'],
+    'darwin-x64': ['libclang_rt.osx.a', 'libclang_rt-profile.a', 'libclang_rt.fuzzer_no_main.a']});
+  // none of them is supplied by the AST or std installation instead (sdk-targets.mjs nativeTargetLibraryExcludes)
+  for (const names of Object.values(installed)) assert.deepEqual(names.filter(name => nativeTargetLibraryExcludes.includes(name)), []);
+  // the driver links exactly these names (packages/driver, read only)
+  const driver = name => fs.readFileSync(path.join(root, 'packages/driver/src', name), 'utf8');
+  assert.match(driver('Linux_CJNATIVE.cj'), /if \(driverOptions\.target\.arch != ArchType\.AARCH64\) \{\n\s+tool\.AppendArg\("-lclang_rt-builtins"\)/);
+  assert.ok(driver('Darwin_CJNATIVE.cj').includes('FileUtil.JoinPath(cangjieLibPath, "libclang_rt.osx.a")'));
+  assert.ok(driver('MinGW_CJNATIVE.cj').includes('tool.AppendArg("-lclang_rt-builtins")'));
+  assert.ok(driver('ToolChain.cj').includes('return "libclang_rt-profile.a"'));
 });

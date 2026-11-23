@@ -17,7 +17,7 @@ import {sdkPlatform, stdxChirMembers} from '../../../../ci/bootstrap/sdk-platfor
 import {readHostToolchainPin} from '../../../../ci/host-toolchain-pin.mjs';
 import {readSourcePins} from '../../../../ci/native-llvm-inputs.mjs';
 import {PREPARE_PYTHON, preparePythonMembers, PREPARE_LLDB_PYTHON_PACKAGE, PREPARE_CLANG_RESOURCES,
-  clangResourceProblems} from './build_prepare_llvm.mjs';
+  clangResourceProblems, PREPARE_COMPILER_RT, PREPARE_LLVM_PROJECTS, compilerRtLibraries, isStaticLibrary} from './build_prepare_llvm.mjs';
 import {workflowSourceSelection} from '../srcbuild/source-selection.mjs';
 import {baseSdkDownload} from '../../../lib/release-component-provenance.mjs';
 import {allTargets, getTarget} from '../../../lib/targets.mjs';
@@ -126,6 +126,9 @@ export function installLlvm({root, target, from, commits, producer, shimCommit})
   // The same build's clang resource tree, at the location stage0-run's
   // installation recipe copies as 'N clang resources' (sdk-targets.mjs).
   const clangResources = installClangResources({from, install});
+  // N's lib/<tuple>: the compiler-rt libraries every installation recipe copies
+  // from stage1-initial on (ci/bootstrap/sdk-targets.mjs installationRecipe).
+  const targetLibraries = installCompilerRt({from, install, platform});
   // The compiler-owned LLVM shim object of this LLVM build (build_prepare_llvm.mjs
   // shim) at the path ci/bootstrap/native-shim-inputs.mjs reads, with its record.
   const shimRecordFile = path.join(from, 'fixed-llc/SHIM-BUILD.json');
@@ -153,16 +156,28 @@ export function installLlvm({root, target, from, commits, producer, shimCommit})
   // with its original producer record and the observed CMake configuration.
   const python = installPython({from, install, platform, lldbNames});
   const facts = {schema: 'cjcj-prepare-llvm-v1', platform, commits: {...commits, shim: shimCommit},
-    configuration: {producer, library: file, targets: 'X86;ARM;AArch64', tools: PREPARE_LLVM_TOOLS, projects: 'clang;lldb'},
-    llvmLibrary: {file, sha256: row.sha256}, tools, clangResources,
+    configuration: {producer, library: file, targets: 'X86;ARM;AArch64', tools: PREPARE_LLVM_TOOLS, projects: PREPARE_LLVM_PROJECTS},
+    llvmLibrary: {file, sha256: row.sha256}, tools, clangResources, targetLibraries,
     nativeShim: {source: {commit: shimCommit, file: 'runtime_shim/cjselfhost_llvmshim.cpp'},
       compiler: {commit: commits.compiler, schema: 'schema/CjoFormat.fbs'}, llvm: {commit: commits.llvm},
       object: {path: PREPARE_SHIM_OBJECT, ...shim}, symbols: shimRecord.symbols,
       configuration: {producer: 'build/sdk/producers/release/build_prepare_llvm.mjs shim', argv: shimRecord.argv}},
-    cjdb: {file: cjdbFile, ...cjdb, libraries, configuration: {projects: 'clang;lldb', target: 'lldb'}},
+    cjdb: {file: cjdbFile, ...cjdb, libraries, configuration: {projects: PREPARE_LLVM_PROJECTS, target: 'lldb'}},
     ...python};
   fs.writeFileSync(path.join(install, 'BUILD-INPUTS.json'), JSON.stringify(facts, null, 2) + '\n');
   return facts;
+}
+// Rows as the full N's facts carry them (ci/bootstrap/native-cjdb.mjs
+// nativeTargetLibraries), which the installed reader re-checks
+// (build/sdk/producers/srcbuild/lib/installed-inputs.mjs targetLibraries).
+function installCompilerRt({from, install, platform}) {
+  const dir = `lib/${sdkPlatform(platform).tuple}`;
+  return compilerRtLibraries(platform).map(({name}) => {
+    const rel = `${PREPARE_COMPILER_RT}/${name}`, to = `${dir}/${name}`;
+    if (fs.existsSync(path.join(from, rel)) && !isStaticLibrary(path.join(from, rel)))
+      throw new Error('PREPARE_COMPILER_RT_NOT_STATIC_LIBRARY ' + rel);
+    return {path: to, ...copyMember(from, rel, install, to)};
+  });
 }
 export const PREPARE_CLANG_RESOURCE_DIR = 'third_party/llvm/lib/clang';
 function installClangResources({from, install}) {

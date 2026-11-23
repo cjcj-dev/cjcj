@@ -6,7 +6,8 @@
 // (ci/bootstrap/sdk-inputs.mjs shapes.llvm). Windows runs it in the MSYS2
 // MINGW64 shell so the same CMake build yields bin/libLLVM-15.dll; the static
 // platform_tuples build does not produce an in-process library.
-// Output: OUT/<llvmLibrary>, OUT/bin/<tool><exe>, OUT/BUILD-COMMANDS.json.
+// Output: OUT/<llvmLibrary>, OUT/bin/<tool><exe>, OUT/compiler-rt/<library>,
+// OUT/BUILD-COMMANDS.json.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,9 +33,69 @@ export function clangResourceProblems(root) {
   return ['stddef.h', 'stdint.h', 'stdarg.h'].filter(name => !fs.existsSync(path.join(root, versions[0], 'include', name)))
     .map(name => `lib/clang/${versions[0]}/include/${name} missing`);
 }
+// N's lib/<tuple> holds the compiler-rt static libraries of the same tree. The
+// set and the installed names are cangjie_compiler third_party/CMakeLists.txt
+// CLANG_RT_LIBS (build/test/fixtures/compiler-174db8f/third_party/CMakeLists.txt
+// 123-147, 379-387, 525): builtins only on x86_64 or Darwin (Darwin: the lipo'd
+// libclang_rt.osx.a), profile everywhere, fuzzer_no_main except on Windows.
+// cmake/ExtractRtlib.cmake moves each out of lib/clang/<version>/lib/<os>/;
+// LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF fixes that <os> layout on every host.
+export const PREPARE_COMPILER_RT = 'compiler-rt';
+const rtlib = (name, source) => Object.freeze({name, source});
+const DARWIN_COMPILER_RT = Object.freeze([rtlib('libclang_rt.osx.a', 'darwin/libclang_rt.osx.a'),
+  rtlib('libclang_rt-profile.a', 'darwin/libclang_rt.profile_osx.a'),
+  rtlib('libclang_rt.fuzzer_no_main.a', 'darwin/libclang_rt.fuzzer_no_main_osx.a')]);
+export const PREPARE_COMPILER_RT_LIBRARIES = Object.freeze({
+  linux_x86_64: Object.freeze([rtlib('libclang_rt-builtins.a', 'linux/libclang_rt.builtins-x86_64.a'),
+    rtlib('libclang_rt-profile.a', 'linux/libclang_rt.profile-x86_64.a'),
+    rtlib('libclang_rt.fuzzer_no_main.a', 'linux/libclang_rt.fuzzer_no_main-x86_64.a')]),
+  linux_aarch64: Object.freeze([rtlib('libclang_rt-profile.a', 'linux/libclang_rt.profile-aarch64.a'),
+    rtlib('libclang_rt.fuzzer_no_main.a', 'linux/libclang_rt.fuzzer_no_main-aarch64.a')]),
+  darwin_aarch64: DARWIN_COMPILER_RT,
+  darwin_x86_64: DARWIN_COMPILER_RT,
+  windows_x86_64: Object.freeze([rtlib('libclang_rt-builtins.a', 'windows/libclang_rt.builtins-x86_64.a'),
+    rtlib('libclang_rt-profile.a', 'windows/libclang_rt.profile-x86_64.a')]),
+});
+export function compilerRtLibraries(platform) {
+  const rows = PREPARE_COMPILER_RT_LIBRARIES[platform];
+  if (!rows) throw new Error('PREPARE_COMPILER_RT_PLATFORM ' + platform);
+  return rows;
+}
+// The compiler-rt components those libraries come from; the rest stay off.
+export const compilerRtTargets = os => ['builtins', 'profile', ...(os === 'win32' ? [] : ['fuzzer'])];
+export function compilerRtArgs(os) {
+  return ['-DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF', '-DCOMPILER_RT_ENABLE_IOS=OFF',
+    '-DCOMPILER_RT_BUILD_BUILTINS=ON', '-DCOMPILER_RT_BUILD_PROFILE=ON', `-DCOMPILER_RT_BUILD_LIBFUZZER=${os === 'win32' ? 'OFF' : 'ON'}`,
+    '-DCOMPILER_RT_BUILD_SANITIZERS=OFF', '-DCOMPILER_RT_BUILD_XRAY=OFF', '-DCOMPILER_RT_BUILD_MEMPROF=OFF',
+    '-DCOMPILER_RT_BUILD_ORC=OFF', '-DCOMPILER_RT_BUILD_GWP_ASAN=OFF', '-DCOMPILER_RT_BUILD_CRT=OFF',
+    // Darwin builds its fat osx libraries for the SDK's architectures.
+    ...(os === 'darwin' ? [] : ['-DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON'])];
+}
+// A static library is an ar archive, or on Darwin a fat (lipo) file of archives.
+export function isStaticLibrary(file) {
+  let head;
+  try { head = Buffer.alloc(8); const fd = fs.openSync(file, 'r'); fs.readSync(fd, head, 0, 8, 0); fs.closeSync(fd); }
+  catch { return false; }
+  return head.toString('latin1') === '!<arch>\n' || head.readUInt32BE(0) === 0xcafebabe;
+}
+// Move the libraries out of the build's resource tree under their installed
+// names (as ExtractRtlib.cmake renames them); any missing one stops the export.
+export function extractCompilerRt({platform, resources, out}) {
+  const version = fs.readdirSync(resources).find(name => /^\d+(\.\d+)*$/.test(name));
+  const rows = compilerRtLibraries(platform), source = row => path.join(resources, version, 'lib', row.source);
+  const missing = rows.filter(row => !isStaticLibrary(source(row)));
+  if (missing.length) throw new Error('PREPARE_COMPILER_RT_MISSING ' + missing.map(row => `lib/clang/${version}/lib/${row.source}`).join(', '));
+  fs.mkdirSync(path.join(out, PREPARE_COMPILER_RT), {recursive: true});
+  for (const row of rows) {
+    fs.copyFileSync(source(row), path.join(out, PREPARE_COMPILER_RT, row.name));
+    fs.rmSync(source(row));
+  }
+  return rows.map(row => row.name);
+}
 // cjdb is LLDB of the same tree (upstream compiler third_party/cmake/BuildCJDB.cmake
 // enables lldb with CANGJIE_ROOT=<compiler source>); libedit/curses stay off.
-export const PREPARE_LLDB_ARGS = Object.freeze(['-DLLVM_ENABLE_PROJECTS=clang;lldb', '-DLLDB_INCLUDE_TESTS=OFF',
+export const PREPARE_LLVM_PROJECTS = 'clang;lldb;compiler-rt';
+export const PREPARE_LLDB_ARGS = Object.freeze(['-DLLVM_ENABLE_PROJECTS=' + PREPARE_LLVM_PROJECTS, '-DLLDB_INCLUDE_TESTS=OFF',
   '-DCLANG_INCLUDE_TESTS=OFF', '-DLLDB_ENABLE_LIBEDIT=OFF', '-DLLDB_ENABLE_CURSES=OFF',
   '-DLLDB_ENABLE_LZMA=OFF', '-DLLDB_ENABLE_LIBXML2=OFF', '-DLLVM_ENABLE_TERMINFO=OFF']);
 // The formal nativeN check (ci/bootstrap/sdk-native-input-check.mjs) requires
@@ -94,7 +155,7 @@ export function llvmConfigureArgs({source, build, runtime, sha, jobs, os, compil
     // On Unix llc/llvm-as/llvm-dis link the in-process library itself, so the
     // installed readers load the installed N (sdk-native-input-check.mjs ldd domain).
     '-DBUILD_SHARED_LIBS=OFF', '-DLLVM_BUILD_LLVM_DYLIB=ON', `-DLLVM_LINK_LLVM_DYLIB=${os === 'win32' ? 'OFF' : 'ON'}`,
-    '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', ...PREPARE_LLDB_ARGS, ...lldbPythonArgs(python, os), `-DCANGJIE_ROOT=${compiler}`,
+    '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', ...PREPARE_LLDB_ARGS, ...compilerRtArgs(os), ...lldbPythonArgs(python, os), `-DCANGJIE_ROOT=${compiler}`,
     ...(os === 'win32' ? ['-DLLVM_ENABLE_ZLIB=OFF', '-DLLVM_ENABLE_LIBXML2=OFF'] : []),
     '-DCMAKE_CXX_FLAGS=-include cstdint -include unordered_map -include map -include vector -include string'];
 }
@@ -140,7 +201,8 @@ export function buildPrepareLlvm({platform, sha, out, compiler, python, work = p
     const jobs = command([process.execPath, 'ci/build-resources.mjs', '--jobs-only'], {capture: true}).trim();
     if (!/^[1-9][0-9]*$/.test(jobs)) throw new Error('PREPARE_LLVM_JOBS');
     command(['cmake', ...llvmConfigureArgs({source: path.join(source, 'llvm'), build, runtime, sha, jobs, os: native.os, compiler: slash(path.resolve(compiler)), python})]);
-    command(['cmake', '--build', build, '--target', ...PREPARE_LLVM_TARGETS, ...(python ? [PREPARE_LLDB_PYTHON_TARGET] : []), '--parallel', jobs]);
+    command(['cmake', '--build', build, '--target', ...compilerRtTargets(native.os), ...PREPARE_LLVM_TARGETS,
+      ...(python ? [PREPARE_LLDB_PYTHON_TARGET] : []), '--parallel', jobs]);
     const library = path.join(build, native.llvmDirectory, native.llvmLibrary);
     const symbols = command([path.join(build, 'bin', 'llvm-nm' + native.exe), '--defined-only', library], {capture: true});
     if (llvmLibrarySymbolProblems(symbols).length) throw new Error('PREPARE_LLVM_LIBRARY_SYMBOLS');
@@ -160,6 +222,7 @@ export function buildPrepareLlvm({platform, sha, out, compiler, python, work = p
     for (const name of lldbLibraries) fs.copyFileSync(path.join(libDir, name), path.join(out, 'lldb-lib', name));
     const resources = path.join(build, 'lib', 'clang'), resourceProblems = clangResourceProblems(resources);
     if (resourceProblems.length) throw new Error('PREPARE_CLANG_RESOURCES ' + resourceProblems.join('; '));
+    const compilerRt = extractCompilerRt({platform, resources, out});
     fs.cpSync(resources, path.join(out, PREPARE_CLANG_RESOURCES), {recursive: true, verbatimSymlinks: true});
     if (python) {
       const pkg = path.join(build, lldbPythonBuildPackage(native.os));
@@ -168,7 +231,7 @@ export function buildPrepareLlvm({platform, sha, out, compiler, python, work = p
       fs.cpSync(pkg, path.join(out, 'lldb-python/lldb'), {recursive: true, verbatimSymlinks: true});
     }
     return {platform, sha, library: native.llvmLibrary, tools: ['llc', 'llvm-as', 'llvm-dis'], cjdb: 'bin/lldb' + native.exe, lldbLibraries,
-      clangResources: PREPARE_CLANG_RESOURCES, build};
+      clangResources: PREPARE_CLANG_RESOURCES, compilerRt, build};
   } finally {
     fs.writeFileSync(path.join(out, 'BUILD-COMMANDS.json'), JSON.stringify(records, null, 2) + '\n');
   }
