@@ -66,12 +66,31 @@ public class LocalLoweringDiagnosticsTest {
         return LocalLoweringReport(name, "llvm.cj.malloc.local.array", (false, BasicRange()))
     }
 
-    // The real IRBuilder2 emission point on wasm32-wasi with no CHIR function or expression attached: the
-    // gate's report is genuinely positionless ('<module>'), the case the bridge used to drop.
-    private func EmitLocalArray(local: Bool): (Bool, ArrayList<LocalLoweringReport>, String) {
-        let context = R5CHIRContext()
-        let builder = R5CHIRBuilder(context)
-        let pkg = builder.CreatePackage("local_lowering_diagnostics_test")
+    // Runs the production rejection boundary of GenPackageModules (GenWithLocalLoweringDiagnostics) around
+    // `gen`, with the same CLI handler as Run, and returns whether CodeGen output survived, the gate's reports,
+    // the error count, the printed count and the printed text.
+    private func RunBridge(gen: (R5LocalLoweringTargetChecker) -> Bool): (Bool, ArrayList<LocalLoweringReport>, UInt64,
+        UInt64, String) {
+        var result: (Bool, ArrayList<LocalLoweringReport>, UInt64, UInt64, String) = (false,
+            ArrayList<LocalLoweringReport>(), 0, 0, "")
+        try (diag = DiagnosticEngine()) {
+            let sm = SourceManager()
+            let _ = sm.AddSource("local_target.cj", SOURCE)
+            diag.SetSourceManager(sm)
+            let handler = CompilerDiagnosticHandler(diag.AsBasicDiagnosticEngine(), noColor: true)
+            handler.SetOutToStringStream()
+            diag.AsBasicDiagnosticEngine().RegisterHandler(handler)
+            let checker = R5LocalLoweringTargetChecker(WasmWasiOptions().SupportsLocalModeLowering())
+            let generated = GenWithLocalLoweringDiagnostics(diag, checker, { => gen(checker) })
+            let out = handler.GetOutString()
+            let printed = diag.AsBasicDiagnosticEngine().GetErrorPrintCount()
+            println("LOCAL_LOWERING_BRIDGE generated=${generated.isSome()} errors=${diag.GetErrorCount()} printed=${printed} out=<<${out}>>")
+            result = (generated.isSome(), checker.GetReports(), diag.GetErrorCount(), printed, out)
+        }
+        return result
+    }
+
+    private func WasmWasiOptions(): R5GlobalOptions {
         let options = R5GlobalOptions()
         options.host = R5TripleInfo()
         let target = R5TripleInfo()
@@ -79,14 +98,21 @@ public class LocalLoweringDiagnosticsTest {
         target.os = R5OSType.WASI
         target.env = R5EnvironmentType.NOT_AVAILABLE
         options.target = target
+        return options
+    }
+
+    // The real IRBuilder2 emission point on wasm32-wasi with no CHIR function or expression attached: the
+    // gate's report is genuinely positionless ('<module>'), the case the bridge used to drop. The gate's
+    // exception leaves through the caller.
+    private func EmitArray(options: R5GlobalOptions, checker: R5LocalLoweringTargetChecker, local: Bool): Unit {
+        let context = R5CHIRContext()
+        let builder = R5CHIRBuilder(context)
+        let pkg = builder.CreatePackage("local_lowering_diagnostics_test")
         let basicDiag = R5BasicDiagnosticEngine()
-        let checker = R5LocalLoweringTargetChecker(options.SupportsLocalModeLowering())
         let pkgContext = R5CGPkgContext(R5CHIRData(context, pkg), options, false,
             R5NoHeapAllocChecker(basicDiag), R5NoWriteBarrierRecChecker(basicDiag), R5CachedMangleMap(),
             localLoweringChecker: checker)
         let module = R5CGModule(R5SubCHIRPackage(1), pkgContext)
-        var rejected = false
-        var other = ""
         try {
             let fnTy = context.GetFuncTy(ArrayList<R5Type>(), context.GetUnitTy())
             let functionType = (R5CGType.GetOrCreate(module, fnTy) as R5CGFunctionType).getOrThrow()
@@ -95,17 +121,25 @@ public class LocalLoweringDiagnosticsTest {
                 ir.SetInsertPoint(ir.CreateBasicBlockAtEnd(fn, "entry"))
                 let modal = if (local) { R5ModalInfo(R5CHIRMode.MUST) } else { R5ModalInfo() }
                 let arrayTy = context.GetRawArrayTy(context.GetUInt8Ty(), modal: modal)
-                try {
-                    ir.AllocateArray(arrayTy, ir.GetInt64(4))
-                } catch (_: R5LocalLoweringUnsupportedException) {
-                    rejected = true
-                } catch (e: Exception) {
-                    other = e.message
-                }
+                ir.AllocateArray(arrayTy, ir.GetInt64(4))
             }
         } finally {
             module.Clear()
             pkgContext.Clear()
+        }
+    }
+
+    private func EmitLocalArray(local: Bool): (Bool, ArrayList<LocalLoweringReport>, String) {
+        let options = WasmWasiOptions()
+        let checker = R5LocalLoweringTargetChecker(options.SupportsLocalModeLowering())
+        var rejected = false
+        var other = ""
+        try {
+            EmitArray(options, checker, local)
+        } catch (_: R5LocalLoweringUnsupportedException) {
+            rejected = true
+        } catch (e: Exception) {
+            other = e.message
         }
         return (rejected, checker.GetReports(), other)
     }
@@ -180,5 +214,83 @@ public class LocalLoweringDiagnosticsTest {
         @Expect(errors, 1)
         @Expect(printed, 1)
         @Expect(out.contains(fallback), true)
+    }
+
+    // Several worker threads can each record a positionless rejection before the first exception unwinds;
+    // the user must see every distinct one, and the count must match what is printed.
+    @TestCase
+    public func DistinctPositionlessReportsAreAllPrinted(): Unit {
+        let first = Positionless("<module>")
+        let second = LocalLoweringReport("$init", "llvm.cj.maybe.local.write.ref", (false, BasicRange()))
+        let (errors, printed, out) = Run({ _ => ArrayList<LocalLoweringReport>([
+            Positionless("<module>"),
+            LocalLoweringReport("$init", "llvm.cj.maybe.local.write.ref", (false, BasicRange()))]) }, "")
+        @Expect(errors, 2)
+        @Expect(printed, 2)
+        @Expect(out.contains(first.Message()), true)
+        @Expect(out.contains(second.Message()), true)
+        @Expect(out.contains("==>"), false)
+    }
+
+    // Repeating the same positionless rejection is still reported once (HasPrevDiag on begin and message).
+    @TestCase
+    public func RepeatedPositionlessReportIsPrintedOnce(): Unit {
+        let report = Positionless("<module>")
+        let (errors, printed, out) = Run({ _ => ArrayList<LocalLoweringReport>([
+            Positionless("<module>"), Positionless("<module>")]) }, "")
+        @Expect(errors, 1)
+        @Expect(printed, 1)
+        @Expect(out.contains(report.Message()), true)
+    }
+
+    // The production catch: the real wasm32-wasi emitter throws out of the CodeGen closure into
+    // GenWithLocalLoweringDiagnostics, which must print the positionless '<module>' rejection.
+    @TestCase
+    public func BridgePrintsEmitterPositionlessRejection(): Unit {
+        let (generated, reports, errors, printed, out) = RunBridge({ checker =>
+            EmitArray(WasmWasiOptions(), checker, true)
+            true
+        })
+        @Expect(generated, false)
+        @Assert(reports.size, 1)
+        @Expect(reports[0].position[0], false)
+        @Expect(reports[0].functionName, "<module>")
+        @Expect(errors, 1)
+        @Expect(printed, 1)
+        @Expect(out.contains(reports[0].Message()), true)
+        @Expect(out.contains("==>"), false)
+    }
+
+    // A rejection recorded by another worker (the gate's own Check with no function or expression) plus the
+    // real emitter's: both distinct positionless rejections reach the user through the production catch.
+    @TestCase
+    public func BridgePrintsEveryDistinctPositionlessRejection(): Unit {
+        let (generated, reports, errors, printed, out) = RunBridge({ checker =>
+            try {
+                checker.Check("llvm.cj.maybe.local.write.ref", None, None)
+            } catch (_: R5LocalLoweringUnsupportedException) {}
+            EmitArray(WasmWasiOptions(), checker, true)
+            true
+        })
+        @Expect(generated, false)
+        @Assert(reports.size, 2)
+        @Expect(reports[0].Message() != reports[1].Message(), true)
+        @Expect(errors, 2)
+        @Expect(printed, 2)
+        @Expect(out.contains(reports[0].Message()), true)
+        @Expect(out.contains(reports[1].Message()), true)
+    }
+
+    @TestCase
+    public func BridgeKeepsOrdinaryCodegenOutput(): Unit {
+        let (generated, reports, errors, printed, out) = RunBridge({ checker =>
+            EmitArray(WasmWasiOptions(), checker, false)
+            true
+        })
+        @Expect(generated, true)
+        @Expect(reports.size, 0)
+        @Expect(errors, 0)
+        @Expect(printed, 0)
+        @Expect(out, "")
     }
 }

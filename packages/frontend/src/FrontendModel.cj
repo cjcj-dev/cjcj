@@ -59,6 +59,7 @@ import cjcj::utils.{ProfileRecorder, TaskQueue, TaskResult}
 import cjcj::utils.STANDARD_LIBS
 import std.collection.*
 import std.sort.*
+import std.sync.AtomicInt64
 import std.env.getVariable
 import std.fs.File as CjoPrefetchFile
 import std.fs.OpenMode
@@ -75,6 +76,8 @@ foreign {
 
 public class DiagnosticEngine <: Resource {
     private let impl: BasicDiagnosticEngine = BasicDiagnosticEngine()
+    // Ordinal of the next DiagnoseWithoutLocation call; see PositionlessDiagnosticEnd.
+    private let positionlessDiagnostics: AtomicInt64 = AtomicInt64(0)
 
     public init() {}
 
@@ -111,11 +114,13 @@ public class DiagnosticEngine <: Resource {
     // CompilerDiagnosticHandler prints a deferred category only from its per-category store, and that store
     // rejects a default range (DiagnosticEngine.cj HandleDiagnose; C++ DiagnosticEngine.cpp:957-982), so
     // Diagnose(category, DEFAULT_POSITION, ...) would be counted but never printed. The range keeps
-    // begin = DEFAULT_POSITION, which DiagnosticEmitter.Render and the JSON formatter treat as "no location",
-    // and only its end differs from the default so the store keeps it for EmitCategoryDiagnostics.
+    // begin = DEFAULT_POSITION, which DiagnosticEmitter.Render treats as "no location", and only its end
+    // differs from the default so the store keeps it for EmitCategoryDiagnostics. The store is a set keyed by
+    // the range (Diagnostic.== / Range.EqualForHash compare begin and end, not the message), so every call
+    // gets its own end; a repeated identical message is still dropped earlier by HasPrevDiag(begin, message).
     public func DiagnoseWithoutLocation(category: DiagCategory, message: String): Unit {
-        emitFrontendDiagnosticInRange(this, category, MakeRange(DEFAULT_POSITION, PositionlessDiagnosticEnd()), message,
-            DiagSeverity.DS_ERROR)
+        let end = PositionlessDiagnosticEnd(positionlessDiagnostics.fetchAdd(1))
+        emitFrontendDiagnosticInRange(this, category, MakeRange(DEFAULT_POSITION, end), message, DiagSeverity.DS_ERROR)
     }
 
     public func DiagnoseRefactor(kind: DiagKindRefactor, position: Position,
@@ -156,9 +161,11 @@ public class DiagnosticEngine <: Resource {
     }
 }
 
-// Not DEFAULT_POSITION and not IsZero(), so the range is neither Range.IsDefault() nor HasZero().
-private func PositionlessDiagnosticEnd(): Position {
-    return Position(0, -1, 0)
+// Line -1 keeps it neither DEFAULT_POSITION nor IsZero(), so the range is neither Range.IsDefault() nor
+// HasZero(); the per-engine ordinal in the column keeps distinct positionless diagnostics distinct in the
+// category store and sorts them in reporting order.
+private func PositionlessDiagnosticEnd(ordinal: Int64): Position {
+    return Position(0, -1, ordinal)
 }
 
 private func emitFrontendDiagnostic(

@@ -1241,13 +1241,14 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
     // Option.cj SupportsLocalModeLowering: the authoritative Local Mode target gate is CodeGen's own
     // emission point, so it sees exactly the IR that SetMemRegion and ModalWrite selection produced.
     let localLoweringChecker = LocalLoweringTargetChecker(instance.invocation.globalOptions.SupportsLocalModeLowering())
-    let packageModules = try {
+    let generated = GenWithLocalLoweringDiagnostics(instance.diag, localLoweringChecker, { =>
         CodegenGenPackageModules(codegenData, codegenOptions, enableIncrement,
             noHeapAllocChecker, noWriteBarrierRecChecker, cachedMangleMap: cachedMangleMap,
             localLoweringChecker: localLoweringChecker)
-    } catch (e: LocalLoweringUnsupportedException) {
-        DiagnoseLocalLoweringReports(instance.diag, localLoweringChecker.GetReports(), e.message)
-        return llvmModules
+    })
+    let packageModules = match (generated) {
+        case Some(modules) => modules
+        case None => return llvmModules
     }
     var transferred = false
     var failed = false
@@ -1271,6 +1272,19 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
                 if (!failed) { throw e }
             }
         }
+    }
+}
+
+// The Local Mode target rejection boundary of GenPackageModules: runs CodeGen and, when its emission point
+// rejects a Local Mode symbol, reports every recorded rejection and returns None so the caller emits nothing.
+// Other exceptions propagate unchanged.
+func GenWithLocalLoweringDiagnostics<T>(diag: DiagnosticEngine, localLoweringChecker: LocalLoweringTargetChecker,
+    gen: () -> T): Option<T> {
+    try {
+        return Some(gen())
+    } catch (e: LocalLoweringUnsupportedException) {
+        DiagnoseLocalLoweringReports(diag, localLoweringChecker.GetReports(), e.message)
+        return None
     }
 }
 
