@@ -13,6 +13,56 @@ import cjcj::sema.Test.TestManager
 import cjcj::sema.NativeFFI.Java.GenerateJavaForeignAbstractStub
 import cjcj::sema.NativeFFI.ObjC.GenerateObjCForeignAbstractStub
 
+// How two DEFAULT modal interface members merged into one entry relate. A std built with --local-mode-api adds
+// `@local!`/`@local?` defaults next to plain members (Equatable<T>'s `!=`, Comparable<T>'s `==` over Equal<T>'s,
+// Collection<T>'s `isEmpty`, InputStream's `read`, ...), and a type listing a sub-interface together with one of
+// its supers (cjcj utils' UnicodeCharRange <: Comparable & Equatable, packages/utils/src/Unicode.cj:109) reaches
+// them twice. Code outside local mode cannot spell an override, so only unrelated modal defaults conflict; the
+// upstream rule (cangjie_compiler src/Sema/InheritanceChecker/MergeInheritedMemberHelper.cpp:191) stays for
+// plain members.
+private enum ModalDefaultOverride <: Equatable<ModalDefaultOverride> {
+    | NONE // not two modal defaults of one interface chain: the plain rule applies
+    | CHILD // the same declaration, or the child's interface inherits the parent's
+    | PARENT // the parent's interface inherits the child's: keep the more specific parent
+
+    public operator func ==(other: ModalDefaultOverride): Bool {
+        match ((this, other)) {
+            case (ModalDefaultOverride.NONE, ModalDefaultOverride.NONE) | (ModalDefaultOverride.CHILD, ModalDefaultOverride.CHILD) |
+                (ModalDefaultOverride.PARENT, ModalDefaultOverride.PARENT) => true
+            case _ => false
+        }
+    }
+
+    public operator func !=(other: ModalDefaultOverride): Bool {
+        !(this == other)
+    }
+}
+
+private func InterfaceOuter(decl: Decl): Option<InheritableDecl> {
+    let outer = decl.outerDecl ?? return None
+    if (outer.astKind != ASTKind.INTERFACE_DECL) { return None }
+    return outer as InheritableDecl
+}
+
+private func InheritsInterface(sub: InheritableDecl, sup: InheritableDecl): Bool {
+    for (superDecl in sub.GetAllSuperDecls()) {
+        if (SameDecl(superDecl, sup) && !SameDecl(superDecl, sub)) { return true }
+    }
+    return false
+}
+
+private func GetModalDefaultOverride(child: Decl, parent: Decl): ModalDefaultOverride {
+    if (!HasModalInputs(child) || !child.TestAttr(Attribute.DEFAULT) || !parent.TestAttr(Attribute.DEFAULT)) {
+        return ModalDefaultOverride.NONE
+    }
+    if (SameDecl(child, parent)) { return ModalDefaultOverride.CHILD }
+    let childOuter = InterfaceOuter(child) ?? return ModalDefaultOverride.NONE
+    let parentOuter = InterfaceOuter(parent) ?? return ModalDefaultOverride.NONE
+    if (InheritsInterface(childOuter, parentOuter)) { return ModalDefaultOverride.CHILD }
+    if (InheritsInterface(parentOuter, childOuter)) { return ModalDefaultOverride.PARENT }
+    return ModalDefaultOverride.NONE
+}
+
 private func DeclRange(decl: Decl): BasicRange {
     return MakeRange(decl.begin, decl.end)
 }
@@ -1431,7 +1481,9 @@ public class StructInheritanceChecker {
             }
             CheckNativeFFI(parent, child)
             if (shouldUpdate) {
-                if (parentDecl.TestAttr(Attribute.ABSTRACT) || !childDecl.TestAttr(Attribute.ABSTRACT)) {
+                let modalOverride = GetModalDefaultOverride(childDecl, parentDecl)
+                if ((parentDecl.TestAttr(Attribute.ABSTRACT) || !childDecl.TestAttr(Attribute.ABSTRACT)) &&
+                    modalOverride != ModalDefaultOverride.PARENT) {
                     entry.signature = updated.Clone()
                 }
                 entry.signature.replaceOther = true
@@ -1445,8 +1497,12 @@ public class StructInheritanceChecker {
                 }
                 entry.signature.isInheritedInterface = child.isInheritedInterface && inheritedInterfaces
                 let relationExtend = IsRelationExtend(child)
-                entry.signature.shouldBeImplemented = (entry.signature.isInheritedInterface || !relationExtend) &&
-                    childDecl.TestAttr(Attribute.DEFAULT) && parentDecl.TestAttr(Attribute.DEFAULT)
+                if (modalOverride != ModalDefaultOverride.NONE) {
+                    entry.signature.shouldBeImplemented = parent.shouldBeImplemented
+                } else {
+                    entry.signature.shouldBeImplemented = (entry.signature.isInheritedInterface || !relationExtend) &&
+                        childDecl.TestAttr(Attribute.DEFAULT) && parentDecl.TestAttr(Attribute.DEFAULT)
+                }
                 return entry.signature
             }
         }

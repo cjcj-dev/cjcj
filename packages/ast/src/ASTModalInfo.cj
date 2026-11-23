@@ -115,3 +115,16 @@ public func SameModalInputs(left: Decl, right: Decl): Bool {
     }
     return true
 }
+
+// True for a function or property overload selected by a non-default receiver or parameter mode.
+public func HasModalInputs(decl: Decl): Bool {
+    if (let Some(pd) <- (decl as PropDecl)) { return PropertyMode(pd) != ASTMode.NOT }
+    let fd = (decl as FuncDecl) ?? return false;
+    if (GetReceiverMode(fd) != ASTMode.NOT) { return true }
+    let body = fd.funcBody ?? return false;
+    if (body.paramLists.isEmpty()) { return false }
+    for (i in 0..body.paramLists[0].params.size) {
+        if (LocalParameterMode(fd, i) != ASTMode.NOT) { return true }
+    }
+    return false
+}
