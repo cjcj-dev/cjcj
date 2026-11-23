@@ -77,6 +77,32 @@ export function verifyAssets({dist, version, keys = expectedArchiveKeys(), readI
   return expected.map(file => path.join(dist, file));
 }
 
+// Each artifact downloads into its own directory (merge-multiple: false), so
+// the selection is by artifact name: exactly one pkg-<archiveKey> per key.
+// pkg-diagnosis-* (failure evidence of any attempt) is excluded by its name;
+// any other artifact, missing key or nested/colliding file fails closed.
+export function selectPackageArtifacts({from, to, keys = expectedArchiveKeys()}) {
+  const entries = fs.readdirSync(from, {withFileTypes: true});
+  const selected = [], excluded = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) throw new Error(`PUBLISH_ARTIFACT_LAYOUT ${entry.name}`);
+    if (entry.name.startsWith('pkg-diagnosis-')) { excluded.push(entry.name); continue; }
+    if (!entry.name.startsWith('pkg-') || !keys.includes(entry.name.slice(4))) throw new Error(`PUBLISH_ARTIFACT_UNEXPECTED ${entry.name}`);
+    selected.push(entry.name);
+  }
+  const missing = keys.filter(key => !selected.includes(`pkg-${key}`));
+  if (missing.length) throw new Error(`PUBLISH_ARTIFACT_MISSING ${missing.join(',')}`);
+  if (fs.existsSync(to) && fs.readdirSync(to).length) throw new Error(`PUBLISH_DIST_NOT_EMPTY ${to}`);
+  fs.mkdirSync(to, {recursive: true});
+  for (const name of selected.sort()) for (const file of fs.readdirSync(path.join(from, name), {withFileTypes: true})) {
+    if (!file.isFile()) throw new Error(`PUBLISH_ARTIFACT_LAYOUT ${name}/${file.name}`);
+    const destination = path.join(to, file.name);
+    if (fs.existsSync(destination)) throw new Error(`PUBLISH_ARTIFACT_COLLISION ${file.name}`);
+    fs.copyFileSync(path.join(from, name, file.name), destination);
+  }
+  return {selected: selected.sort(), excluded: excluded.sort()};
+}
+
 export function verifyNeeds(needs) {
   const entries = Object.entries(needs || {});
   if (entries.length !== EXPECTED_NEEDS) throw new Error(`PUBLISH_NEEDS_COUNT ${entries.length} != ${EXPECTED_NEEDS}`);
@@ -116,12 +142,20 @@ export function releaseWorkflowProblems(text) {
     ['node ci/release-publish.mjs verify-needs', 'explicit needs success check'],
     ['node ci/release-publish.mjs verify-assets', 'asset verification'],
     ['node ci/release-publish.mjs verify-ci-run', 'ci_run_id verification'],
-    ['--target "$GITHUB_SHA"', '--target "$GITHUB_SHA"'],
+    ['node ci/release-publish.mjs select-packages', 'name-based package artifact selection'],
+    ['-f sha="$GITHUB_SHA"', 'atomic tag claim at GITHUB_SHA'],
+    ['flags=(--verify-tag ', '--verify-tag release creation on the claimed tag'],
     ['--prerelease --latest=false', '--prerelease --latest=false'],
+    ['PUBLISH_FORMAL_RELEASE_NOT_AUTHORIZED', 'formal release refusal'],
     ['RELEASE_ALREADY_EXISTS', 'fail-closed existing release check'],
     ['TAG_ALREADY_EXISTS', 'fail-closed existing tag check'],
+    ['PUBLISH_READBACK_TAG', 'tag readback'],
+    ['PUBLISH_READBACK_RELEASE', 'release readback'],
   ]) if (!script.includes(needle)) problems.push(`publish lacks ${label}`);
-  if (/pattern:\s*pkg-\*/.test(text) === false) problems.push('publish must download pkg-*');
+  const download = (publish.steps || []).find(step => String(step.uses || '').startsWith('actions/download-artifact@'));
+  if (download?.with?.pattern !== 'pkg-*' || download?.with?.['merge-multiple'] !== false)
+    problems.push('publish must download pkg-* into per-artifact directories');
+  if (!publish.environment) problems.push('publish must run in a deployment environment (manual approval entry)');
   for (const [name, job] of Object.entries(jobs).filter(([name]) => /^(?:source|package)-/.test(name))) {
     for (const key of ['native_runtime_artifact', 'native_llvm_ref', 'native_runtime_ref', 'native_host_version']) {
       if (job.with?.[key] !== `\${{ inputs.${key} }}`) problems.push(`${name} does not pass ${key}`);
@@ -138,7 +172,10 @@ function option(argv, name) {
 
 function main(argv) {
   const command = argv[0];
-  if (command === 'verify-assets') {
+  if (command === 'select-packages') {
+    const result = selectPackageArtifacts({from: option(argv, 'from'), to: option(argv, 'to')});
+    console.log(`PUBLISH_PACKAGES_SELECTED ${result.selected.length} excluded=${result.excluded.join(',') || 'none'}`);
+  } else if (command === 'verify-assets') {
     const assets = verifyAssets({dist: option(argv, 'dist'), version: option(argv, 'version')});
     fs.writeFileSync(option(argv, 'output'), assets.join('\n') + '\n');
     console.log(`PUBLISH_ASSETS_VERIFIED archives=${assets.length / FILES_PER_ARCHIVE} files=${assets.length}`);
@@ -152,7 +189,7 @@ function main(argv) {
     for (const problem of problems) console.error(`RELEASE_WORKFLOW ${problem}`);
     return problems.length ? 1 : 0;
   } else {
-    console.error('usage: release-publish.mjs verify-assets|verify-needs|verify-ci-run|check-workflow');
+    console.error('usage: release-publish.mjs select-packages|verify-assets|verify-needs|verify-ci-run|check-workflow');
     return 2;
   }
   return 0;

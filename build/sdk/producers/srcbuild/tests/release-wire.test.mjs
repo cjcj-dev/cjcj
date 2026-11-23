@@ -68,7 +68,10 @@ test('release cross packages depend on their native phase and cross producer wit
   });
   assert.deepEqual(cross.map(job => job.with?.release_key).sort(), rows.map(row => row.release_key).sort(),
     'every non-native package must have an explicit cross contract');
-  const sources = jobsOf(release).filter(job => (job.uses === './.github/workflows/sdk-build.yml' && job.with?.mode !== 'package'));
+  // phase=prepare jobs (prepare-native, prepare-srcbuild-linux-x64) never feed
+  // a package: only phase=publish source phases are package producers.
+  const sources = jobsOf(release).filter(job => job.uses === './.github/workflows/sdk-build.yml' && job.with?.mode !== 'package'
+    && !String(job.if || '').includes("inputs.phase == 'prepare'"));
   const jobId = job => job.id;
   for (const row of rows) {
     const {release_key: key, platform: host} = row;
@@ -89,7 +92,10 @@ test('release cross packages depend on their native phase and cross producer wit
     const publish = release.jobs.publish;
     assert.ok(publish.needs.includes(jobId(job)),
       `${key}: publish waits for the cross package`);
-    assert.ok(publish.if.includes(`needs.${jobId(job)}.result == 'success'`), `${key}: publish requires cross success`);
+    // Default needs semantics skip publish unless this job succeeded, and the
+    // first publish step re-checks every direct need (ci/release-publish.mjs).
+    assert.doesNotMatch(publish.if, /always\(\)|cancelled\(\)|failure\(\)/, `${key}: publish keeps default needs semantics`);
+    assert.ok(publish.steps.some(step => step.run === 'node ci/release-publish.mjs verify-needs'), `${key}: publish re-checks needs`);
   }
   assert.ok(release.jobs.plan.steps.some(step => step.run === 'node build/sdk/producers/srcbuild/target-matrix.mjs --targets all --require-ready'));
   assert.equal(release.jobs['source-p1-linux-x64'].needs, 'plan');

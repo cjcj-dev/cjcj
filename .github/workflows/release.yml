@@ -524,7 +524,7 @@ jobs:
 
   package-win32-x64-wasm:
     name: win32-x64-wasm / Build release package
-    needs: [package-p3-windows-x64, source-p1-linux-x64]
+    needs: [package-p3-windows-x64, source-p1-linux-x64, source-p3-windows-x64]
     uses: ./.github/workflows/sdk-build.yml
     with:
       mode: package
@@ -537,7 +537,7 @@ jobs:
       llvm_platform: windows_x86_64
       sdk_runtime_dir: windows_x86_64_cjnative
       release_key: win32-x64-wasm
-      std_artifact: final-std-native-windows-x64
+      std_artifact: ${{ needs.source-p3-windows-x64.outputs.std_artifact }}
       cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
@@ -638,6 +638,9 @@ jobs:
     # Default needs semantics: any failed, cancelled or skipped upstream job skips
     # publication, and the first step re-checks all 20 direct needs explicitly.
     if: inputs.phase == 'publish' && !inputs.dry_run
+    # Manual approval entry: required reviewers are configured on this
+    # environment in the repository settings (not by this workflow).
+    environment: release-publish
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -665,8 +668,12 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ github.run_id }}
           pattern: pkg-*
-          path: dist
-          merge-multiple: true
+          # One directory per artifact: selection is by artifact name, so
+          # pkg-diagnosis-* never reaches dist (file names cannot tell them apart).
+          path: dist-artifacts
+          merge-multiple: false
+      - name: Select the 15 package artifacts by name
+        run: node ci/release-publish.mjs select-packages --from dist-artifacts --to dist
       - name: Verify exactly 15 package cells and 60 assets
         env:
           RELEASE_VERSION: ${{ inputs.version }}
@@ -685,6 +692,8 @@ jobs:
           RELEASE_DRAFT: ${{ inputs.draft }}
         run: |
           tag="v$RELEASE_VERSION"
+          # A formal/latest release needs its own user authorization; this job creates prereleases only.
+          [ "$RELEASE_PRERELEASE" = "true" ] || { echo "::error::PUBLISH_FORMAL_RELEASE_NOT_AUTHORIZED $tag"; exit 1; }
           # Fail closed: never overwrite an existing release or tag, and never let gh fall back
           # to the default branch -- the tag is created at the exact commit this run built.
           if out=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>&1); then
@@ -697,12 +706,28 @@ jobs:
           elif ! grep -q 'HTTP 404' <<<"$out"; then
             echo "::error::TAG_LOOKUP_FAILED $tag: $out"; exit 1
           fi
-          flags=(--target "$GITHUB_SHA" --title "cjcj $tag" --notes-file "$RUNNER_TEMP/release-notes.md")
-          if [ "$RELEASE_PRERELEASE" = "true" ]; then flags+=(--prerelease --latest=false); fi
-          if [ "$RELEASE_DRAFT" = "true" ]; then flags+=(--draft); fi
           mapfile -t assets < "$RUNNER_TEMP/publish-assets.txt"
           [ "${#assets[@]}" -eq 60 ] || { echo "::error::PUBLISH_ASSET_COUNT ${#assets[@]}"; exit 1; }
-          gh release create "$tag" "${flags[@]}" "${assets[@]}"
+          # Claim the tag atomically at the built commit: creating the ref fails
+          # (422) if any other writer created it after the lookup above. The
+          # release is then attached to that claimed tag only (--verify-tag).
+          if ! out=$(gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" 2>&1); then
+            echo "::error::TAG_ALREADY_EXISTS $tag (claim refused): $out"; exit 1
+          fi
+          flags=(--verify-tag --title "cjcj $tag" --notes-file "$RUNNER_TEMP/release-notes.md" --prerelease --latest=false)
+          if [ "$RELEASE_DRAFT" = "true" ]; then flags+=(--draft); fi
+          if ! gh release create "$tag" "${flags[@]}" "${assets[@]}"; then
+            # Release the claim only while it is still exactly this run's tag.
+            if [ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null)" = "$GITHUB_SHA" ]; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" || true
+            fi
+            echo "::error::PUBLISH_RELEASE_CREATE_FAILED $tag"; exit 1
+          fi
+          # Read back what GitHub now serves for this tag.
+          ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.type + " " + .object.sha')
+          [ "$ref" = "commit $GITHUB_SHA" ] || { echo "::error::PUBLISH_READBACK_TAG $tag $ref"; exit 1; }
+          release=$(gh release view "$tag" --json isPrerelease,assets --jq '[.isPrerelease, (.assets | length)] | map(tostring) | join(" ")')
+          [ "$release" = "true 60" ] || { echo "::error::PUBLISH_READBACK_RELEASE $tag $release"; exit 1; }
 
 # Source-build owns the four native LLVM artifacts; the platform_tuples producer (build/sdk/producers/platform_tuples) owns
 # only the Windows tuple. Each release cell consumes final-std-${platform} from

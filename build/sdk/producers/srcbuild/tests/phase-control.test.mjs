@@ -58,11 +58,17 @@ function phaseOf(job) {
   return 0;
 }
 
+// GitHub job status functions for a run that is not cancelled: success() and
+// failure() read the direct needs; cancelled() is false.
 function evalSourceCondition(condition, inputs, needs) {
-  return Function('inputs', 'needs', 'always', 'contains', 'return (' +
+  const results = Object.values(needs).map(item => item.result);
+  return Function('inputs', 'needs', 'always', 'cancelled', 'success', 'failure', 'contains', 'return (' +
     condition.replace(/needs\.([\w-]+)/g, 'needs["$1"]') + ')')(
-    inputs, needs, () => true, (value, part) => value.includes(part));
+    inputs, needs, () => true, () => false, () => results.every(result => result === 'success'),
+    () => results.includes('failure'), (value, part) => value.includes(part));
 }
+// Any status function replaces the implicit success() requirement.
+const STATUS_FUNCTION = /\b(always|cancelled|failure|success)\s*\(/;
 
 function sourceOutcomes(workflow, cell, inputs) {
   const seen = new Map([['plan', {result:'success',outputs:{llvm_platforms:cell.llvm_platform}}]]);
@@ -73,7 +79,7 @@ function sourceOutcomes(workflow, cell, inputs) {
     const job = workflow.jobs[id];
     const needs = Object.fromEntries([job.needs ?? []].flat().map(parent => [parent, visit(parent,[...stack,id])]));
     const success = Object.values(needs).every(item => item.result === 'success');
-    const allowed = (success || /\balways\(\)/.test(job.if || '')) &&
+    const allowed = (success || STATUS_FUNCTION.test(job.if || '')) &&
       (!job.if || evalSourceCondition(job.if, inputs, needs));
     const row = {result: allowed ? 'success' : 'skipped'};
     seen.set(id,row);
@@ -130,7 +136,9 @@ test('Windows and optional iOS source paths reach only their own packaging jobs'
       assert.equal(outcome.get(job).result,expected ? 'success' : 'skipped',cell.target+' '+job);
     for (const [winResult,iosResult] of results.flatMap(w => results.map(i => [w,i]))) {
       const needs = {plan:{result:'success',outputs:{llvm_platforms:cell.llvm_platform}},
-        'source-stage3':{result:windows?'skipped':'success'},'source-windows':{result:winResult},'source-ios':{result:iosResult}};
+        'source-stage3':{result:windows?'skipped':'success'},'source-windows':{result:winResult},'source-ios':{result:iosResult},
+        // Android is not requested here (inputs.build_android unset): its skip admits srcbuild.
+        'source-android':{result:'skipped'}};
       assert.equal(evalSourceCondition(workflow.jobs.srcbuild.if,inputs,needs),
         !windows && ['success','skipped'].includes(winResult) && (iosResult==='success' || iosResult==='skipped'&&!ios));
     }
