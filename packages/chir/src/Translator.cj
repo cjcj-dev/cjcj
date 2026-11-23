@@ -3109,9 +3109,14 @@ public class Translator {
         return SubstituteGenericType(ownerTy, genericParams, replacements).StripAllRefs()
     }
 
+    // The receiver mode is part of a method's identity (BaseMangler.MangleReceiverMode, and the vtable
+    // slot key FuncSigIsMatched compares it), so it is kept even when this package is compiled without
+    // --enable-local-mode: a std built with --local-mode-api declares `!=`, `!=(this @local!)` and
+    // `!=(this @local?)` side by side, and erasing the mode here made all three one signature.
+    // Upstream translates the mode unconditionally (src/CHIR/IR/Type/CHIRType.cpp:280,
+    // src/CHIR/AST2CHIR/TranslateASTNode/TranslateMemberAccess.cpp:54 @63bf237b). NOT is a no-op.
     private func GetThisTypeWithModal(thisType: Type, decl: AstFuncDecl): Type {
         let ty = AddRefIfFuncIsMutOrClass(thisType, decl)
-        if (!opts.IsLocalModeAnalysis()) { return ty }
         return builder.WithModal(ty, ASTModal2CHIRModal(GetReceiverMode(decl)))
     }
 

@@ -4932,9 +4932,9 @@ public class FaithfulAST2CHIR {
         let astTypeAlreadyHasThis = baseParams.size > explicitParamCount
         let params = ArrayList<Type>()
         let receiver = chirType.TranslateType(outerDecl)
-        let receiverTy = if (opts.IsLocalModeAnalysis()) {
-            builder.WithModal(receiver, ASTModal2CHIRModal(GetReceiverMode(funcDecl)))
-        } else { receiver }
+        // Keep the declared receiver mode without --enable-local-mode too (see Translator.GetThisTypeWithModal):
+        // otherwise imported mode overloads collapse into one vtable slot key.
+        let receiverTy = builder.WithModal(receiver, ASTModal2CHIRModal(GetReceiverMode(funcDecl)))
         params.add(AddRefIfFuncIsMutOrClass(receiverTy, funcDecl))
         var paramIndex: Int64 = if (astTypeAlreadyHasThis) { 1 } else { 0 }
         while (paramIndex < baseParams.size) {
