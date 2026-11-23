@@ -73,7 +73,8 @@ export function colourDifference(sdk, tuple) {
 export function selfContained(sdk, files, env) {
   const root = fs.realpathSync(sdk) + path.sep, report = {};
   for (const file of files) {
-    const p = capture(['ldd', file], {env});
+    const p = capture(['ldd', file], {env: {...env, LC_ALL: 'C'}});
+    if (p.rc !== 0 && /not a dynamic executable/.test(p.stdout + p.stderr)) { report[path.relative(sdk, file)] = ['static']; continue; }
     if (p.rc !== 0) throw new Error(`SDK_LDD_FAILED ${file}`);
     for (const line of p.stdout.split('\n')) {
       if (/not found/.test(line)) throw new Error(`SDK_LDD_MISSING ${path.basename(file)}: ${line.trim()}`);

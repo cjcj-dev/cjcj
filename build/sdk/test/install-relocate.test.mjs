@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {verifyLayout, runtimeLibrary} from '../verify.mjs';
+import {verifyLayout, runtimeLibrary, selfContained} from '../verify.mjs';
 import {checkArchive, packArchive, relocateAndVerify, unpackArchive, writeSums} from '../archive.mjs';
 import {makeSdk} from './fixture.mjs';
 
@@ -72,4 +72,10 @@ test('archive: the original install is restored even when relocated verification
   await assert.rejects(relocateAndVerify({file: archive.file, asset: 'linux-x64', version: V, sdk, work: path.join(root, 'r'),
     verify: async dir => { fs.rmSync(runtimeLibrary(dir, 'linux_x86_64_cjnative', 'host')); return verifyLayout(dir, 'linux-x64'); }}), /^Error: SDK_MISSING_HOST_RUNTIME$/);
   assert.ok(fs.existsSync(runtimeLibrary(sdk, 'linux_x86_64_cjnative', 'host')));
+});
+
+test('ldd: a statically linked compiler is recorded as static, a missing file still fails', () => {
+  const {sdk} = makeSdk();
+  assert.deepEqual(selfContained(sdk, [path.join(sdk, 'bin/cjc')], process.env), {'bin/cjc': ['static']});
+  assert.throws(() => selfContained(sdk, [path.join(sdk, 'bin/missing')], process.env), /^Error: SDK_LDD_FAILED/);
 });
