@@ -2765,13 +2765,23 @@ public class IRBuilder2 <: Resource {
     }
 
     private func DoSimpleCast(arg: CGValue, destType: CGType, name: String): LLVMValueRef {
-        let raw = arg.GetRawValue()
+        var raw = arg.GetRawValue()
+        var rawTy = unsafe { LLVMTypeOf(raw) }
+        let destPtrTy = destType.GetLLVMType()
+        // A first-class aggregate (the SSA String of a local string literal, CreateLocalStringLiteral) has no
+        // address; a struct passed by reference takes a spilled copy, as MaterializeAggSource does for
+        // llvm.cj.gcwrite.struct. Passing the value itself mismatches the declared pointer parameter.
+        var spilled = false
+        if (!rawTy.isNull() && !destPtrTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 10 && // 10: LLVMStructTypeKind
+            unsafe { LLVMGetTypeKind(destPtrTy) } == LLVM_POINTER_TYPE_KIND) {
+            raw = MaterializeAggSource(raw)
+            rawTy = unsafe { LLVMTypeOf(raw) }
+            spilled = true
+        }
         let argCGType = arg.GetCGType() ?? return raw
-        let rawTy = unsafe { LLVMTypeOf(raw) }
-        if (!argCGType.IsStructPtrType() && !argCGType.IsVArrayPtrType()) {
+        if (!spilled && !argCGType.IsStructPtrType() && !argCGType.IsVArrayPtrType()) {
             return raw
         }
-        let destPtrTy = destType.GetLLVMType()
         if (rawTy.isNull() || unsafe { LLVMGetTypeKind(rawTy) } != LLVM_POINTER_TYPE_KIND ||
             unsafe { LLVMGetTypeKind(destPtrTy) } != LLVM_POINTER_TYPE_KIND) {
             return raw
