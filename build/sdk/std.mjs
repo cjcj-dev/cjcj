@@ -19,3 +19,30 @@ export function stdProducerArgs(tuple, {localModeApi = false} = {}) {
 export function wasmStdPlan() {
   return {tuple: 'wasi_wasm32_cjnative', packages: 'full', includesCore: true, flags: stdCompileFlags('wasi_wasm32_cjnative')};
 }
+
+export const WASM_TUPLE = 'wasi_wasm32_cjnative';
+export const WASM_TARGET = '--target=wasm32-wasi';
+export const WASM_OPT_LEVELS = Object.freeze(['O2', 'default']);
+
+// cjc argv for one Wasm std package. Every package carries the same local-mode flags as native std.
+// std.core is the prelude package (--no-prelude, no reflection). The aggregate root package `std` only
+// re-exports its sub-packages, so it alone is built without --no-sub-pkg; the flag is added by name,
+// never removed by position, so no other option (e.g. --enable-local-mode) can be dropped with it.
+export function wasmStdPackageArgv({name, dir, output, importPath, opt = 'O2'}) {
+  if (!WASM_OPT_LEVELS.includes(opt)) throw new Error(`WASM_STD_OPT ${opt}`);
+  if (typeof name !== 'string' || !/^std(\.[a-z_][a-z0-9_]*)*$/.test(name)) throw new Error(`WASM_STD_PACKAGE ${name}`);
+  if (!dir || !output) throw new Error(`WASM_STD_PATHS ${name}`);
+  const level = opt === 'O2' ? ['-O2'] : [];
+  const flags = stdCompileFlags(WASM_TUPLE);
+  if (name === 'std.core') return [WASM_TARGET, ...level, ...flags, '--no-prelude', '--no-sub-pkg', '-p', dir,
+    '--output-type=staticlib', '--disable-reflection', `--output=${output}`, '-V'];
+  if (!importPath) throw new Error(`WASM_STD_IMPORT_PATH ${name}`);
+  return [WASM_TARGET, ...level, ...flags, ...(name === 'std' ? [] : ['--no-sub-pkg']), '-p', dir,
+    '--output-type=staticlib', `--output=${output}`, `--import-path=${importPath}`, '-Woff', 'all'];
+}
+
+// -O2 first, then the compiler default level; the producer records which attempt built the package
+// and never reports a default-level package as -O2.
+export function wasmStdAttempts(pkg) {
+  return WASM_OPT_LEVELS.map(opt => ({opt, argv: wasmStdPackageArgv({...pkg, opt})}));
+}
