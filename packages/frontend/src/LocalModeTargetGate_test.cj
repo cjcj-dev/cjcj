@@ -9,18 +9,14 @@ import std.unittest.testmacro.*
 
 private let LOCAL_TARGET_MESSAGE: String = "local mode lowering is only supported on Linux x86_64 GNU targets"
 
-private func ItemHasText(item: Diagnostic, text: String): Bool {
-    return item.errorMessage.contains(text) || item.diagMessage.contains(text)
-}
-
 private func HasMessage(diag: DiagnosticEngine, text: String): Bool {
     let stored = diag.AsBasicDiagnosticEngine().GetCategoryDiagnostic(DiagCategory.SEMA)
     for (item in stored) {
-        if (ItemHasText(item, text)) { return true }
+        if (item.errorMessage.contains(text) || item.diagMessage.contains(text)) { return true }
     }
     let parsed = diag.AsBasicDiagnosticEngine().GetCategoryDiagnostic(DiagCategory.PARSE)
     for (item in parsed) {
-        if (ItemHasText(item, text)) { return true }
+        if (item.errorMessage.contains(text) || item.diagMessage.contains(text)) { return true }
     }
     return false
 }
