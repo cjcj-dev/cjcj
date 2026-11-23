@@ -25,7 +25,9 @@ export async function installHleDependencies({toolsRoot,sdk,platform,input,prepa
   // optional --no-detect-include-path, -p/-o and header -- clang arguments.
   // Both the original release and upstream 0.3.6 provide that CLI contract.
   // Preserve the producer's version/source; this is not production qualification.
-  if(!['v1.1.0-alpha.53.1','0.3.6'].includes(input.cjbind.version))throw new Error('HLE_DEPENDENCY_VERSION cjbind');
+  // v1.1.0-alpha.53.1-source is that release's tag commit built from source on
+  // darwin_x86_64, the one host without a release asset.
+  if(!['v1.1.0-alpha.53.1','v1.1.0-alpha.53.1-source','0.3.6'].includes(input.cjbind.version))throw new Error('HLE_DEPENDENCY_VERSION cjbind');
   await assertLauncherFormat({binary:input.node.path,native,platform});
   await assertLauncherFormat({binary:input.cjbind.path,native,platform});
   sdk=await privateRoot(sdk);

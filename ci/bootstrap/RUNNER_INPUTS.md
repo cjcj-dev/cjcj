@@ -141,7 +141,14 @@ Do not put adapter sources or a tools.privateRoot in any native-inputs artifact;
 H1 through the same public CJPM producer of `sdk-native-stage.mjs`: H's cjpm/cjc
 compile the pinned workspace, the host's `packages/cjc` target section supplies
 the ELF or Mach-O link inputs, and the H LLVM library and directory (the Mach-O
-`-rpath`) become N's, so the transitional stages execute H1 with N LLVM.
+`-rpath`) become N's, so the transitional stages execute H1 with N LLVM. The
+fixed H1 source (`FIXED_INPUTS.h1`) has no `[target.<triple>]` section, only the
+ELF link in `[package]`; on Darwin that line is translated to the same Mach-O
+contract (`-export_dynamic`, `-headerpad_max_install_names`, N's library,
+`-rpath <N lib>`, `-lc++`), with no H LLVM, `libLLVM-15.so`, `--export-dynamic` or
+`-lstdc++` left. `runtime_shim/cjc_heap_defaults.c` is compiled only when a
+manifest names `runtime_shim/cjc_heap_defaults.o` (the Linux sections of later
+sources); a named object without its source fails closed.
 `locations.json` records `platform`, `host` (`install`, the original official
 `archive` file and `version`), `installations` (each has relative `install`,
 original `buildResult`, and `configuration`), `tools` and, for tools builds,
@@ -156,10 +163,18 @@ the pinned official archive downloaded by `bootstrap_host_sdk.mjs` and kept
 under `host-archive/` with its original name; `HOST-INPUT.json` binds its size
 and SHA-256. The same producer supplies the HLE dependency package, the N shim
 object and cjdb. Its cjbind is the fixed cjbind-cangjie v1.1.0-alpha.53.1
-release, which has no darwin-x64 asset; its four assets embed four different
-Cangjie toolchains and none comes from the tag commit's own build, so no
-darwin-x64 source build can be verified to match it and that host fails closed
-with `HLE_CJBIND_UNAVAILABLE darwin_x86_64`.
+release on linux-x64, linux-aarch64, windows-x64 and darwin-arm64 (four pinned
+size/SHA-256 assets). That release has no darwin-x64 asset, so darwin-x64 uses
+the approved source identity `HLE_CJBIND_SOURCE_BUILD`: the release's tag commit
+`https://gitcode.com/Cangjie-SIG/cjbind-cangjie.git@d9ba9709906fda36fdb486fa55ec615cdb1fa2cb`,
+fetched and checked by `git rev-parse HEAD`, built in prepare-native on
+macos-15-intel with the installed official darwin-x64 host SDK (as installed,
+not patched) and uv, and probed with `--version`. `install-hle --cjbind-file F
+--cjbind-source-commit C` records it as version `v1.1.0-alpha.53.1-source` with
+that `source`, `commit`, `sha256` and `size`; a missing, empty or
+non-executable file, any other commit, or a source commit on another host fails
+closed (`HLE_CJBIND_SOURCE_FILE_REQUIRED`, `HLE_CJBIND_SOURCE_FILE`,
+`HLE_CJBIND_SOURCE_COMMIT`, `HLE_CJBIND_SOURCE_UNAPPROVED`).
 `configure-gha-inputs.mjs` checks out the fixed LLVM, runtime, AST compiler and
 H1 repositories, reads the actual candidate checkout, selects execution-host H,
 and writes `CJCJ_SDK_INPUTS` into GITHUB_ENV. The artifact must contain genuine

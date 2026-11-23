@@ -3049,7 +3049,10 @@ jobs:
             --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}" --from "$RUNNER_TEMP/ast-out"
       # HLE dependency package (ci/bootstrap/hle-input.mjs): this runner's Node,
       # the npm tree of the pinned tools dtsparser package.json and the pinned
-      # public cjbind release, under hle/ of the native input root.
+      # public cjbind release, under hle/ of the native input root. darwin-x64
+      # has no release asset: its approved identity (HLE_CJBIND_SOURCE_BUILD) is
+      # that release's tag commit, built here with the installed official host
+      # SDK and uv; the official SDK itself is used as installed, not patched.
       - name: Check out the fixed HLE parser source
         run: |
           set -euo pipefail
@@ -3059,11 +3062,39 @@ jobs:
           git -C hle-tools fetch --depth=1 origin "$TOOLS_REF"
           git -C hle-tools checkout --detach FETCH_HEAD
           test "$(git -C hle-tools rev-parse HEAD)" = "$TOOLS_REF"
+      - name: Build the pinned cjbind source with the official host SDK (darwin-x64)
+        id: cjbind
+        if: matrix.target == 'darwin-x64'
+        run: |
+          set -euo pipefail
+          eval "$(node build/sdk/producers/release/prepare_native_inputs.mjs cjbind-source --target "${{ matrix.target }}")"
+          git init cjbind-source
+          git -C cjbind-source remote add origin "$CJBIND_SRC_URL"
+          git -C cjbind-source fetch --depth=1 origin "$CJBIND_REF" \
+            || git -C cjbind-source fetch --depth=1 origin "refs/tags/$CJBIND_TAG"
+          git -C cjbind-source checkout --detach FETCH_HEAD
+          actual="$(git -C cjbind-source rev-parse HEAD)"
+          test "$actual" = "$CJBIND_REF"
+          brew install uv
+          uv --version
+          export CANGJIE_HOME="$RUNNER_TEMP/native-inputs/host"
+          set +u; source "$CANGJIE_HOME/envsetup.sh"; set -u
+          cjc --version
+          cd cjbind-source
+          uv run --python 3.13 ./scripts/download.py
+          uv run --python 3.13 ./scripts/cjpm.py build --cfg_verbose -V
+          ./target/release/bin/main --version
+          echo "file=$PWD/target/release/bin/main" >> "$GITHUB_OUTPUT"
+          echo "commit=$actual" >> "$GITHUB_OUTPUT"
       - name: Install the HLE dependency package into the native input root
+        env:
+          CJBIND_FILE: ${{ steps.cjbind.outputs.file }}
+          CJBIND_COMMIT: ${{ steps.cjbind.outputs.commit }}
         run: >-
           node build/sdk/producers/release/prepare_native_inputs.mjs install-hle
           --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}"
           --parser hle-tools/packages/hle/src/dtsparser
+          ${{ matrix.target == 'darwin-x64' && '--cjbind-file "$CJBIND_FILE" --cjbind-source-commit "$CJBIND_COMMIT"' || '' }}
       - name: Assemble native inputs and bind their provenance
         run: >-
           node build/sdk/producers/release/prepare_native_inputs.mjs assemble

@@ -247,10 +247,10 @@ export function compilerSource(env = process.env) {
 // tree of the pinned tools dtsparser package.json (--ignore-scripts: its
 // postinstall download is replaced by the pinned cjbind below) and the public
 // cjbind-cangjie release that consumer accepts. That release has no darwin-x64
-// asset, so that host fails closed instead of carrying a foreign cjbind: the
-// tag commit's build matrix has no darwin-x64 cell and its four assets embed
-// four different Cangjie toolchains, none from that commit's own build, so no
-// darwin-x64 build can be verified as the same release.
+// asset (the tag commit's build matrix has no darwin-x64 cell), so darwin_x86_64
+// carries the controller-approved source identity below instead of any foreign
+// binary: the release's tag commit, built on that prepare host (macos-15-intel)
+// with the installed official darwin-x64 host SDK, and recorded by commit.
 export const HLE_CJBIND = Object.freeze({version: 'v1.1.0-alpha.53.1',
   base: 'https://gitcode.com/Cangjie-SIG/cjbind-cangjie/releases/download/v1.1.0-alpha.53.1/',
   assets: Object.freeze({
@@ -260,6 +260,30 @@ export const HLE_CJBIND = Object.freeze({version: 'v1.1.0-alpha.53.1',
     darwin_aarch64: Object.freeze({name: 'cjbind-darwin-arm64', size: 92136544, sha256: '4da660c010203be14660edb5ee0e76f4a894214ca7a7c383702159d2f9d4005b'}),
   })});
 export const HLE_DESCRIPTOR = 'hle/hle-dependencies.json';
+export const HLE_CJBIND_SOURCE_BUILD = Object.freeze({
+  darwin_x86_64: Object.freeze({repo: 'https://gitcode.com/Cangjie-SIG/cjbind-cangjie.git',
+    commit: 'd9ba9709906fda36fdb486fa55ec615cdb1fa2cb', tag: 'v1.1.0-alpha.53.1', version: 'v1.1.0-alpha.53.1-source'}),
+});
+export function hleCjbindSource(target) {
+  const platform = prepareHost(target).llvm_platform, build = HLE_CJBIND_SOURCE_BUILD[platform];
+  if (!build) throw new Error(`HLE_CJBIND_SOURCE_UNAPPROVED ${platform}`);
+  return build;
+}
+// A source-built cjbind is accepted only on its approved host, only for the
+// fixed commit, and only as a non-empty executable regular file.
+function sourceBuiltCjbind(platform, file, commit) {
+  const build = HLE_CJBIND_SOURCE_BUILD[platform];
+  if (!build) {
+    if (commit !== undefined) throw new Error(`HLE_CJBIND_SOURCE_UNAPPROVED ${platform}`);
+    return undefined;
+  }
+  if (!file) throw new Error(`HLE_CJBIND_SOURCE_FILE_REQUIRED ${platform}`);
+  if (commit !== build.commit) throw new Error(`HLE_CJBIND_SOURCE_COMMIT ${commit ?? '(none)'} != ${build.commit}`);
+  const stat = fs.existsSync(file) ? fs.statSync(file) : undefined;
+  if (!stat?.isFile() || stat.size === 0 || (process.platform !== 'win32' && (stat.mode & 0o111) === 0))
+    throw new Error(`HLE_CJBIND_SOURCE_FILE ${file}`);
+  return build;
+}
 export function hleCjbindAsset(platform) {
   const asset = HLE_CJBIND.assets[platform];
   if (!asset) throw new Error(`HLE_CJBIND_UNAVAILABLE ${platform}`);
@@ -284,10 +308,11 @@ async function downloadAsset(url, file) {
   if (!response.ok) throw new Error(`HLE_CJBIND_DOWNLOAD ${response.status} ${url}`);
   fs.writeFileSync(file, Buffer.from(await response.arrayBuffer()));
 }
-export async function installHle({root, target, parser, node = process.execPath, cjbindFile,
+export async function installHle({root, target, parser, node = process.execPath, cjbindFile, cjbindSourceCommit,
   installModules = npmInstall, download = downloadAsset, asset: pinned}) {
   const platform = prepareHost(target).llvm_platform, native = sdkPlatform(platform);
-  const asset = pinned ?? hleCjbindAsset(platform), specs = hleModuleSpecs(parser);
+  const build = sourceBuiltCjbind(platform, cjbindFile, cjbindSourceCommit);
+  const asset = build ? undefined : pinned ?? hleCjbindAsset(platform), specs = hleModuleSpecs(parser);
   const hle = freshComponent(root, 'hle');
   const nodeRel = `node/node${native.exe}`, cjbindRel = `cjbind/cjbind${native.exe}`;
   fs.mkdirSync(path.join(hle, 'node'));
@@ -297,7 +322,7 @@ export async function installHle({root, target, parser, node = process.execPath,
   fs.mkdirSync(path.join(hle, 'cjbind'));
   const cjbind = path.join(hle, cjbindRel);
   if (cjbindFile) fs.copyFileSync(cjbindFile, cjbind); else await download(asset.url, cjbind);
-  if (fs.statSync(cjbind).size !== asset.size || sha256(cjbind) !== asset.sha256) throw new Error('HLE_CJBIND_IDENTITY');
+  if (!build && (fs.statSync(cjbind).size !== asset.size || sha256(cjbind) !== asset.sha256)) throw new Error('HLE_CJBIND_IDENTITY');
   if (native.os !== 'win32') for (const rel of [nodeRel, cjbindRel]) fs.chmodSync(path.join(hle, rel), 0o755);
   const work = path.join(hle, '.modules');
   fs.mkdirSync(work);
@@ -320,7 +345,10 @@ export async function installHle({root, target, parser, node = process.execPath,
       sha256: sha256(path.join(hle, nodeRel))},
     modules: {path: 'modules', version: Object.entries(packages).map(([name, version]) => `${name}@${version}`).join(' '),
       source: `npm registry: ${command.join(' ')}`, packages},
-    cjbind: {path: cjbindRel, version: asset.version, source: asset.url, sha256: asset.sha256, size: asset.size}};
+    cjbind: build
+      ? {path: cjbindRel, version: build.version, source: `${build.repo}@${build.commit}`, commit: build.commit,
+        sha256: sha256(cjbind), size: fs.statSync(cjbind).size}
+      : {path: cjbindRel, version: asset.version, source: asset.url, sha256: asset.sha256, size: asset.size}};
   fs.writeFileSync(path.join(root, HLE_DESCRIPTOR), JSON.stringify(descriptor, null, 2) + '\n');
   return descriptor;
 }
@@ -407,6 +435,16 @@ export function prepareWorkflowProblems({release, sdkBuild, target}) {
     'build/sdk/producers/release/prepare_native_inputs.mjs pack', 'build/sdk/producers/release/prepare_native_inputs.mjs install-hle'])
     if (!text.includes(program)) problems.push(`prepare-native does not run ${program}`);
   problems.push(...prepareComponentProblems(job.steps || []));
+  // darwin-x64: the approved source cjbind is built, checked by commit and
+  // probed on that host, then handed to install-hle with that commit.
+  const source = (job.steps || []).find(step => String(step.run || '').includes('prepare_native_inputs.mjs cjbind-source'));
+  if (!source || source.if !== "matrix.target == 'darwin-x64'" || !/rev-parse HEAD/.test(source.run)
+    || !/target\/release\/bin\/main --version/.test(source.run) || !/uv run/.test(source.run))
+    problems.push('prepare-native does not build the darwin-x64 source cjbind');
+  const hle = (job.steps || []).find(step => String(step.run || '').includes('prepare_native_inputs.mjs install-hle'));
+  if (!/matrix\.target == 'darwin-x64' && '--cjbind-file "\$CJBIND_FILE" --cjbind-source-commit "\$CJBIND_COMMIT"'/.test(String(hle?.run || ''))
+    || (source?.id && !String(hle?.env?.CJBIND_FILE || '').includes(`steps.${source.id}.outputs.file`)))
+    problems.push('prepare-native does not hand the darwin-x64 source cjbind to install-hle');
   // The host is the original official archive; a cjv install (ci/setup_sdk.mjs,
   // Unix-only) re-tarred under a directory locator is not a host identity.
   if (/ci\/setup_sdk\.mjs|host-sdk\.tar/.test(text)) problems.push('prepare-native provisions the host from an installed toolchain');
@@ -481,11 +519,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     else if (command === 'install-llvm') console.log(JSON.stringify(installLlvm({root: path.resolve(option('root') || ''),
       target: option('target'), from: path.resolve(option('from') || ''), commits: componentCommits(), producer: option('producer'), shimCommit: option('shim-commit')})));
     else if (command === 'install-hle') console.log(JSON.stringify(await installHle({root: path.resolve(option('root') || ''),
-      target: option('target'), parser: path.resolve(option('parser') || ''), cjbindFile: option('cjbind-file')})));
+      target: option('target'), parser: path.resolve(option('parser') || ''), cjbindFile: option('cjbind-file'),
+      cjbindSourceCommit: option('cjbind-source-commit')})));
+    else if (command === 'cjbind-source') {
+      const build = hleCjbindSource(option('target'));
+      process.stdout.write(`CJBIND_SRC_URL=${build.repo}\nCJBIND_TAG=${build.tag}\nCJBIND_REF=${build.commit}\n`);
+    }
     else if (command === 'install-ast') console.log(JSON.stringify(installAst({root: path.resolve(option('root') || ''),
       target: option('target'), from: path.resolve(option('from') || ''), commits: componentCommits()})));
     else throw new Error('usage: prepare_native_inputs.mjs provenance | install-host --root DIR --target T'
       + ' | assemble --root DIR --target T [--host-version V] | install-llvm|install-ast --root DIR --target T --from DIR'
-      + ' | compiler-source | pack --root DIR --out FILE');
+      + ' | compiler-source | cjbind-source --target T | pack --root DIR --out FILE');
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

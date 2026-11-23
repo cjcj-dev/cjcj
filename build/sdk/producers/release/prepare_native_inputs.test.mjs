@@ -8,8 +8,9 @@ import test from 'node:test';
 import crypto from 'node:crypto';
 import {PREPARE_HOSTS, PROVENANCE_KEYS, assembleNativeInputs, prepareProvenance, prepareWorkflowProblems,
   installLlvm, installAst, componentCommits, prepareComponentProblems, installHost, prepareHostVersion,
-  packNativeInputs, compilerSource, PREPARE_LLVM_TOOLS, installHle, hleCjbindAsset, HLE_CJBIND, PREPARE_SHIM_OBJECT} from './prepare_native_inputs.mjs';
+  packNativeInputs, compilerSource, PREPARE_LLVM_TOOLS, installHle, hleCjbindAsset, HLE_CJBIND, HLE_CJBIND_SOURCE_BUILD, hleCjbindSource, PREPARE_SHIM_OBJECT} from './prepare_native_inputs.mjs';
 import {configureHleInput, readHleDependencies} from '../../../../ci/bootstrap/hle-input.mjs';
+import {installHleDependencies} from '../../../srcbuild/hle-dependencies.mjs';
 import {readInstalledNativeShim} from '../../../../ci/bootstrap/native-shim-inputs.mjs';
 import {unpackNativeArtifact} from '../../../../ci/bootstrap/native-artifact-archive.mjs';
 import {buildPrepareLlvm, llvmConfigureArgs, buildPrepareShim, shimRequiredSymbols, shimSymbolProblems, PREPARE_LLVM_TARGETS} from './build_prepare_llvm.mjs';
@@ -486,8 +487,119 @@ test('install-hle yields the hleDependencies the real configureHleInput accepts,
     fs.rmSync(again, {recursive: true, force: true}); fs.mkdirSync(again);
     await assert.rejects(installHle({root: again, target: 'linux-x64', parser, installModules: modules(), ...options}), message);
   }
-  fs.rmSync(again, {recursive: true, force: true}); fs.mkdirSync(again);
-  await assert.rejects(installHle({root: again, target: 'darwin-x64', parser, installModules: modules()}), /HLE_CJBIND_UNAVAILABLE darwin_x86_64/);
+  // The four release-asset hosts keep exactly their four pinned sha256 assets.
+  assert.deepEqual(Object.fromEntries(Object.entries(HLE_CJBIND.assets).map(([key, row]) => [key, row.sha256])), {
+    linux_x86_64: '71bf15dbd18a343c366a923a5b25766a373af5d1709a59c25ced545ebc88f21e',
+    linux_aarch64: '18fee7c8d63722f0eb990a5640d877212b195c5d994d78df29e65434d21bb579',
+    windows_x86_64: '417c6aac0d2ff448490c2027bbbd619cf09d10b207e1513ebff369d69db9935e',
+    darwin_aarch64: '4da660c010203be14660edb5ee0e76f4a894214ca7a7c383702159d2f9d4005b'});
   for (const platform of ['linux_x86_64', 'linux_aarch64', 'windows_x86_64', 'darwin_aarch64'])
     assert.match(hleCjbindAsset(platform).url, /^https:\/\/gitcode\.com\/Cangjie-SIG\/cjbind-cangjie\/releases\/download\/v1\.1\.0-alpha\.53\.1\//);
+  assert.throws(() => hleCjbindAsset('darwin_x86_64'), /HLE_CJBIND_UNAVAILABLE darwin_x86_64/);
+  // A source commit is not an identity on a release-asset host.
+  const SOURCE = 'd9ba9709906fda36fdb486fa55ec615cdb1fa2cb';
+  fs.rmSync(again, {recursive: true, force: true}); fs.mkdirSync(again);
+  await assert.rejects(installHle({root: again, target: 'linux-x64', parser, cjbindFile: cjbind, asset, cjbindSourceCommit: SOURCE,
+    installModules: modules()}), /HLE_CJBIND_SOURCE_UNAPPROVED linux_x86_64/);
+});
+
+// ---- darwin-x64: the approved source-built cjbind identity ----
+test('darwin-x64 installs the approved source-built cjbind that the real configureHleInput accepts, and fails closed', async t => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-hle-source-'));
+  t.after(() => fs.rmSync(work, {recursive: true, force: true}));
+  const SOURCE = 'd9ba9709906fda36fdb486fa55ec615cdb1fa2cb';
+  assert.deepEqual(HLE_CJBIND_SOURCE_BUILD, {darwin_x86_64: {repo: 'https://gitcode.com/Cangjie-SIG/cjbind-cangjie.git',
+    commit: SOURCE, tag: 'v1.1.0-alpha.53.1', version: 'v1.1.0-alpha.53.1-source'}});
+  assert.equal(hleCjbindSource('darwin-x64').commit, SOURCE);
+  for (const target of ['linux-x64', 'linux-aarch64', 'windows-x64', 'darwin-arm64'])
+    assert.throws(() => hleCjbindSource(target), /HLE_CJBIND_SOURCE_UNAPPROVED/);
+  const parser = path.join(work, 'dtsparser'); fs.mkdirSync(parser);
+  fs.writeFileSync(path.join(parser, 'package.json'), JSON.stringify({dependencies: {typescript: 'npm:typescript@4.9.5'}}));
+  const modules = () => (prefix, specs) => {
+    for (const spec of specs) {
+      const name = spec.slice(0, spec.indexOf('@', 1)), version = spec.replace(/^.*@/, '').trim();
+      fs.mkdirSync(path.join(prefix, 'node_modules', name), {recursive: true});
+      fs.writeFileSync(path.join(prefix, 'node_modules', name, 'package.json'), JSON.stringify({name, version}));
+    }
+    return ['npm', 'install', ...specs];
+  };
+  const built = path.join(work, 'cjbind-source/target/release/bin/main');
+  fs.mkdirSync(path.dirname(built), {recursive: true}); fs.writeFileSync(built, 'source-built cjbind'); fs.chmodSync(built, 0o755);
+  const empty = path.join(work, 'empty'); fs.writeFileSync(empty, ''); fs.chmodSync(empty, 0o755);
+  const plain = path.join(work, 'not-executable'); fs.writeFileSync(plain, 'cjbind'); fs.chmodSync(plain, 0o644);
+  const again = path.join(work, 'again');
+  for (const [options, message] of [
+    [{}, /HLE_CJBIND_SOURCE_FILE_REQUIRED darwin_x86_64/],
+    [{cjbindSourceCommit: SOURCE}, /HLE_CJBIND_SOURCE_FILE_REQUIRED darwin_x86_64/],
+    [{cjbindFile: built}, /HLE_CJBIND_SOURCE_COMMIT \(none\) != d9ba9709906fda36fdb486fa55ec615cdb1fa2cb/],
+    [{cjbindFile: built, cjbindSourceCommit: 'e'.repeat(40)}, /HLE_CJBIND_SOURCE_COMMIT e{40} != d9ba9709906fda36fdb486fa55ec615cdb1fa2cb/],
+    [{cjbindFile: built, cjbindSourceCommit: SOURCE.slice(0, 12)}, /HLE_CJBIND_SOURCE_COMMIT d9ba9709906f != /],
+    [{cjbindFile: built, cjbindSourceCommit: SOURCE.toUpperCase()}, /HLE_CJBIND_SOURCE_COMMIT D9BA/],
+    [{cjbindFile: path.join(work, 'absent'), cjbindSourceCommit: SOURCE}, /HLE_CJBIND_SOURCE_FILE /],
+    [{cjbindFile: empty, cjbindSourceCommit: SOURCE}, /HLE_CJBIND_SOURCE_FILE /],
+    [{cjbindFile: plain, cjbindSourceCommit: SOURCE}, /HLE_CJBIND_SOURCE_FILE /],
+    [{cjbindFile: path.dirname(built), cjbindSourceCommit: SOURCE}, /HLE_CJBIND_SOURCE_FILE /]]) {
+    fs.rmSync(again, {recursive: true, force: true}); fs.mkdirSync(again);
+    console.log('DARWIN_X64_CJBIND_RED_ASSERT_REACHED ' + JSON.stringify(Object.keys(options)));
+    await assert.rejects(installHle({root: again, target: 'darwin-x64', parser, installModules: modules(), ...options}), message);
+    assert.equal(fs.existsSync(path.join(again, 'hle')), false, 'no HLE component before the identity holds');
+  }
+  const root = path.join(work, 'root'); fs.mkdirSync(root);
+  putHost(root, 'darwin_x86_64');
+  for (const [name, file] of [['llvm', 'BUILD-INPUTS.json'], ['runtime', 'NATIVE-INPUTS.json'], ['ast', 'BUILD-INPUTS.json']]) {
+    fs.mkdirSync(path.join(root, name)); fs.writeFileSync(path.join(root, name, file), JSON.stringify({configuration: {name}, nativeShim: {}}));
+  }
+  const descriptor = await installHle({root, target: 'darwin-x64', parser, cjbindFile: built, cjbindSourceCommit: SOURCE, installModules: modules()});
+  console.log('DARWIN_X64_CJBIND_GREEN_ASSERT_REACHED');
+  assert.equal(descriptor.platform, 'darwin_x86_64');
+  assert.deepEqual(descriptor.cjbind, {path: 'cjbind/cjbind', version: 'v1.1.0-alpha.53.1-source',
+    source: 'https://gitcode.com/Cangjie-SIG/cjbind-cangjie.git@d9ba9709906fda36fdb486fa55ec615cdb1fa2cb', commit: SOURCE,
+    sha256: crypto.createHash('sha256').update('source-built cjbind').digest('hex'), size: 19});
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'hle/hle-dependencies.json'), 'utf8')), descriptor);
+  assert.equal(fs.statSync(path.join(root, 'hle/cjbind/cjbind')).mode & 0o777, 0o755);
+  const {locations} = assembleNativeInputs({root, target: 'darwin-x64', hostVersion: '1.1.0', env, pins});
+  assert.equal(locations.hleDependencies, 'hle/hle-dependencies.json');
+  const selected = await configureHleInput(root, 'darwin_x86_64');
+  const read = await readHleDependencies(selected, 'darwin_x86_64');
+  assert.equal(read.cjbind.path, path.join(fs.realpathSync(root), 'hle/cjbind/cjbind'));
+  assert.equal(fs.readFileSync(read.cjbind.path, 'utf8'), 'source-built cjbind');
+  assert.equal(read.cjbind.commit, SOURCE);
+  await assert.rejects(configureHleInput(root, 'darwin_aarch64'), /GHA_NATIVE_ARTIFACT_PLATFORM/);
+  // The SDK consumer (build/srcbuild/hle-dependencies.mjs) admits that version
+  // and only it beside the two release versions. Its launcher-format check is
+  // per platform, so this host's own executables stand in for the binaries.
+  const tools = path.join(work, 'tools'), dts = path.join(tools, 'packages/hle/src/dtsparser');
+  fs.mkdirSync(dts, {recursive: true}); fs.copyFileSync(path.join(parser, 'package.json'), path.join(dts, 'package.json'));
+  const here = {linux: 'linux', darwin: 'darwin', win32: 'windows'}[process.platform] + '_' + (process.arch === 'arm64' ? 'aarch64' : 'x86_64');
+  const input = version => ({...read, platform: here, node: {...read.node, path: process.execPath},
+    cjbind: {...read.cjbind, path: process.execPath, version}});
+  const consumed = await installHleDependencies({toolsRoot: tools, sdk: path.join(work, 'sdk'), platform: here,
+    input: input('v1.1.0-alpha.53.1-source'), prepareOnly: true});
+  assert.equal(consumed.facts.cjbind.version, 'v1.1.0-alpha.53.1-source');
+  assert.equal(consumed.facts.cjbind.source, 'https://gitcode.com/Cangjie-SIG/cjbind-cangjie.git@' + SOURCE);
+  await assert.rejects(installHleDependencies({toolsRoot: tools, sdk: path.join(work, 'sdk2'), platform: here,
+    input: input('v1.1.0-alpha.53.2-source'), prepareOnly: true}), /HLE_DEPENDENCY_VERSION cjbind/);
+});
+
+test('prepare-native builds the darwin-x64 source cjbind on its own host and hands it to install-hle', () => {
+  const steps = job(read('sdk-build-target')).steps, find = text => steps.filter(step => String(step.run || '').includes(text));
+  const [build] = find('prepare_native_inputs.mjs cjbind-source'), [hle] = find('prepare_native_inputs.mjs install-hle');
+  assert.equal(find('prepare_native_inputs.mjs cjbind-source').length, 1);
+  assert.equal(build.if, "matrix.target == 'darwin-x64'");
+  assert.ok(steps.indexOf(build) < steps.indexOf(hle));
+  assert.ok(steps.indexOf(steps.find(step => String(step.run || '').includes('prepare_native_inputs.mjs install-host'))) < steps.indexOf(build));
+  for (const piece of ['test "$actual" = "$CJBIND_REF"', 'export CANGJIE_HOME="$RUNNER_TEMP/native-inputs/host"', 'uv run --python 3.13 ./scripts/cjpm.py build',
+    './target/release/bin/main --version', 'echo "commit=$actual" >> "$GITHUB_OUTPUT"']) assert.ok(build.run.includes(piece), piece);
+  assert.equal(/patch_opt/.test(build.run), false, 'the official host SDK is used as installed');
+  assert.deepEqual(hle.env, {CJBIND_FILE: '${{ steps.cjbind.outputs.file }}', CJBIND_COMMIT: '${{ steps.cjbind.outputs.commit }}'});
+  const cuts = [[`          ./target/release/bin/main --version\n`, '', 'prepare-native does not build the darwin-x64 source cjbind'],
+    [`        if: matrix.target == 'darwin-x64'\n        run: |\n          set -euo pipefail\n          eval`, `        run: |\n          set -euo pipefail\n          eval`,
+      'prepare-native does not build the darwin-x64 source cjbind'],
+    [` --cjbind-source-commit "$CJBIND_COMMIT"'`, `'`, 'prepare-native does not hand the darwin-x64 source cjbind to install-hle'],
+    [`          CJBIND_FILE: \${{ steps.cjbind.outputs.file }}\n`, `          CJBIND_FILE: \${{ steps.other.outputs.file }}\n`,
+      'prepare-native does not hand the darwin-x64 source cjbind to install-hle']];
+  for (const [from, to, problem] of cuts) {
+    console.log('PREPARE_CJBIND_WIRING_CUT_REACHED ' + problem);
+    assert.ok(prepareWorkflowProblems({...real(), target: once(read('sdk-build-target'), from, to)}).includes(problem), from);
+  }
 });
