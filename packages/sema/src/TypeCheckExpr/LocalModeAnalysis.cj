@@ -554,6 +554,14 @@ class LocalModeAnalysis {
         } else if (let Some(arr) <- (node as ArrayLit)) {
             arr.resolvedMode = arr.expectedLocalMode ?? JoinResultModes(typeManager, arr.children, { v => Some(v.resolvedMode) })
             for (value in arr.children) {
+                // A plain string literal has no region of its own; as an element of a local array
+                // literal it is built in the array's mode, as for a local parameter slot
+                // (HLT local_mode h04: `let a: Array<String> @local! = ["a", "bee", "c"]`).
+                if ((let Some(lit) <- (value as LitConstExpr)) && lit.siExpr.isNone() && arr.resolvedMode != ASTMode.NOT &&
+                    lit.resolvedMode == ASTMode.NOT && lit.expectedLocalMode.isNone()) {
+                    lit.expectedLocalMode = Some(arr.resolvedMode)
+                    lit.resolvedMode = arr.resolvedMode
+                }
                 Check(value, arr.resolvedMode)
                 if (arr.resolvedMode == ASTMode.FULL && !CopyNode(value) && External(value)) {
                     DiagMismatchedTypesWithFoundTy(diag, value, "a value in the array's region", "an external local element")
