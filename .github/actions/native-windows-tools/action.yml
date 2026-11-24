@@ -74,6 +74,10 @@ runs:
         python -m pip install 'cmake>=3.17,<4'
         test -x /mingw64/bin/llvm-readobj.exe
         test -d /mingw64/lib
+        # setup-msys2 installs under RUNNER_TEMP, not C:\msys64: name the actual
+        # MSYS2 bash for producers that enter MSYS2 (build_runtime/build_cjcj).
+        test -x /usr/bin/bash.exe
+        echo "MSYS2_BASH=$(cygpath -w /usr/bin/bash.exe)" >> "$GITHUB_ENV"
         echo "CJCJ_NATIVE_LLVM_BIN=$(cygpath -w /mingw64/bin)" >> "$GITHUB_ENV"
         echo "CJCJ_NATIVE_OPENSSL_LIB=$(cygpath -w /mingw64/lib)" >> "$GITHUB_ENV"
         cygpath -w /mingw64/bin >> "$GITHUB_PATH"

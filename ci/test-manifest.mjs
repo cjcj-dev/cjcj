@@ -218,6 +218,9 @@ export const GATING = Object.freeze([
   'ci/release-gates-g4.test.mjs',
   // Static guard: reusable-workflow expansion stays one copy per workflow.
   'ci/release-workflow-expansion.test.mjs',
+  // prepare.yml Windows native runtime entry: target, host version, MSYS2 bash,
+  // MINGW64 clang candidates and the Linux gc_unit failure diagnostics.
+  'ci/prepare-windows-native-runtime.test.mjs',
 ]);
 
 // Registered, not executed. `needs` is what CI would have to provide; `verified`

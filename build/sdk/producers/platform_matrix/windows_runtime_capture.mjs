@@ -69,7 +69,8 @@ export function collect() {
  manifest.readobj={configured:cachedReadobj??null,selected:readobj};
  for(const [name,args]of [['clang',['--version']],['ld.lld',['--version']],['llvm-readobj',['--version']],['cmake',['--version']],['python3',['--version']],['objdump',['--version']]])
   inspect(dir,'tool-'+name,[name==='llvm-readobj'?readobj:path.join(toolchain,'bin',name+'.exe'),...args]);
- inspect(dir,'pacman-packages',['C:/msys64/usr/bin/pacman.exe','-Q']);
+ // MSYS2_BASH names the actual MSYS2 usr/bin (setup-msys2 installs under RUNNER_TEMP).
+ inspect(dir,'pacman-packages',[path.join(path.dirname(process.env.MSYS2_BASH||'C:/msys64/usr/bin/bash.exe'),'pacman.exe'),'-Q']);
  const dlls=walk(dir).filter(f=>/\.dll$/i.test(f)),objdump=process.env.OBJDUMP||path.join(toolchain,'bin/objdump.exe');
  manifest.dlls=[];
  for(const [i,dll]of dlls.entries()) {

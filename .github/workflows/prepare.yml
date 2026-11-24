@@ -149,7 +149,8 @@ jobs:
           RUNTIME_NATIVE_PAIR: '1'
           GC_UNIT_GATE_LANGUAGE_TESTS: ${{ runner.os == 'Linux' && 'defer' || 'all' }}
           CJCJ_NATIVE_RUNTIME_REF: ${{ steps.pin.outputs.runtime_sha }}
-          RUNTIME_TARGET: native
+          # configureNativeRuntime accepts only windows-x86_64 on the Windows host.
+          RUNTIME_TARGET: ${{ runner.os == 'Windows' && 'windows-x86_64' || 'native' }}
           RUNTIME_BUILD_TYPE: release
           NATIVE_RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
           MATRIX_RUNNER: ${{ matrix.runner }}
@@ -157,9 +158,31 @@ jobs:
           set -euo pipefail
           ulimit -S -c 0
           ulimit -H -c 0
+          # Step-local only (not GITHUB_ENV): the pinned host when the pair is
+          # pinned, NATIVE_RUNTIME_EXPLICIT_HOST_REQUIRED for an explicit pair
+          # without native_host_version. Later steps keep their own contract.
+          CJCJ_NATIVE_HOST_VERSION=$(node build/sdk/producers/release/prepare_native_inputs.mjs host-version --target "${{ matrix.target }}")
+          export CJCJ_NATIVE_HOST_VERSION
           CANGJIE_BUILD_JOBS=$(node ci/build-resources.mjs --jobs-only)
           export CANGJIE_BUILD_JOBS
           npx --yes zx@8 build/sdk/producers/platform_matrix/build_runtime.mjs
+      # gate_gc_unit.sh prints only the last lines of its suite output, which can
+      # cut the GC_UNIT_OTHER_VM_*_RC / TEARDOWN_RECORDS_REJECT verdict lines.
+      - name: Show gc_unit gate diagnostics after a Linux runtime failure
+        if: failure() && runner.os == 'Linux'
+        run: |
+          runs=runtime-source/runtime/tests/gc_unit/build_standalone/gate-runs
+          if [ ! -d "$runs" ]; then
+            echo "GC_UNIT_DIAGNOSTICS_ABSENT $runs"
+            exit 0
+          fi
+          grep -rhE --include='*.log' 'GC_UNIT_OTHER_VM|TEARDOWN_RECORDS|FAIL|ERROR' "$runs" | tail -n 200 || true
+          find "$runs" -type f \( -name gate_run.log -o -name other_vm_exit.log -o -name 'teardown*.log' \) | sort |
+            while IFS= read -r log; do
+              echo "::group::$log"
+              tail -n 200 "$log" || true
+              echo "::endgroup::"
+            done || true
       - name: Consume the installation and the same package on this native host
         env:
           NATIVE_RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
