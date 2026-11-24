@@ -100,6 +100,8 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
     applyCompilerBoundscheckDependencies(compiler);
     assert.deepEqual(fs.readFileSync(boundsFile), canonicalBounds, 'canonical 41b already has both static bounds dependencies');
     await fetchRun(config);
+    assert.match(fs.readFileSync(path.join(compiler, 'demangler/Demangler.h'), 'utf8'),
+      /#include <vector>\r?\n#ifndef BUILD_LIB_CANGJIE_DEMANGLE/, 'Windows fetch must expose vector in the library build');
     assert.match(fs.readFileSync(xml2, 'utf8'), /-DCMAKE_CXX_COMPILER=\$\{CMAKE_CXX_COMPILER\}\r\n/);
     assert.match(fs.readFileSync(boundsFile, 'utf8'), /\/InstallWindowsToolchain\.cmake"\)\n/);
     assert.match(fs.readFileSync(schema, 'utf8'), /FLATC_LIBAST_OUTPUTS\}\)\r\ninstall\(FILES/, 'Windows fetch must preserve CRLF around the new install rule');
@@ -416,6 +418,25 @@ test('native compiler preparation preserves CRLF across configure and install ed
 });
 
 for (const [target, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
+  test(`Windows demangler: pinned include guard, ${target} and reentry`, t => {
+    const root = tempTree(t);
+    fs.cpSync(WINDOWS_PIN_FIXTURE, root, {recursive: true});
+    const file = path.join(root, 'demangler/Demangler.h');
+    const original = withEol(fs.readFileSync(file, 'utf8'), eol);
+    const guard = '#ifndef BUILD_LIB_CANGJIE_DEMANGLE' + eol, vector = '#include <vector>' + eol;
+    assert.ok(original.includes(guard + vector), 'fixture must reproduce the guarded vector include');
+    fs.writeFileSync(file, original);
+    const apply = () => applyCompilerWindowsPatches(root);
+    apply();
+    assert.equal(fs.readFileSync(file, 'utf8'), original.replace(guard + vector, vector + guard));
+    assertNoRewrite(file, apply);
+
+    const drift = original.replace(guard, '#ifndef OTHER_BUILD' + eol);
+    fs.writeFileSync(file, drift);
+    assert.throws(apply, /patch shape drift:.*Demangler\.h/);
+    assert.equal(fs.readFileSync(file, 'utf8'), drift);
+  });
+
   for (const [patchStyle, patchEol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
     test(`Windows Git patch: ${target} compiler, ${patchStyle} patch, forward and reentry`, t => {
       const root = tempTree(t), patch = path.join(root, 'input.patch');

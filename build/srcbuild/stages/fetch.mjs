@@ -268,6 +268,15 @@ export function applyCompilerWindowsPatches(repoDir, patch = new URL('../patches
     throw new BuildError(stage, `compiler Windows patch shape drift: ${check.stderr || check.error?.message}`);
   }
 
+  // Both demangler targets use std::vector with BUILD_LIB_CANGJIE_DEMANGLE set.
+  const guard = '#ifndef BUILD_LIB_CANGJIE_DEMANGLE';
+  const vector = '#include <vector>';
+  const includes = (first, second) => [
+    '#define CANGJIE_DEMANGLER_H', '', '#include <array>', first, second, '#include "Base/CString.h"', '#endif', '',
+  ].join('\n');
+  const fixed = includes(vector, guard);
+  applyTextPatch(path.join(root, 'demangler/Demangler.h'), [[includes(guard, vector), fixed]], {stage, marker: fixed});
+
   // Keep the base patch (and its reverse-check context) stable for cached sources.
   // The first toolchain read happens before CMake identifies the compiler.
   const findLld = 'find_program(lld_path lld${CMAKE_EXECUTABLE_SUFFIX})';

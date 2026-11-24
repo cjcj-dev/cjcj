@@ -91,6 +91,8 @@ for(const mode of ['probe','native','install-only']){
    assert.deepEqual(consumer.path.split(';'),[path.join(probeInstall,'bin'),path.join(probeInstall,'third_party/llvm/bin'),path.join(system,'System32'),system]);
   }
   if(mode!=='probe'){
+   const header=await fs.readFile(path.join(main.argv[main.argv.indexOf('-S')+1],'demangler/Demangler.h'),'utf8');
+   assert.match(header,/#include <vector>\r?\n#ifndef BUILD_LIB_CANGJIE_DEMANGLE/,'native configure must see the unconditional vector include');
    if(mode==='native')assert.equal(incomingProbePath.split(';')[0],bin,'nativeCjdb must bind PATH before invoking probe');
    assert.equal(main.path.split(';')[0],bin,'main configure must search selected bin first: '+mode);
    assert.ok(main.argv.includes('-DCANGJIE_CJNATIVE_SOURCE_DIR=D:/a/cjcj/cjcj/llvm-fork'));

@@ -1,7 +1,7 @@
 {
   "repository": "https://gitcode.com/Cangjie/cangjie_compiler.git",
   "commit": "41b22350b8eb5b0c8244704f906b7b8d3096eb9c",
-  "scope": "Exact CMake source subset; fixture Git commits are not the canonical repository.",
+  "scope": "Exact CMake source subset and Demangler.h include prologue; fixture Git commits are not the canonical repository.",
   "files": [
     {
       "path": "cmake/mingw_x86_64_toolchain.cmake",
@@ -22,6 +22,11 @@
     {
       "path": "src/CMakeLists.txt",
       "sha256": "3520410df21eb13e534a1f655479b7b26007976bce7fa3c7ab8715462fe3c48c"
+    },
+    {
+      "path": "demangler/Demangler.h",
+      "lines": "1-21 and final #endif; identical include block at 2e7b7dd9",
+      "sha256": "609fb0efa9f2043367658319811fe26b97059d35b372fe3d5e017388be773678"
     }
   ]
 }
