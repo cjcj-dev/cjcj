@@ -265,6 +265,50 @@ for (const {llvm_platform: platform} of PREPARE_HOSTS.filter(h => h.llvm_platfor
   });
 }
 
+for (const type of ['commit', 'blob']) {
+  test(`preparePython: ${type === 'commit' ? 'detached commit HEAD reaches download' : 'blob HEAD fails before prefix and download'}`, async t => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'python-head-'));
+    t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+    const git = (args, input) => execFileSync('git', args, {cwd: dir, encoding: 'utf8', input}).trim();
+    git(['init', '--quiet', '--object-format=sha1']);
+    if (type === 'commit') {
+      git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '--no-gpg-sign', '-qm', 'fixture']);
+      git(['checkout', '--quiet', '--detach', 'HEAD']);
+    } else {
+      const blob = git(['hash-object', '-w', '--stdin'], 'not a commit');
+      git(['update-ref', 'refs/tags/blob', blob]);
+      git(['symbolic-ref', 'HEAD', 'refs/tags/blob']);
+    }
+    assert.equal(git(['cat-file', '-t', 'HEAD']), type);
+
+    // Use the fixture's Git metadata for the producer's own source root.
+    const previous = {GIT_DIR: process.env.GIT_DIR, GIT_WORK_TREE: process.env.GIT_WORK_TREE};
+    const out = path.join(dir, 'out'), sentinel = new Error('download reached');
+    let downloads = 0;
+    try {
+      process.env.GIT_DIR = path.join(dir, '.git');
+      process.env.GIT_WORK_TREE = root;
+      const result = await preparePython({platform: 'linux_x86_64', out, download: () => {
+        downloads++;
+        throw sentinel;
+      }}).catch(error => error);
+      const prefix = fs.existsSync(path.join(out, 'python'));
+      if (type === 'commit') {
+        assert.deepEqual({prefix, downloads}, {prefix: true, downloads: 1});
+        assert.equal(result, sentinel);
+      } else {
+        assert.deepEqual({prefix, downloads}, {prefix: false, downloads: 0});
+        assert.equal(result.code, 128); // Git rejected the revision.
+      }
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+}
+
 test('preparePython rejects other archive bytes with the release pin', async t => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'python-archive-'));
   t.after(() => fs.rmSync(out, {recursive: true, force: true}));

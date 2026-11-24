@@ -69,7 +69,7 @@ export async function verifyNativeSource(options, {signal} = {}) {
     return 'unknown';
   }
   if (await fs.realpath(root) !== source) throw new Error('NATIVE_SOURCE_ROOT '+source);
-  const actual = (await execute('git',['-C',source,'rev-parse','HEAD'],{signal})).stdout.trim();
+  const actual = (await execute('git',['-C',source,'rev-parse','--verify','HEAD^{commit}'],{signal})).stdout.trim();
   if (!/^[a-f0-9]{40}$/.test(actual)) throw new Error('NATIVE_SOURCE_HEAD');
   check(actual);
   return actual;
