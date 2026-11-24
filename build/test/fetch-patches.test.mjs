@@ -10,6 +10,7 @@ import {buildConfig, saveSourceSelection} from '../lib/config.mjs';
 import {getBuildTarget} from '../lib/build-target.mjs';
 import {applyCompilerBoundscheckDependencies, applyCompilerCjdbPatches, applyCompilerLlvmVersion, applyCompilerSchemaInstall,
   applyCompilerWindowsPatches, applyCompilerXml2Install, applyNativeCjdbConfigure, prepareLldbSwigPython3Source, run as fetchRun, verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
+import {assertCompilerLibcxxEdits, libcxxEdits} from './fixtures/windows-compiler-libcxx.mjs';
 import {applyTextPatch} from '../srcbuild/stages/common.mjs';
 
 const BUILD_CJDB = [
@@ -100,6 +101,7 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
     applyCompilerBoundscheckDependencies(compiler);
     assert.deepEqual(fs.readFileSync(boundsFile), canonicalBounds, 'canonical 41b already has both static bounds dependencies');
     await fetchRun(config);
+    assertCompilerLibcxxEdits(compiler);
     assert.match(fs.readFileSync(path.join(compiler, 'demangler/Demangler.h'), 'utf8'),
       /#include <vector>\r?\n#ifndef BUILD_LIB_CANGJIE_DEMANGLE/, 'Windows fetch must expose vector in the library build');
     assert.match(fs.readFileSync(xml2, 'utf8'), /-DCMAKE_CXX_COMPILER=\$\{CMAKE_CXX_COMPILER\}\r\n/);
@@ -418,6 +420,26 @@ test('native compiler preparation preserves CRLF across configure and install ed
 });
 
 for (const [target, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
+  test(`Windows compiler libc++: ${target} edits, reentry, missing files and drift`, t => {
+    const root = tempTree(t);
+    fs.cpSync(WINDOWS_PIN_FIXTURE, root, {recursive: true});
+    const apply = () => applyCompilerWindowsPatches(root);
+    const files = libcxxEdits.map(([relative]) => path.join(root, relative));
+    for (const file of files) fs.writeFileSync(file, withEol(fs.readFileSync(file, 'utf8'), eol));
+    apply();
+    assertCompilerLibcxxEdits(root, eol);
+    for (const file of files) {
+      assertNoRewrite(file, apply);
+      const patched = fs.readFileSync(file);
+      fs.unlinkSync(file);
+      assert.throws(apply, {name: 'BuildError', message: '[fetch.patch.windows] required file missing: ' + file});
+      fs.writeFileSync(file, 'unrecognized source' + eol);
+      assert.throws(apply, err => err.name === 'BuildError' && err.message.includes('patch shape drift:') && err.message.endsWith(file));
+      assert.equal(fs.readFileSync(file, 'utf8'), 'unrecognized source' + eol);
+      fs.writeFileSync(file, patched);
+    }
+  });
+
   test(`Windows demangler: pinned include guard, ${target} and reentry`, t => {
     const root = tempTree(t);
     fs.cpSync(WINDOWS_PIN_FIXTURE, root, {recursive: true});

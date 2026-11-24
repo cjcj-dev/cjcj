@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {assertCompilerLibcxxEdits} from '../../build/test/fixtures/windows-compiler-libcxx.mjs';
 import {cmakePath,coffImports,requireMsvcrtImports,selectedExecutable,selectedWindowsToolchainEnvironment,windowsInstalledEnvironment} from './native-windows-toolchain.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
 const out=process.env.TOOLCHAIN_TEST_EVIDENCE;
@@ -91,6 +92,7 @@ for(const mode of ['probe','native','install-only']){
    assert.deepEqual(consumer.path.split(';'),[path.join(probeInstall,'bin'),path.join(probeInstall,'third_party/llvm/bin'),path.join(system,'System32'),system]);
   }
   if(mode!=='probe'){
+   assertCompilerLibcxxEdits(main.argv[main.argv.indexOf('-S')+1]);
    const header=await fs.readFile(path.join(main.argv[main.argv.indexOf('-S')+1],'demangler/Demangler.h'),'utf8');
    assert.match(header,/#include <vector>\r?\n#ifndef BUILD_LIB_CANGJIE_DEMANGLE/,'native configure must see the unconditional vector include');
    if(mode==='native')assert.equal(incomingProbePath.split(';')[0],bin,'nativeCjdb must bind PATH before invoking probe');

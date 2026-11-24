@@ -277,6 +277,25 @@ export function applyCompilerWindowsPatches(repoDir, patch = new URL('../patches
   const fixed = includes(vector, guard);
   applyTextPatch(path.join(root, 'demangler/Demangler.h'), [[includes(guard, vector), fixed]], {stage, marker: fixed});
 
+  // libc++ does not expose these declarations through unrelated headers.
+  for (const [file, before, include, after] of [
+    ['src/AST/Searcher.cpp', '#include "cangjie/AST/Searcher.h"\n\n', '#include <iterator>\n', '#include <memory>'],
+    ['src/Basic/Display.cpp', '#include <codecvt>\n#include <cassert>\n', '#include <locale>\n', '\n#include "cangjie/Basic/Print.h"'],
+    ['src/Frontend/CompilerInstance.cpp', '#include "cangjie/Frontend/CompilerInstance.h"\n\n#include <fstream>\n', '#include <iterator>\n', '\n#include "PrintSymbolTable.h"'],
+    ['include/cangjie/Modules/ModulesUtils.h', '#define CANGJIE_MODULES_UTILS_H\n\n', '#include <iterator>\n\n', '#include "cangjie/AST/Node.h"'],
+    ['src/Parse/Parser.cpp', '#include "ParserImpl.h"\n\n', '#include <iterator>\n\n', '#include "cangjie/AST/Clone.h"'],
+    ['src/Sema/InheritanceChecker/StructInheritanceChecker.cpp', '#include <algorithm>\n#include <cstddef>\n', '#include <iterator>\n', '#include <map>'],
+    ['src/Sema/LegalityOfUsage/LegalityOfUsage.cpp', '#include "TypeCheckerImpl.h"\n\n', '#include <iterator>\n\n', '#include "Diags.h"'],
+  ]) {
+    const fixedIncludes = before + include + after;
+    applyTextPatch(path.join(root, file), [[before + after, fixedIncludes]], {stage, marker: fixedIncludes});
+  }
+
+  // get() also joins the cleanup task and propagates its exceptions; always call it.
+  const cleanup = '    future.get();', consumed = '    res = future.get() && res;';
+  const stop = '\n    Utils::ProfileRecorder::Stop("Main Stage", "DeleteInstanceLeftTime");';
+  applyTextPatch(path.join(root, 'src/Driver/Driver.cpp'), [[cleanup + stop, consumed + stop]], {stage, marker: consumed + stop});
+
   // Keep the base patch (and its reverse-check context) stable for cached sources.
   // The first toolchain read happens before CMake identifies the compiler.
   const findLld = 'find_program(lld_path lld${CMAKE_EXECUTABLE_SUFFIX})';
