@@ -61,10 +61,19 @@ runs:
         suppress-deprecation-warnings: msystem-mingw64
         update: true
         path-type: inherit
+        # clang 23.1.5 depends on neither compiler-rt nor libc++/libunwind, while
+        # the runtime CMakeLists.txt that build.py configures builds with
+        # --rtlib=compiler-rt -stdlib=libc++ and windows_runtime_toolchain.cmake
+        # selects LLD (run 45385716455: ld.lld could not open
+        # libclang_rt.builtins.a). llvm already pulls llvm-tools and lld; they
+        # stay named because readobj/ld.lld are checked below.
         install: >-
-          git tar patch make
+          git tar patch make file gzip unzip
           mingw-w64-x86_64-clang mingw-w64-x86_64-gcc
           mingw-w64-x86_64-ninja mingw-w64-x86_64-llvm mingw-w64-x86_64-openssl
+          mingw-w64-x86_64-binutils mingw-w64-x86_64-compiler-rt
+          mingw-w64-x86_64-libc++ mingw-w64-x86_64-libunwind
+          mingw-w64-x86_64-lld mingw-w64-x86_64-llvm-tools
     - uses: actions/setup-python@v7.1.0
       with:
         python-version: '3.11'
@@ -73,6 +82,14 @@ runs:
       run: |
         python -m pip install 'cmake>=3.17,<4'
         test -x /mingw64/bin/llvm-readobj.exe
+        test -x /mingw64/bin/ld.lld.exe
+        test -x /mingw64/bin/clang++.exe
+        test -f /mingw64/lib/libc++.a
+        test -f /mingw64/lib/libunwind.a
+        # The exact archive clang links for --rtlib=compiler-rt (MSYS2 ships the
+        # lib/windows layout; clang names the per-target path only when absent).
+        builtins="$(/mingw64/bin/clang.exe --target=x86_64-w64-mingw32 --rtlib=compiler-rt -print-libgcc-file-name)"
+        test -f "$(cygpath -u "$builtins")" || { echo "MINGW64_COMPILER_RT_MISSING $builtins" >&2; exit 1; }
         test -d /mingw64/lib
         # setup-msys2 installs under RUNNER_TEMP, not C:\msys64: name the actual
         # MSYS2 bash for producers that enter MSYS2 (build_runtime/build_cjcj).

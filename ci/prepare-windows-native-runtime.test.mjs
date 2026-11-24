@@ -230,3 +230,75 @@ test('sccache report mode runs the SCCACHE_PATH that start mode exported', () =>
     fs.rmSync(work, {recursive: true, force: true});
   }
 });
+
+// Run 45385716455 (windows-x64): CMake's first link failed in ld.lld, which could
+// not open libclang_rt.builtins.a. MSYS2 clang 23.1.5 depends on neither
+// compiler-rt nor libc++/libunwind, while the runtime CMakeLists.txt that build.py
+// configures builds with --rtlib=compiler-rt -stdlib=libc++ and
+// windows_runtime_toolchain.cmake selects LLD.
+const MINGW_TOOLS_STEP = 'Install supported CMake and expose the actual MinGW tools';
+function msys2Install() {
+  const lines = read(TOOLS).split('\n');
+  const at = lines.findIndex(line => /^\s+install: >-\s*$/.test(line));
+  assert.notEqual(at, -1, `${TOOLS}: setup-msys2 has a folded install list`);
+  const indent = lines[at].search(/\S/), packages = [];
+  for (let i = at + 1; i < lines.length && lines[i].trim() && lines[i].search(/\S/) > indent; i++)
+    packages.push(...lines[i].trim().split(/\s+/));
+  return packages;
+}
+
+test('native-windows-tools installs the MINGW64 compiler-rt, libc++, libunwind and LLD the runtime links with', () => {
+  const packages = msys2Install();
+  const mingw = ['clang', 'gcc', 'ninja', 'llvm', 'openssl', 'binutils', 'compiler-rt', 'libc++', 'libunwind', 'lld', 'llvm-tools'];
+  for (const name of ['git', 'tar', 'patch', 'make', 'file', 'gzip', 'unzip', ...mingw.map(name => `mingw-w64-x86_64-${name}`)])
+    assert.ok(packages.includes(name), `${name} in setup-msys2 install: ${packages.join(' ')}`);
+  assert.equal(new Set(packages).size, packages.length, 'no package is listed twice');
+  // The consumer that selects the linker these packages provide.
+  assert.match(read('build/sdk/producers/platform_matrix/windows_runtime_toolchain.cmake'), /^set\(CMAKE_LINKER_TYPE LLD\)$/m);
+});
+
+// The existence checks between llvm-readobj and the MSYS2_BASH export, run against
+// a fake MINGW64 tree. The fake clang answers -print-libgcc-file-name like the
+// driver: the lib/windows archive MSYS2 compiler-rt installs, else the per-target name.
+function mingwToolChecks() {
+  const lines = runBlock(step(TOOLS, MINGW_TOOLS_STEP)).split('\n');
+  const start = lines.indexOf('test -x /mingw64/bin/llvm-readobj.exe');
+  const end = lines.findIndex(line => line.includes('MINGW64_COMPILER_RT_MISSING'));
+  const exported = lines.findIndex(line => line.includes('MSYS2_BASH='));
+  assert.ok(start >= 0 && end > start && exported > end, lines.join('\n'));
+  return lines.slice(start, end + 1).join('\n');
+}
+const MINGW_TOOL_FILES = ['bin/llvm-readobj.exe', 'bin/ld.lld.exe', 'bin/clang++.exe', 'lib/libc++.a', 'lib/libunwind.a',
+  'lib/clang/23/lib/windows/libclang_rt.builtins-x86_64.a'];
+
+test('native-windows-tools stops before CMake when any MINGW64 linker input is missing', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'mingw64-tools-'));
+  try {
+    const root = path.join(work, 'mingw64'), stub = path.join(work, 'stub');
+    fs.mkdirSync(stub);
+    // cygpath -u leaves an already-POSIX path unchanged.
+    fs.writeFileSync(path.join(stub, 'cygpath'), '#!/bin/sh\n[ "$1" = -u ] && printf "%s\\n" "$2"\n', {mode: 0o755});
+    const script = mingwToolChecks().replaceAll('/mingw64/', `${root}/`);
+    const builtins = path.join(root, MINGW_TOOL_FILES.at(-1));
+    const perTarget = path.join(root, 'lib/clang/23/lib/x86_64-w64-windows-gnu/libclang_rt.builtins.a');
+    const populate = missing => {
+      fs.rmSync(root, {recursive: true, force: true});
+      for (const file of ['bin/clang.exe', ...MINGW_TOOL_FILES.filter(file => file !== missing)]) {
+        fs.mkdirSync(path.dirname(path.join(root, file)), {recursive: true});
+        fs.writeFileSync(path.join(root, file), '', {mode: 0o755});
+      }
+      fs.writeFileSync(path.join(root, 'bin/clang.exe'),
+        `#!/bin/sh\nif [ -f '${builtins}' ]; then echo '${builtins}'; else echo '${perTarget}'; fi\n`);
+      return bash(script, {env: {...process.env, PATH: `${stub}:${process.env.PATH}`}});
+    };
+    const complete = populate(null);
+    assert.equal(complete.status, 0, complete.stdout + complete.stderr);
+    for (const missing of MINGW_TOOL_FILES)
+      assert.notEqual(populate(missing).status, 0, `${missing} absent must stop the step`);
+    // Without compiler-rt the step names the archive run 45385716455's link could not open.
+    assert.match(populate(MINGW_TOOL_FILES.at(-1)).stderr,
+      /MINGW64_COMPILER_RT_MISSING .*\/lib\/clang\/23\/lib\/x86_64-w64-windows-gnu\/libclang_rt\.builtins\.a/);
+  } finally {
+    fs.rmSync(work, {recursive: true, force: true});
+  }
+});
