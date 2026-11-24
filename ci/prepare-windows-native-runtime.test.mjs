@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {spawnSync} from 'node:child_process';
 import {WINDOWS_RUNTIME_CC, defaultWindowsCandidates} from '../build/sdk/producers/platform_matrix/pick_cc.mjs';
+import {resolveSccachePath} from './sccache/resolve-path.mjs';
 
 // prepare.yml reaches build_runtime.mjs on all five hosts. On windows-x64 that
 // path needs the windows-x86_64 runtime target (native_runtime.mjs
@@ -16,6 +17,9 @@ const PREPARE = '.github/workflows/prepare.yml';
 const TOOLS = '.github/actions/native-windows-tools/action.yml';
 const BUILD_STEP = 'Build and install the exact native runtime and bounds';
 const DIAGNOSTIC_STEP = 'Show gc_unit gate diagnostics after a Linux runtime failure';
+const SCCACHE = '.github/actions/sccache/action.yml';
+const SCCACHE_CONFIGURE = 'Configure sccache disk cache and CMake launcher';
+const SCCACHE_STATS = 'sccache statistics';
 
 // A step is its `- name:` line and every following line indented deeper.
 function steps(text) {
@@ -136,4 +140,93 @@ test('default Windows compiler candidates probe CJCJ_NATIVE_LLVM_BIN right after
   assert.equal(consumer, String(WINDOWS_RUNTIME_CC));
   // Red cut: the old last resort cannot satisfy the runtime's MINGW64 requirement.
   assert.doesNotMatch(legacy.at(-1), WINDOWS_RUNTIME_CC);
+});
+
+// sccache-action@v0.0.11 exported SCCACHE_PATH=<toolcache>\x64/sccache on
+// windows-x64 while the file is sccache.exe; native_runtime.mjs then failed
+// NATIVE_RUNTIME_SCCACHE_MISSING (run 45376721209). On Linux `test -f` has no
+// MSYS .exe emulation, so a directory holding only sccache.exe is exactly what
+// Node's Win32 fs sees on the runner.
+const parseEnvFile = file => fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
+  .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]) : [];
+function configureSccache(work, sccachePath) {
+  const githubEnv = path.join(work, 'github-env'), runnerTemp = path.join(work, 'runner-temp');
+  fs.mkdirSync(runnerTemp, {recursive: true});
+  const result = bash(runBlock(step(SCCACHE, SCCACHE_CONFIGURE)), {cwd: work, env: {...process.env,
+    SCCACHE_PATH: sccachePath, GITHUB_ENV: githubEnv, RUNNER_TEMP: runnerTemp,
+    GITHUB_ACTION_PATH: path.join(repo, '.github/actions/sccache'),
+    COMPONENT: 'native-runtime', PLATFORM: 'windows_x86_64', PIN: '0123abcd', CACHE_SIZE: '2G'}});
+  return {result, entries: parseEnvFile(githubEnv), runnerTemp};
+}
+const exported = (entries, key) => entries.filter(([name]) => name === key).map(([, value]) => value);
+
+test('sccache start resolves an .exe-less SCCACHE_PATH and exports it with both CMake launchers', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sccache-exe-'));
+  try {
+    const bin = path.join(work, 'hostedtoolcache', 'x64');
+    fs.mkdirSync(bin, {recursive: true});
+    fs.writeFileSync(path.join(bin, 'sccache.exe'), '#!/bin/sh\n', {mode: 0o755});
+    const {result, entries} = configureSccache(work, path.join(bin, 'sccache'));
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const executable = path.join(bin, 'sccache.exe');
+    for (const key of ['SCCACHE_PATH', 'CMAKE_C_COMPILER_LAUNCHER', 'CMAKE_CXX_COMPILER_LAUNCHER'])
+      assert.deepEqual(exported(entries, key), [executable], `${key} in GITHUB_ENV`);
+    // The consumer the Windows run failed at (native_runtime.mjs configureNativeRuntime).
+    assert.ok(path.isAbsolute(executable) && fs.existsSync(executable));
+    // An exact path is kept as it is.
+    const exact = configureSccache(work, executable);
+    assert.equal(exact.result.status, 0, exact.result.stdout + exact.result.stderr);
+    assert.deepEqual(exported(exact.entries, 'SCCACHE_PATH').at(-1), executable);
+  } finally {
+    fs.rmSync(work, {recursive: true, force: true});
+  }
+});
+
+test('sccache start fails loudly when neither SCCACHE_PATH nor SCCACHE_PATH.exe exists', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sccache-missing-'));
+  try {
+    const {result, entries} = configureSccache(work, path.join(work, 'x64', 'sccache'));
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout, /^::error::SCCACHE_PATH_MISSING: /m);
+    assert.match(result.stderr, /SCCACHE_PATH_MISSING: neither /);
+    assert.deepEqual(entries, [], 'nothing reaches GITHUB_ENV for a missing binary');
+  } finally {
+    fs.rmSync(work, {recursive: true, force: true});
+  }
+});
+
+test('the Windows SCCACHE_PATH is spelled with .exe and forward slashes for Node, cygpath, CMake and bash', () => {
+  const raw = 'C:\\hostedtoolcache\\windows\\sccache\\0.18.0\\x64/sccache';
+  const resolved = resolveSccachePath(raw, {platform: 'win32', exists: candidate => candidate === raw + '.exe'});
+  assert.equal(resolved, 'C:/hostedtoolcache/windows/sccache/0.18.0/x64/sccache.exe');
+  assert.ok(path.win32.isAbsolute(resolved));
+  assert.equal(resolveSccachePath(raw + '.exe', {platform: 'win32', exists: candidate => candidate === raw + '.exe'}), resolved);
+  assert.throws(() => resolveSccachePath(raw, {platform: 'win32', exists: () => false}), /SCCACHE_PATH_MISSING/);
+  assert.throws(() => resolveSccachePath('', {platform: 'win32', exists: () => true}), /SCCACHE_PATH_MISSING/);
+});
+
+test('sccache report mode runs the SCCACHE_PATH that start mode exported', () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sccache-report-'));
+  try {
+    const bin = path.join(work, 'x64'), calls = path.join(work, 'calls');
+    fs.mkdirSync(bin, {recursive: true});
+    const fixture = path.join(repo, 'ci/sccache/fixtures-stats-v0.18.0.json');
+    fs.writeFileSync(path.join(bin, 'sccache.exe'), `#!/bin/sh\necho "$0 $*" >> '${calls}'\n` +
+      `case "$*" in *--stats-format=json*) cat '${fixture}';; esac\n`, {mode: 0o755});
+    const start = configureSccache(work, path.join(bin, 'sccache'));
+    assert.equal(start.result.status, 0, start.result.stdout + start.result.stderr);
+    // Report mode reads SCCACHE_PATH from GITHUB_ENV only: no step env overrides it.
+    for (const name of [SCCACHE_STATS, 'Start sccache server on the restored cache'])
+      assert.equal(field(step(SCCACHE, name), 'SCCACHE_PATH'), undefined, name);
+    const env = {...process.env, ...Object.fromEntries(start.entries), RUNNER_TEMP: start.runnerTemp,
+      GITHUB_ACTION_PATH: path.join(repo, '.github/actions/sccache'), GITHUB_STEP_SUMMARY: path.join(work, 'summary'),
+      GITHUB_OUTPUT: path.join(work, 'output'), COMPONENT: 'native-runtime', PLATFORM: 'windows_x86_64', REQUIRE_COMPILES: 'false'};
+    const report = bash(runBlock(step(SCCACHE, SCCACHE_STATS)), {cwd: work, env});
+    assert.equal(report.status, 0, report.stdout + report.stderr);
+    assert.doesNotMatch(report.stdout, /SCCACHE_PATH is unset/);
+    const invoked = fs.readFileSync(calls, 'utf8').trim().split('\n').map(line => line.split(' ')[0]);
+    assert.deepEqual([...new Set(invoked)], [path.join(bin, 'sccache.exe')]);
+  } finally {
+    fs.rmSync(work, {recursive: true, force: true});
+  }
 });

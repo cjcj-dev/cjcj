@@ -79,6 +79,17 @@ runs:
         set -euo pipefail
         test -n "$SCCACHE_PATH"
         case "$COMPONENT$PLATFORM$PIN" in *[!A-Za-z0-9_.-]*) echo "::error::sccache component/platform/pin must be [A-Za-z0-9_.-]: '$COMPONENT' '$PLATFORM' '$PIN'"; exit 1;; esac
+        # sccache-action exports <dir>\x64/sccache on Windows, but the file is
+        # sccache.exe: Node's fs rejects that name (NATIVE_RUNTIME_SCCACHE_MISSING)
+        # while bash `test -f` accepts it through MSYS's .exe lookup. Resolve it with
+        # Node, which every caller has before this step (report mode runs node too),
+        # and re-export the one existing executable for every later step.
+        if ! resolved="$(node "$GITHUB_ACTION_PATH/../../../ci/sccache/resolve-path.mjs")"; then
+          echo "::error::SCCACHE_PATH_MISSING: sccache-action exported SCCACHE_PATH=$SCCACHE_PATH, and neither it nor $SCCACHE_PATH.exe is a file"
+          exit 1
+        fi
+        SCCACHE_PATH="$resolved"
+        echo "sccache: SCCACHE_PATH=$SCCACHE_PATH"
         dir="$RUNNER_TEMP/sccache-$COMPONENT"
         mkdir -p "$dir"
         {
@@ -88,6 +99,7 @@ runs:
           echo "SCCACHE_GHA_ENABLED=false"
           echo "SCCACHE_LOG=warn"
           echo "SCCACHE_ERROR_LOG=$RUNNER_TEMP/sccache-$COMPONENT-error.log"
+          echo "SCCACHE_PATH=$SCCACHE_PATH"
           echo "CMAKE_C_COMPILER_LAUNCHER=$SCCACHE_PATH"
           echo "CMAKE_CXX_COMPILER_LAUNCHER=$SCCACHE_PATH"
           echo "CJCJ_SCCACHE_COMPONENT=$COMPONENT"
