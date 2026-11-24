@@ -166,6 +166,35 @@ export function prepareDarwinCompilerRtSource(llvm) {
 }
 export const DARWIN_XRAY_X86_64_LOCAL_LABELS = Object.freeze(['tmp0', 'tmp2', 'tmp4', 'arg1entryLog', 'arg1entryFail', 'customEventCleanup', 'typedEventCleanup']);
 
+// Applied to prepare-native's private LLVM checkout on every host. The pinned
+// lldb/bindings/python/python-typemaps.swig still spells Python 2 PyInt_* calls
+// that only resolved through SWIG's own pyhead.swg compatibility macros
+// (PyInt_Check/PyInt_AsLong/PyInt_FromLong -> PyLong_*). SWIG 4.5 removed those
+// macros, so LLDBWrapPython.cpp fails to compile (run 45410608964, macos-15,
+// Homebrew SWIG 4.5.1, [942/1022]). Spell the Python 3 API directly, as current
+// upstream LLDB does; SetNumberFromPyObject keeps only its PyLongAsT<T> branch so
+// unsigned/64-bit numbers are not narrowed through PyLong_AsLong.
+export const LLDB_SWIG_PYTHON3_TYPEMAPS = Object.freeze([
+  ['  if (!PyInt_Check($input)) {', '  if (!PyLong_Check($input)) {'],
+  ['  $2 = PyInt_AsLong($input);\n  if ($2 <= 0) {', '  $2 = PyLong_AsLong($input);\n  if ($2 <= 0) {'],
+  ['  if (!PyInt_Check($input)) {', '  if (!PyLong_Check($input)) {'],
+  ['  $2 = PyInt_AsLong($input);\n  if ($2 <= 0) {', '  $2 = PyLong_AsLong($input);\n  if ($2 <= 0) {'],
+  ['  if (PyInt_Check($input)) {\n    $2 = PyInt_AsLong($input);\n  } else if (PyLong_Check($input)) {\n',
+    '  if (PyLong_Check($input)) {\n'],
+  ['  if (PyInt_Check(obj))\n    number = static_cast<T>(PyInt_AsLong(obj));\n  else if (PyLong_Check(obj))\n',
+    '  if (PyLong_Check(obj))\n'],
+  ['    PyObject *item = PyInt_FromLong($1[j]);', '    PyObject *item = PyLong_FromLong($1[j]);'],
+].map(edit => Object.freeze(edit)));
+export const LLDB_SWIG_PYTHON3_MARKER = 'bool SetNumberFromPyObject(T &number, PyObject *obj) {\n  if (PyLong_Check(obj))\n    number = PyLongAsT<T>(obj);';
+export function prepareLldbSwigPython3Source(llvm) {
+  const file = path.join(llvm, 'lldb/bindings/python/python-typemaps.swig');
+  const stage = 'prepare.lldb.swig-python3';
+  applyTextPatch(file, LLDB_SWIG_PYTHON3_TYPEMAPS, {stage, marker:LLDB_SWIG_PYTHON3_MARKER});
+  const text = fs.readFileSync(file, 'utf8');
+  if (!text.includes(LLDB_SWIG_PYTHON3_MARKER) || /\bPy(Int|String|File)_/.test(text))
+    throw new BuildError(stage, `Python 2 API remains in ${file}`);
+}
+
 // The installed public compiler headers include several generated schemas.
 // Install the complete output set owned by the existing flatc target, including
 // libs-only builds; never synthesize headers or copy them after CMake install.

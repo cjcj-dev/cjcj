@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
-import {prepareDarwinCompilerRtSource,prepareDarwinLldbSource} from '../../../srcbuild/stages/fetch.mjs';
+import {prepareDarwinCompilerRtSource,prepareDarwinLldbSource,prepareLldbSwigPython3Source} from '../../../srcbuild/stages/fetch.mjs';
 import {sdkPlatform} from '../../../../ci/bootstrap/sdk-platform.mjs';
 import {download} from '../../../lib/archive.mjs';
 import {preserveNativePythonInput} from '../../../../ci/bootstrap/native-cjdb-job.mjs';
@@ -31,6 +31,7 @@ export async function prepareNativeSuperbuild({target,workspace,work,root,env=pr
     if(!/^[a-f0-9]{40}$/.test(commit||''))throw Error('PREPARE_NATIVE_SOURCE '+key);
     await verifyNativeSource({source,commit});
   }
+  prepareLldbSwigPython3Source(sources.llvm);
   await fs.mkdir(work,{recursive:true});
   const xml2Archive={file:path.join(work,'libxml2-2.14.0.tar.xz'),
     sha256:'3e2ed89d81d210322d70b35460166d4ea285e5bb017576972a1d76a09631985c'};

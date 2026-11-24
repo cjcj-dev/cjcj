@@ -1467,3 +1467,79 @@ test('prepare.yml persists the one native sccache session that covers runtime an
   assert.deepEqual(report.with, {mode: 'report', component: start.with.component, platform: start.with.platform,
     'require-compiles': "${{ job.status == 'success' }}"});
 });
+
+// Compiles the Python-facing C++ that SWIG would paste from python-typemaps.swig
+// (the %{...%} helper block plus each integer typemap body) against real Python 3
+// headers, which declare no PyInt_*: SWIG 4.5 no longer supplies those macros.
+const LLDB_TYPEMAPS = '/root/cj_build/llvm_rebase/lldb/bindings/python/python-typemaps.swig';
+const PYTHON3_INCLUDE = spawnSync('python3', ['-c', 'import sysconfig;print(sysconfig.get_paths()["include"])'], {encoding:'utf8'}).stdout?.trim();
+function typemapTranslationUnit(text) {
+  const body = start => {let depth = 0; for (let i = start; i < text.length; i++) {
+    if (text[i] === '{') depth++; else if (text[i] === '}' && --depth === 0) return text.slice(start + 1, i);} throw Error('unbalanced');};
+  const helper = /%\{\n((?:(?!%\})[\s\S])*SetNumberFromPyObject(?:(?!%\})[\s\S])*)%\}/.exec(text);
+  assert.ok(helper, 'SetNumberFromPyObject helper block');
+  const units = ['#include <Python.h>', '#include <cstdint>', '#include <cstdlib>', helper[1],
+    'bool useNumbers(PyObject *o) {uint64_t a; uint32_t b; int32_t c; double d;',
+    '  return SetNumberFromPyObject(a, o) && SetNumberFromPyObject(b, o) && SetNumberFromPyObject(c, o) && SetNumberFromPyObject(d, o);}'];
+  const maps = [['in', '(char *dst, size_t dst_len)'], ['in', '(char *dst_or_null, size_t dst_len)'], ['in', '(void *buf, size_t size)'],
+    ['argout', '(uint32_t *versions, uint32_t num_versions)']];
+  maps.forEach(([kind, sig], n) => {
+    const at = text.indexOf(`%typemap(${kind}) ${sig} {`); assert.ok(at >= 0, sig);
+    const [t1, t2] = sig.slice(1, -1).split(',').map(p => p.trim().replace(/\w+$/, ''));
+    const code = body(text.indexOf('{', at)).replaceAll('$input', 'input').replaceAll('$result', 'resultObj')
+      .replaceAll('$1', 'arg1').replaceAll('$2', 'arg2');
+    units.push(`PyObject *typemap${n}(PyObject *input) {${t1} arg1{}; ${t2} arg2{}; uint32_t result = 0; PyObject *resultObj = nullptr; (void)result;`,
+      code, '  return resultObj;}');
+  });
+  return units.join('\n');
+}
+function compileTypemaps(text, dir, name) {
+  const file = path.join(dir, name + '.cpp'); fs.writeFileSync(file, typemapTranslationUnit(text));
+  return spawnSync('clang++', ['-std=c++17', '-fsyntax-only', '-Wno-everything', '-I' + PYTHON3_INCLUDE, file], {encoding:'utf8'});
+}
+
+test('prepare-native spells LLDB\'s SWIG typemaps with the Python 3 API on every host', {skip:!fs.existsSync(LLDB_TYPEMAPS) && 'pinned llvm source absent'}, async t => {
+  const {prepareLldbSwigPython3Source, LLDB_SWIG_PYTHON3_MARKER} = await import('../../../srcbuild/stages/fetch.mjs');
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-lldb-swig-'));
+  t.after(() => fs.rmSync(work, {recursive:true, force:true}));
+  const file = path.join(work, 'lldb/bindings/python/python-typemaps.swig');
+  fs.mkdirSync(path.dirname(file), {recursive:true});
+  const original = fs.readFileSync(LLDB_TYPEMAPS, 'utf8');
+  fs.writeFileSync(file, original);
+  assert.equal((original.match(/PyInt_/g) || []).length, 9, 'the pinned file carries the nine Python 2 calls seen on macos-15');
+  prepareLldbSwigPython3Source(work);
+  const patched = fs.readFileSync(file, 'utf8');
+  assert.equal((patched.match(/\bPy(Int|String|File)_/g) || []).length, 0);
+  assert.ok(patched.includes(LLDB_SWIG_PYTHON3_MARKER));
+  const numbers = /bool SetNumberFromPyObject\(T &number, PyObject \*obj\) \{\n([\s\S]*?)\n\}/.exec(patched)[1];
+  assert.deepEqual(numbers.split('\n').map(line => line.trim()).filter(Boolean),
+    ['if (PyLong_Check(obj))', 'number = PyLongAsT<T>(obj);', 'else', 'return false;', 'return true;']);
+  const buffer = /%typemap\(in\) \(void \*buf, size_t size\) \{\n([\s\S]*?)\n\}/.exec(patched)[1];
+  assert.equal(buffer.split('PyLong_Check(').length - 1, 1, 'one integer branch, no duplicated PyLong_Check');
+  assert.match(buffer, /^  if \(PyLong_Check\(\$input\)\) \{\n    \$2 = PyLong_AsLong\(\$input\);\n  \} else \{/);
+  assert.equal(patched.split('\n').length, original.split('\n').length - 4, 'only the dead Python 2 branches are removed');
+  prepareLldbSwigPython3Source(work);
+  assert.equal(fs.readFileSync(file, 'utf8'), patched, 'idempotent');
+  const source = fs.readFileSync(path.join(import.meta.dirname, 'prepare_native_superbuild.mjs'), 'utf8');
+  const verify = source.indexOf('await verifyNativeSource({source,commit});\n  }\n'), call = source.indexOf('  prepareLldbSwigPython3Source(sources.llvm);\n');
+  assert.ok(verify > 0 && call > verify && call < source.indexOf("if(platform.startsWith('darwin_'))") && call < source.indexOf('await nativeCjdb('),
+    'patched after source verification, outside the Darwin block, before the superbuild configures');
+  assert.equal(source.split('prepareLldbSwigPython3Source(').length - 1, 1);
+  // Control arm: the same harness rejects the pinned text without SWIG's PyInt_* macros.
+  const before = compileTypemaps(original, work, 'unpatched'), after = compileTypemaps(patched, work, 'patched');
+  assert.notEqual(before.status, 0);
+  for (const name of ['PyInt_Check', 'PyInt_AsLong', 'PyInt_FromLong']) assert.match(before.stderr, new RegExp(`undeclared identifier '${name}'`));
+  assert.equal(after.status, 0, after.stderr);
+});
+
+test('Python 2 typemap text that drifts from the pinned shape fails closed', async t => {
+  const {prepareLldbSwigPython3Source} = await import('../../../srcbuild/stages/fetch.mjs');
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-lldb-swig-drift-'));
+  t.after(() => fs.rmSync(work, {recursive:true, force:true}));
+  const file = path.join(work, 'lldb/bindings/python/python-typemaps.swig');
+  fs.mkdirSync(path.dirname(file), {recursive:true});
+  fs.writeFileSync(file, 'template <class T> bool SetNumberFromPyObject(T &number, PyObject *obj) {\n  if (PyLong_Check(obj))\n    number = PyLongAsT<T>(obj);\n}\nPyObject *x = PyString_FromString("");\n');
+  assert.throws(() => prepareLldbSwigPython3Source(work), /Python 2 API remains/);
+  fs.writeFileSync(file, '  if (!PyInt_Check(input)) {\n');
+  assert.throws(() => prepareLldbSwigPython3Source(work), /patch shape drift/);
+});
