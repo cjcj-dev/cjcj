@@ -62,7 +62,7 @@ test('native: a mixed-generation LLVM/runtime pair is refused', () => {
 });
 
 test('tools: exactly the 10 tools from the pinned tools commit', () => {
-  const commit = '3460b1e55a16414f52385663ba780fb4ed07ee65';
+  const commit = '4d14d051c58a5574d6525314b2c695e2e5dd26e6';
   const row = {producer: {source: {commit}, build: {rc: 0}, install: {rc: 0}}};
   const files = Object.fromEntries(TOOL_NAMES.map(n => [n, row]));
   assert.equal(checkTools({files}, commit), 10);
@@ -77,7 +77,7 @@ test('cli: arguments and config are validated against the pins', () => {
   const dir = tmp(), file = path.join(dir, 'c.json');
   const base = {work: dir, evidence: dir, cjcj: dir, platform: 'linux_x86_64', asset: 'linux-x64', nativeInstall: dir, runtimeInstall: dir,
     seedInputs: dir, sources: {}, env: {}, commits: {runtime: '495052d6505a5d57dc172d605b5aa8ef14bb0027', llvm: 'eb7ad0120f43f802fbc60615e6c6f068183fffe3',
-      ast: '2e7b7dd9f363b8b7ae1fc724273e5399a5ea7c0d', tools: '3460b1e55a16414f52385663ba780fb4ed07ee65', stdx: 'a124230201e938fb7a6aaecd56d1bd1c3e5243cc'}};
+      ast: '2e7b7dd9f363b8b7ae1fc724273e5399a5ea7c0d', tools: '4d14d051c58a5574d6525314b2c695e2e5dd26e6', stdx: 'a124230201e938fb7a6aaecd56d1bd1c3e5243cc'}};
   fs.writeFileSync(file, JSON.stringify(base));
   assert.equal(readConfig(file).asset, 'linux-x64');
   // The positive fixture must be the frozen RC Final generation; the previous runtime stays a negative case.

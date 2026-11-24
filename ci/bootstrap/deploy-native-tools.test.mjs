@@ -32,7 +32,7 @@ function tools(t, {origin = PUBLIC + '.git'} = {}) {
 
 test('the tools origin is the public pinned repository and TOOLS_REF is unchanged', () => {
   const pin = read('ci/source_pin.env');
-  assert.match(pin, /^TOOLS_REF=3460b1e55a16414f52385663ba780fb4ed07ee65$/m);
+  assert.match(pin, /^TOOLS_REF=4d14d051c58a5574d6525314b2c695e2e5dd26e6$/m);
   assert.equal(publicToolsRepository(), PUBLIC);
   assert.throws(() => publicToolsRepository('TOOLS_SRC_URL=git@internal:private/tools.git\n'), /NATIVE_TOOLS_PUBLIC_URL/);
 });
