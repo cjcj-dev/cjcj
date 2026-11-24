@@ -11,7 +11,7 @@ const pins = loadPins();
 const sha = 'a'.repeat(64);
 
 test('pins: every repository is a full commit and the merged stdx/tools defaults are adopted', () => {
-  assert.equal(pins.repos.stdx.commit, '76c9da37332d5ec2f82fedaf6c0a3793d3200e2c');
+  assert.equal(pins.repos.stdx.commit, 'a124230201e938fb7a6aaecd56d1bd1c3e5243cc');
   assert.equal(pins.repos.tools.commit, '3460b1e55a16414f52385663ba780fb4ed07ee65');
   for (const repo of Object.values(pins.repos)) assert.match(repo.commit, /^[0-9a-f]{40}$/);
   assert.match(pins.wasi.sha256, /^[0-9a-f]{64}$/);

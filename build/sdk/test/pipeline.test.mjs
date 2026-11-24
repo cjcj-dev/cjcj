@@ -77,7 +77,7 @@ test('cli: arguments and config are validated against the pins', () => {
   const dir = tmp(), file = path.join(dir, 'c.json');
   const base = {work: dir, evidence: dir, cjcj: dir, platform: 'linux_x86_64', asset: 'linux-x64', nativeInstall: dir, runtimeInstall: dir,
     seedInputs: dir, sources: {}, env: {}, commits: {runtime: '495052d6505a5d57dc172d605b5aa8ef14bb0027', llvm: 'eb7ad0120f43f802fbc60615e6c6f068183fffe3',
-      ast: '2e7b7dd9f363b8b7ae1fc724273e5399a5ea7c0d', tools: '3460b1e55a16414f52385663ba780fb4ed07ee65', stdx: '76c9da37332d5ec2f82fedaf6c0a3793d3200e2c'}};
+      ast: '2e7b7dd9f363b8b7ae1fc724273e5399a5ea7c0d', tools: '3460b1e55a16414f52385663ba780fb4ed07ee65', stdx: 'a124230201e938fb7a6aaecd56d1bd1c3e5243cc'}};
   fs.writeFileSync(file, JSON.stringify(base));
   assert.equal(readConfig(file).asset, 'linux-x64');
   // The positive fixture must be the frozen RC Final generation; the previous runtime stays a negative case.
