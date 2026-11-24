@@ -86,7 +86,7 @@ function commandStdio(env) {
   }
   return stdio;
 }
-export async function command(argv, {cwd, env = {}, records, resumeOf, signal = cancellation.getStore()} = {}) {
+export async function command(argv, {cwd, env = {}, records, resumeOf, signal = cancellation.getStore(), windowsVerbatimArguments = false} = {}) {
   signal?.throwIfAborted();
   const start = performance.now(), environment = {...process.env, ...env};
   console.log(JSON.stringify({event:'target-command',argv,cwd}));
@@ -108,7 +108,7 @@ export async function command(argv, {cwd, env = {}, records, resumeOf, signal = 
     try {
       if(signal?.aborted)abort();
       result=await new Promise(resolve=>{
-        child=spawn(argv[0],argv.slice(1),{cwd,env:environment,stdio:commandStdio(environment)});
+        child=spawn(argv[0],argv.slice(1),{cwd,env:environment,stdio:commandStdio(environment),windowsVerbatimArguments});
         child.once('error',error=>resolve({rc:null,signal:null,error:error.message}));
         child.once('exit',(rc,childSignal)=>resolve({rc,signal:childSignal}));
         if(cancelled){child.kill(cancelled);timer=setTimeout(()=>child.kill('SIGKILL'),1500);}

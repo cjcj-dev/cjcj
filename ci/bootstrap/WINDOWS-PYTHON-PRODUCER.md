@@ -46,7 +46,12 @@ The normal chain is:
 2. Run the explicitly supplied bootstrap Python and upstream
    `PCbuild/get_externals.bat --no-tkinter`; preserve its own rc.
 3. Run `PCbuild/build.bat -p x64 -c Release -e --no-tkinter -M /m:<jobs>
-   /p:KillPython=false /bl:../pcbuild.binlog`. SSL and ctypes remain enabled.
+   "/p:KillPython=false" ["/p:PlatformToolset=<toolset>"] /bl:../pcbuild.binlog`.
+   For MSBuild 18 and newer, query the selected MSBuild for
+   `DefaultPlatformToolset` on the x64 Release project; CPython's built-in
+   mapping stops at VS 17 and can otherwise select a missing v140. Both
+   properties are quoted so each reaches MSBuild as one switch. SSL and
+   ctypes remain enabled.
    Upstream `-e` fetches/caches normal dependencies; no arbitrary package or
    mutable target label is substituted. `-M` removes upstream's default
    unbounded `/m`. The global MSBuild property disables its process-kill target. The child
@@ -91,14 +96,19 @@ record and originals with the same N artifact. CI owns that shared caller and
 copy/reader composition, and must preserve its newer Python source fields and
 the N/AST source binding. Producer support alone does not close that integration.
 
-Current verification is limited to the *unmodified official PC/layout* running
+The layout tests exercise the *unmodified official PC/layout* running
 on Linux over explicitly non-executable fixture files, actual layout bytes and
 relative paths, omission of `--include-dev`, loader-file rejection and public
 foreign-host rejection. The official layout's documented `PYTHON_HEXVERSION`
 override is used only by that fixture; the producer clears it and uses the newly
-built interpreter. Windows PCbuild, external dependency acquisition, installed
-Windows Python/SSL/ctypes, and CJDB execution remain NOT_RUN. No Windows/GHA/stage
-qualification follows from these fixture results.
+built interpreter.
+
+On Windows, run the batch argument regression independently with
+`node --test --test-name-pattern="^cmd.exe" ci/bootstrap/native-python-windows.test.mjs`.
+It checks what a native child receives through the producer's batch transport.
+Local VS 18 verification covers CPython project preparation and a single C
+compilation; the full PCbuild, external downloads, installed Windows Python
+imports and CJDB execution were not exercised.
 
 The native N caller supplies its effective `jobs` when `pythonProducer.jobs`
 is omitted. See `NATIVE-CJDB-JOBS.md` for the public caller's finite configure

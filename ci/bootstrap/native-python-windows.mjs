@@ -19,7 +19,7 @@ export function windowsPythonEnvironment(base,tools) {
   // inherited selectors. Windows environment names are case-insensitive.
   const env={...base};
   const cleared=new Set(['PYTHONHOME','PYTHONPATH','PYTHON_HEXVERSION','VIRTUAL_ENV',
-    'HOST_PYTHON','ORG','EXTERNALS_DIR','PCBUILD','PYTHON','MSBUILD','REGEN',
+    'DEFAULTPLATFORMTOOLSET','HOST_PYTHON','ORG','EXTERNALS_DIR','PCBUILD','PYTHON','MSBUILD','REGEN',
     'USETESTMARKER','INCLUDETKINTER','INCLUDECTYPES','INCLUDESSL','INCLUDELIBFFI','INCLUDEEXTERNALS']);
   const selected={PYTHON:tools.bootstrapPython,MSBUILD:tools.msbuild,
     PYTHONDONTWRITEBYTECODE:'1',IncludeTkinter:'false',IncludeCTypes:'true',
@@ -30,12 +30,35 @@ export function windowsPythonEnvironment(base,tools) {
   return {...env,...selected};
 }
 
-export function windowsPythonBuildArgs(jobs) {
+function checkedPlatformToolset(value) {
+  if(typeof value!=='string'||!/^v\d+$/.test(value))throw Error('WINDOWS_PYTHON_PLATFORM_TOOLSET '+JSON.stringify(value));
+  return value;
+}
+
+export async function windowsPythonPlatformToolset(msbuild,{cwd,env}) {
+  const query=async args=>(await capture(msbuild,args,{cwd,env})).stdout.trim();
+  const version=await query(['-nologo','-version']);
+  if(!/^\d+(?:\.\d+)+$/.test(version))throw Error('WINDOWS_PYTHON_MSBUILD_VERSION '+version);
+  // Older MSBuild may not support -getProperty. Keep CPython's existing
+  // toolset mapping there; its mapping ends at VS 17.
+  if(Number(version.split('.')[0])<18)return undefined;
+  const toolset=await query(['PCbuild/pythoncore.vcxproj','-nologo','-p:Configuration=Release',
+    '-p:Platform=x64','-getProperty:DefaultPlatformToolset']);
+  return checkedPlatformToolset(toolset);
+}
+
+export function windowsPythonBuildArgs(jobs,{platformToolset}={}) {
   if(!Number.isSafeInteger(jobs)||jobs<1)throw Error('PYTHON_JOBS');
-  // A command line MSBuild property overrides pythoncore.vcxproj's KillPython.
+  // build.bat splits unquoted '=' into separate arguments before invoking MSBuild.
+  const properties=['"/p:KillPython=false"'];
+  if(platformToolset!==undefined)properties.push(`"/p:PlatformToolset=${checkedPlatformToolset(platformToolset)}"`);
   // -M removes the unbounded default /m before applying the admitted job count.
   return ['call','PCbuild\\build.bat','-p','x64','-c','Release','-e','--no-tkinter','-M',
-    '/m:'+jobs,'/p:KillPython=false','/bl:..\\pcbuild.binlog'];
+    '/m:'+jobs,...properties,'/bl:..\\pcbuild.binlog'];
+}
+
+export function runWindowsPythonBatch(run,cmd,args) {
+  return run([cmd,'/d','/s','/c',args.join(' ')],{windowsVerbatimArguments:true});
 }
 export function windowsPythonLayoutArgs({source,build,install,temp}) {
   return ['-B',path.join(source,'PC/layout'),'--source',source,'--build',build,
@@ -139,8 +162,10 @@ export async function nativeWindowsPython(config) {
     await run([tools.bootstrapPython,'-I','-B','-c','import sys; assert sys.version_info >= (3,8); print(sys.version)']);
     // Fetch once explicitly so get_externals' own rc is retained, then the
     // ordinary build -e handles cached/remaining dependencies itself.
-    await run([tools.cmd,'/d','/s','/c','call PCbuild\\get_externals.bat --no-tkinter']);
-    await run([tools.cmd,'/d','/s','/c',windowsPythonBuildArgs(jobs).join(' ')]);
+    const platformToolset=await windowsPythonPlatformToolset(tools.msbuild,{cwd:source,env});
+    const buildArgs=windowsPythonBuildArgs(jobs,{platformToolset});
+    await runWindowsPythonBatch(run,tools.cmd,['call','PCbuild\\get_externals.bat','--no-tkinter']);
+    await runWindowsPythonBatch(run,tools.cmd,buildArgs);
     const builtPython=path.join(build,'python.exe');
     await run([builtPython,'-I','-B','-c','import sys; assert sys.version_info[:3]==(3,11,17); print(sys.version)']);
     const pendingInstall=await fs.mkdtemp(path.join(work,'install.pending-'));
@@ -154,7 +179,7 @@ export async function nativeWindowsPython(config) {
       producer:{repository:producerRoot,commit:producerCommit,scriptSha256:await fileDigest(fileURLToPath(import.meta.url))},
       tools:{bootstrapPython:{file:tools.bootstrapPython,sha256:await fileDigest(tools.bootstrapPython)},
         msbuild:{file:tools.msbuild,sha256:await fileDigest(tools.msbuild)}},
-      configuration:{buildArgs:windowsPythonBuildArgs(jobs),layoutArgs:windowsPythonLayoutArgs({source,build,install:pendingInstall,temp:path.join(work,'layout-temp')})},
+      configuration:{buildArgs,layoutArgs:windowsPythonLayoutArgs({source,build,install:pendingInstall,temp:path.join(work,'layout-temp')})},
       files:layout.files,installation:{entries:layout.entries},observed:selected,
       externalInputs:await inventory(path.join(source,'externals')),commands:state.commands};
     // Carry actual binary build log and probe alongside the ordinary inputs.

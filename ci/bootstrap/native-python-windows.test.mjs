@@ -5,11 +5,10 @@ import path from 'node:path';
 import os from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {windowsPythonEnvironment,windowsPythonBuildArgs,windowsPythonLayoutArgs,windowsPythonInstallation,windowsPythonJobs} from './native-python-windows.mjs';
-import {fileDigest} from './sdk-flow.mjs';
+import {windowsPythonEnvironment,runWindowsPythonBatch,windowsPythonBuildArgs,windowsPythonLayoutArgs,windowsPythonInstallation,windowsPythonJobs} from './native-python-windows.mjs';
+import {command,fileDigest} from './sdk-flow.mjs';
 const execute=promisify(execFile);
 const upstream=process.env.WINDOWS_PYTHON_LAYOUT;
-if(!upstream)throw Error('FIXED_CPYTHON_LAYOUT_REQUIRED');
 const root=await fs.mkdtemp(path.join(process.env.PYTHON_LAYOUT_EVIDENCE||os.tmpdir(),'python-layout-fixture-'));
 test.after(async()=>{if(!process.env.PYTHON_LAYOUT_EVIDENCE)await fs.rm(root,{recursive:true});});
 test('jobs on the actual CPU domain reach native MSBuild arguments without a minimum core gate',()=>{
@@ -23,7 +22,12 @@ test('jobs reject invalid values',()=>{
   for(const jobs of [0,-1,1.5,'4',NaN,Infinity])
     assert.throws(()=>windowsPythonJobs(jobs),/WINDOWS_PYTHON_NATIVE_CAPACITY/);
 });
+test('only a numeric MSVC toolset can become a batch switch',()=>{
+  for(const platformToolset of ['',null,'v145 & echo','v145"/p:X=true'])
+    assert.throws(()=>windowsPythonBuildArgs(4,{platformToolset}),/WINDOWS_PYTHON_PLATFORM_TOOLSET/);
+});
 async function fixture(name,producerArgs=true,dev=true) {
+  if(!upstream)throw Error('FIXED_CPYTHON_LAYOUT_REQUIRED');
   const dir=path.join(root,name),source=path.join(dir,'source'),build=path.join(dir,'build'),install=path.join(dir,'install'),temp=path.join(dir,'temp');
   await fs.mkdir(path.join(source,'PC'),{recursive:true});
   await fs.cp(upstream,path.join(source,'PC/layout'),{recursive:true});
@@ -74,7 +78,7 @@ test('relocated upstream layout retains relative files and rejects missing loade
 });
 test('native build arguments and actual child environment keep the selected configuration',async()=>{
   const args=windowsPythonBuildArgs(64);
-  assert.ok(args.includes('-M'));assert.ok(args.includes('/m:64'));assert.ok(args.includes('/p:KillPython=false'));
+  assert.ok(args.includes('-M'));assert.ok(args.includes('/m:64'));assert.ok(args.includes('"/p:KillPython=false"'));
   assert.ok(args.includes('-e'));assert.ok(!args.includes('-E'));assert.ok(!args.includes('--no-ssl'));assert.ok(!args.includes('--no-ctypes'));
   assert.throws(()=>windowsPythonBuildArgs(0),/PYTHON_JOBS/);
   const inherited={...process.env,PYTHON_HEXVERSION:'wrong',ORG:'wrong',PythonHome:'wrong',INCLUDESSL:'false',IncludeSSL:'false',Regen:'true'};
@@ -86,6 +90,33 @@ test('native build arguments and actual child environment keep the selected conf
   assert.equal(observed.INCLUDESSL,'true');assert.equal(observed.IncludeSSL,'true');assert.equal(observed.IncludeCTypes,'true');
   assert.equal(observed.PYTHON,'explicit-python');assert.equal(observed.MSBUILD,'explicit-msbuild');
 });
+
+test('cmd.exe forwards both PCbuild properties to a native process',async t=>{
+  if(process.platform!=='win32')return t.skip('real cmd.exe argv test requires a Windows host');
+  const pcbuild=path.join(root,'PCbuild');
+  await fs.mkdir(pcbuild);
+  // Match build.bat's option loop and %1..%9 forwarding. Save %~dp0 before
+  // shift changes %0, then capture argv after Windows native argument parsing.
+  await fs.writeFile(path.join(pcbuild,'build.bat'),[
+    '@echo off','setlocal','set "DIR=%~dp0"',':CheckOpts',
+    ...['-p','-c'].map(opt=>`if "%~1"=="${opt}" (shift & shift & goto CheckOpts)`),
+    ...['-e','--no-tkinter','-M'].map(opt=>`if "%~1"=="${opt}" (shift & goto CheckOpts)`),
+    '"%CAPTURE_NODE%" "%DIR%capture.cjs" %1 %2 %3 %4 %5 %6 %7 %8 %9','exit /b %errorlevel%','',
+  ].join('\r\n'));
+  await fs.writeFile(path.join(pcbuild,'capture.cjs'),
+    "require('node:fs').writeFileSync('argv.json', JSON.stringify(process.argv.slice(2)))");
+  const run=(argv,options)=>command(argv,{cwd:root,env:{CAPTURE_NODE:process.execPath},...options});
+  const buildArgs=windowsPythonBuildArgs(4,{platformToolset:'v145'});
+  const capture=async args=>{
+    await runWindowsPythonBatch(run,process.env.ComSpec,args);
+    return JSON.parse(await fs.readFile(path.join(root,'argv.json'),'utf8'));
+  };
+  const expected=['/m:4','/p:KillPython=false','/p:PlatformToolset=v145','/bl:..\\pcbuild.binlog'];
+  assert.deepEqual(await capture(buildArgs),expected);
+  const split=buildArgs.map(arg=>arg==='"/p:KillPython=false"'?'/p:KillPython=false':arg);
+  assert.deepEqual(await capture(split),[expected[0],'/p:KillPython','false',...expected.slice(2)]);
+});
+
 test('public producer rejects a non-Windows host before creating a work tree',async()=>{
   assert.notEqual(process.platform,'win32','this limited entry rejection arm runs on Linux');
   const work=path.join(root,'must-not-exist'),config=path.join(root,'foreign.json');
