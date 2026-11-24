@@ -598,21 +598,19 @@ export function assembleNativeInputs({root, target, hostVersion, env = process.e
   return {locations, record};
 }
 
-// Static wiring contract of release.yml -> sdk-build.yml -> sdk-build-target.yml
-// for phase=prepare: the five hosts, both artifact families, and no route into
-// plan/source/package/publish. Returns a list of problems; empty means wired.
-export function prepareWorkflowProblems({release, sdkBuild, target}) {
-  const problems = [...g4SourcePhases(release).problems];
-  const rel = loadYaml(release)?.jobs || {}, sdk = loadYaml(sdkBuild)?.jobs || {}, tgt = loadYaml(target)?.jobs || {};
-  const producer = Object.entries(rel).find(([, job]) => job?.with?.mode === 'prepare');
-  if (!producer || producer[1].uses !== './.github/workflows/sdk-build.yml') problems.push('release.yml lacks the mode=prepare sdk-build call');
-  const call = sdk.prepare;
-  if (call?.if !== "inputs.mode == 'prepare'" || call?.uses !== './.github/workflows/sdk-build-target.yml' || call?.with?.prepare_native !== true)
-    problems.push('sdk-build.yml prepare does not call sdk-build-target.yml with prepare_native');
-  if (!/inputs\.mode != 'prepare'/.test(String(sdk.plan?.if ?? ''))) problems.push('sdk-build.yml plan runs in mode=prepare');
-  if (!/inputs\.prepare_native != true/.test(String(tgt.plan?.if ?? ''))) problems.push('sdk-build-target.yml plan runs with prepare_native');
-  const job = tgt['prepare-native'];
-  if (!job || job.if !== 'inputs.prepare_native') { problems.push('sdk-build-target.yml lacks prepare-native'); return problems; }
+// Static wiring contract of prepare.yml: its prepare-native job builds the five
+// hosts directly (no nested workflow call), uploads both artifact families, and
+// feeds only the same-run linux-x64 source build; release.yml, sdk-build.yml and
+// sdk-build-target.yml carry no prepare path. Returns a list of problems; empty means wired.
+export function prepareWorkflowProblems({release, prepare, sdkBuild, target}) {
+  const problems = [...g4SourcePhases(release, prepare).problems];
+  const prep = loadYaml(prepare)?.jobs || {}, sdk = loadYaml(sdkBuild)?.jobs || {}, tgt = loadYaml(target)?.jobs || {};
+  const targetInputs = loadYaml(target)?.on?.workflow_call?.inputs || {};
+  if (sdk.prepare || sdk.package) problems.push('sdk-build.yml still carries a prepare or package job');
+  if (tgt['prepare-native'] || targetInputs.prepare_native) problems.push('sdk-build-target.yml still carries prepare-native');
+  if (/prepare_native/.test(String(tgt.plan?.if ?? ''))) problems.push('sdk-build-target.yml plan still reads prepare_native');
+  const job = prep['prepare-native'];
+  if (!job || job.uses || job.if !== undefined) { problems.push('prepare.yml lacks an unconditional prepare-native job'); return problems; }
   const rows = job.strategy?.matrix?.include || [];
   const key = row => `${row.target}|${row.llvm_platform}|${row.runner}`;
   const want = PREPARE_HOSTS.map(key), got = rows.map(key);

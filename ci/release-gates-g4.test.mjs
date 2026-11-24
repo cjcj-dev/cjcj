@@ -4,57 +4,61 @@ import path from 'node:path';
 import test from 'node:test';
 import {g4SourcePhases} from './release-gates.mjs';
 
-const release = fs.readFileSync(path.resolve(import.meta.dirname, '../.github/workflows/release.yml'), 'utf8');
+const workflows = path.resolve(import.meta.dirname, '../.github/workflows');
+const release = fs.readFileSync(path.join(workflows, 'release.yml'), 'utf8');
+const prepare = fs.readFileSync(path.join(workflows, 'prepare.yml'), 'utf8');
 
-test('G4 counts five source phases among the 20 sdk-build calls of the real release.yml', () => {
-  const graph = g4SourcePhases(release);
+const mustReplace = (text, from, to) => {
+  assert.ok(text.includes(from), `fixture anchor missing: ${from}`);
+  return text.replace(from, to);
+};
+
+test('G4 accepts the four parallel stages: one source call, one 15-cell package matrix, prepare.yml', () => {
+  const graph = g4SourcePhases(release, prepare);
   assert.deepEqual(graph.problems, []);
   assert.equal(graph.ok, true);
-  assert.equal(graph.sdkCalls, 20);
-  assert.equal(graph.sourcePhases, 5);
-  assert.equal(graph.packageCalls, 15);
+  assert.equal(graph.sdkCalls, 1);
+  assert.equal(graph.packageCalls, 1);
+  assert.equal(graph.packageCells, 15);
+  assert.equal(graph.prepareCalls, 1);
 });
 
-test('G4 red cut: a missing source phase is NOT_MET', () => {
-  const start = release.indexOf('  source-p3-windows-x64:');
-  const end = release.indexOf('  source-p4-darwin-arm64:');
-  const graph = g4SourcePhases(release.slice(0, start) + release.slice(end));
-  assert.equal(graph.ok, false);
-  assert.ok(graph.problems.includes('missing source phase 3'), JSON.stringify(graph.problems));
-});
+// Each red cut is applied to the real workflow text and must be named precisely.
+const releaseCuts = [
+  ['a second, serial source call', text => mustReplace(text, '  # The 15 release assets', [
+    '  source-p2:', '    needs: package', '    uses: ./.github/workflows/sdk-build.yml', '    with:', '      targets: linux-aarch64', '',
+    '  # The 15 release assets'].join('\n')), /exactly one sdk-build\.yml source call, found 2/],
+  ['source split to one host', text => mustReplace(text, '      targets: all\n', '      targets: linux-x64\n'), /targets: all/],
+  ['a cross std left off', text => mustReplace(text, '      build_ios: true\n', '      build_ios: false\n'), /must set build_ios: true/],
+  ['package detached from source', text => mustReplace(text, '    needs: source\n', '    needs: plan\n'), /package must need only source/],
+  ['package matrix serialised', text => mustReplace(text, '      fail-fast: false\n      matrix:', '      fail-fast: false\n      max-parallel: 1\n      matrix:'), /every cell in parallel/],
+  ['a package cell dropped', text => text.replace(/\n {10}- \{release_key: darwin-arm64-ios,[^\n]*/, ''), /15 distinct release cells, found 14\/14/],
+  ['publish detached from package', text => mustReplace(text, 'needs: [plan, package]', 'needs: [plan]'), /publish does not need package/],
+  ['the 22-call serial layout restored', text => text.replace('  # The 15 release assets', Array.from({length: 21}, (_, i) =>
+    `  source-extra-${i}:\n    needs: plan\n    uses: ./.github/workflows/sdk-build.yml\n    with:\n      targets: linux-x64\n`).join('\n') + '\n  # The 15 release assets'),
+    /exactly one sdk-build\.yml source call, found 22/],
+  ['phase input restored', text => mustReplace(text, '    if: ${{ !inputs.dry_run }}', "    if: inputs.phase == 'publish' && !inputs.dry_run"), /still reads inputs\.phase/],
+];
+for (const [name, cut, expected] of releaseCuts) {
+  test(`G4 red cut: ${name} is NOT_MET`, () => {
+    const graph = g4SourcePhases(cut(release), prepare);
+    assert.equal(graph.ok, false);
+    assert.match(graph.problems.join('\n'), expected);
+  });
+}
 
-test('G4 red cut: a broken phase dependency is NOT_MET', () => {
-  const mutated = release.replace('    needs: package-p3-windows-x64\n', '    needs: plan\n');
-  assert.notEqual(mutated, release);
-  const graph = g4SourcePhases(mutated);
-  assert.equal(graph.ok, false);
-  assert.ok(graph.problems.includes('source-p4-darwin-arm64 does not need package-p3-windows-x64'), JSON.stringify(graph.problems));
-});
-
-test('G4 red cut: a package job detached from its source phase is NOT_MET', () => {
-  const mutated = release.replace('    needs: [source-p2-linux-aarch64]\n', '    needs: [plan]\n');
-  assert.notEqual(mutated, release);
-  const graph = g4SourcePhases(mutated);
-  assert.ok(graph.problems.includes('package-p2-linux-aarch64 does not need source-p2-linux-aarch64'), JSON.stringify(graph.problems));
-});
-
-test('G4 checks the phase=prepare path separately from the five publish source phases', () => {
-  const graph = g4SourcePhases(release);
-  assert.equal(graph.prepareCalls, 2);
-  assert.equal(graph.sourcePhases, 5);
-});
-
-test('G4 red cut: a prepare source build not bound to the same-run inputs is NOT_MET', () => {
-  const mutated = release.replace('    needs: prepare-native\n', '    needs: plan\n');
-  assert.notEqual(mutated, release);
-  const graph = g4SourcePhases(mutated);
-  assert.equal(graph.ok, false);
-  assert.ok(graph.problems.includes('prepare-srcbuild-linux-x64 does not need prepare-native'), JSON.stringify(graph.problems));
-});
-
-test('G4 red cut: a publish-path job that depends on prepare is NOT_MET', () => {
-  const mutated = release.replace('  source-p1-linux-x64:\n    needs: plan\n', '  source-p1-linux-x64:\n    needs: [plan, prepare-native]\n');
-  assert.notEqual(mutated, release);
-  const graph = g4SourcePhases(mutated);
-  assert.ok(graph.problems.includes('source-p1-linux-x64 depends on prepare job prepare-native'), JSON.stringify(graph.problems));
-});
+const prepareCuts = [
+  ['a prepare source build not bound to the same-run inputs', text => mustReplace(text, '      native_inputs_run_id: ${{ github.run_id }}', '      native_inputs_run_id: ${{ inputs.native_inputs_run_id }}'),
+    /prepare-srcbuild-linux-x64 native_inputs_run_id must be \$\{\{ github\.run_id \}\}/],
+  ['a prepare source build for every target', text => mustReplace(text, '      targets: linux-x64', '      targets: all'), /must build only linux-x64/],
+  ['a native host dropped', text => mustReplace(text, '          - target: darwin-x64\n', '          - target: darwin-x64-dropped\n'), /must cover the five native hosts/],
+  ['prepare-native routed back through sdk-build-target.yml', text => mustReplace(text, '  prepare-srcbuild-linux-x64:', '  extra:\n    uses: ./.github/workflows/sdk-build-target.yml\n\n  prepare-srcbuild-linux-x64:'),
+    /exactly one same-run linux-x64 sdk-build\.yml call, found 2/],
+];
+for (const [name, cut, expected] of prepareCuts) {
+  test(`G4 red cut: ${name} is NOT_MET`, () => {
+    const graph = g4SourcePhases(release, cut(prepare));
+    assert.equal(graph.ok, false);
+    assert.match(graph.problems.join('\n'), expected);
+  });
+}

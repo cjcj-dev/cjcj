@@ -40,10 +40,13 @@ test('plan readiness of the 15 assets is reported, not hidden', () => {
   for (const k of by('unplanned')) assert.match(status[k].reasons.join(), /unknown source target\(s\): windows-x64/);
 });
 
+const cells = w => w.release.jobs.package.strategy.matrix.include;
+const cell = (w, key) => cells(w).find(r => r.release_key === key);
 const CONTROLS = [
-  ['a release package job is removed', /WIRING_PACKAGE_MISSING darwin-arm64-ios/, w => { delete w.release.jobs['package-darwin-arm64-ios']; }],
+  ['a release package cell is removed', /WIRING_PACKAGE_MISSING darwin-arm64-ios/, w => {
+    w.release.jobs.package.strategy.matrix.include = cells(w).filter(r => r.release_key !== 'darwin-arm64-ios'); }],
   ['a package ships a tuple set different from targets.mjs', /WIRING_CROSS_TUPLES win32-x64-ohos/, w => {
-    const j = w.release.jobs['package-win32-x64-ohos'].with;
+    const j = cell(w, 'win32-x64-ohos');
     j.cross_std_artifacts = JSON.stringify(JSON.parse(j.cross_std_artifacts).slice(0, 1)); }],
   ['the producer job uploads a different artifact', /WIRING_ARTIFACT_UNPRODUCED source-wasm final-std-wasm32-wasi/, w => {
     for (const s of w.source.jobs['source-wasm'].steps) if (String(s.uses).startsWith('actions/upload-artifact')) s.with.name = 'final-std-wasm-renamed'; }],
@@ -51,18 +54,22 @@ const CONTROLS = [
     w.source.jobs['source-ios'].steps = w.source.jobs['source-ios'].steps.filter(s => !String(s.run ?? '').includes('build-ios-final-std')); }],
   ['a workflow runs a script from a retired ci/ tree', /WIRING_RETIRED_TREE source ci\/srcbuild\/target-matrix\.mjs/, w => {
     for (const s of w.source.jobs.plan.steps) if (s.run) s.run = s.run.replace('build/sdk/producers/srcbuild/', 'ci/srcbuild/'); }],
-  ['publish stops waiting for a package', /WIRING_PUBLISH_NEEDS package-win32-x64-wasm/, w => {
-    w.release.jobs.publish.needs = w.release.jobs.publish.needs.filter(n => n !== 'package-win32-x64-wasm'); }],
-  ['a package no longer orders after its producer', /WIRING_PRODUCER_NEEDS package-linux-x64-android/, w => {
-    w.release.jobs['package-linux-x64-android'].needs = []; }],
-  ['a package call loses its package mode', /WIRING_PACKAGE_MISSING linux-x64-wasm/, w => {
-    delete w.release.jobs['package-linux-x64-wasm'].with.mode; }],
-  ['a host source call leaves build mode', /WIRING_HOST_SOURCE darwin-x64 source-p5-darwin-x64/, w => {
-    w.release.jobs['source-p5-darwin-x64'].with.mode = 'llvm-tools'; }],
-  ['sdk-build.yml stops gating its package job on package mode', /WIRING_PACKAGE_JOB/, w => {
-    delete w.package.jobs.package.if; }],
+  ['publish stops waiting for the package matrix', /WIRING_PUBLISH_NEEDS package\/linux-x64/, w => {
+    w.release.jobs.publish.needs = w.release.jobs.publish.needs.filter(n => n !== 'package'); }],
+  ['the package matrix no longer orders after its producer', /WIRING_PRODUCER_NEEDS package\/linux-x64 source/, w => {
+    w.release.jobs.package.needs = []; }],
+  ['a package cell loses its release key', /WIRING_PACKAGE_MISSING linux-x64-wasm/, w => {
+    cell(w, 'linux-x64-wasm').release_key = 'linux-x64-wasm-renamed'; }],
+  ['the source call builds one host instead of all', /WIRING_HOST_SOURCE linux-x64 source/, w => {
+    w.release.jobs.source.with.targets = 'darwin-x64'; }],
+  ['the package matrix is split back into a second sdk-package.yml call', /WIRING_PACKAGE_MATRIX/, w => {
+    w.release.jobs['package-extra'] = {...w.release.jobs.package}; }],
+  ['sdk-package.yml regains a nested workflow call', /WIRING_PACKAGE_JOB/, w => {
+    w.package.jobs.nested = {uses: './.github/workflows/sdk-build-target.yml'}; }],
+  ['sdk-package.yml gates its package job again', /WIRING_PACKAGE_JOB/, w => {
+    w.package.jobs.package.if = "inputs.mode == 'package'"; }],
   ['sdk-build.yml fans out to a different target workflow', /WIRING_SOURCE_CALL/, w => {
-    w.package.jobs.srcbuild.uses = './.github/workflows/srcbuild-target.yml'; }],
+    w.build.jobs.srcbuild.uses = './.github/workflows/srcbuild-target.yml'; }],
 ];
 for (const [name, code, mutate] of CONTROLS) test(`control arm: ${name}`, () => {
   assert.throws(() => check(mutate), code);
@@ -74,7 +81,7 @@ test('control arm: a producer step file is missing', () => {
   assert.throws(() => check(() => {}, f => f !== gone), /WIRING_STEP_MISSING build\/sdk\/producers\/srcbuild\/steps\/build-android-final-std\.mjs/);
 });
 
-// The collapse to four workflows and three composite actions is itself the contract: a probe workflow or a
+// The collapse to six workflows and three composite actions is itself the contract: a probe workflow or a
 // second report action coming back must turn this red, and every local `uses:` must resolve in the tree.
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const surface = (root = REPO) => ({
@@ -100,9 +107,9 @@ const checkSurface = (root = REPO) => {
   return {workflows, actions, uses: localUses(root).length};
 };
 
-test('the workflow surface is exactly ci, release, sdk-build and sdk-build-target with three actions', () => {
+test('the workflow surface is exactly ci, prepare, release, sdk-build, sdk-build-target and sdk-package with three actions', () => {
   const s = checkSurface();
-  assert.deepEqual(s.workflows, ['ci.yml', 'release.yml', 'sdk-build-target.yml', 'sdk-build.yml']);
+  assert.deepEqual(s.workflows, ['ci.yml', 'prepare.yml', 'release.yml', 'sdk-build-target.yml', 'sdk-build.yml', 'sdk-package.yml']);
   assert.deepEqual(s.actions, ['native-windows-tools', 'sccache', 'setup-release-sdk']);
   assert.ok(s.uses >= 20, `only ${s.uses} local uses`);
 });

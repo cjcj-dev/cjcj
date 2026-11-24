@@ -1,0 +1,289 @@
+# Prepare. Builds, from fixed Git sources only, the five-host native inputs
+# (native-inputs-<target>, native-runtime-install-<llvm_platform>) and then the
+# Linux x64 source SDK (cjcj-srcbuild-linux-x64-<version>) from those same-run
+# inputs for ci.yml. It never packages or publishes; release.yml consumes this
+# run through native_inputs_run_id / native_runtime_run_id.
+name: Prepare
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 0.0.2 (SDK version label of the Linux x64 source SDK)"
+        required: true
+        type: string
+      native_llvm_ref:
+        description: Explicit paired LLVM full commit
+        type: string
+        required: false
+        default: ''
+      native_runtime_ref:
+        description: Explicit paired runtime full commit
+        type: string
+        required: false
+        default: ''
+      native_host_version:
+        description: Exact official bootstrap host version for this pair
+        type: string
+        required: false
+        default: ''
+      shim_source_selection:
+        description: Cjo header source repository and full commit JSON; private fixed sources require reachable repositories
+        type: string
+        required: false
+        default: "{}"
+      source_selection:
+        description: Ordinary build repository options JSON, including explicit full stdx url/tag; empty keeps defaults
+        type: string
+        required: false
+        default: '{}'
+      dry_run:
+        description: "Authorize the runtime_ref override for the Linux x64 source SDK"
+        type: boolean
+        required: false
+        default: false
+      runtime_ref:
+        description: "Dry-run only: test an exact 40-character runtime commit instead of ci/runtime_pin.env"
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # Each of the five native hosts builds, from the fixed Git
+  # sources selected by ci/native-llvm-inputs.mjs and ci/source_pin.env, its own
+  # paired runtime/boundscheck installation (the build-native-runtime.yml producer
+  # retired in b2701d39) and then assembles native-inputs-<target> from the
+  # installations on this same runner. The host set is PREPARE_HOSTS in
+  # build/sdk/producers/release/prepare_native_inputs.mjs. Nothing here
+  # publishes; a missing host/N/LLVM/AST/runtime installation fails closed.
+  prepare-native:
+    name: ${{ matrix.target }} / prepare native inputs
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            llvm_platform: linux_x86_64
+            runner: ubuntu-22.04
+          - target: linux-aarch64
+            llvm_platform: linux_aarch64
+            runner: ubuntu-24.04-arm
+          - target: windows-x64
+            llvm_platform: windows_x86_64
+            runner: windows-2025
+          - target: darwin-arm64
+            llvm_platform: darwin_aarch64
+            runner: macos-15
+          - target: darwin-x64
+            llvm_platform: darwin_x86_64
+            runner: macos-15-intel
+    defaults:
+      run:
+        shell: bash
+    env:
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
+      CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
+      CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.1'
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
+        with:
+          native-compiler: 'true'
+      - name: Load native source pair
+        id: pin
+        run: node ci/native-llvm-inputs.mjs
+      - name: Check out the fixed runtime source
+        uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ steps.pin.outputs.runtime_sha }}
+          path: runtime-source
+          persist-credentials: false
+      - name: Prepare fixed bounds source through normal Git inputs
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import {darwinCommand as run} from './build/sdk/producers/release/darwin_commands.mjs';
+          import {readSourcePins} from './ci/native-llvm-inputs.mjs';
+          const logs='.platform-ci/logs/native-prepare', pin=readSourcePins().source;
+          const destination=path.resolve('runtime-source/runtime/third_party/third_party_bounds_checking_function');
+          if(fs.existsSync(destination))throw Error('fresh bounds source required');
+          run(logs,'bounds-init','git',['init',destination]);
+          run(logs,'bounds-fetch','git',['-C',destination,'fetch','--depth=1',pin.BOUNDS_SRC_URL,pin.BOUNDS_REF]);
+          run(logs,'bounds-checkout','git',['-C',destination,'checkout','--detach','FETCH_HEAD']);
+          const actual=run(logs,'bounds-ref','git',['-C',destination,'rev-parse','HEAD']).stdout.trim();
+          if(actual!==pin.BOUNDS_REF)throw Error('bounds fixed source mismatch');
+          JS
+      - uses: ./.github/actions/sccache
+        with:
+          component: native-runtime
+          platform: ${{ matrix.llvm_platform }}
+          pin: ${{ steps.pin.outputs.runtime_sha }}
+      - name: Build and install the exact native runtime and bounds
+        env:
+          RUNTIME_NATIVE_PAIR: '1'
+          GC_UNIT_GATE_LANGUAGE_TESTS: ${{ runner.os == 'Linux' && 'defer' || 'all' }}
+          CJCJ_NATIVE_RUNTIME_REF: ${{ steps.pin.outputs.runtime_sha }}
+          RUNTIME_TARGET: native
+          RUNTIME_BUILD_TYPE: release
+          NATIVE_RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+          MATRIX_RUNNER: ${{ matrix.runner }}
+        run: |
+          set -euo pipefail
+          ulimit -S -c 0
+          ulimit -H -c 0
+          CANGJIE_BUILD_JOBS=$(node ci/build-resources.mjs --jobs-only)
+          export CANGJIE_BUILD_JOBS
+          npx --yes zx@8 build/sdk/producers/platform_matrix/build_runtime.mjs
+      - name: Consume the installation and the same package on this native host
+        env:
+          NATIVE_RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+        run: node build/sdk/producers/platform_matrix/native_runtime_package.mjs
+      - name: Upload native runtime installation
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-runtime-install-${{ matrix.llvm_platform }}
+          # The package verified above (same bytes as the installation, modes
+          # kept); ci/bootstrap/native-artifact-archive.mjs extracts it.
+          path: .platform-ci/runtime-install.tar
+          if-no-files-found: error
+      - name: Provision the official host SDK archive into the native input root
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/native-inputs"
+          mkdir -p "$root"
+          node build/sdk/producers/release/prepare_native_inputs.mjs install-host --root "$root" --target "${{ matrix.target }}"
+          cp -a .platform-ci/runtime-install "$root/runtime"
+      - name: Check out the selected LLVM source
+        uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cjcj-llvm
+          ref: ${{ steps.pin.outputs.sha }}
+          path: llvm-fork
+          persist-credentials: false
+      - name: Fetch the selected compiler source for cjdb, the shim and AST support
+        run: |
+          set -euo pipefail
+          set -a; . ci/llvm_pin.env; eval "$(node build/sdk/producers/release/prepare_native_inputs.mjs compiler-source)"; set +a
+          git init compiler
+          git -C compiler remote add origin "$COMPILER_SRC_URL"
+          git -C compiler fetch --depth=1 origin "$COMPILER_REF"
+          git -C compiler checkout --detach FETCH_HEAD
+          test "$(git -C compiler rev-parse HEAD)" = "$COMPILER_REF"
+          git init flatbuffers
+          git -C flatbuffers remote add origin "$FLATBUFFERS_URL"
+          git -C flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
+          git -C flatbuffers checkout --detach FETCH_HEAD
+      - name: Install native compiler build dependencies on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang llvm lld cmake ninja-build swig libedit-dev libffi-dev libncurses-dev
+      - name: Install native compiler build dependencies on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja swig llvm
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+      - name: Install native compiler build dependencies on Windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: pacman -S --needed --noconfirm mingw-w64-x86_64-swig
+      - name: Install N/LLVM and AST into the native input root
+        run: node build/sdk/producers/release/prepare_native_superbuild.mjs "${{ matrix.target }}"
+      # HLE dependency package (ci/bootstrap/hle-input.mjs): this runner's Node,
+      # the npm tree of the pinned tools dtsparser package.json and the pinned
+      # public cjbind release, under hle/ of the native input root. darwin-x64
+      # has no release asset: its approved identity (HLE_CJBIND_SOURCE_BUILD) is
+      # that release's tag commit, built here with the installed official host
+      # SDK and uv; the official SDK itself is used as installed, not patched.
+      - name: Check out the fixed HLE parser source
+        run: |
+          set -euo pipefail
+          set -a; . ci/source_pin.env; set +a
+          git init hle-tools
+          git -C hle-tools remote add origin "$TOOLS_SRC_URL"
+          git -C hle-tools fetch --depth=1 origin "$TOOLS_REF"
+          git -C hle-tools checkout --detach FETCH_HEAD
+          test "$(git -C hle-tools rev-parse HEAD)" = "$TOOLS_REF"
+      - name: Build the pinned cjbind source with the official host SDK (darwin-x64)
+        id: cjbind
+        if: matrix.target == 'darwin-x64'
+        run: |
+          set -euo pipefail
+          eval "$(node build/sdk/producers/release/prepare_native_inputs.mjs cjbind-source --target "${{ matrix.target }}")"
+          git init cjbind-source
+          git -C cjbind-source remote add origin "$CJBIND_SRC_URL"
+          git -C cjbind-source fetch --depth=1 origin "$CJBIND_REF" \
+            || git -C cjbind-source fetch --depth=1 origin "refs/tags/$CJBIND_TAG"
+          git -C cjbind-source checkout --detach FETCH_HEAD
+          actual="$(git -C cjbind-source rev-parse HEAD)"
+          test "$actual" = "$CJBIND_REF"
+          brew install uv
+          uv --version
+          export CANGJIE_HOME="$RUNNER_TEMP/native-inputs/host"
+          set +u; source "$CANGJIE_HOME/envsetup.sh"; set -u
+          cjc --version
+          cd cjbind-source
+          uv run --python 3.13 ./scripts/download.py
+          uv run --python 3.13 ./scripts/cjpm.py build --cfg_verbose -V
+          ./target/release/bin/main --version
+          echo "file=$PWD/target/release/bin/main" >> "$GITHUB_OUTPUT"
+          echo "commit=$actual" >> "$GITHUB_OUTPUT"
+      - name: Install the HLE dependency package into the native input root
+        env:
+          CJBIND_FILE: ${{ steps.cjbind.outputs.file }}
+          CJBIND_COMMIT: ${{ steps.cjbind.outputs.commit }}
+        run: >-
+          node build/sdk/producers/release/prepare_native_inputs.mjs install-hle
+          --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}"
+          --parser hle-tools/packages/hle/src/dtsparser
+          ${{ matrix.target == 'darwin-x64' && '--cjbind-file "$CJBIND_FILE" --cjbind-source-commit "$CJBIND_COMMIT"' || '' }}
+      - name: Assemble native inputs and bind their provenance
+        run: >-
+          node build/sdk/producers/release/prepare_native_inputs.mjs assemble
+          --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}"
+      - name: Pack native inputs with their file modes
+        run: >-
+          node build/sdk/producers/release/prepare_native_inputs.mjs pack
+          --root "$RUNNER_TEMP/native-inputs" --out "$RUNNER_TEMP/native-inputs.tar"
+      - name: Upload native inputs
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-inputs-${{ matrix.target }}
+          path: ${{ runner.temp }}/native-inputs.tar
+          if-no-files-found: error
+
+  prepare-srcbuild-linux-x64:
+    needs: prepare-native
+    name: prepare / linux-x64 source SDK from the same-run native inputs
+    uses: ./.github/workflows/sdk-build.yml
+    with:
+      cangjie_ref: ${{ inputs.version }}
+      source_selection: ${{ inputs.source_selection }}
+      shim_source_selection: ${{ inputs.shim_source_selection }}
+      native_inputs_artifact: native-inputs
+      native_inputs_run_id: ${{ github.run_id }}
+      native_runtime_artifact: native-runtime-install
+      native_runtime_run_id: ${{ github.run_id }}
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
+      build_type: relwithdebinfo
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+      targets: linux-x64

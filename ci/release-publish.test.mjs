@@ -17,8 +17,8 @@ const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file))
 test('release.yml satisfies the publish contract and packages exactly the 15 archiveKeys', () => {
   assert.deepEqual(releaseWorkflowProblems(releaseText), []);
   const jobs = loadYaml(releaseText).jobs;
-  const packaged = Object.values(jobs).filter(job => job.with?.mode === 'package')
-    .map(job => getReleasePlatform(job.with.release_key).archiveKey).sort();
+  const packaged = jobs.package.strategy.matrix.include
+    .map(row => getReleasePlatform(row.release_key).archiveKey).sort();
   assert.deepEqual(packaged, expectedArchiveKeys());
   assert.equal(expectedArchiveKeys().length, 15);
   assert.ok(!expectedArchiveKeys().some(key => key.startsWith('diagnosis')));
@@ -26,7 +26,7 @@ test('release.yml satisfies the publish contract and packages exactly the 15 arc
 
 // Each red cut is applied to the real workflow text and must be named precisely.
 const cuts = [
-  ['always() restored', text => text.replace("if: inputs.phase == 'publish' && !inputs.dry_run", "if: always() && inputs.phase == 'publish' && !inputs.dry_run"), /must not use always/],
+  ['always() restored', text => text.replace("if: ${{ !inputs.dry_run }}", "if: ${{ always() && !inputs.dry_run }}"), /must not use always/],
   ['tag claim moved off GITHUB_SHA', text => text.replace('-f sha="$GITHUB_SHA"', '-f sha="$TAG_SHA"'), /lacks atomic tag claim/],
   ['--verify-tag dropped', text => text.replace('flags=(--verify-tag ', 'flags=('), /lacks --verify-tag/],
   ['formal release refusal dropped', text => text.replaceAll('PUBLISH_FORMAL_RELEASE_NOT_AUTHORIZED', 'FORMAL'), /formal release refusal/],
@@ -38,13 +38,17 @@ const cuts = [
   ['--latest=false dropped', text => text.replace('--prerelease --latest=false', '--prerelease'), /lacks --prerelease --latest=false/],
   ['existing release check dropped', text => text.replaceAll('RELEASE_ALREADY_EXISTS', 'RELEASE_SEEN'), /existing release check/],
   ['existing tag check dropped', text => text.replaceAll('TAG_ALREADY_EXISTS', 'TAG_SEEN'), /existing tag check/],
-  ['one need removed', text => text.replace(', package-win32-x64-wasm, package-linux-x64-ohos', ', package-linux-x64-ohos'), /publish needs 19 jobs/],
-  ['win32 wasm loses its native switch', text => {
-    const start = text.indexOf('  package-win32-x64-wasm:');
+  ['one need removed', text => text.replace('needs: [plan, package]', 'needs: [package]'), /publish needs package, expected package,plan/],
+  ['package matrix loses its native switch', text => {
+    const start = text.indexOf('  package:\n');
     const end = text.indexOf('secrets: inherit', start);
     return text.slice(0, start) + text.slice(start, end).replace(/\n      native_runtime_artifact: .*/, '') + text.slice(end);
-  }, /package-win32-x64-wasm does not pass native_runtime_artifact/],
-  ['phase default publish', text => text.replace('default: prepare', 'default: publish'), /phase must be a choice/],
+  }, /package does not pass native_runtime_artifact/],
+  ['serial phase input restored', text => text.replace('    inputs:\n', "    inputs:\n      phase:\n        type: choice\n        options: [prepare, publish]\n        default: prepare\n"), /phase must not exist/],
+  ['source split back to one target', text => text.replace('      targets: all\n', '      targets: linux-x64\n'), /targets: all/],
+  ['package cell dropped', text => text.replace(/\n {10}- \{release_key: win32-x64-wasm,[^\n]*/, ''), /package matrix must hold the 15 release keys/],
+  ['package matrix serialised', text => text.replace('      fail-fast: false\n      matrix:', '      fail-fast: false\n      max-parallel: 1\n      matrix:'), /every cell in parallel/],
+  ['ci_run_id requirement dropped from plan', text => text.replace('PUBLISH_CI_RUN_ID_REQUIRED', 'PUBLISH_CI_RUN_ID_OPTIONAL'), /plan lacks ci_run_id required unless dry_run/],
 ];
 for (const [name, cut, expected] of cuts) {
   test(`red cut: ${name}`, () => {
@@ -103,13 +107,14 @@ test('verify-assets accepts exactly 15 complete cells (60 assets) and rejects ea
   assert.throws(() => verifyAssets({dist, version: '0.0.2'}), /^Error: PUBLISH_ARCHIVE_CELL darwin-x64 has 0 archives/);
 });
 
-test('verify-needs requires all 20 direct needs to be success', () => {
-  const needs = Object.fromEntries(Array.from({length: 20}, (_, index) => [`job-${index}`, {result: 'success'}]));
-  assert.equal(verifyNeeds(needs), 20);
-  assert.throws(() => verifyNeeds({...needs, 'job-3': {result: 'skipped'}}), /^Error: PUBLISH_NEEDS_NOT_SUCCESS job-3=skipped/);
-  assert.throws(() => verifyNeeds({...needs, 'job-4': {result: 'cancelled'}}), /^Error: PUBLISH_NEEDS_NOT_SUCCESS job-4=cancelled/);
-  const {['job-0']: _, ...nineteen} = needs;
-  assert.throws(() => verifyNeeds(nineteen), /^Error: PUBLISH_NEEDS_COUNT 19/);
+test('verify-needs requires both direct needs (plan, package matrix) to be success', () => {
+  const needs = {plan: {result: 'success'}, package: {result: 'success'}};
+  assert.equal(verifyNeeds(needs), 2);
+  assert.throws(() => verifyNeeds({...needs, package: {result: 'failure'}}), /^Error: PUBLISH_NEEDS_NOT_SUCCESS package=failure/);
+  assert.throws(() => verifyNeeds({...needs, plan: {result: 'skipped'}}), /^Error: PUBLISH_NEEDS_NOT_SUCCESS plan=skipped/);
+  assert.throws(() => verifyNeeds({...needs, package: {result: 'cancelled'}}), /^Error: PUBLISH_NEEDS_NOT_SUCCESS package=cancelled/);
+  const {plan: _, ...one} = needs;
+  assert.throws(() => verifyNeeds(one), /^Error: PUBLISH_NEEDS_COUNT 1/);
 });
 
 test('verify-ci-run binds the CI run to this commit and to success', () => {

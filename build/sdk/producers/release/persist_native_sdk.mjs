@@ -25,7 +25,7 @@ export const MAX_ASSET_BYTES = 2 * 1024 ** 3 - 1;
 // sdk-build.yml itself and the callers that reach it through sdk-build.yml. The
 // run event must be workflow_dispatch, so no push, PR or fork run can produce an
 // input.
-export const PRODUCER_WORKFLOWS = ['.github/workflows/sdk-build.yml', '.github/workflows/release.yml',
+export const PRODUCER_WORKFLOWS = ['.github/workflows/sdk-build.yml', '.github/workflows/release.yml', '.github/workflows/prepare.yml',
   '.github/workflows/release-matrix.yml', '.github/workflows/arm-soak.yml'];
 
 function fail(code, detail = '') { throw new Error(`${code}${detail ? ' ' + detail : ''}`); }

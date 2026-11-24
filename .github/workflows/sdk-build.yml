@@ -10,11 +10,6 @@ on:
         description: Native final std name for a single runnable source target
         value: ${{ jobs.plan.outputs.std_artifact }}
     inputs:
-      mode:
-        description: build (default) runs the source SDK plan and fan-out; package builds one release package from a finished build; prepare builds the five-host native inputs (release.yml phase=prepare).
-        required: false
-        type: string
-        default: build
       native_runtime_artifact:
         description: Existing native-runtime-install artifact prefix
         type: string
@@ -92,9 +87,8 @@ on:
         default: ''
       targets:
         description: >-
-          Comma-separated source targets to build; "all" builds every one. A
-          release phase passes its own target so it pays for that target and no
-          other.
+          Comma-separated source targets to build; "all" builds every one in
+          parallel (release.yml); prepare.yml passes linux-x64 only.
         required: false
         type: string
         default: all
@@ -123,56 +117,6 @@ on:
         required: false
         type: boolean
         default: false
-      validation_run_id:
-        description: Package mode. Recheck existing Windows SDK and std from one successful same-commit run, without publishing a package
-        type: string
-        default: ''
-      runner:
-        required: false
-        type: string
-        default: ''
-      platform:
-        required: false
-        type: string
-        default: ''
-      llvm_platform:
-        required: false
-        type: string
-        default: ''
-      sdk_runtime_dir:
-        description: Package mode. Expected runtime tuple, checked against the selected native target
-        required: false
-        type: string
-        default: ''
-      std_artifact:
-        description: Package mode. Same-platform source-built final std artifact
-        required: false
-        type: string
-        default: ''
-      release_key:
-        description: Package mode. Official release package key; empty retains the host package name
-        required: false
-        type: string
-        default: ''
-      cross_std_artifacts:
-        description: Package mode. JSON array of tuple/artifact pairs from the source cells
-        required: false
-        type: string
-        default: '[]'
-      cross_std_artifact:
-        description: Package mode. Legacy single cross std artifact; normalized into the tuple list
-        required: false
-        type: string
-        default: ''
-      cross_std_tuple:
-        description: Package mode. Legacy single cross std tuple
-        required: false
-        type: string
-        default: ''
-      version:
-        required: false
-        type: string
-        default: ''
   workflow_dispatch:
     inputs:
       native_runtime_artifact:
@@ -250,9 +194,8 @@ on:
         default: ''
       targets:
         description: >-
-          Comma-separated source targets to build; "all" builds every one. A
-          release phase passes its own target so it pays for that target and no
-          other.
+          Comma-separated source targets to build; "all" builds every one in
+          parallel (release.yml); prepare.yml passes linux-x64 only.
         required: false
         type: string
         default: all
@@ -286,37 +229,21 @@ permissions:
   contents: read
   actions: read
 
-# Per target set, not per ref alone: release.yml calls this workflow once
-# per platform in the same run, and one group for all of them would leave every
-# call but one pending -- and cancel all but the newest pending one.
+# Per target set, not per ref alone: prepare.yml (linux-x64) and release.yml (all)
+# call this workflow with different target sets, and one group for both would
+# leave one call pending -- and cancel all but the newest pending one.
 concurrency:
-  group: ${{ inputs.mode == 'package' && format('sdk-package-{0}-{1}-{2}', github.run_id, github.run_attempt, inputs.release_key || inputs.platform) || format('srcbuild-native-{0}-{1}', github.ref, inputs.targets || 'all') }}
+  group: ${{ format('srcbuild-native-{0}-{1}', github.ref, inputs.targets || 'all') }}
   cancel-in-progress: false
 
 
 jobs:
-  # Four source SDK builds are the expensive part of a release, and starting all
-  # of them before phase 1 has reported anything is what the phase policy exists
-  # to prevent. Selecting here lets each phase call this workflow for its own
-  # target; the tuple list stays in one place.
-  # phase=prepare: the five native hosts build native-inputs-<target> and
-  # native-runtime-install-<llvm_platform> from fixed Git sources. No source
-  # target, package or publication job runs in this mode.
-  prepare:
-    name: Prepare five-host native inputs
-    if: inputs.mode == 'prepare'
-    uses: ./.github/workflows/sdk-build-target.yml
-    with:
-      prepare_native: true
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      source_selection: ${{ inputs.source_selection }}
-      cangjie_ref: ${{ inputs.cangjie_ref }}
-
+  # plan selects the requested source targets; srcbuild fans them out as ONE
+  # matrix over sdk-build-target.yml, so every selected host builds in parallel.
+  # Packaging lives in sdk-package.yml and the five-host native inputs in
+  # prepare.yml: this workflow makes exactly one nested workflow call.
   plan:
     name: Select targets
-    if: inputs.mode != 'package' && inputs.mode != 'prepare'
     runs-on: ubuntu-24.04
     env:
       CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
@@ -413,176 +340,3 @@ jobs:
         env:
           REQUESTED: ${{ inputs.targets }}
         run: node build/sdk/producers/srcbuild/target-matrix.mjs --targets "$REQUESTED" --require-ready
-
-  # Package mode (formerly a separate package workflow): one release package from
-  # the SDK a build-mode call of this workflow produced in the same run.
-  # Whole native SDKs are produced by srcbuild-target's package-install step.
-  # Component artifacts below are comparison inputs only, never install overlays.
-  package:
-    name: ${{ inputs.platform }} / Build release package
-    if: inputs.mode == 'package'
-    runs-on: ${{ inputs.runner }}
-    timeout-minutes: 180
-    env:
-      WINDOWS_TOOLS_REPOSITORY: ${{ vars.WINDOWS_TOOLS_REPOSITORY }}
-      CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
-      CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
-      CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
-      CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
-      RELEASE_LLVM_PLATFORM: ${{ inputs.llvm_platform }}
-      RELEASE_RUNTIME_TUPLE: ${{ inputs.sdk_runtime_dir }}
-      RELEASE_PLATFORM: ${{ inputs.platform }}
-      RELEASE_KEY: ${{ inputs.release_key }}
-      CJCJ_NATIVE_SDK_VERSION: ${{ inputs.version }}
-      CJCJ_RELEASE_SOURCE_SHA: ${{ github.sha }}
-      NATIVE_SDK_ARTIFACT_DIR: ${{ github.workspace }}/.release-native/input
-      NATIVE_SDK_INSTALL_DIR: ${{ github.workspace }}/.release-native/install-${{ github.run_attempt }}
-      FINAL_STD_DIR: ${{ github.workspace }}/.release-final-std/${{ inputs.platform }}
-      CROSS_STD_DIR: ${{ github.workspace }}/.release-cross-std/${{ inputs.platform }}
-      CROSS_STD_ARTIFACTS: ${{ inputs.cross_std_artifacts }}
-      CROSS_STD_ARTIFACT: ${{ inputs.cross_std_artifact }}
-      CROSS_STD_TUPLE: ${{ inputs.cross_std_tuple }}
-      RELEASE_DIST: ${{ github.workspace }}/dist
-      CJ_HEAP_SIZE: ${{ inputs.platform == 'darwin-arm64' && '6GB' || '12GB' }}
-    steps:
-      - name: Require the package inputs
-        shell: bash
-        env:
-          PACKAGE_INPUTS: ${{ toJSON(inputs) }}
-        run: |
-          node -e 'const i = JSON.parse(process.env.PACKAGE_INPUTS); const miss = ["runner", "platform", "llvm_platform", "sdk_runtime_dir", "std_artifact", "version"].filter((k) => !i[k]); if (miss.length) { console.error("::error::package mode requires " + miss.join(", ")); process.exit(1); }'
-      - name: Checkout cjcj
-        uses: actions/checkout@v7
-
-      - name: Set up Node
-        uses: actions/setup-node@v7.1.0
-        with:
-          node-version: '24.22.1'
-
-      - name: Install the Windows PE table reader
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          install: mingw-w64-x86_64-llvm
-
-      - name: Select PE inspection tools outside the SDK loader path
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: |
-          test -x /mingw64/bin/llvm-readobj.exe
-          echo "CJCJ_NATIVE_LLVM_BIN=$(cygpath -w /mingw64/bin)" >> "$GITHUB_ENV"
-
-      - name: Resolve archive identity independently of host toolchain
-        id: package-inputs
-        run: node build/sdk/producers/release/package-key.mjs
-
-      - name: Load and validate runtime pin
-        env:
-          CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
-          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
-          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
-          CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
-          CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
-        run: npx --yes zx@8 ci/load_runtime_pin.mjs
-
-      - name: Check original Windows producer run
-        if: inputs.validation_run_id != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN_ID: ${{ inputs.validation_run_id }}
-        shell: pwsh
-        run: |
-          if ($env:SOURCE_RUN_ID -notmatch '^[1-9][0-9]*$') { throw 'invalid producer run id' }
-          $run = Invoke-RestMethod "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID" -Headers @{Authorization="Bearer $env:GH_TOKEN"}
-          if ($run.path -ne '.github/workflows/sdk-build.yml' -or $run.head_sha -ne $env:GITHUB_SHA -or $run.head_repository.full_name -ne $env:GITHUB_REPOSITORY -or $run.conclusion -ne 'success') { throw 'producer commit, repository or conclusion differs' }
-
-      - name: Download complete native SDK
-        uses: actions/download-artifact@v8
-        with:
-          name: cjcj-srcbuild-${{ inputs.platform }}-${{ inputs.version }}
-          path: ${{ env.NATIVE_SDK_ARTIFACT_DIR }}
-          github-token: ${{ github.token }}
-          run-id: ${{ inputs.validation_run_id || github.run_id }}
-
-      - name: Validate same-platform final std contract
-        shell: bash
-        env:
-          EXPECTED_STD_ARTIFACT: ${{ steps.package-inputs.outputs.std_artifact }}
-          SELECTED_STD_ARTIFACT: ${{ inputs.std_artifact }}
-        run: |
-          set -euo pipefail
-          test "$SELECTED_STD_ARTIFACT" = "$EXPECTED_STD_ARTIFACT"
-
-      - name: Download same-platform source-built final std
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ inputs.std_artifact }}
-          path: ${{ env.FINAL_STD_DIR }}
-          github-token: ${{ github.token }}
-          run-id: ${{ inputs.validation_run_id || github.run_id }}
-
-      - name: Download cross-tuple comparison inputs
-        if: inputs.cross_std_artifacts != '[]' || inputs.cross_std_artifact != ''
-        uses: actions/download-artifact@v8
-        with:
-          pattern: final-std-*
-          path: ${{ env.CROSS_STD_DIR }}
-
-      # Mandatory for normal and dry-run candidates, on every native runner:
-      # archive SHA -> source/target/tool bytes -> std/cross/stdx -> ABI ->
-      # installed language/ordinary/macros -> cjdb/Python -> smoke -> same
-      # directory archive -> original path hidden -> all consumers again.
-      - name: Consume and rearchive complete native SDK
-        run: node build/sdk/producers/release/compose-package.mjs
-
-      - name: Retain installed and relocated Windows consumer evidence
-        if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
-        with:
-          name: consumer-${{ inputs.release_key || inputs.platform }}-${{ github.run_attempt }}
-          if-no-files-found: warn
-          include-hidden-files: true
-          path: |
-            dist/**/smoke/*.log
-            dist/**/smoke/*.json
-            dist/**/lsp-macro/**/server.*
-            dist/**/lsp-macro/**/compile.*
-            dist/**/lsp-macro/**/requests.lsp
-            dist/**/cjlint/*.json
-            dist/**/cjprof/*.json
-            dist/**/linker-response/*/*.json
-            dist/**/linker-response/*/*.stdout
-            dist/**/linker-response/*/*.stderr
-            dist/**/linker-response/saved/**/link.rsp
-            dist/*.commands.json
-
-      - name: Upload failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: pkg-diagnosis-${{ env.PACKAGE_KEY }}-${{ github.run_attempt }}
-          retention-days: 7
-          if-no-files-found: warn
-          include-hidden-files: true
-          path: |
-            dist/**/*.json
-            dist/**/*.jsonl
-            dist/**/*.log
-            .platform-ci/installed-sdk-check/**
-            .release-native/install-${{ github.run_attempt }}/cangjie/BUILD-MANIFEST.json
-
-      - name: Upload SDK artifact
-        if: inputs.validation_run_id == ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: pkg-${{ env.PACKAGE_KEY }}
-          path: |
-            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.tar.gz
-            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.tar.gz.sha256
-            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.zip
-            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.zip.sha256
-            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.RELEASE-MANIFEST.jsonl
-            dist/cjcj-${{ inputs.version }}-${{ env.PACKAGE_KEY }}.SHA256SUMS
-          if-no-files-found: error
-          retention-days: 90

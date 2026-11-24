@@ -32,7 +32,7 @@ import {sourceBuildCells} from '../../../lib/targets.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../../..');
 const read = name => fs.readFileSync(path.join(root, '.github/workflows', name + '.yml'), 'utf8');
-const real = () => ({release: read('release'), sdkBuild: read('sdk-build'), target: read('sdk-build-target')});
+const real = () => ({release: read('release'), prepare: read('prepare'), sdkBuild: read('sdk-build'), target: read('sdk-build-target')});
 const once = (text, from, to) => { assert.equal(text.split(from).length, 2, from); return text.replace(from, to); };
 
 test('the real workflows wire the five-host prepare path without a route to publish', () => {
@@ -48,36 +48,39 @@ test('the real workflows wire the five-host prepare path without a route to publ
 
 test('red cut: dropping one native host from prepare-native is rejected', () => {
   const w = real();
-  w.target = once(w.target, '          - target: darwin-x64\n            llvm_platform: darwin_x86_64\n            runner: macos-15-intel\n', '');
+  w.prepare = once(w.prepare, '          - target: darwin-x64\n            llvm_platform: darwin_x86_64\n            runner: macos-15-intel\n', '');
   assert.ok(prepareWorkflowProblems(w).includes('prepare-native lacks host darwin-x64|darwin_x86_64|macos-15-intel'));
 });
 
 test('red cut: a prepare host on a foreign runner is rejected', () => {
   const w = real();
-  w.target = once(w.target, '            llvm_platform: windows_x86_64\n            runner: windows-2025\n',
+  w.prepare = once(w.prepare, '            llvm_platform: windows_x86_64\n            runner: windows-2025\n',
     '            llvm_platform: windows_x86_64\n            runner: ubuntu-24.04\n');
   assert.ok(prepareWorkflowProblems(w).includes('prepare-native lacks host windows-x64|windows_x86_64|windows-2025'));
 });
 
-test('red cut: prepare that can reach publish is rejected', () => {
+test('red cut: a publish route into prepare.yml or a prepare route back into release.yml is rejected', () => {
   const w = real();
-  w.release = once(w.release, "    if: inputs.phase == 'publish' && !inputs.dry_run\n", "    if: '!inputs.dry_run'\n");
-  assert.ok(prepareWorkflowProblems(w).includes('publish is not gated on phase=publish'));
+  w.prepare = once(w.prepare, '  prepare-srcbuild-linux-x64:\n', '  publish:\n    needs: prepare-native\n    runs-on: ubuntu-24.04\n    steps:\n      - run: true\n\n  prepare-srcbuild-linux-x64:\n');
+  assert.ok(prepareWorkflowProblems(w).includes('prepare.yml: unexpected job publish'), JSON.stringify(prepareWorkflowProblems(w)));
   const v = real();
-  v.release = once(v.release, '    needs: [source-p1-linux-x64, source-p2-linux-aarch64,', '    needs: [prepare-native, source-p1-linux-x64, source-p2-linux-aarch64,');
-  assert.ok(prepareWorkflowProblems(v).some(p => p === 'publish depends on prepare job prepare-native'), JSON.stringify(prepareWorkflowProblems(v)));
+  v.release = once(v.release, '    if: ${{ !inputs.dry_run }}\n', "    if: inputs.phase == 'publish' && !inputs.dry_run\n");
+  assert.ok(prepareWorkflowProblems(v).includes('release still reads inputs.phase; prepare lives in prepare.yml'));
+  const t = real();
+  t.target = once(t.target, '    if: inputs.llvm_tools_only != true\n', '    if: inputs.llvm_tools_only != true && inputs.prepare_native != true\n');
+  assert.ok(prepareWorkflowProblems(t).includes('sdk-build-target.yml plan still reads prepare_native'));
 });
 
 test('red cut: the same-run linux-x64 source build must consume this run\'s native inputs', () => {
   const w = real();
-  w.release = once(w.release, '      native_inputs_artifact: native-inputs\n      native_inputs_run_id: ${{ github.run_id }}\n',
+  w.prepare = once(w.prepare, '      native_inputs_artifact: native-inputs\n      native_inputs_run_id: ${{ github.run_id }}\n',
     '      native_inputs_artifact: native-inputs\n      native_inputs_run_id: ${{ inputs.native_inputs_run_id }}\n');
   assert.ok(prepareWorkflowProblems(w).includes('prepare-srcbuild-linux-x64 native_inputs_run_id must be ${{ github.run_id }}'));
 });
 
 test('red cut: prepare-native without one artifact family is rejected', () => {
   const w = real();
-  w.target = once(w.target, '          name: native-runtime-install-${{ matrix.llvm_platform }}\n', '          name: native-runtime-install\n');
+  w.prepare = once(w.prepare, '          name: native-runtime-install-${{ matrix.llvm_platform }}\n', '          name: native-runtime-install\n');
   assert.ok(prepareWorkflowProblems(w).includes('prepare-native does not upload native-runtime-install-${{ matrix.llvm_platform }}'));
 });
 
@@ -142,7 +145,7 @@ test('assemble fails closed on a missing installation, adapter or identity', t =
 // ---- N/LLVM + AST producers on all five hosts (ruling 1) ----
 const job = text => loadYaml(text).jobs['prepare-native'];
 test('every prepare host runs its N/LLVM and AST producer and installs both', () => {
-  assert.deepEqual(prepareComponentProblems(job(read('sdk-build-target')).steps), []);
+  assert.deepEqual(prepareComponentProblems(job(read('prepare')).steps), []);
 });
 test('red cut: dropping one host family\'s N/LLVM or AST step names exactly that host and component', () => {
   const entry='prepare_native_superbuild.mjs "${{ matrix.target }}"';
@@ -157,18 +160,18 @@ test('red cut: dropping one host family\'s N/LLVM or AST step names exactly that
       PREPARE_HOSTS.map(h=>`${h.target} lacks hle producer prepare_native_inputs.mjs install-hle`)],
   ];
   for (const [from, to, want] of cuts) {
-    const target=read('sdk-build-target'), start=target.indexOf('  prepare-native:');
+    const target=read('prepare'), start=target.indexOf('  prepare-native:');
     const cutTarget=target.slice(0,start)+once(target.slice(start),from,to);
     const problems = prepareComponentProblems(job(cutTarget).steps)
       .map(p => p.replace(/^prepare-native host /, ''));
     assert.deepEqual(problems, want, from);
-    assert.ok(prepareWorkflowProblems({...real(), target: cutTarget}).length >= want.length);
+    assert.ok(prepareWorkflowProblems({...real(), prepare: cutTarget}).length >= want.length);
   }
 });
 test('red cut: re-adding the private adapter deployment to prepare-native is refused', () => {
-  const text = once(read('sdk-build-target'), '      - name: Install N/LLVM and AST into the native input root\n',
+  const text = once(read('prepare'), '      - name: Install N/LLVM and AST into the native input root\n',
     '      - name: Deploy adapter\n        run: node ci/bootstrap/deploy-native-tools.mjs src ref out\n      - name: Install N/LLVM and AST into the native input root\n');
-  assert.ok(prepareWorkflowProblems({...real(), target: text}).includes('prepare-native consumes the retired private tools adapter'));
+  assert.ok(prepareWorkflowProblems({...real(), prepare: text}).includes('prepare-native consumes the retired private tools adapter'));
 });
 
 // ---- end-to-end mock layout: producer output -> native-inputs -> downstream readers ----
@@ -473,14 +476,14 @@ test('pack and the consumer unpack keep executable modes and refuse other layout
   assert.throws(() => unpackNativeArtifact({directory: directoryUpload, archive: 'native-inputs.tar'}), /NATIVE_ARTIFACT_SINGLE_ARCHIVE_REQUIRED/);
 });
 test('red cut: uploading a directory instead of the tar, or a cjv host, is refused', () => {
-  const dir = once(read('sdk-build-target'), '          path: ${{ runner.temp }}/native-inputs.tar\n', '          path: ${{ runner.temp }}/native-inputs\n');
-  assert.deepEqual(prepareWorkflowProblems({...real(), target: dir}), ['prepare-native uploads native-inputs-${{ matrix.target }} without native-inputs.tar']);
-  const rt = once(read('sdk-build-target'), '          path: .platform-ci/runtime-install.tar\n', '          path: .platform-ci/runtime-install\n');
-  assert.deepEqual(prepareWorkflowProblems({...real(), target: rt}),
+  const dir = once(read('prepare'), '          path: ${{ runner.temp }}/native-inputs.tar\n', '          path: ${{ runner.temp }}/native-inputs\n');
+  assert.deepEqual(prepareWorkflowProblems({...real(), prepare: dir}), ['prepare-native uploads native-inputs-${{ matrix.target }} without native-inputs.tar']);
+  const rt = once(read('prepare'), '          path: .platform-ci/runtime-install.tar\n', '          path: .platform-ci/runtime-install\n');
+  assert.deepEqual(prepareWorkflowProblems({...real(), prepare: rt}),
     ['prepare-native uploads native-runtime-install-${{ matrix.llvm_platform }} without runtime-install.tar']);
-  const cjv = once(read('sdk-build-target'), '          cp -a .platform-ci/runtime-install "$root/runtime"\n',
+  const cjv = once(read('prepare'), '          cp -a .platform-ci/runtime-install "$root/runtime"\n',
     '          cp -a .platform-ci/runtime-install "$root/runtime"\n          npx --yes zx@8 ci/setup_sdk.mjs\n');
-  assert.deepEqual(prepareWorkflowProblems({...real(), target: cjv}), ['prepare-native provisions the host from an installed toolchain']);
+  assert.deepEqual(prepareWorkflowProblems({...real(), prepare: cjv}), ['prepare-native provisions the host from an installed toolchain']);
 });
 test('every native-inputs consumer unpacks the tar before the host or runtime is read', () => {
   const jobs = loadYaml(read('sdk-build-target')).jobs;
@@ -954,7 +957,7 @@ test('darwin-x64 installs the approved source-built cjbind that the real configu
 });
 
 test('prepare-native builds the darwin-x64 source cjbind on its own host and hands it to install-hle', () => {
-  const steps = job(read('sdk-build-target')).steps, find = text => steps.filter(step => String(step.run || '').includes(text));
+  const steps = job(read('prepare')).steps, find = text => steps.filter(step => String(step.run || '').includes(text));
   const [build] = find('prepare_native_inputs.mjs cjbind-source'), [hle] = find('prepare_native_inputs.mjs install-hle');
   assert.equal(find('prepare_native_inputs.mjs cjbind-source').length, 1);
   assert.equal(build.if, "matrix.target == 'darwin-x64'");
@@ -972,7 +975,7 @@ test('prepare-native builds the darwin-x64 source cjbind on its own host and han
       'prepare-native does not hand the darwin-x64 source cjbind to install-hle']];
   for (const [from, to, problem] of cuts) {
     console.log('PREPARE_CJBIND_WIRING_CUT_REACHED ' + problem);
-    assert.ok(prepareWorkflowProblems({...real(), target: once(read('sdk-build-target'), from, to)}).includes(problem), from);
+    assert.ok(prepareWorkflowProblems({...real(), prepare: once(read('prepare'), from, to)}).includes(problem), from);
   }
 });
 

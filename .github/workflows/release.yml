@@ -9,13 +9,8 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      phase:
-        description: "prepare builds and uploads the five-host native inputs only; publish builds the 15 packages and creates the prerelease"
-        type: choice
-        options: [prepare, publish]
-        default: prepare
       ci_run_id:
-        description: "publish only: a successful ci.yml run of this exact commit, verified before the release is created"
+        description: "A successful ci.yml run of this exact commit; required unless dry_run, verified by plan and again before the release is created"
         type: string
         required: false
         default: ''
@@ -65,12 +60,12 @@ on:
         required: false
         default: '{}'
       native_inputs_artifact:
-        description: "publish only: reviewed complete native installation artifact prefix, suffixed by source target"
+        description: "Reviewed complete native installation artifact prefix (prepare.yml: native-inputs), suffixed by source target"
         required: false
         type: string
         default: ''
       native_inputs_run_id:
-        description: "publish only: original native installation producer run"
+        description: "The prepare.yml run that produced the native inputs"
         required: false
         type: string
         default: ''
@@ -117,9 +112,12 @@ env:
   CJCJ_SOURCE_SELECTION: ${{ inputs.source_selection }}
 
 jobs:
+  # Four stages, every stage fully parallel: plan -> source (ONE sdk-build.yml
+  # call, all five hosts and every cross std at once) -> package (ONE 15-cell
+  # sdk-package.yml matrix) -> publish. Each reusable workflow is referenced
+  # once, so the static expansion holds one copy of sdk-build-target.yml.
   plan:
-    name: Check all source platform inputs before release
-    if: inputs.phase == 'publish'
+    name: Check the release inputs and every source target before release
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -128,7 +126,7 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.1'
-      - name: Require the native inputs that phase=prepare produced
+      - name: Require the native inputs that prepare.yml produced
         env:
           NATIVE_INPUTS_ARTIFACT: ${{ inputs.native_inputs_artifact }}
           NATIVE_INPUTS_RUN_ID: ${{ inputs.native_inputs_run_id }}
@@ -137,50 +135,27 @@ jobs:
           [ -n "$NATIVE_INPUTS_ARTIFACT" ] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_inputs_artifact"; exit 1; }
           [[ "$NATIVE_INPUTS_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_inputs_run_id"; exit 1; }
           [ -n "$NATIVE_RUNTIME_ARTIFACT" ] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_runtime_artifact"; exit 1; }
+      # A publishing run must name the CI run of this exact commit before any
+      # source cell starts; publish verifies it again before the tag is claimed.
+      - name: Require and verify the candidate CI run unless dry_run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: |
+          if [ "$DRY_RUN" = "true" ] && [ -z "$CI_RUN_ID" ]; then exit 0; fi
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::PUBLISH_CI_RUN_ID_REQUIRED $CI_RUN_ID"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/ci-run.json"
+          node ci/release-publish.mjs verify-ci-run --run-json "$RUNNER_TEMP/ci-run.json" --sha "$GITHUB_SHA"
       - name: Check release source targets
         run: node build/sdk/producers/srcbuild/target-matrix.mjs --targets all --require-ready
 
-  # phase=prepare never reaches plan, source, package or publish. It builds the
-  # five-host native inputs from fixed Git sources, then the Linux x64 source SDK
-  # (cjcj-srcbuild-linux-x64-<version>) from those same-run inputs for ci.yml.
-  prepare-native:
-    if: inputs.phase == 'prepare'
-    name: prepare · five-host native inputs and runtime installations
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: prepare
-      cangjie_ref: ${{ inputs.version }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      source_selection: ${{ inputs.source_selection }}
-
-  prepare-srcbuild-linux-x64:
-    needs: prepare-native
-    if: inputs.phase == 'prepare'
-    name: prepare · linux-x64 source SDK from the same-run native inputs
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      cangjie_ref: ${{ inputs.version }}
-      source_selection: ${{ inputs.source_selection }}
-      shim_source_selection: ${{ inputs.shim_source_selection }}
-      native_inputs_artifact: native-inputs
-      native_inputs_run_id: ${{ github.run_id }}
-      native_runtime_artifact: native-runtime-install
-      native_runtime_run_id: ${{ github.run_id }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      build_type: relwithdebinfo
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-      targets: linux-x64
-
-  # Each phase produces its own native SDK and consumes that same installation.
-  # Linux retains its separate cross std artifact for Linux's FFI payload.
-  source-p1-linux-x64:
+  # One call: sdk-build.yml plans all five hosts and fans them out as one
+  # sdk-build-target.yml matrix. Cross stds are gated inside each cell on its
+  # own target (android/wasm/ohos on linux-x64, ios on darwin-arm64).
+  source:
     needs: plan
-    name: phase 1 · linux-x64 / source SDK and final std (also cross-builds the Windows std)
+    name: source / five hosts and every cross std in parallel
     uses: ./.github/workflows/sdk-build.yml
     with:
       cangjie_ref: ${{ inputs.version }}
@@ -198,435 +173,51 @@ jobs:
       build_type: relwithdebinfo
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
-      targets: linux-x64
+      targets: all
       build_android: true
       build_wasm: true
       build_ohos: true
-
-  source-p2-linux-aarch64:
-    name: phase 2 · linux-aarch64 / source SDK and final std
-    uses: ./.github/workflows/sdk-build.yml
-    needs: package-p1-linux-x64
-    with:
-      cangjie_ref: ${{ inputs.version }}
-      native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
-      native_build_inputs_run_id: ${{ inputs.native_build_inputs_run_id }}
-      source_selection: ${{ inputs.source_selection }}
-      native_inputs_artifact: ${{ inputs.native_inputs_artifact }}
-      shim_source_selection: ${{ inputs.shim_source_selection }}
-      native_inputs_run_id: ${{ inputs.native_inputs_run_id }}
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_runtime_run_id: ${{ inputs.native_runtime_run_id }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      build_type: relwithdebinfo
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-      targets: linux-aarch64
-
-  source-p3-windows-x64:
-    name: phase 3 · windows-x64 / source SDK and final std
-    uses: ./.github/workflows/sdk-build.yml
-    needs: package-p2-linux-aarch64
-    with:
-      cangjie_ref: ${{ inputs.version }}
-      native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
-      native_build_inputs_run_id: ${{ inputs.native_build_inputs_run_id }}
-      source_selection: ${{ inputs.source_selection }}
-      native_inputs_artifact: ${{ inputs.native_inputs_artifact }}
-      shim_source_selection: ${{ inputs.shim_source_selection }}
-      native_inputs_run_id: ${{ inputs.native_inputs_run_id }}
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_runtime_run_id: ${{ inputs.native_runtime_run_id }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      build_type: relwithdebinfo
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-      targets: windows-x64
-
-  source-p4-darwin-arm64:
-    name: phase 4 · darwin-arm64 / source SDK and final std
-    uses: ./.github/workflows/sdk-build.yml
-    needs: package-p3-windows-x64
-    with:
-      cangjie_ref: ${{ inputs.version }}
-      native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
-      native_build_inputs_run_id: ${{ inputs.native_build_inputs_run_id }}
-      source_selection: ${{ inputs.source_selection }}
-      native_inputs_artifact: ${{ inputs.native_inputs_artifact }}
-      shim_source_selection: ${{ inputs.shim_source_selection }}
-      native_inputs_run_id: ${{ inputs.native_inputs_run_id }}
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_runtime_run_id: ${{ inputs.native_runtime_run_id }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      build_type: relwithdebinfo
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-      targets: darwin-arm64
       build_ios: true
 
-  source-p5-darwin-x64:
-    name: phase 5 · darwin-x64 / source SDK and final std
-    uses: ./.github/workflows/sdk-build.yml
-    needs: package-p4-darwin-arm64
+  # The 15 release assets, all in parallel. Each row is the former package-*
+  # job's inputs verbatim; the Windows rows name the native Windows final std
+  # (final-std-native-windows-x64, build/lib/targets.mjs) that sdk-package.yml
+  # re-derives through package-key.mjs and rejects on any mismatch.
+  package:
+    needs: source
+    name: package / ${{ matrix.release_key }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {release_key: linux-x64, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'}
+          - {release_key: linux-arm64, runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64, sdk_runtime_dir: linux_aarch64_cjnative, std_artifact: final-std-linux-aarch64, cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'}
+          - {release_key: win32-x64, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[]'}
+          - {release_key: darwin-arm64, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[]'}
+          - {release_key: darwin-x64, runner: macos-15-intel, platform: darwin-x64, llvm_platform: darwin_x86_64, sdk_runtime_dir: darwin_x86_64_cjnative, std_artifact: final-std-darwin-x64, cross_std_artifacts: '[]'}
+          - {release_key: linux-x64-android, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"}]'}
+          - {release_key: darwin-arm64-android, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"}]'}
+          - {release_key: win32-x64-android, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"},{"tuple":"linux_x86_64_cjnative","artifact":"final-std-linux-x64"}]'}
+          - {release_key: linux-x64-wasm, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'}
+          - {release_key: darwin-arm64-wasm, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'}
+          - {release_key: win32-x64-wasm, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'}
+          - {release_key: linux-x64-ohos, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"},{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'}
+          - {release_key: darwin-arm64-ohos, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"}]'}
+          - {release_key: darwin-arm64-ios, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"ios_aarch64_cjnative","artifact":"final-std-ios-aarch64-cjnative"},{"tuple":"ios_simulator_aarch64_cjnative","artifact":"final-std-ios-simulator-aarch64-cjnative"},{"tuple":"ios_simulator_x86_64_cjnative","artifact":"final-std-ios-simulator-x86-64-cjnative"}]'}
+          - {release_key: win32-x64-ohos, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"}]'}
+    uses: ./.github/workflows/sdk-package.yml
     with:
-      cangjie_ref: ${{ inputs.version }}
-      native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
-      native_build_inputs_run_id: ${{ inputs.native_build_inputs_run_id }}
-      source_selection: ${{ inputs.source_selection }}
-      native_inputs_artifact: ${{ inputs.native_inputs_artifact }}
-      shim_source_selection: ${{ inputs.shim_source_selection }}
-      native_inputs_run_id: ${{ inputs.native_inputs_run_id }}
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_runtime_run_id: ${{ inputs.native_runtime_run_id }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      build_type: relwithdebinfo
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-      targets: darwin-x64
-
-  # ci/docs/dryrun-execution-policy.md §3 fixes this order, cheapest information
-  # first, so a stop at phase N has not paid for phases N+1..5. A matrix cannot
-  # express that: its cells are siblings and all five start together. The needs:
-  # edges are the phase control, and the semantics they rest on -- a job whose
-  # needs did not succeed is skipped, transitively -- are measured by
-  # .github/workflows/needs-semantics-probe.yml rather than assumed.
-  #
-  # Nothing on this chain may carry if: always(). That one condition, which this
-  # job used to have, makes a job run even when everything it needs failed, and
-  # the probe confirms it: c-needs-a-if-always succeeds while a-fails failed.
-  package-p1-linux-x64:
-    name: phase 1 · linux-x64 / Build release package
-    needs: [source-p1-linux-x64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
       native_host_version: ${{ inputs.native_host_version }}
-      runner: ubuntu-24.04
-      platform: linux-x64
-      llvm_platform: linux_x86_64
-      sdk_runtime_dir: linux_x86_64_cjnative
-      release_key: linux-x64
-      std_artifact: final-std-linux-x64
-      cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-p2-linux-aarch64:
-    name: phase 2 · linux-aarch64 / Build release package
-    needs: [source-p2-linux-aarch64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: ubuntu-24.04-arm
-      platform: linux-aarch64
-      llvm_platform: linux_aarch64
-      sdk_runtime_dir: linux_aarch64_cjnative
-      release_key: linux-arm64
-      std_artifact: final-std-linux-aarch64
-      cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-p3-windows-x64:
-    name: phase 3 · windows-x64 / Build release package
-    needs: [source-p3-windows-x64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: windows-2025
-      platform: windows-x64
-      llvm_platform: windows_x86_64
-      sdk_runtime_dir: windows_x86_64_cjnative
-      release_key: win32-x64
-      std_artifact: ${{ needs.source-p3-windows-x64.outputs.std_artifact }}
-      cross_std_artifacts: '[]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-p4-darwin-arm64:
-    name: phase 4 · darwin-arm64 / Build release package
-    needs: [source-p4-darwin-arm64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: macos-15
-      platform: darwin-arm64
-      llvm_platform: darwin_aarch64
-      sdk_runtime_dir: darwin_aarch64_cjnative
-      release_key: darwin-arm64
-      std_artifact: final-std-darwin-arm64
-      cross_std_artifacts: '[]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-p5-darwin-x64:
-    name: phase 5 · darwin-x64 / Build release package
-    needs: [source-p5-darwin-x64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: macos-15-intel
-      platform: darwin-x64
-      llvm_platform: darwin_x86_64
-      sdk_runtime_dir: darwin_x86_64_cjnative
-      release_key: darwin-x64
-      std_artifact: final-std-darwin-x64
-      cross_std_artifacts: '[]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-linux-x64-android:
-    name: linux-x64-android / Build release package
-    needs: [package-p1-linux-x64, source-p1-linux-x64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: ubuntu-24.04
-      platform: linux-x64
-      llvm_platform: linux_x86_64
-      sdk_runtime_dir: linux_x86_64_cjnative
-      release_key: linux-x64-android
-      std_artifact: final-std-linux-x64
-      cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"}]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-darwin-arm64-android:
-    name: darwin-arm64-android / Build release package
-    needs: [package-p4-darwin-arm64, source-p1-linux-x64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: macos-15
-      platform: darwin-arm64
-      llvm_platform: darwin_aarch64
-      sdk_runtime_dir: darwin_aarch64_cjnative
-      release_key: darwin-arm64-android
-      std_artifact: final-std-darwin-arm64
-      cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"}]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-win32-x64-android:
-    name: win32-x64-android / Build release package
-    needs: [package-p3-windows-x64, source-p3-windows-x64, source-p1-linux-x64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: windows-2025
-      platform: windows-x64
-      llvm_platform: windows_x86_64
-      sdk_runtime_dir: windows_x86_64_cjnative
-      release_key: win32-x64-android
-      std_artifact: ${{ needs.source-p3-windows-x64.outputs.std_artifact }}
-      cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"},{"tuple":"linux_x86_64_cjnative","artifact":"final-std-linux-x64"}]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-linux-x64-wasm:
-    name: linux-x64-wasm / Build release package
-    needs: [package-p1-linux-x64, source-p1-linux-x64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: ubuntu-24.04
-      platform: linux-x64
-      llvm_platform: linux_x86_64
-      sdk_runtime_dir: linux_x86_64_cjnative
-      release_key: linux-x64-wasm
-      std_artifact: final-std-linux-x64
-      cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-darwin-arm64-wasm:
-    name: darwin-arm64-wasm / Build release package
-    needs: [package-p4-darwin-arm64, source-p1-linux-x64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: macos-15
-      platform: darwin-arm64
-      llvm_platform: darwin_aarch64
-      sdk_runtime_dir: darwin_aarch64_cjnative
-      release_key: darwin-arm64-wasm
-      std_artifact: final-std-darwin-arm64
-      cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-win32-x64-wasm:
-    name: win32-x64-wasm / Build release package
-    needs: [package-p3-windows-x64, source-p1-linux-x64, source-p3-windows-x64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: windows-2025
-      platform: windows-x64
-      llvm_platform: windows_x86_64
-      sdk_runtime_dir: windows_x86_64_cjnative
-      release_key: win32-x64-wasm
-      std_artifact: ${{ needs.source-p3-windows-x64.outputs.std_artifact }}
-      cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-linux-x64-ohos:
-    name: linux-x64-ohos / Build release package
-    needs: [package-p1-linux-x64, source-p1-linux-x64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: ubuntu-24.04
-      platform: linux-x64
-      llvm_platform: linux_x86_64
-      sdk_runtime_dir: linux_x86_64_cjnative
-      release_key: linux-x64-ohos
-      std_artifact: final-std-linux-x64
-      cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"},{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-darwin-arm64-ohos:
-    name: darwin-arm64-ohos / Build release package
-    needs: [package-p4-darwin-arm64, source-p1-linux-x64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: macos-15
-      platform: darwin-arm64
-      llvm_platform: darwin_aarch64
-      sdk_runtime_dir: darwin_aarch64_cjnative
-      release_key: darwin-arm64-ohos
-      std_artifact: final-std-darwin-arm64
-      cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"}]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-darwin-arm64-ios:
-    name: darwin-arm64-ios / Build release package
-    needs: [package-p4-darwin-arm64, source-p4-darwin-arm64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: macos-15
-      platform: darwin-arm64
-      llvm_platform: darwin_aarch64
-      sdk_runtime_dir: darwin_aarch64_cjnative
-      release_key: darwin-arm64-ios
-      std_artifact: final-std-darwin-arm64
-      cross_std_artifacts: '[{"tuple":"ios_aarch64_cjnative","artifact":"final-std-ios-aarch64-cjnative"},{"tuple":"ios_simulator_aarch64_cjnative","artifact":"final-std-ios-simulator-aarch64-cjnative"},{"tuple":"ios_simulator_x86_64_cjnative","artifact":"final-std-ios-simulator-x86-64-cjnative"}]'
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  package-win32-x64-ohos:
-    name: win32-x64-ohos / Build release package
-    needs: [package-p3-windows-x64, source-p3-windows-x64, source-p1-linux-x64]
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      mode: package
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: windows-2025
-      platform: windows-x64
-      llvm_platform: windows_x86_64
-      sdk_runtime_dir: windows_x86_64_cjnative
-      release_key: win32-x64-ohos
-      std_artifact: ${{ needs.source-p3-windows-x64.outputs.std_artifact }}
-      cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"}]'
+      runner: ${{ matrix.runner }}
+      platform: ${{ matrix.platform }}
+      llvm_platform: ${{ matrix.llvm_platform }}
+      sdk_runtime_dir: ${{ matrix.sdk_runtime_dir }}
+      release_key: ${{ matrix.release_key }}
+      std_artifact: ${{ matrix.std_artifact }}
+      cross_std_artifacts: ${{ matrix.cross_std_artifacts }}
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
@@ -634,10 +225,10 @@ jobs:
 
   publish:
     name: Publish release
-    needs: [source-p1-linux-x64, source-p2-linux-aarch64, source-p3-windows-x64, source-p4-darwin-arm64, source-p5-darwin-x64, package-p1-linux-x64, package-p2-linux-aarch64, package-p3-windows-x64, package-p4-darwin-arm64, package-p5-darwin-x64, package-linux-x64-android, package-darwin-arm64-android, package-win32-x64-android, package-linux-x64-wasm, package-darwin-arm64-wasm, package-win32-x64-wasm, package-linux-x64-ohos, package-darwin-arm64-ohos, package-win32-x64-ohos, package-darwin-arm64-ios]
-    # Default needs semantics: any failed, cancelled or skipped upstream job skips
-    # publication, and the first step re-checks all 20 direct needs explicitly.
-    if: inputs.phase == 'publish' && !inputs.dry_run
+    needs: [plan, package]
+    # Default needs semantics: a failed, cancelled or skipped plan or any failed
+    # package cell skips publication, and the first step re-checks both direct needs.
+    if: ${{ !inputs.dry_run }}
     # Manual approval entry: required reviewers are configured on this
     # environment in the repository settings (not by this workflow).
     environment: release-publish

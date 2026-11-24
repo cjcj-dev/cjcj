@@ -752,109 +752,100 @@ function runTests(context, files) {
   return {status: 'MET', detail: `tests pass=${pass} fail=${fail}`};
 }
 
-// G4 counts source phases from the job graph, not from `uses:` lines: release.yml calls
-// sdk-build.yml for five source phases and fifteen package jobs, so the call count alone
-// can never equal the phase count. A source phase is a sdk-build.yml call without
-// `mode: package` named source-pN-*; its chain is plan -> source-p1 -> package-p1 ->
-// source-p2 -> ... -> package-p5, and each package-pN must need its own source-pN.
 function asList(value) {
   if (value === undefined || value === null) return [];
   return Array.isArray(value) ? value.map(String) : [String(value)];
 }
 
-export function g4SourcePhases(releaseText, expectedPhases = 5) {
+// G4: release.yml is four stages, each fully parallel -- plan, ONE sdk-build.yml
+// call that builds every host and cross std at once, ONE 15-cell sdk-package.yml
+// matrix, publish. The five-host native inputs are prepare.yml's (g4PreparePath).
+export function g4SourcePhases(releaseText, prepareText = null, expectedCells = 15) {
   const document = loadYaml(releaseText) || {};
   const jobs = document.jobs && typeof document.jobs === 'object' ? document.jobs : {};
   const problems = [];
-  // G4's five source phases are the phase=publish path. phase=prepare jobs are a
-  // separate, publication-free path checked by g4PreparePath; they never count
-  // as (or replace) a source phase.
-  const isPrepare = job => /inputs\.phase\s*==\s*'prepare'/.test(String(job?.if ?? ''));
-  const allCalls = Object.entries(jobs).filter(([, job]) => job?.uses === './.github/workflows/sdk-build.yml');
-  const sdkCalls = allCalls.filter(([, job]) => !isPrepare(job));
-  const prepare = g4PreparePath(jobs, allCalls.filter(([, job]) => isPrepare(job)));
-  const mode = job => String(job?.with?.mode ?? 'build');
-  const source = sdkCalls.filter(([, job]) => mode(job) === 'build');
-  const packages = sdkCalls.filter(([, job]) => mode(job) === 'package');
-  for (const [name, job] of sdkCalls) {
-    if (!['build', 'package'].includes(mode(job))) problems.push(`${name}: unexpected sdk-build mode ${mode(job)}`);
+  const calls = workflow => Object.entries(jobs).filter(([, job]) => job?.uses === `./.github/workflows/${workflow}`);
+  const sdkCalls = calls('sdk-build.yml');
+  const packageCalls = calls('sdk-package.yml');
+  if (sdkCalls.length !== 1) problems.push(`release needs exactly one sdk-build.yml source call, found ${sdkCalls.length}`);
+  if (packageCalls.length !== 1) problems.push(`release needs exactly one sdk-package.yml package matrix, found ${packageCalls.length}`);
+  if (/inputs\.phase\b/.test(releaseText)) problems.push('release still reads inputs.phase; prepare lives in prepare.yml');
+  const [sourceName, source] = sdkCalls[0] || [];
+  if (source) {
+    if (JSON.stringify(asList(source.needs)) !== '["plan"]') problems.push(`${sourceName} must need only plan`);
+    if (source.if !== undefined) problems.push(`${sourceName} must be unconditional`);
+    if (String(source.with?.targets) !== 'all') problems.push(`${sourceName} must build every target in one call (targets: all)`);
+    for (const key of ['build_android', 'build_wasm', 'build_ohos', 'build_ios'])
+      if (source.with?.[key] !== true) problems.push(`${sourceName} must set ${key}: true`);
   }
-  const phaseOf = (name, kind) => Number(new RegExp(`^${kind}-p(\\d+)-`).exec(name)?.[1] || 0);
-  const phases = new Map();
-  for (const [name] of source) {
-    const phase = phaseOf(name, 'source');
-    if (!phase) { problems.push(`${name}: source call is not named source-pN-*`); continue; }
-    if (phases.has(phase)) problems.push(`source phase ${phase} declared twice (${phases.get(phase)}, ${name})`);
-    phases.set(phase, name);
+  const [packageName, pkg] = packageCalls[0] || [];
+  const rows = pkg?.strategy?.matrix?.include || [];
+  if (pkg) {
+    if (!sourceName || JSON.stringify(asList(pkg.needs)) !== JSON.stringify([sourceName])) problems.push(`${packageName} must need only ${sourceName || 'the source call'}`);
+    if (pkg.if !== undefined) problems.push(`${packageName} must be unconditional`);
+    if (pkg.strategy?.['fail-fast'] !== false || pkg.strategy?.['max-parallel'] !== undefined) problems.push(`${packageName} must run every cell in parallel (fail-fast: false, no max-parallel)`);
+    const keys = new Set(rows.map(row => row.release_key));
+    if (rows.length !== expectedCells || keys.size !== expectedCells) problems.push(`${packageName} must hold ${expectedCells} distinct release cells, found ${rows.length}/${keys.size}`);
   }
-  const packageByPhase = new Map(packages.map(([name]) => [phaseOf(name, 'package'), name]).filter(([phase]) => phase));
-  for (let phase = 1; phase <= expectedPhases; phase += 1) {
-    const sourceName = phases.get(phase);
-    if (!sourceName) { problems.push(`missing source phase ${phase}`); continue; }
-    const needs = asList(jobs[sourceName].needs);
-    const upstream = phase === 1 ? 'plan' : packageByPhase.get(phase - 1);
-    if (!upstream || !needs.includes(upstream)) problems.push(`${sourceName} does not need ${upstream || `package-p${phase - 1}`}`);
-    const packageName = packageByPhase.get(phase);
-    if (!packageName) problems.push(`missing package phase ${phase}`);
-    else if (!asList(jobs[packageName].needs).includes(sourceName)) problems.push(`${packageName} does not need ${sourceName}`);
+  const publishNeeds = asList(jobs.publish?.needs).sort();
+  if (packageName && !publishNeeds.includes(packageName)) problems.push(`publish does not need ${packageName}`);
+  for (const [name, job] of Object.entries(jobs)) {
+    if (job?.uses && ![sourceName, packageName].includes(name)) problems.push(`${name}: unexpected workflow call ${job.uses}`);
   }
-  for (const phase of phases.keys()) if (phase < 1 || phase > expectedPhases) problems.push(`unexpected source phase ${phase}`);
+  const prepare = prepareText === null ? {calls: 0, problems: []} : g4PreparePath(loadYaml(prepareText)?.jobs || {});
   problems.push(...prepare.problems);
-  return {sdkCalls: sdkCalls.length, sourcePhases: source.length, uniquePhases: phases.size,
-    packageCalls: packages.length, prepareCalls: prepare.calls, problems, ok: problems.length === 0 && phases.size === expectedPhases};
+  return {sdkCalls: sdkCalls.length, packageCalls: packageCalls.length, packageCells: rows.length,
+    prepareCalls: prepare.calls, problems, ok: problems.length === 0};
 }
 
-// phase=prepare: one mode=prepare call (five-host native inputs) and one Linux x64
-// source build that consumes exactly those same-run inputs. The publish path is
-// unreachable from prepare: plan/publish are gated on phase=publish and publish
-// never needs a prepare job.
-export function g4PreparePath(jobs, calls) {
+// prepare.yml: the five native hosts build native-inputs-<target> and
+// native-runtime-install-<llvm_platform> directly (no nested workflow), then ONE
+// Linux x64 source build consumes exactly those same-run inputs. Nothing in
+// prepare.yml packages or publishes.
+export function g4PreparePath(jobs) {
   const problems = [];
-  const mode = job => String(job?.with?.mode ?? 'build');
-  const producers = calls.filter(([, job]) => mode(job) === 'prepare');
-  const consumers = calls.filter(([, job]) => mode(job) === 'build');
-  for (const [name, job] of calls) if (!['prepare', 'build'].includes(mode(job))) problems.push(`${name}: unexpected prepare mode ${mode(job)}`);
-  if (producers.length !== 1) problems.push(`prepare path needs exactly one mode=prepare call, found ${producers.length}`);
-  if (consumers.length !== 1) problems.push(`prepare path needs exactly one same-run linux-x64 source build, found ${consumers.length}`);
-  const [producer] = producers[0] || [];
-  for (const [name, job] of consumers) {
+  const native = jobs['prepare-native'];
+  const hosts = (native?.strategy?.matrix?.include || []).map(row => row.target).sort();
+  if (!native || native.uses) problems.push('prepare-native must run the five hosts directly');
+  if (JSON.stringify(hosts) !== JSON.stringify(['darwin-arm64', 'darwin-x64', 'linux-aarch64', 'linux-x64', 'windows-x64']))
+    problems.push(`prepare-native must cover the five native hosts, found ${hosts}`);
+  const uploads = (native?.steps || []).filter(step => String(step.uses || '').startsWith('actions/upload-artifact@')).map(step => step.with?.name).sort();
+  if (JSON.stringify(uploads) !== JSON.stringify(['native-inputs-${{ matrix.target }}', 'native-runtime-install-${{ matrix.llvm_platform }}']))
+    problems.push(`prepare-native must upload exactly native-inputs-<target> and native-runtime-install-<llvm_platform>, found ${uploads}`);
+  const calls = Object.entries(jobs).filter(([, job]) => job?.uses);
+  if (calls.length !== 1 || calls[0][1].uses !== './.github/workflows/sdk-build.yml')
+    problems.push(`prepare path needs exactly one same-run linux-x64 sdk-build.yml call, found ${calls.length}`);
+  for (const [name, job] of calls) {
     const w = job.with || {};
     if (String(w.targets) !== 'linux-x64') problems.push(`${name} must build only linux-x64`);
-    if (!producer || !asList(job.needs).includes(producer)) problems.push(`${name} does not need ${producer || 'the prepare producer'}`);
+    if (!asList(job.needs).includes('prepare-native')) problems.push(`${name} does not need prepare-native`);
     for (const [key, value] of [['native_inputs_artifact', 'native-inputs'], ['native_runtime_artifact', 'native-runtime-install'],
       ['native_inputs_run_id', '${{ github.run_id }}'], ['native_runtime_run_id', '${{ github.run_id }}']])
       if (String(w[key] ?? '') !== value) problems.push(`${name} ${key} must be ${value}`);
   }
-  const prepareNames = new Set(calls.map(([name]) => name));
-  for (const name of ['plan', 'publish']) {
-    if (!/inputs\.phase\s*==\s*'publish'/.test(String(jobs[name]?.if ?? ''))) problems.push(`${name} is not gated on phase=publish`);
-  }
-  for (const [name, job] of Object.entries(jobs)) {
-    if (prepareNames.has(name)) continue;
-    const reached = asList(job?.needs).filter(need => prepareNames.has(need));
-    if (reached.length) problems.push(`${name} depends on prepare job ${reached.join(', ')}`);
-  }
+  for (const name of Object.keys(jobs)) if (!['prepare-native', 'prepare-srcbuild-linux-x64'].includes(name)) problems.push(`prepare.yml: unexpected job ${name}`);
   return {calls: calls.length, problems};
 }
 
 async function evaluateG4(context) {
-  const release = await readFile(context, '.github/workflows/release.yml');
+  const [release, prepare] = await Promise.all([readFile(context, '.github/workflows/release.yml'), readFile(context, '.github/workflows/prepare.yml')]);
   let graph;
   try {
-    graph = g4SourcePhases(release);
+    graph = g4SourcePhases(release, prepare);
   } catch (error) {
-    return gateResult('G4', 'NOT_MET', `release.yml is not parseable YAML: ${error.message}`);
+    return gateResult('G4', 'NOT_MET', `release.yml or prepare.yml is not parseable YAML: ${error.message}`);
   }
   const tests = runTests(context, [
     'build/sdk/producers/srcbuild/tests/phase-control.test.mjs',
     'build/sdk/producers/srcbuild/tests/release-wire.test.mjs',
     'build/sdk/producers/srcbuild/tests/workflow-inputs.test.mjs',
     'build/sdk/producers/srcbuild/tests/platform-contract.test.mjs',
+    'ci/release-workflow-expansion.test.mjs',
   ]);
   const status = graph.ok && tests.status === 'MET' ? 'MET' : 'NOT_MET';
   return gateResult('G4', status,
-    `判据 1124 按 job 图核源阶段；srcbuild_calls=${graph.sdkCalls} source_phases=${graph.sourcePhases} ` +
-    `unique_source_phases=${graph.uniquePhases} package_calls=${graph.packageCalls}` +
+    `release.yml four parallel stages: source_calls=${graph.sdkCalls} package_calls=${graph.packageCalls} ` +
+    `package_cells=${graph.packageCells} prepare_calls=${graph.prepareCalls}` +
     `${graph.problems.length ? `; problems=${graph.problems.join(';')}` : ''}; ${tests.detail}`);
 }
 
@@ -868,7 +859,7 @@ function stepBlock(workflow, name) {
 async function evaluateG5(context) {
   const [checker, workflow] = await Promise.all([
     readFile(context, 'build/sdk/producers/package/check_packaged_std.mjs'),
-    readFile(context, '.github/workflows/sdk-build.yml'),
+    readFile(context, '.github/workflows/sdk-package.yml'),
   ]);
   const [nativeConsumer, composer] = workflow.includes('run: node build/sdk/producers/release/compose-package.mjs')
     ? await Promise.all([readFile(context, 'build/sdk/producers/release/verify_native_release.mjs'), readFile(context, 'build/sdk/producers/release/compose-package.mjs')]) : ['', ''];
@@ -1605,10 +1596,11 @@ async function releaseScope(context) {
   if (!plainObject(workflow?.jobs)) {
     throw new GateInputError('NOT_MET', 'release workflow jobs must be a mapping');
   }
+  // One sdk-package.yml matrix cell per release package.
   const jobs = Object.entries(workflow.jobs)
-    .filter(([, job]) => (job?.uses === './.github/workflows/sdk-build.yml' && job?.with?.mode === 'package'))
-    .map(([id, job]) => ({id, key: job.with?.release_key, host: job.with?.platform,
-      llvm_platform: job.with?.llvm_platform}));
+    .filter(([, job]) => job?.uses === './.github/workflows/sdk-package.yml')
+    .flatMap(([id, job]) => (job?.strategy?.matrix?.include || []).map(row => ({id: `${id}/${row.release_key}`,
+      key: row.release_key, host: row.platform, llvm_platform: row.llvm_platform})));
   // Static workflow declarations include source-blocked recipes. Admission is
   // still controlled by source readiness; evidence covers every registry row.
   const expected = platforms.filter(platform => platform.packageDeclared);
@@ -1685,7 +1677,7 @@ async function evaluateG10(context) {
 async function evaluateG15(context) {
   const [python, packageWorkflow, scope] = await Promise.all([
     readFile(context, 'build/lib/python-bundle.mjs'),
-    readFile(context, '.github/workflows/sdk-build.yml'),
+    readFile(context, '.github/workflows/sdk-package.yml'),
     releaseScope(context),
   ]);
   const [nativeConsumer, composer] = packageWorkflow.includes('run: node build/sdk/producers/release/compose-package.mjs')

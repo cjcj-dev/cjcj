@@ -12,16 +12,17 @@ import {load} from '../../ci/vendor/js-yaml/js-yaml.mjs';
 import {ASSETS, HOSTS} from './targets.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-export const WORKFLOWS = Object.freeze({release: '.github/workflows/release.yml',
-  source: '.github/workflows/sdk-build-target.yml', package: '.github/workflows/sdk-build.yml'});
+export const WORKFLOWS = Object.freeze({release: '.github/workflows/release.yml', prepare: '.github/workflows/prepare.yml',
+  build: '.github/workflows/sdk-build.yml', source: '.github/workflows/sdk-build-target.yml', package: '.github/workflows/sdk-package.yml'});
 export const PRODUCERS_DIR = 'build/sdk/producers';
 // The whole workflow and composite-action surface; anything else under .github is a stray probe.
-export const WORKFLOW_FILES = Object.freeze(['ci.yml', 'release.yml', 'sdk-build-target.yml', 'sdk-build.yml']);
+export const WORKFLOW_FILES = Object.freeze(['ci.yml', 'prepare.yml', 'release.yml', 'sdk-build-target.yml', 'sdk-build.yml', 'sdk-package.yml']);
 export const ACTION_DIRS = Object.freeze(['native-windows-tools', 'sccache', 'setup-release-sdk']);
 
 // release.yml calls the source workflow once per host carrier.
-export const HOST_SOURCE_JOBS = Object.freeze({'linux-x64': 'source-p1-linux-x64', 'linux-aarch64': 'source-p2-linux-aarch64',
-  'windows-x64': 'source-p3-windows-x64', 'darwin-arm64': 'source-p4-darwin-arm64', 'darwin-x64': 'source-p5-darwin-x64'});
+// release.yml builds every host in ONE sdk-build.yml call (targets: all).
+export const HOST_SOURCE_JOBS = Object.freeze({'linux-x64': 'source', 'linux-aarch64': 'source',
+  'windows-x64': 'source', 'darwin-arm64': 'source', 'darwin-x64': 'source'});
 
 const P = (host, job, artifact, steps) => Object.freeze({host, job, artifact, steps: Object.freeze(steps)});
 const OHOS = ['srcbuild/steps/build-ohos-final-std.mjs'], IOS = ['srcbuild/steps/build-ios-final-std.mjs'];
@@ -77,27 +78,31 @@ export function checkProductionWiring({workflows = loadWorkflows(), exists = f =
   const {release, source} = workflows, jobs = release?.jobs ?? {}, plans = new Map();
   const planFor = host => { if (!plans.has(host)) plans.set(host, plan(host)); return plans.get(host); };
   const callsSdkBuild = j => String(j?.uses ?? '').endsWith('/sdk-build.yml');
-  const packages = Object.entries(jobs).filter(([, j]) => callsSdkBuild(j) && j.with?.mode === 'package');
+  // The 15 packages are the cells of ONE sdk-package.yml matrix job; a cell is named <job>/<release_key>.
+  const matrixJobs = Object.entries(jobs).filter(([, j]) => String(j?.uses ?? '').endsWith('/sdk-package.yml'));
+  if (matrixJobs.length !== 1) fail('WIRING_PACKAGE_MATRIX', `${WORKFLOWS.release} calls sdk-package.yml ${matrixJobs.length} times`);
+  const [matrixName, matrixJob] = matrixJobs[0];
+  const cellJob = name => name.startsWith(`${matrixName}/`) ? matrixName : name;
+  const packages = (matrixJob.strategy?.matrix?.include ?? []).map(row => [`${matrixName}/${row.release_key}`, {with: row}]);
   const pkgJob = workflows.package?.jobs?.package;
-  if (!/inputs\.mode == 'package'/.test(String(pkgJob?.if ?? '')) || !(pkgJob?.steps ?? []).length)
+  if (pkgJob?.if !== undefined || !(pkgJob?.steps ?? []).length || Object.values(workflows.package?.jobs ?? {}).some(j => j?.uses))
     fail('WIRING_PACKAGE_JOB', `${WORKFLOWS.package} jobs.package`);
-  if (!String(workflows.package?.jobs?.srcbuild?.uses ?? '').endsWith('/sdk-build-target.yml'))
-    fail('WIRING_SOURCE_CALL', `${WORKFLOWS.package} jobs.srcbuild`);
+  if (!String(workflows.build?.jobs?.srcbuild?.uses ?? '').endsWith('/sdk-build-target.yml'))
+    fail('WIRING_SOURCE_CALL', `${WORKFLOWS.build} jobs.srcbuild`);
   const keys = packages.map(([, j]) => j.with?.release_key);
   for (const asset of ASSETS) if (!keys.includes(asset.key)) fail('WIRING_PACKAGE_MISSING', asset.key);
   if (packages.length !== ASSETS.length || new Set(keys).size !== keys.length) fail('WIRING_PACKAGE_SET', keys.join(','));
   const publishNeeds = new Set([].concat(jobs.publish?.needs ?? []));
-  const before = name => { const seen = new Set(), todo = [].concat(jobs[name]?.needs ?? []);
+  const before = name => { const seen = new Set(), todo = [].concat(jobs[cellJob(name)]?.needs ?? []);
     while (todo.length) { const n = todo.pop(); if (!seen.has(n)) { seen.add(n); todo.push(...[].concat(jobs[n]?.needs ?? [])); } }
     return seen; };
   const result = [];
   for (const [name, job] of packages) {
     const asset = ASSETS.find(a => a.key === job.with.release_key);
-    if (!publishNeeds.has(name)) fail('WIRING_PUBLISH_NEEDS', name);
+    if (!publishNeeds.has(cellJob(name))) fail('WIRING_PUBLISH_NEEDS', name);
     const hostJob = HOST_SOURCE_JOBS[asset.host];
-    if (!callsSdkBuild(jobs[hostJob]) || (jobs[hostJob]?.with?.mode ?? 'build') !== 'build' || jobs[hostJob]?.with?.targets !== asset.host)
+    if (!callsSdkBuild(jobs[hostJob]) || jobs[hostJob]?.with?.targets !== 'all')
       fail('WIRING_HOST_SOURCE', `${asset.key} ${hostJob}`);
-    if (!publishNeeds.has(hostJob)) fail('WIRING_PUBLISH_NEEDS', hostJob);
     if (!before(name).has(hostJob)) fail('WIRING_PRODUCER_NEEDS', `${name} ${hostJob}`);
     const std = String(job.with.std_artifact ?? '');
     if (std !== `\${{ needs.${hostJob}.outputs.std_artifact }}` && planFor(asset.host).planned) {

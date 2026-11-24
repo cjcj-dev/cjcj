@@ -5,8 +5,9 @@
 //     of build/lib/targets.mjs, four files each (archive, .sha256, .RELEASE-MANIFEST.jsonl,
 //     .SHA256SUMS), 60 in total, no pkg-diagnosis-* or other stray file; every digest and
 //     the sidecar manifest must match the archive and the manifest packed inside it.
-//   verify-needs: every direct `needs` of publish concluded `success`.
-//   verify-ci-run: an optional ci_run_id must be a successful ci.yml run of GITHUB_SHA.
+//   verify-needs: both direct `needs` of publish (plan, the 15-cell package matrix)
+//     concluded `success`.
+//   verify-ci-run: ci_run_id (required unless dry_run) must be a successful ci.yml run of GITHUB_SHA.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,7 +17,8 @@ import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
 
 export const EXPECTED_ARCHIVE_COUNT = 15;
 export const FILES_PER_ARCHIVE = 4;
-export const EXPECTED_NEEDS = 20;
+export const EXPECTED_NEEDS = 2;
+export const PUBLISH_NEEDS = Object.freeze(['package', 'plan']);
 
 export function expectedArchiveKeys() {
   const keys = [...new Set(allReleasePlatforms().map(getReleasePlatform)
@@ -120,23 +122,50 @@ export function verifyCiRun(run, sha) {
 }
 
 // Static contract of release.yml, used by ci/release-publish.test.mjs and its red cuts.
+// Four stages, each fully parallel: plan -> source (one sdk-build.yml call for every
+// host) -> package (one 15-cell sdk-package.yml matrix) -> publish.
 export function releaseWorkflowProblems(text) {
   const workflow = loadYaml(text);
   const problems = [];
   const inputs = workflow?.on?.workflow_dispatch?.inputs || {};
-  if (inputs.phase?.type !== 'choice' || JSON.stringify(inputs.phase?.options) !== '["prepare","publish"]' || inputs.phase?.default !== 'prepare') {
-    problems.push('phase must be a choice of prepare|publish defaulting to prepare');
-  }
+  if (inputs.phase) problems.push('phase must not exist: prepare.yml owns the native inputs');
   if (inputs.ci_run_id?.type !== 'string' || inputs.ci_run_id?.required) problems.push('ci_run_id must be an optional string');
   const jobs = workflow?.jobs || {};
+  if (JSON.stringify(Object.keys(jobs).sort()) !== JSON.stringify(['package', 'plan', 'publish', 'source']))
+    problems.push(`release jobs must be exactly plan, source, package, publish: ${Object.keys(jobs).sort()}`);
+  const plan = jobs.plan;
+  const planScript = (plan?.steps || []).map(step => step.run || '').join('\n');
+  if (!plan || plan.if !== undefined || plan.needs !== undefined) problems.push('plan must run unconditionally first');
+  for (const [needle, label] of [
+    ['target-matrix.mjs --targets all --require-ready', 'every source target ready'],
+    ['PUBLISH_CI_RUN_ID_REQUIRED', 'ci_run_id required unless dry_run'],
+    ['node ci/release-publish.mjs verify-ci-run', 'ci_run_id verification'],
+  ]) if (!planScript.includes(needle)) problems.push(`plan lacks ${label}`);
+  const source = jobs.source;
+  if (source?.uses !== './.github/workflows/sdk-build.yml' || source?.needs !== 'plan' || source?.if !== undefined)
+    problems.push('source must be one unconditional sdk-build.yml call that needs plan');
+  if (source?.with?.targets !== 'all') problems.push('source must build every target in one call (targets: all)');
+  for (const key of ['build_android', 'build_wasm', 'build_ohos', 'build_ios'])
+    if (source?.with?.[key] !== true) problems.push(`source must set ${key}: true`);
+  const pkg = jobs.package;
+  const rows = pkg?.strategy?.matrix?.include || [];
+  if (pkg?.uses !== './.github/workflows/sdk-package.yml' || pkg?.needs !== 'source' || pkg?.if !== undefined)
+    problems.push('package must be one unconditional sdk-package.yml matrix that needs source');
+  if (pkg?.strategy?.['fail-fast'] !== false || pkg?.strategy?.['max-parallel'] !== undefined)
+    problems.push('package must run every cell in parallel with fail-fast: false');
+  const keys = rows.map(row => row.release_key).sort();
+  const expected = allReleasePlatforms().filter(key => { const platform = getReleasePlatform(key); return !platform.excluded && !platform.crossCompiledHost; }).sort();
+  if (rows.length !== EXPECTED_ARCHIVE_COUNT || JSON.stringify(keys) !== JSON.stringify(expected))
+    problems.push(`package matrix must hold the ${EXPECTED_ARCHIVE_COUNT} release keys: ${keys}`);
+  for (const field of ['runner', 'platform', 'llvm_platform', 'sdk_runtime_dir', 'release_key', 'std_artifact', 'cross_std_artifacts'])
+    if (pkg?.with?.[field] !== `\${{ matrix.${field} }}`) problems.push(`package does not pass matrix.${field}`);
   const publish = jobs.publish;
   if (!publish) return [...problems, 'publish job missing'];
   const condition = String(publish.if || '');
   if (/always\(\)|cancelled\(\)|failure\(\)/.test(condition)) problems.push('publish must not use always()/cancelled()/failure()');
-  if (!condition.includes("inputs.phase == 'publish'") || !condition.includes('!inputs.dry_run')) problems.push("publish must require inputs.phase == 'publish' && !inputs.dry_run");
-  const upstream = Object.keys(jobs).filter(name => /^(?:source|package)-/.test(name)).sort();
+  if (!condition.includes('!inputs.dry_run')) problems.push('publish must require !inputs.dry_run');
   const needs = [...(publish.needs || [])].sort();
-  if (upstream.length !== EXPECTED_NEEDS || JSON.stringify(needs) !== JSON.stringify(upstream)) problems.push(`publish needs ${needs.length} jobs, expected all ${upstream.length} source/package jobs`);
+  if (JSON.stringify(needs) !== JSON.stringify(PUBLISH_NEEDS)) problems.push(`publish needs ${needs}, expected ${PUBLISH_NEEDS}`);
   const script = (publish.steps || []).map(step => step.run || '').join('\n');
   for (const [needle, label] of [
     ['node ci/release-publish.mjs verify-needs', 'explicit needs success check'],
@@ -156,12 +185,11 @@ export function releaseWorkflowProblems(text) {
   if (download?.with?.pattern !== 'pkg-*' || download?.with?.['merge-multiple'] !== false)
     problems.push('publish must download pkg-* into per-artifact directories');
   if (!publish.environment) problems.push('publish must run in a deployment environment (manual approval entry)');
-  for (const [name, job] of Object.entries(jobs).filter(([name]) => /^(?:source|package)-/.test(name))) {
+  for (const [name, job] of [['source', source], ['package', pkg]]) {
     for (const key of ['native_runtime_artifact', 'native_llvm_ref', 'native_runtime_ref', 'native_host_version']) {
-      if (job.with?.[key] !== `\${{ inputs.${key} }}`) problems.push(`${name} does not pass ${key}`);
+      if (job?.with?.[key] !== `\${{ inputs.${key} }}`) problems.push(`${name} does not pass ${key}`);
     }
   }
-  if (jobs.plan && !String(jobs.plan.if || '').includes("inputs.phase == 'publish'")) problems.push('plan must only run in phase=publish');
   return problems;
 }
 
