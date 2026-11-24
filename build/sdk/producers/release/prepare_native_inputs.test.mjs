@@ -1315,6 +1315,72 @@ for (const {target,llvm_platform:platform} of PREPARE_HOSTS) test(target + ': co
   await readInstalledNativeShim(resolved.shim);
 });
 
+// eb7ad012 lldb/tools/debugserver/source/CMakeLists.txt:162-187, byte for byte
+// (sha256 2dc3ba30c8de4aefc822746200d6e5bbcc0b38f08509d419cbaeb53b921ac3a2): the
+// energy probe and the mig rule that macos-15 (CMake 4.5.0) configured in run 45420757561.
+const DEBUGSERVER_MIG_PINNED=[
+  'if(${CMAKE_OSX_SYSROOT} MATCHES ".Internal.sdk$")',
+  '  message(STATUS "LLDB debugserver energy support is enabled")',
+  '  add_definitions(-DLLDB_ENERGY)',
+  '  set(ENERGY_LIBRARY -lpmenergy -lpmsample)',
+  'else()',
+  '  message(STATUS "LLDB debugserver energy support is disabled")',
+  'endif()',
+  '',
+  'set(generated_mach_interfaces',
+  '  ${CMAKE_CURRENT_BINARY_DIR}/mach_exc.h',
+  '  ${CMAKE_CURRENT_BINARY_DIR}/mach_excServer.c',
+  '  ${CMAKE_CURRENT_BINARY_DIR}/mach_excUser.c',
+  '  )',
+  '',
+  'set(MIG_ARCH_FLAGS "")',
+  'if (DEFINED MIG_ARCHS)',
+  '  foreach(ARCH ${MIG_ARCHS})',
+  '    set(MIG_ARCH_FLAGS "${MIG_ARCH_FLAGS} -arch ${ARCH}")',
+  '  endforeach()',
+  'endif()',
+  'separate_arguments(MIG_ARCH_FLAGS_SEPARTED NATIVE_COMMAND "${MIG_ARCH_FLAGS}")',
+  '',
+  'add_custom_command(OUTPUT ${generated_mach_interfaces}',
+  '  VERBATIM COMMAND mig ${MIG_ARCH_FLAGS_SEPARTED} -isysroot ${CMAKE_OSX_SYSROOT} ${CMAKE_CURRENT_SOURCE_DIR}/MacOSX/dbgnub-mig.defs',
+  '  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/MacOSX/dbgnub-mig.defs',
+  '  )',
+].join('\n')+'\n';
+function putDarwinDebugserver(work){
+  const dir=path.join(work,'lldb/tools/debugserver/source'),file=path.join(dir,'CMakeLists.txt'),defs=path.join(dir,'MacOSX/dbgnub-mig.defs');
+  fs.mkdirSync(path.dirname(defs),{recursive:true});
+  fs.writeFileSync(defs,'subsystem dbgnub 2401;\n');
+  fs.writeFileSync(file,'cmake_minimum_required(VERSION 3.20)\nproject(debugserver_mig NONE)\n'+DEBUGSERVER_MIG_PINNED+
+    'add_custom_target(mach_interfaces ALL DEPENDS ${generated_mach_interfaces})\n');
+  return {dir,file,defs};
+}
+// Configure and build the debugserver fixture with argv-recording mig/xcrun stubs
+// first on PATH; an argv is null when that tool never ran.
+function runDebugserverMig(t,{dir},{define,xcrun}){
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'prepare-mig-'));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const bin=path.join(root,'bin'),build=path.join(root,'build'),migArgv=path.join(root,'mig.argv'),xcrunArgv=path.join(root,'xcrun.argv');
+  const record=file=>`for a in "$@"; do printf '%s\\0' "$a"; done > '${file}'\n`;
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin,'mig'),'#!/bin/sh\n'+record(migArgv),{mode:0o755});
+  fs.writeFileSync(path.join(bin,'xcrun'),'#!/bin/sh\n'+record(xcrunArgv)+
+    (xcrun.out===undefined?'':`printf '%s\\n' '${xcrun.out}'\n`)+`exit ${xcrun.rc??0}\n`,{mode:0o755});
+  const env={...process.env,PATH:bin+path.delimiter+process.env.PATH};
+  const argv=file=>fs.existsSync(file)?fs.readFileSync(file,'utf8').split('\0').slice(0,-1):null;
+  const configure=spawnSync('cmake',['-G','Unix Makefiles','-S',dir,'-B',build,...define],{env,encoding:'utf8'});
+  if(configure.status===0){
+    const built=spawnSync('cmake',['--build',build],{env,encoding:'utf8'});
+    assert.equal(built.status,0,built.stdout+built.stderr);
+  }
+  return {configure,mig:argv(migArgv),xcrun:argv(xcrunArgv)};
+}
+function putDarwinLldbPlugins(work){
+  const put=(file,body)=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,body);};
+  for(const plugin of ['ExpressionParser/Cangjie','Platform/OHOS'])
+    put(path.join(work,'lldb/source/Plugins',plugin,'CMakeLists.txt'),'string(REPLACE "AMD64" "x86_64" ARCH_NAME "${CMAKE_SYSTEM_PROCESSOR}")\n');
+  put(path.join(work,'lldb/source/API/CMakeLists.txt'),'target_link_options(liblldb PUBLIC "-Wl,-rpath,${CMAKE_SOURCE_DIR}/../utils/boundscheck/lib/${CMAKE_SYSTEM_PROCESSOR}")\n');
+}
+
 test('Darwin standalone LLDB uses the parent boundscheck architecture and a relocatable install name',async t=>{
   const {prepareDarwinLldbSource}=await import('../../../srcbuild/stages/fetch.mjs');
   const work=fs.mkdtempSync(path.join(os.tmpdir(),'prepare-darwin-'));
@@ -1324,6 +1390,7 @@ test('Darwin standalone LLDB uses the parent boundscheck architecture and a relo
   const put=(file,body)=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,body);};
   for(const file of files)put(file,'string(REPLACE "AMD64" "x86_64" ARCH_NAME "${CMAKE_SYSTEM_PROCESSOR}")\nfile(WRITE "${OUT}" "${ARCH_NAME}")\n');
   put(api,'target_link_options(liblldb PUBLIC "-Wl,-rpath,${CMAKE_SOURCE_DIR}/../utils/boundscheck/lib/${CMAKE_SYSTEM_PROCESSOR}")\n');
+  putDarwinDebugserver(work);
   prepareDarwinLldbSource(work);
   const before=[...files,api].map(f=>fs.readFileSync(f,'utf8'));
   prepareDarwinLldbSource(work);
@@ -1335,6 +1402,55 @@ test('Darwin standalone LLDB uses the parent boundscheck architecture and a relo
   }
   assert.match(before[2],/target_link_options\(liblldb PRIVATE "-Wl,-rpath,@loader_path"\)/);
   assert.ok(!before[2].includes('CMAKE_SOURCE_DIR'));
+});
+
+test('Darwin debugserver hands mig a resolved SDK when CMake 4 leaves CMAKE_OSX_SYSROOT empty',
+  {skip:process.platform==='win32'&&'POSIX mig/xcrun stubs'},async t=>{
+  const {prepareDarwinLldbSource}=await import('../../../srcbuild/stages/fetch.mjs');
+  const work=fs.mkdtempSync(path.join(os.tmpdir(),'prepare-darwin-mig-'));
+  t.after(()=>fs.rmSync(work,{recursive:true,force:true}));
+  assert.equal(crypto.createHash('sha256').update(DEBUGSERVER_MIG_PINNED).digest('hex'),
+    '2dc3ba30c8de4aefc822746200d6e5bbcc0b38f08509d419cbaeb53b921ac3a2');
+  putDarwinLldbPlugins(work);
+  const debugserver=putDarwinDebugserver(work),empty=['-DCMAKE_OSX_SYSROOT='];
+  const sdk='/Applications/Xcode 16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk';
+  // The pinned rule with CMake 4's empty default: dbgnub-mig.defs becomes the
+  // -isysroot value and mig is left without an input file.
+  const pinned=runDebugserverMig(t,debugserver,{define:empty,xcrun:{out:sdk}});
+  assert.equal(pinned.configure.status,0,pinned.configure.stderr);
+  assert.deepEqual(pinned.mig,['-isysroot',debugserver.defs]);
+  assert.equal(pinned.xcrun,null);
+  const original=fs.readFileSync(debugserver.file,'utf8');
+  prepareDarwinLldbSource(work);
+  const patched=fs.readFileSync(debugserver.file,'utf8');
+  prepareDarwinLldbSource(work);
+  assert.equal(fs.readFileSync(debugserver.file,'utf8'),patched);
+  assert.ok(patched.startsWith(original.slice(0,original.indexOf('add_custom_command('))));
+  const resolved=runDebugserverMig(t,debugserver,{define:[...empty,'-DMIG_ARCHS=arm64'],xcrun:{out:sdk}});
+  assert.equal(resolved.configure.status,0,resolved.configure.stderr);
+  assert.deepEqual(resolved.xcrun,['--sdk','macosx','--show-sdk-path']);
+  assert.deepEqual(resolved.mig,['-arch','arm64','-isysroot',sdk,debugserver.defs]);
+  const explicit=runDebugserverMig(t,debugserver,{define:['-DCMAKE_OSX_SYSROOT=/custom/sdk'],xcrun:{rc:1}});
+  assert.equal(explicit.configure.status,0,explicit.configure.stderr);
+  assert.equal(explicit.xcrun,null);
+  assert.deepEqual(explicit.mig,['-isysroot','/custom/sdk',debugserver.defs]);
+  for(const xcrun of [{rc:1,out:sdk},{rc:0}]){
+    const failed=runDebugserverMig(t,debugserver,{define:empty,xcrun});
+    assert.notEqual(failed.configure.status,0,JSON.stringify(xcrun));
+    assert.match(failed.configure.stderr.replace(/\s+/g,' '),/CMAKE_OSX_SYSROOT is empty and 'xcrun --sdk macosx --show-sdk-path' gave no SDK for mig/);
+    assert.deepEqual(failed.xcrun,['--sdk','macosx','--show-sdk-path']);
+    assert.equal(failed.mig,null);
+  }
+});
+
+test('Darwin debugserver mig patch fails closed on a drifted rule',async t=>{
+  const {prepareDarwinLldbSource}=await import('../../../srcbuild/stages/fetch.mjs');
+  const work=fs.mkdtempSync(path.join(os.tmpdir(),'prepare-darwin-mig-drift-'));
+  t.after(()=>fs.rmSync(work,{recursive:true,force:true}));
+  putDarwinLldbPlugins(work);
+  const {file}=putDarwinDebugserver(work);
+  fs.writeFileSync(file,fs.readFileSync(file,'utf8').replace('-isysroot ${CMAKE_OSX_SYSROOT} ','-isysroot ${SDKROOT} '));
+  assert.throws(()=>prepareDarwinLldbSource(work),/patch shape drift/);
 });
 
 // eb7ad012 compiler-rt/lib/builtins/assembly.h:249-265, byte for byte (sha256

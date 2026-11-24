@@ -121,6 +121,34 @@ export function applyNativeCjdbConfigure(repoDir) {
   applyTextPatch(file, [[args, args + ' ${CJCJ_LLDB_ARGS}']], {stage:'fetch.patch.cjdb-args',marker:args + ' ${CJCJ_LLDB_ARGS}'});
 }
 
+// CMake >= 4.0 leaves CMAKE_OSX_SYSROOT empty on macOS unless it is set. The
+// pinned debugserver (eb7ad012 lldb/tools/debugserver/source/CMakeLists.txt:184-187)
+// passes it unquoted to mig, so an empty value makes mig take dbgnub-mig.defs as
+// the -isysroot argument, read stdin and generate nothing (run 45420757561,
+// macos-15, CMake 4.5.0: [979/1022] mach_excServer.c not found). Resolve the SDK
+// for mig alone, from xcrun when unset, and fail configure when it cannot; the
+// compile lines of every other LLDB object stay as they are.
+export const DARWIN_DEBUGSERVER_MIG_SYSROOT = Object.freeze({
+  before: 'add_custom_command(OUTPUT ${generated_mach_interfaces}\n' +
+    '  VERBATIM COMMAND mig ${MIG_ARCH_FLAGS_SEPARTED} -isysroot ${CMAKE_OSX_SYSROOT} ${CMAKE_CURRENT_SOURCE_DIR}/MacOSX/dbgnub-mig.defs\n',
+  after: [
+    'if("${CMAKE_OSX_SYSROOT}" STREQUAL "")',
+    '  execute_process(COMMAND xcrun --sdk macosx --show-sdk-path',
+    '    RESULT_VARIABLE _lldb_mig_sdk_rc',
+    '    OUTPUT_VARIABLE _lldb_mig_sysroot',
+    '    ERROR_VARIABLE _lldb_mig_sdk_err',
+    '    OUTPUT_STRIP_TRAILING_WHITESPACE)',
+    '  if(NOT _lldb_mig_sdk_rc EQUAL 0 OR "${_lldb_mig_sysroot}" STREQUAL "")',
+    '    message(FATAL_ERROR "debugserver: CMAKE_OSX_SYSROOT is empty and \'xcrun --sdk macosx --show-sdk-path\' gave no SDK for mig (rc=${_lldb_mig_sdk_rc}): ${_lldb_mig_sdk_err}")',
+    '  endif()',
+    'else()',
+    '  set(_lldb_mig_sysroot "${CMAKE_OSX_SYSROOT}")',
+    'endif()',
+    'add_custom_command(OUTPUT ${generated_mach_interfaces}',
+    '  VERBATIM COMMAND mig ${MIG_ARCH_FLAGS_SEPARTED} -isysroot "${_lldb_mig_sysroot}" ${CMAKE_CURRENT_SOURCE_DIR}/MacOSX/dbgnub-mig.defs',
+    ''].join('\n'),
+});
+
 // Applied to prepare-native's private LLVM checkout. The parent toolchain
 // stages boundscheck under aarch64; standalone CMake reports arm64 on macOS.
 export function prepareDarwinLldbSource(llvm) {
@@ -135,6 +163,9 @@ export function prepareDarwinLldbSource(llvm) {
   const before = 'target_link_options(liblldb PUBLIC "-Wl,-rpath,${CMAKE_SOURCE_DIR}/../utils/boundscheck/lib/${CMAKE_SYSTEM_PROCESSOR}")';
   const after = 'target_link_options(liblldb PRIVATE "-Wl,-rpath,@loader_path")';
   applyTextPatch(file, [[before, after]], {stage:'prepare.darwin.rpath', marker:after});
+  const debugserver = path.join(llvm, 'lldb/tools/debugserver/source/CMakeLists.txt');
+  const mig = DARWIN_DEBUGSERVER_MIG_SYSROOT;
+  applyTextPatch(debugserver, [[mig.before, mig.after]], {stage:'prepare.darwin.debugserver-mig-sysroot', marker:mig.after});
 }
 
 // Applied to prepare-native's private LLVM checkout on Darwin. The pinned
