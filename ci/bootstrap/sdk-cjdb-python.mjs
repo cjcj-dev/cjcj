@@ -160,7 +160,9 @@ lldb.SBDebugger.Terminate()
     reject('CJDB_PYTHON_IMPORT','llvm-cjdb',`${name} escaped exported install`);
   if (!observed.binding.endsWith(observed.suffix)) reject('CJDB_PYTHON_IMPORT','llvm-cjdb','binding ABI differs');
   const pythonPattern=native.os==='win32'?/^python311\.dll$/i:native.os==='darwin'?/^libpython3\.11.*\.dylib$/:/^libpython3\.11\.so/;
-  const lldbPattern=native.os==='win32'?/^(?:lib)?lldb\.dll$/i:native.os==='darwin'?/^liblldb.*\.dylib$/:/^liblldb\.so/;
+  // Windows LLDB's _lldb*.pyd is a copy of liblldb.dll (lldb/bindings/python/CMakeLists.txt
+  // create_relative_symlink copies there), so importing lldb maps LLDB under the binding's name.
+  const lldbPattern=native.os==='win32'?/^(?:(?:lib)?lldb\.dll|_lldb(?:\.[^.]+)?\.pyd)$/i:native.os==='darwin'?/^liblldb.*\.dylib$/:/^liblldb\.so/;
   const libraries=observed.maps.filter(file=>pythonPattern.test(path.basename(file))||lldbPattern.test(path.basename(file)));
   for(const pattern of [pythonPattern,lldbPattern]) {
     const files=libraries.filter(file=>pattern.test(path.basename(file)));

@@ -189,6 +189,7 @@ function putShimCjdb(out, native, label, platform) {
   put('fixed-llc/SHIM-BUILD.json', JSON.stringify({object: 'fixed-llc/cjselfhost_llvmshim.o', bytes: object.length,
     sha256: crypto.createHash('sha256').update(object).digest('hex'), symbols: ['LLVMSelfhost', 'CJOF'], argv: ['clang++']}));
   put(`bin/lldb${native.exe}`, 'lldb ' + label);
+  if (native.os !== 'win32') { put('bin/lldb-argdumper', 'lldb-argdumper ' + label); fs.chmodSync(path.join(out, 'bin/lldb-argdumper'), 0o755); }
   put(native.os === 'win32' ? 'lldb-lib/liblldb.dll' : native.os === 'darwin' ? 'lldb-lib/liblldb.15.dylib' : 'lldb-lib/liblldb.so.15', 'liblldb');
   // clang-resource-headers of the same build (build_prepare_llvm.mjs clang-resources)
   for (const name of CLANG_HEADERS) put(`clang-resources/15.0.4/include/${name}`, 'builtin ' + name);
@@ -219,6 +220,9 @@ function putPython(out, platform) {
   if (!fs.existsSync(path.join(out, 'lldb-lib', L.lldb))) put('lldb-lib/' + L.lldb, 'liblldb');
   if (L.copy) fs.copyFileSync(path.join(out, 'lldb-lib', L.lldb), path.join(out, 'lldb-python/lldb/_lldb' + L.suffix));
   else fs.symlinkSync('../../../' + L.lldb, path.join(out, 'lldb-python/lldb/_lldb' + L.suffix));
+  // upstream finish_swig_python's second relative link: lldb/lldb-argdumper -> <prefix>/bin
+  if (!L.copy) fs.symlinkSync('../../../../bin/lldb-argdumper', path.join(out, 'lldb-python/lldb/lldb-argdumper'));
+  else put('lldb-python/lldb/lldb-argdumper.exe', 'lldb-argdumper copy');
   const files = Object.fromEntries(Object.entries(products).map(([rel, body]) => [rel, {sha256: crypto.createHash('sha256').update(body).digest('hex')}]));
   const pin = PREPARE_PYTHON[platform];
   put('PYTHON-BUILD-INPUTS.json', JSON.stringify({schema: 'cjcj-prepare-python-v1', rc: 0, target: platform, host: platform,
@@ -431,7 +435,7 @@ test('the N/LLVM producer configures the dylib build and installs library and to
     const native = sdkPlatform(platform), work = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-llvm-'));
     t.after(() => fs.rmSync(work, {recursive: true, force: true}));
     const seen = [];
-    let omitClangResources = false, omitCompilerRt, omitSix = false;
+    let omitClangResources = false, omitCompilerRt, omitSix = false, omitArgdumper = false;
     const run = (file, argv) => { // records argv; the build step leaves the real output shape
       const all = [file, ...argv]; seen.push(all.join(' '));
       if (all[0] === 'git' && all.includes('rev-parse')) return {status: 0, stdout: LLVM + '\n'};
@@ -441,6 +445,7 @@ test('the N/LLVM producer configures the dylib build and installs library and to
         fs.mkdirSync(path.join(build, native.llvmDirectory), {recursive: true}); fs.mkdirSync(path.join(build, 'bin'), {recursive: true});
         fs.writeFileSync(path.join(build, native.llvmDirectory, native.llvmLibrary), 'lib');
         for (const tool of ['llc', 'llvm-as', 'llvm-dis', 'llvm-nm', 'lldb']) fs.writeFileSync(path.join(build, 'bin', tool + native.exe), tool);
+        if (all.includes('lldb-argdumper') && !omitArgdumper) { fs.writeFileSync(path.join(build, 'bin/lldb-argdumper'), 'argdumper'); fs.chmodSync(path.join(build, 'bin/lldb-argdumper'), 0o644); }
         fs.mkdirSync(path.join(build, 'lib'), {recursive: true});
         fs.writeFileSync(path.join(build, native.os === 'win32' ? 'bin' : 'lib', native.os === 'win32' ? 'liblldb.dll' : 'liblldb.so.15'), 'liblldb');
         if (all.includes('clang-resource-headers') && !omitClangResources) for (const name of CLANG_HEADERS) {
@@ -489,6 +494,18 @@ test('the N/LLVM producer configures the dylib build and installs library and to
         new RegExp(`^Error: PREPARE_LLDB_PYTHON_SIX_MISSING ${escape(path.posix.dirname(lldbPythonBuildPackage(native.os)))}/six\\.py$`));
       omitSix = false;
     }
+    if (native.os !== 'win32') {
+      // the helper the package's lldb-argdumper link names is exported executable beside lldb
+      assert.equal(fs.readFileSync(path.join(out, 'bin/lldb-argdumper'), 'utf8'), 'argdumper');
+      assert.equal(fs.statSync(path.join(out, 'bin/lldb-argdumper')).mode & 0o777, 0o755, platform);
+      // red cut: a Unix build without the helper is not exported
+      omitArgdumper = true;
+      const noHelper = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-llvm-nohelper-'));
+      t.after(() => fs.rmSync(noHelper, {recursive: true, force: true}));
+      assert.throws(() => buildPrepareLlvm({platform, sha: LLVM, out: path.join(noHelper, 'out'), work: noHelper, env: {}, run, compiler, python}),
+        /^Error: PREPARE_LLDB_ARGDUMPER_MISSING bin\/lldb-argdumper$/);
+      omitArgdumper = false;
+    } else assert.ok(!fs.existsSync(path.join(out, 'bin/lldb-argdumper')), platform);
     for (const name of CLANG_HEADERS) assert.ok(fs.existsSync(path.join(out, 'clang-resources/15.0.4/include', name)), name);
     // compiler-rt is moved out of the resource tree under its installed names (ExtractRtlib.cmake)
     assert.deepEqual(fs.readdirSync(path.join(out, 'compiler-rt')).sort(), compilerRtLibraries(platform).map(row => row.name).sort(), platform);
@@ -592,11 +609,30 @@ test('the N/LLVM producer configures the dylib build and installs library and to
       else assert.equal(fs.realpathSync(binding), fs.realpathSync(path.join(root, 'llvm/third_party/llvm/lib', L.lldb)));
       // six sits beside lldb in the one site-packages cjdb's PYTHONPATH names (sdk-cjdb-python.mjs)
       assert.equal(fs.readFileSync(path.join(root, 'llvm/third_party/llvm/lib/python3.11/site-packages/six.py'), 'utf8'), 'six of the same LLDB tree');
+      if (!L.copy) {
+        // the package's helper link resolves to the same build's helper, installed executable at bin/
+        const helper = path.join(root, 'llvm/third_party/llvm/lib/python3.11/site-packages/lldb/lldb-argdumper');
+        assert.equal(fs.readlinkSync(helper), '../../../../bin/lldb-argdumper');
+        assert.equal(fs.realpathSync(helper), fs.realpathSync(path.join(root, 'llvm/third_party/llvm/bin/lldb-argdumper')));
+        assert.equal(fs.statSync(helper).mode & 0o777, 0o755);
+        const cut = (name, edit) => { const from = path.join(work, 'out-' + name); fs.cpSync(out, from, {recursive: true, verbatimSymlinks: true}); edit(from);
+          return () => installLlvm({root: path.join(work, 'root-' + name), target, from, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER}, producer: 'x', shimCommit: SHIM}); };
+        // red cut: a producer output without the helper is not installed
+        assert.throws(cut('nohelper', from => fs.rmSync(path.join(from, 'bin/lldb-argdumper'))),
+          /^Error: NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING bin\/lldb-argdumper$/);
+        // red cut: a helper without its executable mode is not installed
+        assert.throws(cut('nomode', from => fs.chmodSync(path.join(from, 'bin/lldb-argdumper'), 0o644)),
+          /^Error: NATIVE_INPUTS_PRODUCER_OUTPUT_MODE bin\/lldb-argdumper$/);
+        // red cut: a package link to a file outside third_party/llvm is not installed
+        assert.throws(cut('escape', from => fs.symlinkSync(path.join(out, 'bin/lldb'), path.join(from, 'lldb-python/lldb/escaped'))),
+          /^Error: PREPARE_LLDB_PYTHON_LINK lib\/python3\.11\/site-packages\/lldb\/escaped$/);
+      }
       // red cut: a producer output whose lldb package lost its six sibling is not installed
       const nosix = path.join(work, 'out-nosix'); fs.cpSync(out, nosix, {recursive: true, verbatimSymlinks: true}); fs.rmSync(path.join(nosix, 'lldb-python/six.py'));
       assert.throws(() => installLlvm({root: path.join(work, 'root-nosix'), target, from: nosix, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER},
         producer: 'x', shimCommit: SHIM}), /^Error: NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING lldb-python\/six\.py$/);
-      assert.ok(seen.some(line => line.startsWith('cmake --build') && line.includes(' lldb clang-resource-headers lldb-python --parallel')), 'lldb-python target');
+      assert.ok(seen.some(line => line.startsWith('cmake --build') && line.includes(L.copy ? ' lldb clang-resource-headers lldb-python --parallel'
+        : ' lldb clang-resource-headers lldb-argdumper lldb-python --parallel')), 'lldb-python target');
       // red cut: a Python LLDB build without its lldb package is not installed
       const nopkg = path.join(work, 'out-nopkg'); fs.cpSync(out, nopkg, {recursive: true, verbatimSymlinks: true}); fs.rmSync(path.join(nopkg, 'lldb-python'), {recursive: true});
       assert.throws(() => installLlvm({root: path.join(work, 'root-nopkg'), target, from: nopkg, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER},
@@ -1078,4 +1114,46 @@ test('prepare N lib/<tuple> is the cangjie_compiler CLANG_RT_LIBS set on each of
   assert.ok(driver('Darwin_CJNATIVE.cj').includes('FileUtil.JoinPath(cangjieLibPath, "libclang_rt.osx.a")'));
   assert.ok(driver('MinGW_CJNATIVE.cj').includes('tool.AppendArg("-lclang_rt-builtins")'));
   assert.ok(driver('ToolChain.cj').includes('return "libclang_rt-profile.a"'));
+});
+
+// The fixed LLDB's Unix package carries two relative links (lldb/bindings/python/CMakeLists.txt
+// finish_swig_python): _lldb -> liblldb and lldb-argdumper -> ../../../../bin/lldb-argdumper.
+// The formal SDK path check accepts the installed N, and names the helper link once it is cut.
+for (const host of PREPARE_HOSTS.filter(h => sdkPlatform(h.llvm_platform).os !== 'win32'))
+  test(`${host.target}: the installed LLDB package links pass SDK path parity, and fail once the helper is cut`, async t => {
+    const {assertSdkPathParity} = await import('../../../lib/sdk-path-parity.mjs');
+    const {dir, root} = produced(t, host.target);
+    const sdk = path.join(dir, 'sdk'), official = path.join(dir, 'official'); fs.mkdirSync(sdk); fs.mkdirSync(official);
+    await copyOutputs(sdk, [{from: path.join(root, 'llvm/third_party/llvm'), to: 'third_party/llvm', owner: 'N'}]);
+    await assertSdkPathParity(sdk, {officialRoot: official, target: host.target});
+    fs.rmSync(path.join(sdk, 'third_party/llvm/bin/lldb-argdumper'));
+    await assert.rejects(assertSdkPathParity(sdk, {officialRoot: official, target: host.target}), error => {
+      assert.match(error.message, /package-link-invalid\tthird_party\/llvm\/lib\/python3\.11\/site-packages\/lldb\/lldb-argdumper\t\.\.\/\.\.\/\.\.\/\.\.\/bin\/lldb-argdumper/);
+      assert.doesNotMatch(error.message, /_lldb/);
+      return true;
+    });
+  });
+
+// Windows LLDB copies liblldb.dll to _lldb*.pyd, so importing lldb maps LLDB under the
+// binding's name only (sdk-cjdb-python.mjs verifyCjdbPythonInstallation).
+test('windows_x86_64: the imported _lldb pyd is the LLDB module, and only from inside the install', async t => {
+  const {verifyCjdbPythonInstallation} = await import('../../../../ci/bootstrap/sdk-cjdb-python.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cjdb-windows-'));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const root = path.join(dir, 'third_party/llvm'), outside = path.join(dir, 'outside'), site = path.join(root, 'lib/python3.11/site-packages/lldb');
+  const suffix = '.cp311-win_amd64.pyd', binding = path.join(site, '_lldb' + suffix);
+  for (const rel of ['python.exe', 'python311.dll', 'bin/liblldb.dll', 'lib/python3.11/site-packages/lldb/__init__.py'])
+    { fs.mkdirSync(path.dirname(path.join(root, rel)), {recursive: true}); fs.writeFileSync(path.join(root, rel), rel); }
+  fs.copyFileSync(path.join(root, 'bin/liblldb.dll'), binding);
+  fs.mkdirSync(outside);
+  for (const name of ['python311.dll', 'liblldb.dll', '_lldb' + suffix]) fs.copyFileSync(binding, path.join(outside, name));
+  const run = maps => verifyCjdbPythonInstallation(root, root, async command => command === 'dumpbin' ? {stdout: 'python311.dll'}
+    : {stdout: JSON.stringify({lldb: path.join(site, '__init__.py'), binding, suffix, valid: true, maps}), stderr: ''}, 'windows_x86_64');
+  const identity = /CJDB_PYTHON_IMPORT.*loaded library identity/;
+  await run([path.join(root, 'python311.dll'), binding]);
+  // red cuts: LLDB or Python mapped from outside the install, or no LLDB module at all
+  for (const maps of [[path.join(root, 'python311.dll'), binding, path.join(outside, '_lldb' + suffix)],
+    [path.join(root, 'python311.dll'), binding, path.join(outside, 'liblldb.dll')],
+    [path.join(outside, 'python311.dll'), binding], [path.join(root, 'python311.dll')]])
+    await assert.rejects(run(maps), identity);
 });

@@ -153,6 +153,10 @@ export const lldbPythonBuildPackage = os => os === 'win32' ? 'Lib/site-packages/
 // and installs that parent directory (:174); none of the pinned Python prefixes has a
 // top-level six, so the sibling crosses with the package.
 export const PREPARE_LLDB_PYTHON_SIX = 'six.py';
+// Unix LLDB's Python package links lldb/lldb-argdumper to ../../../../bin/lldb-argdumper
+// (lldb/bindings/python/CMakeLists.txt finish_swig_python, create_relative_symlink); the
+// same build's helper is exported at bin/ so the installed link resolves to it.
+export const PREPARE_LLDB_ARGDUMPER = 'lldb-argdumper';
 export function lldbPythonArgs(python, os) {
   if (!python) return ['-DLLDB_ENABLE_PYTHON=OFF'];
   for (const key of ['executable', 'include', 'library'])
@@ -221,7 +225,7 @@ export function buildPrepareLlvm({platform, sha, out, compiler, python, work = p
     if (!/^[1-9][0-9]*$/.test(jobs)) throw new Error('PREPARE_LLVM_JOBS');
     command(['cmake', ...llvmConfigureArgs({source: path.join(source, 'llvm'), build, runtime, sha, jobs, platform, compiler: slash(path.resolve(compiler)), python})]);
     command(['cmake', '--build', build, '--target', ...compilerRtTargets(native.os), ...PREPARE_LLVM_TARGETS,
-      ...(python ? [PREPARE_LLDB_PYTHON_TARGET] : []), '--parallel', jobs]);
+      ...(native.os !== 'win32' ? [PREPARE_LLDB_ARGDUMPER] : []), ...(python ? [PREPARE_LLDB_PYTHON_TARGET] : []), '--parallel', jobs]);
     const library = path.join(build, native.llvmDirectory, native.llvmLibrary);
     const symbols = command([path.join(build, 'bin', 'llvm-nm' + native.exe), '--defined-only', library], {capture: true});
     if (llvmLibrarySymbolProblems(symbols).length) throw new Error('PREPARE_LLVM_LIBRARY_SYMBOLS');
@@ -234,6 +238,12 @@ export function buildPrepareLlvm({platform, sha, out, compiler, python, work = p
     }
     fs.copyFileSync(path.join(build, 'bin', 'lldb' + native.exe), path.join(out, 'bin', 'lldb' + native.exe));
     if (native.os !== 'win32') fs.chmodSync(path.join(out, 'bin', 'lldb' + native.exe), 0o755);
+    if (native.os !== 'win32') {
+      const argdumper = path.join(build, 'bin', PREPARE_LLDB_ARGDUMPER);
+      if (!fs.existsSync(argdumper) || !fs.statSync(argdumper).isFile()) throw new Error('PREPARE_LLDB_ARGDUMPER_MISSING bin/' + PREPARE_LLDB_ARGDUMPER);
+      fs.copyFileSync(argdumper, path.join(out, 'bin', PREPARE_LLDB_ARGDUMPER));
+      fs.chmodSync(path.join(out, 'bin', PREPARE_LLDB_ARGDUMPER), 0o755);
+    }
     const libDir = path.join(build, native.os === 'win32' ? 'bin' : 'lib');
     const lldbLibraries = fs.readdirSync(libDir).filter(name => /^liblldb(\.[0-9]+)*\.(so(\.[0-9]+)*|dylib|dll)$/.test(name));
     if (!lldbLibraries.length) throw new Error('PREPARE_LLDB_LIBRARY_MISSING');

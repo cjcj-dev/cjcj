@@ -16,7 +16,7 @@ import {spawnSync} from 'node:child_process';
 import {sdkPlatform, stdxChirMembers} from '../../../../ci/bootstrap/sdk-platform.mjs';
 import {readHostToolchainPin} from '../../../../ci/host-toolchain-pin.mjs';
 import {readSourcePins} from '../../../../ci/native-llvm-inputs.mjs';
-import {PREPARE_PYTHON, preparePythonMembers, PREPARE_LLDB_PYTHON_PACKAGE, PREPARE_LLDB_PYTHON_SIX, PREPARE_CLANG_RESOURCES,
+import {PREPARE_PYTHON, preparePythonMembers, PREPARE_LLDB_PYTHON_PACKAGE, PREPARE_LLDB_PYTHON_SIX, PREPARE_LLDB_ARGDUMPER, PREPARE_CLANG_RESOURCES,
   clangResourceProblems, PREPARE_COMPILER_RT, PREPARE_LLVM_PROJECTS, compilerRtLibraries, isStaticLibrary} from './build_prepare_llvm.mjs';
 import {workflowSourceSelection} from '../srcbuild/source-selection.mjs';
 import {baseSdkDownload} from '../../../lib/release-component-provenance.mjs';
@@ -142,6 +142,9 @@ export function installLlvm({root, target, from, commits, producer, shimCommit})
   const cjdbFile = `tools/bin/cjdb${native.exe}`;
   const cjdb = copyMember(from, `bin/lldb${native.exe}`, install, cjdbFile);
   if (native.os !== 'win32') fs.chmodSync(path.join(install, cjdbFile), 0o755);
+  // The helper Unix LLDB's Python package links to (lldb/lldb-argdumper ->
+  // ../../../../bin/lldb-argdumper, build_prepare_llvm.mjs PREPARE_LLDB_ARGDUMPER), with its mode.
+  if (native.os !== 'win32') installArgdumper(from, install);
   const lldbDir = path.join(from, 'lldb-lib');
   const lldbNames = fs.existsSync(lldbDir) ? fs.readdirSync(lldbDir).sort() : [];
   if (!lldbNames.length) throw new Error('NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING lldb-lib');
@@ -200,6 +203,21 @@ function installClangResources({from, install}) {
   return {path: PREPARE_CLANG_RESOURCE_DIR, version: fs.readdirSync(destination)[0], files};
 }
 export const PREPARE_PYTHON_RECORD = 'third_party/llvm/PYTHON-BUILD-INPUTS.json';
+export const PREPARE_LLDB_ARGDUMPER_FILE = 'third_party/llvm/bin/' + PREPARE_LLDB_ARGDUMPER;
+function installArgdumper(from, install) {
+  const rel = 'bin/' + PREPARE_LLDB_ARGDUMPER, row = copyMember(from, rel, install, PREPARE_LLDB_ARGDUMPER_FILE);
+  const mode = fs.statSync(path.join(from, rel)).mode & 0o777;
+  if (!(mode & 0o100)) throw new Error('NATIVE_INPUTS_PRODUCER_OUTPUT_MODE ' + rel);
+  fs.chmodSync(path.join(install, PREPARE_LLDB_ARGDUMPER_FILE), mode);
+  return row;
+}
+// Every symbolic link under DIR, relative to it.
+function packageLinks(dir, rel = '') {
+  return fs.readdirSync(path.join(dir, rel), {withFileTypes: true}).flatMap(entry => {
+    const child = rel ? rel + '/' + entry.name : entry.name;
+    return entry.isSymbolicLink() ? [child] : entry.isDirectory() ? packageLinks(dir, child) : [];
+  });
+}
 function installPython({from, install, platform, lldbNames}) {
   const record = path.join(from, 'PYTHON-BUILD-INPUTS.json'), configuredFile = path.join(from, 'PYTHON-CONFIGURED.json');
   if (!PREPARE_PYTHON[platform]) {
@@ -234,6 +252,13 @@ function installPython({from, install, platform, lldbNames}) {
   const installedPackage = path.join(nativeRoot, PREPARE_LLDB_PYTHON_PACKAGE);
   fs.cpSync(pkg, installedPackage, {recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false});
   fs.copyFileSync(six, path.join(path.dirname(installedPackage), PREPARE_LLDB_PYTHON_SIX), fs.constants.COPYFILE_EXCL);
+  // Each link the package carries (Unix _lldb -> liblldb, lldb-argdumper -> bin) resolves inside the native root.
+  const nativeReal = fs.realpathSync(nativeRoot);
+  for (const link of packageLinks(installedPackage)) {
+    const file = path.join(installedPackage, link), target = fs.existsSync(file) && fs.realpathSync(file);
+    if (!target || !target.startsWith(nativeReal + path.sep))
+      throw new Error('PREPARE_LLDB_PYTHON_LINK ' + path.posix.join(PREPARE_LLDB_PYTHON_PACKAGE, link));
+  }
   const binding = fs.readdirSync(installedPackage).find(name => name.startsWith('_lldb'));
   const real = binding && fs.existsSync(path.join(installedPackage, binding)) && fs.realpathSync(path.join(installedPackage, binding));
   // Unix: _lldb links to the same build's liblldb. Windows LLDB copies liblldb.dll
