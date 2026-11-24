@@ -17,6 +17,7 @@ import {sdkPlatform} from '../../../../ci/bootstrap/sdk-platform.mjs';
 import {nativeLlvmInputs} from '../../../../ci/native-llvm-inputs.mjs';
 import {pythonConfiguration} from '../../../../ci/bootstrap/sdk-cjdb-python.mjs';
 import {execute} from '../../../../ci/bootstrap/sdk-io.mjs';
+import {verifyNativeSource} from '../../../../ci/bootstrap/sdk-source.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -278,11 +279,14 @@ export async function preparePython({platform, out, download = async (url, file)
   const response = await fetch(url);
   if (!response.ok) throw new Error(`PREPARE_PYTHON_DOWNLOAD ${response.status}`);
   fs.writeFileSync(file, Buffer.from(await response.arrayBuffer()));
-}, run = spawnSync, configure = pythonConfiguration}) {
-  const pin = PREPARE_PYTHON[platform];
+}, run = spawnSync, configure = pythonConfiguration}, pins = PREPARE_PYTHON) {
+  const pin = pins[platform];
   if (!pin) throw new Error('PREPARE_PYTHON_UNAVAILABLE ' + platform);
   const root = path.join(out, 'python'), archive = path.join(out, path.basename(new URL(pin.url).pathname));
   if (fs.existsSync(root)) throw new Error('PREPARE_PYTHON_FRESH_PREFIX_REQUIRED');
+  const commit = await verifyNativeSource({source: repoRoot});
+  if (commit === 'unknown') throw new Error('PYTHON_PRODUCER_SOURCE');
+  const producer = {repository: repoRoot, commit, scriptSha256: sha256File(fileURLToPath(import.meta.url))};
   fs.mkdirSync(root, {recursive: true});
   await download(pin.url, archive);
   if (fs.statSync(archive).size !== pin.size || sha256File(archive) !== pin.sha256) throw new Error('PREPARE_PYTHON_ARCHIVE_IDENTITY');
@@ -306,7 +310,7 @@ export async function preparePython({platform, out, download = async (url, file)
     files[rel] = {sha256: sha256File(real)};
   }
   const record = {schema: 'cjcj-prepare-python-v1', rc: 0, target: platform, host: platform,
-    producer: 'build/sdk/producers/release/build_prepare_llvm.mjs python',
+    producer,
     source: {url: pin.url, version: pin.version, sha256: pin.sha256}, files};
   fs.writeFileSync(path.join(out, 'PYTHON-BUILD-INPUTS.json'), JSON.stringify(record, null, 2) + '\n');
   fs.writeFileSync(path.join(out, 'PYTHON-SELECTED.json'), JSON.stringify(selected, null, 2) + '\n');

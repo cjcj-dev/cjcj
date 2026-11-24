@@ -13,13 +13,16 @@ import {configureHleInput, readHleDependencies} from '../../../../ci/bootstrap/h
 import {installHleDependencies} from '../../../srcbuild/hle-dependencies.mjs';
 import {readInstalledNativeShim} from '../../../../ci/bootstrap/native-shim-inputs.mjs';
 import {unpackNativeArtifact} from '../../../../ci/bootstrap/native-artifact-archive.mjs';
-import {buildPrepareLlvm, llvmConfigureArgs, buildPrepareShim, shimRequiredSymbols, shimSymbolProblems, PREPARE_LLVM_TARGETS,
+import {preparePython, buildPrepareLlvm, llvmConfigureArgs, buildPrepareShim, shimRequiredSymbols, shimSymbolProblems, PREPARE_LLVM_TARGETS,
   llvmLibrarySymbolProblems, lldbPythonArgs, PREPARE_PYTHON, pythonCacheConfiguration, lldbPythonBuildPackage,
   compilerRtLibraries, compilerRtTargets, compilerRtArgs, PREPARE_COMPILER_RT_TRIPLES} from './build_prepare_llvm.mjs';
 import {copyOutputs} from '../../../../ci/bootstrap/sdk-flow.mjs';
 import {selectedStdAst} from '../../../../ci/bootstrap/sdk-std-resume.mjs';
 import {createBootstrapTargets, FIXED_INPUTS, nativeTargetLibraryExcludes} from '../../../../ci/bootstrap/sdk-targets.mjs';
-import {spawnSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
+import {preserveNativePythonInput} from '../../../../ci/bootstrap/native-cjdb-job.mjs';
+import {pythonSourceInputs} from '../../../../ci/bootstrap/sdk-cjdb-python.mjs';
+import {installedInputs} from '../srcbuild/lib/installed-inputs.mjs';
 import {nativeInstallationLocations} from '../../../../ci/bootstrap/native-installation-locations.mjs';
 import {readInstalledNativeAst} from '../../../../ci/bootstrap/installed-native-ast.mjs';
 import {sdkPlatform, stdxChirMembers} from '../../../../ci/bootstrap/sdk-platform.mjs';
@@ -201,6 +204,73 @@ function pythonLayout(platform) {
     include: 'include/python3.11', suffix: darwin ? '.cpython-311-darwin.so' : '.cpython-311-x86_64-linux-gnu.so',
     lldb: darwin ? 'liblldb.15.dylib' : 'liblldb.so.15', copy: false};
 }
+// No network or foreign binaries: extract a small, digest-pinned tar using the
+// target's archive layout and model sysconfig and the surrounding LLVM install.
+for (const {llvm_platform: platform} of PREPARE_HOSTS.filter(h => h.llvm_platform !== 'windows_x86_64')) {
+  test(platform + ': prepared Python record reaches the package reader', async t => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'python-package-'));
+    t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+    const sdk = path.join(dir, 'sdk'), out = path.join(dir, 'out'), layout = pythonLayout(platform);
+    const write = (file, data) => {
+      fs.mkdirSync(path.dirname(file), {recursive: true});
+      fs.writeFileSync(file, data);
+    };
+    const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    const fixed = PREPARE_PYTHON[platform], tree = path.join(dir, 'tree'), top = fixed.prefix ?? '.';
+    for (const rel of [layout.interpreter, layout.header, layout.library, 'share/fixture']) {
+      write(path.join(tree, top, rel), platform + ':' + rel);
+    }
+    const archive = path.join(dir, 'fixture.tar.gz');
+    execFileSync('tar', ['-czf', archive, '-C', tree, top]);
+    const pin = {...fixed, url: 'https://example.invalid/fixture.tar.gz',
+      sha256: digest(archive), size: fs.statSync(archive).size};
+    const configure = prefix => ({version: pin.version + ' (fixture)', configure: '--enable-shared',
+      executable: path.join(prefix, layout.interpreter), include: path.join(prefix, layout.include),
+      library: path.join(prefix, layout.library)});
+    const {root: prefix} = await preparePython({platform, out, configure,
+      download: (url, file) => { assert.equal(url, pin.url); fs.copyFileSync(archive, file); }}, {[platform]: pin});
+
+    const native = sdkPlatform(platform), nativeRoot = path.join(sdk, 'third_party/llvm');
+    fs.cpSync(prefix, nativeRoot, {recursive: true});
+    const record = path.join(sdk, 'share/cjcj/build-inputs/python-original.json');
+    const input = {record: path.join(out, 'PYTHON-BUILD-INPUTS.json')};
+    const original = await pythonSourceInputs({...input, root: prefix, nativeRoot, platform, selected: configure(prefix)});
+    write(path.join(sdk, 'BUILD-INPUTS.json'), JSON.stringify({
+      configuration: {pythonInputs: input}, pythonSource: original}));
+    await preserveNativePythonInput(sdk);
+    fs.rmSync(out, {recursive: true});
+    const selected = configure(nativeRoot), artifacts = [];
+    for (const rel of ['third_party/llvm/' + native.llvmDirectory + '/' + native.llvmLibrary, 'tools/bin/cjdb']) {
+      const file = path.join(sdk, rel);
+      write(file, 'native fixture: ' + rel);
+      artifacts.push({path: rel, sha256: digest(file)});
+    }
+    const readPackage = async sha256 => {
+      const pythonSource = await pythonSourceInputs({record, sha256, root: nativeRoot, nativeRoot, platform, selected});
+      write(path.join(path.dirname(record), 'native-llvm.json'), JSON.stringify({rc: 0, platform, artifacts,
+        pythonSource, pythonConfiguration: {selected}, pythonInstallation: {observed: {version: selected.version}}}));
+      return (await installedInputs(sdk, platform)).components.find(row => row.component === 'python');
+    };
+    const row = await readPackage(original.build.originalInputs.sha256);
+    assert.deepEqual(row.source, {status: 'resolved', kind: 'archive', url: pin.url, version: pin.version, sha256: pin.sha256});
+    assert.deepEqual(row.build.producer, {repository: root,
+      commit: execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], {encoding: 'utf8'}).trim(),
+      scriptSha256: digest(path.join(root, 'build/sdk/producers/release/build_prepare_llvm.mjs'))});
+    assert.equal(row.build.originalInputs.sha256, digest(record));
+    const facts = JSON.parse(fs.readFileSync(record));
+    for (const producer of ['legacy string', {repository: root}, {...facts.producer, commit: 'g'.repeat(40)}]) {
+      write(record, JSON.stringify({...facts, producer}));
+      await assert.rejects(readPackage(), {message: 'INSTALLED_PYTHON_CONFIGURATION'});
+    }
+  });
+}
+
+test('preparePython rejects other archive bytes with the release pin', async t => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'python-archive-'));
+  t.after(() => fs.rmSync(out, {recursive: true, force: true}));
+  await assert.rejects(preparePython({platform: 'linux_x86_64', out,
+    download: (_url, file) => fs.writeFileSync(file, 'other archive')}), {message: 'PREPARE_PYTHON_ARCHIVE_IDENTITY'});
+});
 function putPython(out, platform) {
   if (!PREPARE_PYTHON[platform]) return;
   const put = (rel, body) => { fs.mkdirSync(path.dirname(path.join(out, rel)), {recursive: true}); fs.writeFileSync(path.join(out, rel), body); };
@@ -220,7 +290,7 @@ function putPython(out, platform) {
   const files = Object.fromEntries(Object.entries(products).map(([rel, body]) => [rel, {sha256: crypto.createHash('sha256').update(body).digest('hex')}]));
   const pin = PREPARE_PYTHON[platform];
   put('PYTHON-BUILD-INPUTS.json', JSON.stringify({schema: 'cjcj-prepare-python-v1', rc: 0, target: platform, host: platform,
-    producer: 'build/sdk/producers/release/build_prepare_llvm.mjs python', source: {url: pin.url, version: pin.version, sha256: pin.sha256}, files}));
+    producer: {repository: 'fixture', commit: SHIM}, source: {url: pin.url, version: pin.version, sha256: pin.sha256}, files}));
   const selected = {executable: out + '/python/' + L.interpreter, include: out + '/python/' + L.include,
     library: out + '/python/' + L.library, suffix: L.suffix, version: pin.version + ' (main)'};
   put('PYTHON-CONFIGURED.json', JSON.stringify({selected, actual: selected, cacheSha256: 'c'.repeat(64)}));
