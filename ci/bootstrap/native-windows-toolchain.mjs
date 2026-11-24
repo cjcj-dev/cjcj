@@ -9,9 +9,12 @@ import {execute} from './sdk-io.mjs';
 export async function selectedExecutable(value,env=process.env) {
  if(!value)throw Error('WINDOWS_COMPILER_REQUIRED');
  const candidates=path.isAbsolute(value)||/[\\/]/.test(value)?[path.resolve(value)]:
-  (env.PATH||'').split(path.delimiter).flatMap(dir=>[path.join(dir,value),path.join(dir,value+'.exe')]);
+  (env.PATH||env.Path||'').split(path.delimiter).flatMap(dir=>[path.join(dir,value),path.join(dir,value+'.exe')]);
  for(const file of candidates)if(await fs.stat(file).then(s=>s.isFile(),()=>false))return fs.realpath(file);
  throw Error('WINDOWS_COMPILER_MISSING '+value);
+}
+export function selectedWindowsToolchainEnvironment({PATH,Path,...env},bin) {
+ return {...env,PATH:[bin,...(PATH||Path||'').split(';').filter(dir=>dir && dir.toLowerCase()!==bin.toLowerCase())].join(';')};
 }
 export function coffImports(text) {
  return [...text.matchAll(/^\s*Name:\s*([^\s]+\.dll)\s*$/gmi)].map(m=>m[1].toLowerCase());
@@ -39,17 +42,18 @@ export async function probeWindowsToolchain({tools,compiler,work,env=process.env
  work=await fs.mkdtemp(work+'-'); // Keep every attempt, including normal reentry.
  const records=[],facts={commands:records};
  const save=()=>atomicJson(path.join(work,'toolchain.json'),facts);
- const capture=async(label,argv,options={})=>{
-  const row={label,argv,rc:null,signal:null};records.push(row);
-  try {const r=await execute(argv[0],argv.slice(1),{env,maxBuffer:4*1024**2,timeout:120000,...options});
-   row.rc=0;row.stdout=r.stdout;row.stderr=r.stderr;return r.stdout;
-  }catch(e){row.rc=typeof e.code==='number'?e.code:null;row.signal=e.signal||null;row.error=e.message;row.stdout=e.stdout;row.stderr=e.stderr;throw e;}
-  finally{await save();}
- };
  try {
   const cc=await selectedExecutable(tools.cc,env),cxx=await selectedExecutable(tools.cxx,env);
   if(path.dirname(cc)!==path.dirname(cxx))throw Error('WINDOWS_TOOLCHAIN_COMPILER_PAIR');
   const root=path.dirname(path.dirname(cc)),target=path.join(root,'x86_64-w64-mingw32');
+  const probeEnv=selectedWindowsToolchainEnvironment(env,path.dirname(cc));
+  const capture=async(label,argv,options={})=>{
+   const row={label,argv,rc:null,signal:null};records.push(row);
+   try {const r=await execute(argv[0],argv.slice(1),{env:probeEnv,maxBuffer:4*1024**2,timeout:120000,...options});
+    row.rc=0;row.stdout=r.stdout;row.stderr=r.stderr;return r.stdout;
+   }catch(e){row.rc=typeof e.code==='number'?e.code:null;row.signal=e.signal||null;row.error=e.message;row.stdout=e.stdout;row.stderr=e.stderr;throw e;}
+   finally{await save();}
+  };
   const version=await capture('cxx-version',[cxx,'--version']);
   const triple=(await capture('cxx-target',[cxx,'-print-target-triple'])).trim();
   if(!/clang version /i.test(version)||!/^x86_64-(?:w64-windows-gnu|w64-mingw32)$/.test(triple))throw Error('WINDOWS_TOOLCHAIN_CLANG_TARGET');
@@ -73,14 +77,18 @@ project(WindowsCompilerInput C CXX)
 if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang" OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
  message(FATAL_ERROR "WINDOWS_TOOLCHAIN_ACTUAL_COMPILER")
 endif()
-if(NOT LLVM_BUILD_C_COMPILER STREQUAL CMAKE_C_COMPILER OR NOT LLVM_BUILD_CXX_COMPILER STREQUAL CMAKE_CXX_COMPILER)
+file(TO_CMAKE_PATH "\${LLVM_BUILD_C_COMPILER}" _llvm_build_c_compiler)
+file(TO_CMAKE_PATH "\${CMAKE_C_COMPILER}" _cmake_c_compiler)
+file(TO_CMAKE_PATH "\${LLVM_BUILD_CXX_COMPILER}" _llvm_build_cxx_compiler)
+file(TO_CMAKE_PATH "\${CMAKE_CXX_COMPILER}" _cmake_cxx_compiler)
+if(NOT _llvm_build_c_compiler STREQUAL _cmake_c_compiler OR NOT _llvm_build_cxx_compiler STREQUAL _cmake_cxx_compiler)
  message(FATAL_ERROR "WINDOWS_TOOLCHAIN_LLVM_COMPILER")
 endif()
 add_executable(toolchain_probe probe.cpp)
 install(TARGETS toolchain_probe RUNTIME DESTINATION bin)
 include("\${CANGJIE_RUNTIME_INSTALL_RULE}")
 `);
-  const run=argv=>command(argv,{env,records});
+  const run=argv=>command(argv,{env:probeEnv,records});
   await run([tools.cmake||'cmake','-S',source,'-B',build,'-G','Ninja',
    '-DCMAKE_BUILD_TYPE=Release',`-DCMAKE_C_COMPILER=${cc}`,`-DCMAKE_CXX_COMPILER=${cxx}`,
    `-DCMAKE_TOOLCHAIN_FILE=${path.join(compiler,'cmake/mingw_x86_64_toolchain.cmake')}`,
@@ -99,7 +107,7 @@ include("\${CANGJIE_RUNTIME_INSTALL_RULE}")
   return {cc,cxx,runtimeFiles,record:path.join(work,'toolchain.json'),facts};
  }catch(error){facts.error=error.message;facts.rc=error.rc??(typeof error.code==='number'?error.code:1);await save();throw error;}
 }
-export function windowsInstalledEnvironment(env,install) {
+export function windowsInstalledEnvironment({Path,...env},install) {
  const system=env.SystemRoot||env.SYSTEMROOT;
  if(!system)throw Error('WINDOWS_TOOLCHAIN_SYSTEMROOT');
  return {...env,PATH:[path.join(install,'bin'),path.join(install,'third_party/llvm/bin'),path.join(system,'System32'),system].join(';')};

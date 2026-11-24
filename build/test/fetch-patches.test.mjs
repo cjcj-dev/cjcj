@@ -483,3 +483,86 @@ for (const nested of [false, true]) {
     assert.throws(apply, /compiler Windows patch shape drift/, 'reverse check must reject a partial installation');
   });
 }
+
+// Read the actual patched toolchain before compiler IDs exist, as on first configure.
+test('Windows CMake linker and archive tool selection', async t => {
+  const root = tempTree(t), compiler = path.join(root, 'compiler');
+  fs.cpSync(WINDOWS_PIN_FIXTURE, compiler, {recursive: true});
+  applyCompilerWindowsPatches(compiler);
+  const sibling = path.join(root, 'selected toolchain', 'bin'), ambient = path.join(root, 'ambient');
+  for (const dir of [sibling, ambient]) {
+    fs.mkdirSync(dir, {recursive: true});
+    for (const name of ['llvm-ar.exe', 'llvm-ranlib.exe', ...(dir === ambient ? ['lld.exe', 'llvm-ar', 'llvm-ranlib'] : [])])
+      fs.writeFileSync(path.join(dir, name), '', {mode: 0o755});
+  }
+  const slash = file => file.replaceAll('\\', '/');
+  const toolchain = slash(path.join(compiler, 'cmake/mingw_x86_64_toolchain.cmake'));
+  const script = path.join(root, 'read.cmake');
+  fs.writeFileSync(script, [
+    'cmake_minimum_required(VERSION 3.20)', 'set(CMAKE_EXECUTABLE_SUFFIX ".exe")',
+    'include([[' + toolchain + ']])',
+    'file(WRITE result.txt "${CMAKE_C_FLAGS}\\n${CMAKE_CXX_FLAGS}\\n${CMAKE_AR}\\n${CMAKE_RANLIB}")',
+  ].join('\n'));
+  function read(cc, extra = []) {
+    const argv = ['-DCMAKE_PROGRAM_PATH=' + ambient, ...(cc ? ['-DCMAKE_C_COMPILER=' + cc] : []), ...extra, '-P', script];
+    const r = spawnSync('cmake', argv, {cwd: root, encoding: 'utf8'});
+    assert.equal(r.status, 0, r.stderr);
+    const result = fs.readFileSync(path.join(root, 'result.txt'), 'utf8').split('\n');
+    console.log('WINDOWS_CMAKE_SELECTION ' + JSON.stringify({cc, extra, result}));
+    return result;
+  }
+  for (const name of ['clang.exe', 'clang', 'clang++', 'clang++.exe', 'CLANG.EXE', 'x86_64-w64-mingw32-clang.exe', 'x86_64-w64-mingw32-clang++.exe']) {
+    await t.test(name, () => {
+      const cc = slash(path.join(sibling, name));
+      for (const spelling of [cc, cc.replaceAll('/', '\\')]) {
+        const [c, cxx, ar, ranlib] = read(spelling);
+        for (const flags of [c, cxx]) {
+          assert.match(flags, /-fuse-ld=lld/);
+          assert.doesNotMatch(flags, /-B.*toolchain\//);
+        }
+        assert.equal(ar, slash(path.join(sibling, 'llvm-ar.exe')));
+        assert.equal(ranlib, slash(path.join(sibling, 'llvm-ranlib.exe')));
+      }
+    });
+  }
+  await t.test('GCC defaults and explicit drivers keep their linker directory', () => {
+    for (const cc of ['', 'x86_64-w64-mingw32-gcc', 'gcc', 'g++']) {
+      const [c, cxx] = read(cc);
+      for (const flags of [c, cxx]) assert.ok(flags.includes('-B' + slash(root) + '/toolchain/'), flags);
+    }
+  });
+  await t.test('explicit overrides and per-tool fallback', () => {
+    const cc = path.join(sibling, 'clang.exe'), overrides = ['llvm-ar.exe', 'llvm-ranlib.exe'].map(n => slash(path.join(ambient, n)));
+    assert.deepEqual(read(cc, ['-DCMAKE_AR=' + overrides[0], '-DCMAKE_RANLIB=' + overrides[1]]).slice(2), overrides);
+    fs.unlinkSync(path.join(sibling, 'llvm-ar.exe'));
+    const [,, ar, ranlib] = read(cc);
+    assert.equal(slash(path.dirname(ar)), slash(ambient));
+    assert.equal(ranlib, slash(path.join(sibling, 'llvm-ranlib.exe')));
+  });
+});
+
+for (const [style, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
+  test('Windows base-patched compiler upgrade: ' + style, t => {
+    const root = tempTree(t);
+    fs.cpSync(WINDOWS_PIN_FIXTURE, root, {recursive: true});
+    const base = fs.readFileSync(new URL('../srcbuild/patches/compiler-windows-native.patch', import.meta.url), 'utf8');
+    // Reproduce the previous producer's per-file EOL with LF for the new module.
+    const input = withEol(base, '\n').split(/^(?=diff --git )/m).map(section => {
+      if (section.includes('new file mode')) return section;
+      const file = path.join(root, /^diff --git a\/(.+) b\//.exec(section)[1]);
+      fs.writeFileSync(file, withEol(fs.readFileSync(file, 'utf8'), eol));
+      return withEol(section, eol);
+    }).join('');
+    const old = spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'core.whitespace=cr-at-eol', 'apply', '-'],
+      {cwd: root, input, encoding: 'utf8', env: {...process.env, GIT_CEILING_DIRECTORIES: path.dirname(root)}});
+    assert.equal(old.status, 0, old.stderr);
+    const file = path.join(root, 'cmake/mingw_x86_64_toolchain.cmake');
+    const before = fs.readFileSync(file, 'utf8');
+    assert.ok(before.includes('if(NOT CMAKE_C_COMPILER)'));
+    applyCompilerWindowsPatches(root);
+    const after = fs.readFileSync(file, 'utf8');
+    assert.notEqual(after, before, 'cached base patch still needs the Clang change');
+    assert.equal(after, withEol(after, eol));
+    assertNoRewrite(file, () => applyCompilerWindowsPatches(root));
+  });
+}

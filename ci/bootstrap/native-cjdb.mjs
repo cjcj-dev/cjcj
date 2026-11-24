@@ -18,7 +18,7 @@ import {sdkPlatform} from './sdk-platform.mjs';
 import {execute} from './sdk-io.mjs';
 import {nativeWindowsPython} from './native-python-windows.mjs';
 import {copyWindowsPythonInstallation} from './native-python-install.mjs';
-import {probeWindowsToolchain,windowsInstalledEnvironment} from './native-windows-toolchain.mjs';
+import {probeWindowsToolchain,windowsInstalledEnvironment,selectedExecutable,selectedWindowsToolchainEnvironment} from './native-windows-toolchain.mjs';
 export const CJDB_SHIM_CXX_FLAGS=Object.freeze(['-std=c++17','-O2','-fPIC','-fno-rtti','-fno-exceptions','-DNDEBUG']);
 export async function compileCjdbShim({flatc, compiler, llvm, llvmBuild, flatbuffers,
   generatedHeaders, repository, object, clang, launcher, env, commit, sourceArchive,
@@ -164,7 +164,7 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
  }
  // BuildCJDB.cmake disables libedit on Windows. Unix uses the native ABI directory.
  const editDir=native.os==='win32'?null:config.libeditLibraryDirectory || path.join(libedit,'lib',...(native.os==='linux'?[(native.arch==='arm64'?'aarch64':'x86_64')+'-linux-gnu']:[]));
- const env={...process.env,CMAKE_BUILD_PARALLEL_LEVEL:jobs,TARGET_PYTHON_PATH:python,
+ let env={...process.env,CMAKE_BUILD_PARALLEL_LEVEL:jobs,TARGET_PYTHON_PATH:python,
   [native.loader]:[python,python+'/lib',editDir,process.env[native.loader]].filter(Boolean).join(delimiter),
   ...(native.loader==='PATH'?{}:{PATH:[python+'/bin',process.env.PATH].join(delimiter)})};
  const selectedPython=await pythonConfiguration(python,platform,execute,config.pythonExecutable,config.relocatablePython);
@@ -183,12 +183,18 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
  }
  const compilerSource=prepared.source;
  let windowsToolchain;
- if(native.os==='win32'&&!installOnly) {
+ if(native.os==='win32') {
   applyCompilerWindowsPatches(compiler);
-  windowsToolchain=await probeWindowsToolchain({tools,compiler,work:build+'.toolchain',env});
-  tools={...tools,cc:windowsToolchain.cc,cxx:windowsToolchain.cxx};
+  // The selected compiler bin must win every CMake find_program lookup.
+  // The probe configures before the main build, while runner PATH contains
+  // unrelated MSYS2 and host LLVM tools with the same names.
+  const selectedCc=await selectedExecutable(tools.cc,env),selectedCxx=await selectedExecutable(tools.cxx,env);
+  const selectedBin=path.dirname(selectedCc);
+  if(path.dirname(selectedCxx)!==selectedBin)throw Error('WINDOWS_TOOLCHAIN_COMPILER_PAIR');
+  env=selectedWindowsToolchainEnvironment(env,selectedBin);
+  tools={...tools,cc:selectedCc,cxx:selectedCxx};
+  if(!installOnly)windowsToolchain=await probeWindowsToolchain({tools,compiler,work:build+'.toolchain',env});
   config={...config,tools};
-  env.PATH=[path.dirname(tools.cc),env.PATH].join(';');
  }
  const xml2=build+'/xml2-source';
  if(!installOnly) {
@@ -205,7 +211,10 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
  const pythonArgs=[`-DPython3_EXECUTABLE=${selectedPython.executable}`,`-DPython3_INCLUDE_DIR=${selectedPython.include}`,`-DPython3_LIBRARY=${selectedPython.library}`];
  // Set the standalone child's inputs explicitly. find_package(Clang) can
  // otherwise select an unrelated runner installation before LLVM's hints.
- const lldbArgs=[...pythonArgs,'-DLLDB_PYTHON_EXT_SUFFIX='+selectedPython.suffix,'-DClang_DIR='+path.join(llvmBuild,'lib/cmake/clang'),
+ const archiveArgs=native.os==='win32'?[
+  '-DCMAKE_AR='+path.join(path.dirname(tools.cc),'llvm-ar.exe'),
+  '-DCMAKE_RANLIB='+path.join(path.dirname(tools.cc),'llvm-ranlib.exe')]:[];
+ const lldbArgs=[...archiveArgs,...pythonArgs,'-DLLDB_PYTHON_EXT_SUFFIX='+selectedPython.suffix,'-DClang_DIR='+path.join(llvmBuild,'lib/cmake/clang'),
   '-DLLVM_TABLEGEN='+path.join(llvmBuild,'bin','llvm-tblgen'+native.exe),
   '-DLIBXML2_INCLUDE_DIR='+path.join(build,'third_party/xml2/include/libxml2'),
   '-DLIBXML2_LIBRARY='+path.join(build,'third_party/xml2/lib',native.os==='win32'?'libxml2.dll.a':'libxml2'+native.shared),
@@ -218,6 +227,7 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
   `-DCJCJ_NATIVE_NODE=${process.execPath}`,`-DCJ_LLVM_COMMIT=${commits.llvm}`,
   `-DCMAKE_TOOLCHAIN_FILE=${toolchain}`,`-DCMAKE_C_COMPILER=${tools.cc}`,
   `-DCMAKE_CXX_COMPILER=${tools.cxx}`,`-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`,`-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,
+  ...archiveArgs,
   '-DCANGJIE_BUILD_CJC=ON','-DCANGJIE_BUILD_STD_SUPPORT=ON','-DCANGJIE_BUILD_TESTS=OFF','-DCANGJIE_BUILD_CJDB=ON',
   ...(windowsToolchain?[`-DCANGJIE_TOOLCHAIN_RUNTIME_FILES=${windowsToolchain.runtimeFiles.join(';')}`]:
     original?.windowsToolchain?[`-DCANGJIE_TOOLCHAIN_RUNTIME_FILES=${[...new Set(original.windowsToolchain.installedFiles.map(row=>path.join(config.nativeInstall,row.path)))].join(';')}`]:[]),

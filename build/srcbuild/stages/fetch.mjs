@@ -261,12 +261,39 @@ export function applyCompilerWindowsPatches(repoDir, patch = new URL('../patches
     '-c', 'core.autocrlf=false', '-c', 'core.whitespace=cr-at-eol', '-c', 'apply.ignoreWhitespace=no', 'apply', ...args, '-',
   ], {cwd: root, input, encoding: 'utf8', env});
   const check = apply('--check');
-  if (check.status !== 0) {
-    if (apply('--reverse', '--check').status === 0) return;
+  if (check.status === 0) {
+    const result = apply();
+    if (result.status !== 0) throw new BuildError(stage, result.stderr || result.error?.message || `git apply exited ${result.status}`);
+  } else if (apply('--reverse', '--check').status !== 0) {
     throw new BuildError(stage, `compiler Windows patch shape drift: ${check.stderr || check.error?.message}`);
   }
-  const result = apply();
-  if (result.status !== 0) throw new BuildError(stage, result.stderr || result.error?.message || `git apply exited ${result.status}`);
+
+  // Keep the base patch (and its reverse-check context) stable for cached sources.
+  // The first toolchain read happens before CMake identifies the compiler.
+  const findLld = 'find_program(lld_path lld${CMAKE_EXECUTABLE_SUFFIX})';
+  const selectLinker = [
+    'string(REPLACE [[\\]] "/" _cangjie_cc "${CMAKE_C_COMPILER}")',
+    'get_filename_component(_cangjie_cc_name "${_cangjie_cc}" NAME)',
+    'string(TOLOWER "${_cangjie_cc_name}" _cangjie_cc_name)',
+    'set(_cangjie_clang FALSE)',
+    'if(_cangjie_cc_name MATCHES "(^|-)clang([+][+])?(-[0-9.]+)?([.]exe)?$" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")',
+    '    set(_cangjie_clang TRUE)',
+    'else()',
+    '    ' + findLld,
+    'endif()',
+    'if(_cangjie_clang)',
+    '    set(OTHER_FLAGS "${OTHER_FLAGS} -fuse-ld=lld")',
+    '    get_filename_component(_cangjie_cc_dir "${CMAKE_C_COMPILER}" DIRECTORY)',
+    '    if(_cangjie_cc_dir)',
+    '        find_program(CMAKE_AR NAMES llvm-ar llvm-ar.exe HINTS "${_cangjie_cc_dir}" NO_DEFAULT_PATH)',
+    '        find_program(CMAKE_RANLIB NAMES llvm-ranlib llvm-ranlib.exe HINTS "${_cangjie_cc_dir}" NO_DEFAULT_PATH)',
+    '    endif()',
+    'elseif(NOT lld_path)',
+  ].join('\n');
+  // The unchanged archive lookups below provide fallback; find_program also
+  // respects tools already supplied by the caller.
+  applyTextPatch(path.join(root, 'cmake/mingw_x86_64_toolchain.cmake'),
+    [[findLld + '\nif(NOT lld_path)', selectLinker]], {stage, marker: selectLinker});
 }
 
 export async function fetchRepos(config,names) {
