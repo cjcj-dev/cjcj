@@ -82,7 +82,7 @@ const COMPILER_CJDB_REQUIREMENTS = [
 export function verifyCompilerCjdbPatches(repoDir) {
   for (const [relativePath, requiredTexts] of COMPILER_CJDB_REQUIREMENTS) {
     const file = path.join(repoDir, relativePath);
-    const source = fs.readFileSync(file, 'utf8');
+    const source = fs.readFileSync(file, 'utf8').replaceAll('\r\n', '\n');
     for (const requiredText of requiredTexts) {
       if (!source.includes(requiredText)) {
         throw new BuildError('fetch.patch.verify', `required compiler patch text missing from ${file}: ${requiredText}`);
@@ -221,7 +221,7 @@ export function prepareLldbSwigPython3Source(llvm) {
   const file = path.join(llvm, 'lldb/bindings/python/python-typemaps.swig');
   const stage = 'prepare.lldb.swig-python3';
   applyTextPatch(file, LLDB_SWIG_PYTHON3_TYPEMAPS, {stage, marker:LLDB_SWIG_PYTHON3_MARKER});
-  const text = fs.readFileSync(file, 'utf8');
+  const text = fs.readFileSync(file, 'utf8').replaceAll('\r\n', '\n');
   if (!text.includes(LLDB_SWIG_PYTHON3_MARKER) || /\bPy(Int|String|File)_/.test(text))
     throw new BuildError(stage, `Python 2 API remains in ${file}`);
 }
@@ -240,21 +240,33 @@ export function applyCompilerSchemaInstall(repoDir) {
 // Keep the reviewed 53da076 native Windows compiler/install changes when
 // consuming canonical sources. Canonical Flatbuffer.cmake already forwards
 // selected compilers and separates host flatc; preserve its newer recipe.
-export function applyCompilerWindowsPatches(repoDir) {
-  const patch = fileURLToPath(new URL('../patches/compiler-windows-native.patch', import.meta.url));
-  const apply = (...args) => spawnSync('git', ['apply', ...args, patch], {
-    cwd: repoDir, encoding: 'utf8',
-  });
+export function applyCompilerWindowsPatches(repoDir, patch = new URL('../patches/compiler-windows-native.patch', import.meta.url)) {
+  const stage = 'fetch.patch.windows';
+  const root = fs.realpathSync(repoDir);
+  // This patch edits or creates files in place. Match each section to the
+  // working bytes, including on reverse-check of an already created file.
+  const sections = fs.readFileSync(patch, 'utf8').replaceAll('\r\n', '\n').split(/^(?=diff --git )/m);
+  const input = sections.map(section => {
+    const header = /^diff --git a\/(.+) b\/\1\n/.exec(section);
+    if (!header || header[1].split('/').some(part => !part || part === '.' || part === '..') || /[\\:]/.test(header[1]))
+      throw new BuildError(stage, 'compiler Windows patch shape drift: unsupported diff path');
+    const file = path.join(root, header[1]);
+    const crlf = fs.existsSync(file) && fs.readFileSync(file).includes('\r\n');
+    return crlf ? section.replaceAll('\n', '\r\n') : section;
+  }).join('');
+  // Native preparation removes .git when copying the compiler. Even when the
+  // copy lives inside a checkout, Git must interpret patch paths from the copy.
+  const env = {...process.env, GIT_CEILING_DIRECTORIES: path.dirname(root)};
+  const apply = (...args) => spawnSync('git', [
+    '-c', 'core.autocrlf=false', '-c', 'core.whitespace=cr-at-eol', '-c', 'apply.ignoreWhitespace=no', 'apply', ...args, '-',
+  ], {cwd: root, input, encoding: 'utf8', env});
   const check = apply('--check');
   if (check.status !== 0) {
-    const restored = apply('--reverse', '--check');
-    if (restored.status === 0) return;
-    throw new BuildError('fetch.patch.windows', `compiler Windows patch shape drift: ${check.stderr || check.error?.message}`);
+    if (apply('--reverse', '--check').status === 0) return;
+    throw new BuildError(stage, `compiler Windows patch shape drift: ${check.stderr || check.error?.message}`);
   }
   const result = apply();
-  if (result.status !== 0) {
-    throw new BuildError('fetch.patch.windows', result.stderr || result.error?.message || `git apply exited ${result.status}`);
-  }
+  if (result.status !== 0) throw new BuildError(stage, result.stderr || result.error?.message || `git apply exited ${result.status}`);
 }
 
 export async function fetchRepos(config,names) {

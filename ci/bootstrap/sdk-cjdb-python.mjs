@@ -72,7 +72,7 @@ export async function pythonSourceInputs({record, sha256, root, nativeRoot, plat
 export async function verifyCjdbPythonConfiguration(pythonRoot, lldbBuild, execute, platform='linux_x86_64', executable, relocatable=false) {
   const selected=await pythonConfiguration(pythonRoot,platform,execute,executable,relocatable);
   const cache = await fs.readFile(path.join(lldbBuild, 'CMakeCache.txt'), 'utf8');
-  const value = name => cache.match(new RegExp(`^${name}:[^=]+=([^\\n]*)$`, 'm'))?.[1];
+  const value = name => cache.match(new RegExp(`^${name}:[^=]+=([^\\r\\n]*)$`, 'm'))?.[1];
   const actual = {executable:value('_Python3_EXECUTABLE') || value('Python3_EXECUTABLE'),
     include:value('_Python3_INCLUDE_DIR') || value('Python3_INCLUDE_DIR'),
     library:value('_Python3_LIBRARY_RELEASE') || value('Python3_LIBRARY'),

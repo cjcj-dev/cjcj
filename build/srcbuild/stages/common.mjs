@@ -177,13 +177,21 @@ export function applyCompilerPathNeutralFlags(repoDir) {
 
 export function applyTextPatch(file, edits, {stage: stageName, marker} = {}) {
   requireFile(file, {stage: stageName});
-  let text = fs.readFileSync(file, 'utf8');
-  if (marker && text.includes(marker)) return;
+  // One code unit per byte lets us splice the original, even around non-UTF-8
+  // comments. Only the caller's anchor, marker and replacement are UTF-8 text.
+  let text = fs.readFileSync(file, 'latin1');
+  const bytes = value => Buffer.from(value.replaceAll('\r\n', '\n'), 'utf8').toString('latin1');
+  if (marker && text.replaceAll('\r\n', '\n').includes(bytes(marker))) return;
+  const crlfCount = text.split('\r\n').length - 1;
+  const defaultEol = crlfCount * 2 > text.split('\n').length - 1 ? '\r\n' : '\n';
   for (const [oldText, newText] of edits) {
-    if (!text.includes(oldText)) throw new BuildError(stageName, `patch shape drift: ${JSON.stringify(oldText)} not found in ${file}`);
-    text = text.replace(oldText, newText);
+    const literal = bytes(oldText).replace(/[.*+?^{}$()|[\]\\]/g, '\\$&');
+    const match = new RegExp(literal.replaceAll('\n', '\\r?\\n')).exec(text);
+    if (!match) throw new BuildError(stageName, `patch shape drift: ${JSON.stringify(oldText)} not found in ${file}`);
+    const eol = match[0].includes('\r\n') ? '\r\n' : match[0].includes('\n') ? '\n' : defaultEol;
+    text = text.slice(0, match.index) + bytes(newText).replaceAll('\n', eol) + text.slice(match.index + match[0].length);
   }
-  fs.writeFileSync(file, text);
+  fs.writeFileSync(file, text, 'latin1');
   logger.info('Patched %s', file);
 }
 

@@ -8,7 +8,9 @@ import test from 'node:test';
 
 import {buildConfig, saveSourceSelection} from '../lib/config.mjs';
 import {getBuildTarget} from '../lib/build-target.mjs';
-import {applyCompilerBoundscheckDependencies, applyCompilerCjdbPatches, run as fetchRun, verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
+import {applyCompilerBoundscheckDependencies, applyCompilerCjdbPatches, applyCompilerLlvmVersion, applyCompilerSchemaInstall,
+  applyCompilerWindowsPatches, applyCompilerXml2Install, applyNativeCjdbConfigure, prepareLldbSwigPython3Source, run as fetchRun, verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
+import {applyTextPatch} from '../srcbuild/stages/common.mjs';
 
 const BUILD_CJDB = [
   'cmake_policy(SET CMP0114 NEW)',
@@ -73,6 +75,11 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
   try {
     fs.cpSync(WINDOWS_PIN_FIXTURE, compiler, {recursive: true});
     fs.cpSync(SCHEMA_PIN_FIXTURE, path.join(compiler, 'schema'), {recursive: true});
+    const schema = path.join(compiler, 'schema/CMakeLists.txt');
+    fs.writeFileSync(schema, withEol(fs.readFileSync(schema, 'utf8'), '\r\n'));
+    const xml2 = path.join(compiler, 'third_party/cmake/Xml2.cmake');
+    fs.writeFileSync(xml2, withEol(fs.readFileSync(xml2, 'utf8'), '\r\n'));
+    fs.writeFileSync(path.join(compiler, '.gitattributes'), 'third_party/CMakeLists.txt text eol=lf\nthird_party/cmake/Xml2.cmake text eol=crlf\n');
     const repoOverrides = {};
     for (const name of ['compiler', 'runtime', 'tools', 'stdx', 'llvm']) {
       const root = path.join(workspace, name === 'llvm' ? 'cangjie_compiler/third_party/llvm-project'
@@ -93,6 +100,9 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
     applyCompilerBoundscheckDependencies(compiler);
     assert.deepEqual(fs.readFileSync(boundsFile), canonicalBounds, 'canonical 41b already has both static bounds dependencies');
     await fetchRun(config);
+    assert.match(fs.readFileSync(xml2, 'utf8'), /-DCMAKE_CXX_COMPILER=\$\{CMAKE_CXX_COMPILER\}\r\n/);
+    assert.match(fs.readFileSync(boundsFile, 'utf8'), /\/InstallWindowsToolchain\.cmake"\)\n/);
+    assert.match(fs.readFileSync(schema, 'utf8'), /FLATC_LIBAST_OUTPUTS\}\)\r\ninstall\(FILES/, 'Windows fetch must preserve CRLF around the new install rule');
     assert.equal(fs.readFileSync(boundsFile,'utf8').split('DEPENDS cangjie-demangler boundscheck boundscheck-static)').length-1,2);
     const cmake = (args) => {
       const r = spawnSync('cmake', args, {cwd: workspace, encoding: 'utf8'});
@@ -288,3 +298,188 @@ test('boundscheck preparation refuses shape drift without rewriting canonical in
     assert.equal(fs.readFileSync(file,'utf8'),source);
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+function tempTree(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-eol-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  return root;
+}
+const withEol = (text, eol) => text.replace(/\r?\n/g, eol);
+
+function assertNoRewrite(file, repeat) {
+  const before = fs.readFileSync(file);
+  fs.utimesSync(file, 1000000000, 1000000000);
+  const timestamp = fs.statSync(file).mtimeMs;
+  repeat();
+  assert.deepEqual(fs.readFileSync(file), before);
+  assert.equal(fs.statSync(file).mtimeMs, timestamp, 'marker must skip the write');
+}
+
+test('applyTextPatch preserves CRLF and skips an already applied multiline marker', t => {
+  const file = path.join(tempTree(t), 'input');
+  fs.writeFileSync(file, 'before\r\nfirst\r\nsecond\r\nafter');
+  const apply = () => applyTextPatch(file, [['first\nsecond', 'one\r\ntwo']], {stage: 'example', marker: 'one\ntwo'});
+  apply();
+  assert.equal(fs.readFileSync(file, 'utf8'), 'before\r\none\r\ntwo\r\nafter');
+  assertNoRewrite(file, apply);
+
+  fs.writeFileSync(file, 'first\nsecond\n');
+  const fromCrlf = () => applyTextPatch(file, [['first\r\nsecond', 'one\r\ntwo']], {marker: 'one\r\ntwo'});
+  fromCrlf();
+  assert.equal(fs.readFileSync(file, 'utf8'), 'one\ntwo\n');
+  assertNoRewrite(file, fromCrlf);
+});
+
+for (const [name, oldText, before, after] of [
+  ['LF span', 'first\nsecond', 'before\r\nfirst\nsecond\nafter\n', 'before\r\none\ntwo\nafter\n'],
+  ['CRLF span', 'first\nsecond', 'before\nfirst\r\nsecond\r\nafter\n', 'before\none\r\ntwo\r\nafter\n'],
+  ['single line with mostly LF', 'first', 'before\r\nfirst\nsecond\nafter\n', 'before\r\none\ntwo\nsecond\nafter\n'],
+]) {
+  test('applyTextPatch preserves untouched bytes: ' + name, t => {
+    const file = path.join(tempTree(t), 'input');
+    fs.writeFileSync(file, before);
+    const apply = () => applyTextPatch(file, [[oldText, 'one\ntwo']], {marker: 'one\ntwo'});
+    apply();
+    assert.deepEqual(fs.readFileSync(file), Buffer.from(after));
+    assertNoRewrite(file, apply);
+  });
+}
+
+test('applyTextPatch splices UTF-8 edits without decoding surrounding bytes', t => {
+  const file = path.join(tempTree(t), 'input');
+  const prefix = Buffer.from([0xff, 0x0a]);
+  fs.writeFileSync(file, Buffer.concat([prefix, Buffer.from('été[0]\r\nfin\n')]));
+  applyTextPatch(file, [['été[0]\nfin', 'à $&\nfin']]);
+  assert.deepEqual(fs.readFileSync(file), Buffer.concat([prefix, Buffer.from('à $&\r\nfin\n')]));
+});
+
+test('applyTextPatch rejects CRLF source drift without writing a partial edit', t => {
+  const file = path.join(tempTree(t), 'input');
+  fs.writeFileSync(file, 'first\r\nchanged\r\n');
+  const missing = 'second\nthird';
+  assert.throws(() => applyTextPatch(file, [['first', 'done'], [missing, 'last']], {stage: 'drift'}),
+    {name: 'BuildError', message: '[drift] patch shape drift: ' + JSON.stringify(missing) + ' not found in ' + file});
+  assert.equal(fs.readFileSync(file, 'utf8'), 'first\r\nchanged\r\n');
+});
+
+test('LLDB preparation patches synthetic CRLF SWIG typemaps exactly once', t => {
+  const root = tempTree(t), file = path.join(root, 'lldb/bindings/python/python-typemaps.swig');
+  fs.mkdirSync(path.dirname(file), {recursive: true});
+  const sizeCheck = '  if (!PyInt_Check($input)) {\n  $2 = PyInt_AsLong($input);\n  if ($2 <= 0) {';
+  const fixture = [
+    sizeCheck, '// second size argument', sizeCheck,
+    '  if (PyInt_Check($input)) {', '    $2 = PyInt_AsLong($input);', '  } else if (PyLong_Check($input)) {',
+    '    PyObject *item = PyInt_FromLong($1[j]);',
+    'bool SetNumberFromPyObject(T &number, PyObject *obj) {',
+    '  if (PyInt_Check(obj))', '    number = static_cast<T>(PyInt_AsLong(obj));',
+    '  else if (PyLong_Check(obj))', '    number = PyLongAsT<T>(obj);', '',
+  ].join('\n');
+  assert.equal(fixture.match(/\bPyInt_/g).length, 9);
+  fs.writeFileSync(file, withEol(fixture, '\r\n'));
+  prepareLldbSwigPython3Source(root);
+  const text = fs.readFileSync(file, 'utf8');
+  assert.doesNotMatch(text, /\bPy(Int|String|File)_/);
+  assert.match(text, /PyLong_Check\(obj\)\)\r\n    number = PyLongAsT<T>/);
+  assert.equal(text, withEol(text, '\r\n'));
+  assertNoRewrite(file, () => prepareLldbSwigPython3Source(root));
+});
+
+test('native compiler preparation preserves CRLF across configure and install edits', t => {
+  const root = tempTree(t);
+  const files = ['third_party/cmake/BuildCJDB.cmake', 'src/CMakeLists.txt', 'third_party/CMakeLists.txt', 'schema/CMakeLists.txt'];
+  for (const rel of files) {
+    const source = rel.startsWith('schema/') ? path.join(SCHEMA_PIN_FIXTURE, 'CMakeLists.txt') : path.join(PIN_FIXTURE, rel);
+    fs.mkdirSync(path.dirname(path.join(root, rel)), {recursive: true});
+    fs.writeFileSync(path.join(root, rel), withEol(fs.readFileSync(source, 'utf8'), '\r\n'));
+  }
+  const prepare = () => {
+    applyCompilerCjdbPatches(root);
+    applyNativeCjdbConfigure(root);
+    applyCompilerBoundscheckDependencies(root);
+    applyCompilerSchemaInstall(root);
+    applyCompilerLlvmVersion(root);
+    applyCompilerXml2Install(root);
+  };
+  prepare();
+  verifyCompilerCjdbPatches(root);
+  const contents = () => files.map(rel => fs.readFileSync(path.join(root, rel), 'utf8'));
+  const first = contents();
+  assert.ok(first.every(text => text === withEol(text, '\r\n')));
+  assert.match(first[0], /string\(APPEND LLDB_CMAKE_CXX_FLAGS[^\n]+\r\nif\(NOT/);
+  assert.match(first[0], /CMAKE_ARGS \$\{LLDB_CMAKE_ARGS\} \$\{CJCJ_LLDB_ARGS\}/);
+  assert.equal(first[0].match(/FOLLOW_SYMLINK_CHAIN/g).length, 2);
+  assert.equal(first[2].match(/DEPENDS cangjie-demangler boundscheck boundscheck-static\)/g).length, 2);
+  assert.ok(first[2].includes('llvm-source-version.mjs'));
+  assert.ok(first[3].includes('install(FILES ${FLATC_OUTPUTS} DESTINATION include/flatbuffers)'));
+  prepare();
+  assert.deepEqual(contents(), first);
+});
+
+for (const [target, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
+  for (const [patchStyle, patchEol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
+    test(`Windows Git patch: ${target} compiler, ${patchStyle} patch, forward and reentry`, t => {
+      const root = tempTree(t), patch = path.join(root, 'input.patch');
+      fs.cpSync(WINDOWS_PIN_FIXTURE, root, {recursive: true});
+      const files = ['cmake/mingw_x86_64_toolchain.cmake', 'third_party/CMakeLists.txt', 'third_party/cmake/Xml2.cmake'];
+      for (const rel of files) {
+        const file = path.join(root, rel);
+        fs.writeFileSync(file, withEol(fs.readFileSync(file, 'utf8'), eol));
+      }
+      const bundled = new URL('../srcbuild/patches/compiler-windows-native.patch', import.meta.url);
+      fs.writeFileSync(patch, withEol(fs.readFileSync(bundled, 'utf8'), patchEol));
+      const apply = () => applyCompilerWindowsPatches(root, patch);
+      apply();
+      const installed = path.join(root, 'cmake/modules/InstallWindowsToolchain.cmake');
+      const module = fs.readFileSync(installed, 'utf8');
+      assert.ok(module.includes('install(FILES'));
+      assert.equal(module, withEol(module, '\n'), 'new file defaults to LF');
+      for (const rel of files) {
+        const text = fs.readFileSync(path.resolve(root, rel), 'utf8');
+        assert.equal(text, withEol(text, eol), rel);
+      }
+      assertNoRewrite(installed, apply);
+      fs.writeFileSync(installed, fs.readFileSync(installed, 'utf8').replace('install(FILES', 'changed(FILES'));
+      assert.throws(apply, /compiler Windows patch shape drift/);
+    });
+  }
+}
+
+for (const nested of [false, true]) {
+  test('Windows Git patch: ' + (nested ? 'nested plain copy' : 'standalone copy') + ' with per-file EOL', t => {
+    const parent = tempTree(t), root = path.join(parent, 'compiler');
+    if (nested) {
+      const init = spawnSync('git', ['init', '-q', parent], {encoding: 'utf8'});
+      assert.equal(init.status, 0, init.stderr);
+    }
+    fs.cpSync(WINDOWS_PIN_FIXTURE, root, {recursive: true});
+    const toolchain = path.join(root, 'cmake/mingw_x86_64_toolchain.cmake');
+    const thirdParty = path.join(root, 'third_party/CMakeLists.txt');
+    const xml = path.join(root, 'third_party/cmake/Xml2.cmake');
+    const installed = path.join(root, 'cmake/modules/InstallWindowsToolchain.cmake');
+    const apply = () => applyCompilerWindowsPatches(root);
+    for (const [file, eol] of [[toolchain, '\r\n'], [thirdParty, '\n'], [xml, '\r\n']]) {
+      fs.writeFileSync(file, withEol(fs.readFileSync(file, 'utf8'), eol));
+    }
+    const originals = [toolchain, thirdParty, xml].map(file => fs.readFileSync(file, 'utf8'));
+    const drift = originals[2].replace('-DCUSTOM_WARNING_SETTINGS=-Wno-error', '-DCUSTOM_WARNING_SETTINGS=drift');
+    assert.notEqual(drift, originals[2]);
+    fs.writeFileSync(xml, drift);
+    assert.throws(apply, /compiler Windows patch shape drift/, 'drift in the last section must reject the whole patch');
+    assert.deepEqual([toolchain, thirdParty, xml].map(file => fs.readFileSync(file, 'utf8')), [...originals.slice(0, 2), drift]);
+    assert.equal(fs.existsSync(installed), false);
+    fs.writeFileSync(xml, originals[2]);
+
+    assert.doesNotThrow(apply, 'all four sections must apply together');
+    for (const [file, marker, eol] of [
+      [toolchain, 'if(NOT CMAKE_C_COMPILER)', '\r\n'], [thirdParty, '/InstallWindowsToolchain.cmake")', '\n'],
+      [xml, '-DCMAKE_CXX_COMPILER=', '\r\n'], [installed, 'install(FILES', '\n'],
+    ]) {
+      const text = fs.readFileSync(file, 'utf8');
+      assert.ok(text.includes(marker), file);
+      assert.equal(text, withEol(text, eol), file);
+      assertNoRewrite(file, apply);
+    }
+    fs.writeFileSync(installed, 'incomplete\n');
+    assert.throws(apply, /compiler Windows patch shape drift/, 'reverse check must reject a partial installation');
+  });
+}

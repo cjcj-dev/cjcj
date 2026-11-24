@@ -21,7 +21,7 @@ import {selectedStdAst} from '../../../../ci/bootstrap/sdk-std-resume.mjs';
 import {createBootstrapTargets, FIXED_INPUTS, nativeTargetLibraryExcludes} from '../../../../ci/bootstrap/sdk-targets.mjs';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {preserveNativePythonInput} from '../../../../ci/bootstrap/native-cjdb-job.mjs';
-import {pythonSourceInputs} from '../../../../ci/bootstrap/sdk-cjdb-python.mjs';
+import {pythonSourceInputs, verifyCjdbPythonConfiguration} from '../../../../ci/bootstrap/sdk-cjdb-python.mjs';
 import {installedInputs} from '../srcbuild/lib/installed-inputs.mjs';
 import {nativeInstallationLocations} from '../../../../ci/bootstrap/native-installation-locations.mjs';
 import {readInstalledNativeAst} from '../../../../ci/bootstrap/installed-native-ast.mjs';
@@ -1058,7 +1058,7 @@ test('install-ast installs Parse/Parser.h and the header tree std reads from the
   assert.throws(() => installAst({root: empty, target: 'linux-x64', from: without, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER}}),
     /NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING include\/cangjie\/Parse\/Parser\.h/);
 });
-test('the LLDB build Python identity must be the selected prefix', t => {
+test('the LLDB build Python identity must be the selected prefix, including a CRLF cache', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-python-')); t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
   const file = rel => { fs.mkdirSync(path.dirname(path.join(dir, rel)), {recursive: true}); fs.writeFileSync(path.join(dir, rel), rel); return path.join(dir, rel); };
   const selected = {executable: file('p/bin/python3.11'), include: path.dirname(file('p/include/python3.11/Python.h')),
@@ -1067,6 +1067,12 @@ test('the LLDB build Python identity must be the selected prefix', t => {
     fs.writeFileSync(path.join(dir, 'build/CMakeCache.txt'), `Python3_EXECUTABLE:FILEPATH=${executable}\nPython3_INCLUDE_DIR:PATH=${selected.include}\n`
       + `Python3_LIBRARY:FILEPATH=${selected.library}\nLLDB_PYTHON_EXT_SUFFIX:STRING=${suffix}\n`); return path.join(dir, 'build'); };
   assert.deepEqual(pythonCacheConfiguration({selected, build: cache(selected.executable)}).actual.executable, selected.executable);
+  const build = cache(selected.executable), cacheFile = path.join(build, 'CMakeCache.txt');
+  fs.writeFileSync(cacheFile, fs.readFileSync(cacheFile, 'utf8').replaceAll('\n', '\r\n'));
+  const interpreter = async () => ({stdout: JSON.stringify({...selected, version: '3.11.17'})});
+  const verified = await verifyCjdbPythonConfiguration(dir, build, interpreter, 'windows_x86_64');
+  assert.deepEqual(verified.actual, selected);
+  assert.deepEqual(pythonCacheConfiguration({selected, build}).actual, selected);
   assert.throws(() => pythonCacheConfiguration({selected, build: cache(file('other/bin/python3.11'))}), /PREPARE_LLDB_PYTHON_IDENTITY executable/);
   assert.throws(() => pythonCacheConfiguration({selected, build: cache(selected.executable, '.so')}), /PREPARE_LLDB_PYTHON_IDENTITY suffix/);
 });

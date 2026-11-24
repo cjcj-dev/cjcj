@@ -320,7 +320,7 @@ export async function preparePython({platform, out, download = async (url, file)
 // the selected prefix (the relationship verifyRelocatedCjdbPython re-reads).
 export function pythonCacheConfiguration({selected, build}) {
   const cacheFile = path.join(build, 'CMakeCache.txt'), cache = fs.readFileSync(cacheFile, 'utf8');
-  const value = name => cache.match(new RegExp(`^${name}:[^=]+=([^\\n]*)$`, 'm'))?.[1];
+  const value = name => cache.match(new RegExp(`^${name}:[^=]+=([^\\r\\n]*)$`, 'm'))?.[1];
   const actual = {executable: value('_Python3_EXECUTABLE') || value('Python3_EXECUTABLE'),
     include: value('_Python3_INCLUDE_DIR') || value('Python3_INCLUDE_DIR'),
     library: value('_Python3_LIBRARY_RELEASE') || value('Python3_LIBRARY'), suffix: value('LLDB_PYTHON_EXT_SUFFIX')};
