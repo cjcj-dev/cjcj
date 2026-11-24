@@ -9,8 +9,9 @@ import test from 'node:test';
 import {buildConfig, saveSourceSelection} from '../lib/config.mjs';
 import {getBuildTarget} from '../lib/build-target.mjs';
 import {applyCompilerBoundscheckDependencies, applyCompilerCjdbPatches, applyCompilerLlvmVersion, applyCompilerSchemaInstall,
-  applyCompilerWindowsPatches, applyCompilerXml2Install, applyNativeCjdbConfigure, prepareLldbSwigPython3Source, run as fetchRun, verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
+  applyCompilerWindowsPatches, applyCompilerXml2Install, applyNativeCjdbConfigure, prepareLldbSwigPython3Source, prepareWindowsLlvmSource, run as fetchRun, verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
 import {assertCompilerLibcxxEdits, libcxxEdits} from './fixtures/windows-compiler-libcxx.mjs';
+import {BuildError} from '../lib/errors.mjs';
 import {applyTextPatch} from '../srcbuild/stages/common.mjs';
 
 const BUILD_CJDB = [
@@ -70,6 +71,49 @@ function makeCompilerFixture() {
   return root;
 }
 
+// Declaration excerpts from llvm@eb7ad012. The Analysis folder owns data
+// members before its key function; IR's two folders declare it immediately.
+function putLlvmFolders(root, eol = '\n') {
+  return ['IR/ConstantFolder', 'IR/NoFolder', 'Analysis/InstSimplifyFolder'].map(rel => {
+    const name = path.basename(rel), file = path.join(root, 'llvm/include/llvm', rel + '.h');
+    const lines = ['namespace llvm {', `class ${name} final : public IRBuilderFolder {`];
+    if (name === 'InstSimplifyFolder') lines.push('  TargetFolder ConstFolder;', '  SimplifyQuery SQ;', '');
+    lines.push('  virtual void anchor();', '', 'public:', '  // unrelated final stays here', '};', '}', '');
+    const original = lines.join(eol), expected = original.replace(name + ' final :', name + ' :');
+    fs.mkdirSync(path.dirname(file), {recursive: true});
+    fs.writeFileSync(file, original);
+    return {file, original, expected};
+  });
+}
+
+for (const [label, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
+  test('Windows LLVM folder declarations preserve the anchor and ' + label, t => {
+    const root = tempTree(t), folders = putLlvmFolders(root, eol);
+    prepareWindowsLlvmSource(root);
+    for (const {file, expected} of folders) {
+      assert.deepEqual(fs.readFileSync(file), Buffer.from(expected), file);
+      assertNoRewrite(file, () => prepareWindowsLlvmSource(root));
+    }
+  });
+}
+
+test('Windows LLVM preparation rejects a changed, ambiguous or missing folder declaration', t => {
+  const root = tempTree(t);
+  for (const {file, original, expected} of putLlvmFolders(root)) {
+    for (const drift of [original.replace('virtual void', 'void'), expected.replace('anchor()', 'anchor(int)'),
+      original + expected]) {
+      fs.writeFileSync(file, drift);
+      assert.throws(() => prepareWindowsLlvmSource(root),
+        error => error instanceof BuildError && error.message.includes('patch shape drift') && error.message.includes(file));
+      assert.equal(fs.readFileSync(file, 'utf8'), drift);
+    }
+    fs.unlinkSync(file);
+    assert.throws(() => prepareWindowsLlvmSource(root),
+      error => error instanceof BuildError && error.message.includes('required file missing') && error.message.includes(file));
+    fs.writeFileSync(file, original);
+  }
+});
+
 test('Windows fetch preserves selected native compilers and normal runtime installation on canonical source', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'windows-canonical-fetch-'));
   const compiler = path.join(workspace, 'cangjie_compiler');
@@ -81,6 +125,7 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
     const xml2 = path.join(compiler, 'third_party/cmake/Xml2.cmake');
     fs.writeFileSync(xml2, withEol(fs.readFileSync(xml2, 'utf8'), '\r\n'));
     fs.writeFileSync(path.join(compiler, '.gitattributes'), 'third_party/CMakeLists.txt text eol=lf\nthird_party/cmake/Xml2.cmake text eol=crlf\n');
+    const folders = putLlvmFolders(path.join(compiler, 'third_party/llvm-project'));
     const repoOverrides = {};
     for (const name of ['compiler', 'runtime', 'tools', 'stdx', 'llvm']) {
       const root = path.join(workspace, name === 'llvm' ? 'cangjie_compiler/third_party/llvm-project'
@@ -101,6 +146,7 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
     applyCompilerBoundscheckDependencies(compiler);
     assert.deepEqual(fs.readFileSync(boundsFile), canonicalBounds, 'canonical 41b already has both static bounds dependencies');
     await fetchRun(config);
+    for (const {file, expected} of folders) assert.equal(fs.readFileSync(file, 'utf8'), expected, file);
     assertCompilerLibcxxEdits(compiler);
     assert.match(fs.readFileSync(path.join(compiler, 'demangler/Demangler.h'), 'utf8'),
       /#include <vector>\r?\n#ifndef BUILD_LIB_CANGJIE_DEMANGLE/, 'Windows fetch must expose vector in the library build');

@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
-import {prepareDarwinCompilerRtSource,prepareDarwinLldbSource,prepareLldbSwigPython3Source} from '../../../srcbuild/stages/fetch.mjs';
+import {prepareDarwinCompilerRtSource,prepareDarwinLldbSource,prepareLldbSwigPython3Source,prepareWindowsLlvmSource} from '../../../srcbuild/stages/fetch.mjs';
 import {sdkPlatform} from '../../../../ci/bootstrap/sdk-platform.mjs';
 import {download} from '../../../lib/archive.mjs';
 import {preserveNativePythonInput} from '../../../../ci/bootstrap/native-cjdb-job.mjs';
@@ -44,6 +44,7 @@ export async function prepareNativeSuperbuild({target,workspace,work,root,env=pr
   }
   let pythonInputs;
   if(windows) {
+    prepareWindowsLlvmSource(sources.llvm);
     const bin=path.join(env.CJCJ_WINDOWS_TOOLCHAIN,'bin');
     tools.cc=path.join(bin,'clang.exe');tools.cxx=path.join(bin,'clang++.exe');
     const archive=path.join(work,'Python-'+WINDOWS_PYTHON_SOURCE.version+'.tar.xz');

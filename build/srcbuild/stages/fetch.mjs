@@ -8,7 +8,7 @@ import {saveSourceSelection} from '../../lib/config.mjs';
 import {BuildError} from '../../lib/errors.mjs';
 import {shallowClone, assertSourceIdentity} from '../../lib/git.mjs';
 import {getLogger, stage} from '../../lib/logging.mjs';
-import {applyTextPatch, ensureDir} from './common.mjs';
+import {applyTextPatch, ensureDir, requireFile} from './common.mjs';
 
 const logger = getLogger('cangjie_build.stages.fetch');
 const BOUNDSCHECK_DEPENDS = 'DEPENDS cangjie-demangler boundscheck';
@@ -148,6 +148,29 @@ export const DARWIN_DEBUGSERVER_MIG_SYSROOT = Object.freeze({
     '  VERBATIM COMMAND mig ${MIG_ARCH_FLAGS_SEPARTED} -isysroot "${_lldb_mig_sysroot}" ${CMAKE_CURRENT_SOURCE_DIR}/MacOSX/dbgnub-mig.defs',
     ''].join('\n'),
 });
+
+// Clang 23 diagnoses a new virtual member on a final class. Keep the
+// out-of-line key functions and the same virtual slots in producers and users.
+export function prepareWindowsLlvmSource(llvm) {
+  for (const [folder, members] of [
+    ['IR/ConstantFolder', ''],
+    ['IR/NoFolder', ''],
+    ['Analysis/InstSimplifyFolder', '  TargetFolder ConstFolder;\n  SimplifyQuery SQ;\n\n'],
+  ]) {
+    const name = path.basename(folder);
+    const file = path.join(llvm, 'llvm/include/llvm', folder + '.h');
+    const before = `class ${name} final : public IRBuilderFolder {`;
+    const after = `class ${name} : public IRBuilderFolder {`;
+    const stage = 'prepare.windows.llvm-folder';
+    requireFile(file, {stage});
+    const source = fs.readFileSync(file, 'utf8').replaceAll('\r\n', '\n');
+    const declarations = source.split(before).length - 1 + (source.split(after).length - 1);
+    const expected = source.includes(before) ? before : after;
+    if (declarations !== 1 || !source.includes(`\n${expected}\n${members}  virtual void anchor();\n`))
+      throw new BuildError(stage, `patch shape drift: expected one ${name} declaration with its anchor in ${file}`);
+    applyTextPatch(file, [[before, after]], {stage, marker: after});
+  }
+}
 
 // Applied to prepare-native's private LLVM checkout. The parent toolchain
 // stages boundscheck under aarch64; standalone CMake reports arm64 on macOS.
@@ -344,7 +367,10 @@ export async function run(config) {
     applyCompilerCjdbPatches(config.repoPath('compiler'));
     applyCompilerBoundscheckDependencies(config.repoPath('compiler'));
     applyCompilerSchemaInstall(config.repoPath('compiler'));
-    if (config.target.spec.nodePlatform === 'win32') applyCompilerWindowsPatches(config.repoPath('compiler'));
+    if (config.target.spec.nodePlatform === 'win32') {
+      applyCompilerWindowsPatches(config.repoPath('compiler'));
+      prepareWindowsLlvmSource(config.repoPath('llvm'));
+    }
     saveSourceSelection(config);
   });
 }

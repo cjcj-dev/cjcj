@@ -1572,6 +1572,17 @@ test('prepare-native patches the private LLVM checkout\'s compiler-rt on Darwin 
   assert.ok(source.indexOf(darwin[0]) < source.indexOf('await nativeCjdb('), 'patched before the superbuild configures');
 });
 
+test('prepare-native patches the verified private LLVM folders once before the Windows superbuild', () => {
+  const source = fs.readFileSync(path.join(import.meta.dirname, 'prepare_native_superbuild.mjs'), 'utf8');
+  assert.match(source, /^import \{[^}]*\bprepareWindowsLlvmSource\b[^}]*\} from '\.\.\/\.\.\/\.\.\/srcbuild\/stages\/fetch\.mjs';$/m);
+  const windows = /\n  if\(windows\) \{([\s\S]*?)\n  \} else \{/.exec(source);
+  assert.ok(windows, 'Windows preparation block');
+  assert.match(windows[1], /^    prepareWindowsLlvmSource\(sources\.llvm\);$/m, 'Windows must patch the LLVM tree passed to nativeCjdb');
+  assert.equal(source.match(/\bprepareWindowsLlvmSource\s*\(/g)?.length, 1);
+  const verified = source.indexOf('await verifyNativeSource({source,commit});'), build = source.indexOf('await nativeCjdb({...sources,');
+  assert.ok(verified >= 0 && verified < windows.index && windows.index + windows[0].length < build);
+});
+
 test('prepare.yml persists the one native sccache session that covers runtime and the LLVM superbuild', () => {
   const steps = loadYaml(fs.readFileSync(path.join(import.meta.dirname, '../../../../.github/workflows/prepare.yml'), 'utf8'))
     .jobs['prepare-native'].steps;
