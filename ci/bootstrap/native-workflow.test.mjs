@@ -47,7 +47,7 @@ test('native workflow builds N via the existing producer and transports installa
  assert.ok(consumer.needs.includes('native-cjdb'));
  const scripts=producer.steps.map(s=>s.run||'').join('\n');
  assert.match(scripts,/node ci\/bootstrap\/native-cjdb-job.mjs build/);
- assert.equal(producer.steps.find(s=>s.uses==='actions/upload-artifact@v7').with.path,'${{ runner.temp }}/native-cjdb/native-install.tar');
+ assert.equal(producer.steps.find(s=>s.uses==='actions/upload-artifact@v7.0.2').with.path,'${{ runner.temp }}/native-cjdb/native-install.tar');
  const unpack=consumer.steps.findIndex(s=>s.run?.includes('native-cjdb-job.mjs unpack'));
  const host=consumer.steps.findIndex(s=>s.run?.includes('prepare-native-host.mjs'));
  const configure=consumer.steps.findIndex(s=>s.run?.includes('configure-gha-inputs.mjs'));

@@ -159,7 +159,7 @@ jobs:
         run: |
           test -n "$NATIVE_INPUTS_ARTIFACT" || { echo '::error::native_inputs_artifact is required'; exit 1; }
           test -n "$NATIVE_INPUTS_RUN_ID" || { echo '::error::native_inputs_run_id is required'; exit 1; }
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
@@ -185,7 +185,7 @@ jobs:
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Validate native source pair before starting producers
         env:
           CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
@@ -213,9 +213,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.1'
       - name: Select native build capacity
@@ -246,7 +246,7 @@ jobs:
       # entry (release-matrix run 35718484244 restored ...-rebuild-35717971557).
       - name: Restore LLVM tools cache
         id: cache
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: fixed-toolchain/${{ matrix.platform }}
           key: ${{ inputs.rebuild_llvm && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ steps.llvm-pin.outputs.runtime_sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('ci/llvm_pin.env', 'ci/source_pin.env', 'ci/runtime_pin.env', 'ci/fetch-llvm-runtime.mjs', '.github/workflows/sdk-build-target.yml', 'ci/llvm-tools-manifest.mjs', 'build/lib/targets.mjs', 'ci/llvm-tools-matrix.mjs', 'ci/native-llvm-inputs.mjs', 'build/sdk/producers/platform_tuples/**', 'build/lib/srcbuild_git.sh', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
@@ -383,9 +383,11 @@ jobs:
 
       - name: Prepare MSYS2/MinGW LLVM toolchain
         if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@v2.34.0
         with:
           msystem: MINGW64
+          # MINGW64 is intentional: these tools follow the MSVCRT ABI.
+          suppress-deprecation-warnings: msystem-mingw64
           update: true
           path-type: inherit
           install: >-
@@ -514,7 +516,7 @@ jobs:
           node ci/llvm-tools-manifest.mjs validate tuple "fixed-toolchain/$TUPLE_PLATFORM/llvm-tools.manifest"
 
       - name: Upload LLVM tools
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: fixed-llvm-tools-${{ matrix.platform }}
           path: fixed-toolchain/${{ matrix.platform }}
@@ -531,14 +533,14 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.1'
       - name: Receive fixed native source and development dependencies
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: ${{ inputs.native_build_inputs_artifact }}-${{ matrix.target }}
           run-id: ${{ inputs.native_build_inputs_run_id }}
@@ -568,14 +570,14 @@ jobs:
       - name: Build Windows Python and native N and AST
         if: runner.os == 'Windows'
         run: node ci/bootstrap/native-cjdb-job.mjs build "$RUNNER_TEMP/native-inputs" "$RUNNER_TEMP/native-cjdb"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: native-cjdb-${{ matrix.target }}
           path: ${{ runner.temp }}/native-cjdb/native-install.tar
           if-no-files-found: error
       - name: Retain original native build diagnostics
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: native-cjdb-diagnostics-${{ matrix.target }}
           path: |
@@ -622,7 +624,7 @@ jobs:
     steps:
       - &checkout-cjcj
         name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -636,7 +638,7 @@ jobs:
       - &receive-selected-native-inputs-before-choosing-the-host
         name: Receive selected native inputs before choosing the host
         if: inputs.native_runtime_artifact != ''
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: ${{ inputs.native_inputs_artifact }}-${{ matrix.target }}
           run-id: ${{ inputs.native_inputs_run_id }}
@@ -651,7 +653,7 @@ jobs:
 
       - name: Receive native CMake installation produced in this run
         if: inputs.native_build_inputs_artifact != ''
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: native-cjdb-${{ matrix.target }}
           path: ${{ github.workspace }}/.srcbuild/native-cjdb-artifact
@@ -781,7 +783,7 @@ jobs:
       - name: Restore support library cache
         if: matrix.static_libs
         id: support-cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.CANGJIE_BUILD_ROOT }}
           key: cangjie-srcbuild-support-${{ matrix.target }}-${{ hashFiles('build/toolchain/static-libs.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
@@ -794,7 +796,7 @@ jobs:
 
       - name: Save support library cache
         if: matrix.static_libs && steps.support-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@v6.1.0
         with:
           path: ${{ env.CANGJIE_BUILD_ROOT }}
           key: cangjie-srcbuild-support-${{ matrix.target }}-${{ hashFiles('build/toolchain/static-libs.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
@@ -836,7 +838,7 @@ jobs:
 
       - name: Download native LLVM tuple
         if: inputs.native_runtime_artifact == ''
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: fixed-llvm-tools-${{ matrix.llvm_platform }}
           path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
@@ -1074,7 +1076,7 @@ jobs:
 
       - name: Receive complete native target installations and paired build adapter
         if: inputs.native_runtime_artifact == ''
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: ${{ inputs.native_inputs_artifact }}-${{ matrix.target }}
           run-id: ${{ inputs.native_inputs_run_id }}
@@ -1084,7 +1086,7 @@ jobs:
       - &receive-fixed-native-runtime-installation
         name: Receive fixed native runtime installation
         if: inputs.native_runtime_artifact != ''
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: ${{ inputs.native_runtime_artifact }}-${{ matrix.llvm_platform }}
           run-id: ${{ inputs.native_runtime_run_id }}
@@ -1118,7 +1120,7 @@ jobs:
         run: node build/sdk/producers/srcbuild/job-handoff.mjs pack stage0 "$RUNNER_TEMP/source-handoff-output"
 
       - name: Upload source phase handoff
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage0
           path: ${{ runner.temp }}/source-handoff-output
@@ -1153,7 +1155,7 @@ jobs:
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -1164,7 +1166,7 @@ jobs:
         if: runner.os == 'Windows'
 
       - name: Download preceding source phase
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage0
           path: ${{ runner.temp }}/source-handoff
@@ -1205,7 +1207,7 @@ jobs:
         run: node build/sdk/producers/srcbuild/job-handoff.mjs pack stage1-initial-std "$RUNNER_TEMP/source-handoff-output"
 
       - name: Upload source phase handoff
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage1-initial-std
           path: ${{ runner.temp }}/source-handoff-output
@@ -1240,7 +1242,7 @@ jobs:
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -1251,7 +1253,7 @@ jobs:
         if: runner.os == 'Windows'
 
       - name: Download preceding source phase
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage1-initial-std
           path: ${{ runner.temp }}/source-handoff
@@ -1292,7 +1294,7 @@ jobs:
         run: node build/sdk/producers/srcbuild/job-handoff.mjs pack stage1-std "$RUNNER_TEMP/source-handoff-output"
 
       - name: Upload source phase handoff
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage1-std
           path: ${{ runner.temp }}/source-handoff-output
@@ -1327,7 +1329,7 @@ jobs:
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -1338,7 +1340,7 @@ jobs:
         if: runner.os == 'Windows'
 
       - name: Download preceding source phase
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage1-std
           path: ${{ runner.temp }}/source-handoff
@@ -1379,7 +1381,7 @@ jobs:
         run: node build/sdk/producers/srcbuild/job-handoff.mjs pack stage1-compiler "$RUNNER_TEMP/source-handoff-output"
 
       - name: Upload source phase handoff
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage1-compiler
           path: ${{ runner.temp }}/source-handoff-output
@@ -1414,7 +1416,7 @@ jobs:
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -1425,7 +1427,7 @@ jobs:
         if: runner.os == 'Windows'
 
       - name: Download preceding source phase
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage1-compiler
           path: ${{ runner.temp }}/source-handoff
@@ -1467,14 +1469,14 @@ jobs:
 
       - name: Select JDK for native Java interop
         if: matrix.target == 'linux-x64'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6.3.0
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Restore native Java installs
         if: matrix.target == 'linux-x64'
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ runner.temp }}/java-interop/installs
           key: java-interop-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ci/bootstrap/build-java-interop.mjs', 'ci/source_pin.env') }}-${{ github.sha }}-${{ github.run_id }}
@@ -1490,7 +1492,7 @@ jobs:
 
       - &upload-final-source-built-std-install-root
         name: Upload final source-built std install root
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ matrix.std_artifact }}
           path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-stage2
@@ -1503,7 +1505,7 @@ jobs:
 
       - name: Upload the installed Darwin stage2 SDK for iOS
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-ios-stage2-${{ matrix.target }}
           path: ${{ runner.temp }}/ios-stage2-output
@@ -1515,7 +1517,7 @@ jobs:
         run: node build/sdk/producers/srcbuild/job-handoff.mjs pack stage3 "$RUNNER_TEMP/source-handoff-output"
 
       - name: Upload source phase handoff
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage3
           path: ${{ runner.temp }}/source-handoff-output
@@ -1561,7 +1563,7 @@ jobs:
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -1572,7 +1574,7 @@ jobs:
         if: runner.os == 'Windows'
 
       - name: Download preceding source phase
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage3
           path: ${{ runner.temp }}/source-handoff
@@ -1585,7 +1587,7 @@ jobs:
 
       - name: Select JDK for installed and relocated Java consumers
         if: matrix.target == 'linux-x64'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6.3.0
         with:
           distribution: temurin
           java-version: '17'
@@ -1641,7 +1643,7 @@ jobs:
 
       - &upload-source-built-cjpm-artifact
         name: Upload source-built cjpm artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cjpm-${{ matrix.target }}
           path: ${{ github.workspace }}/.release-cjpm/${{ matrix.target }}
@@ -1659,7 +1661,7 @@ jobs:
 
       - &upload-source-built-hle-artifact
         name: Upload source-built hle artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-hle-${{ matrix.target }}
           path: ${{ github.workspace }}/.release-hle/${{ matrix.target }}
@@ -1679,7 +1681,7 @@ jobs:
 
       - &upload-source-built-cjlint-artifact
         name: Upload source-built cjlint artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cjlint-${{ matrix.target }}
           path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjlint
@@ -1697,7 +1699,7 @@ jobs:
 
       - &upload-source-built-cjprof-artifact
         name: Upload source-built cjprof artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cjprof-${{ matrix.target }}
           path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjprof
@@ -1715,7 +1717,7 @@ jobs:
 
       - &upload-source-built-cjcompat-artifact
         name: Upload source-built cjcompat artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cjcompat-${{ matrix.target }}
           path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjcompat
@@ -1733,7 +1735,7 @@ jobs:
 
       - &upload-source-built-cjhead-artifact
         name: Upload source-built cjhead artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cjhead-${{ matrix.target }}
           path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjhead
@@ -1751,7 +1753,7 @@ jobs:
 
       - &upload-source-built-cjfmt-artifact
         name: Upload source-built cjfmt artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cjfmt-${{ matrix.target }}
           path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjfmt
@@ -1769,7 +1771,7 @@ jobs:
 
       - &upload-source-built-lspserver-artifact
         name: Upload source-built LSPServer artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-LSPServer-${{ matrix.target }}
           path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/LSPServer
@@ -1787,7 +1789,7 @@ jobs:
 
       - &upload-source-built-cjcov-artifact
         name: Upload source-built cjcov artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cjcov-${{ matrix.target }}
           path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjcov
@@ -1805,7 +1807,7 @@ jobs:
 
       - &upload-source-built-cjtrace-recover-artifact
         name: Upload source-built cjtrace-recover artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cjtrace-recover-${{ matrix.target }}
           path: ${{ github.workspace }}/.release-tools/${{ matrix.target }}/cjtrace-recover
@@ -1816,7 +1818,7 @@ jobs:
       # source producer is the existing Windows final-std job, not H leftovers.
       - name: Download source-built Windows FFI outputs
         if: matrix.target == 'linux-x64'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: final-std-windows-x64
           path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-windows-stage2
@@ -1827,7 +1829,7 @@ jobs:
 
       - name: Download Android final std and runtime from this run
         if: matrix.target == 'linux-x64' && inputs.build_android
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: final-std-android-aarch64
           path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-android-aarch64
@@ -1844,7 +1846,7 @@ jobs:
 
       - name: Download this run's iOS final std and runtime products
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           pattern: final-std-ios-*
           path: ${{ runner.temp }}/ios-products
@@ -1870,7 +1872,7 @@ jobs:
 
       - name: Upload stage diagnostics
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: srcbuild-diagnosis-${{ matrix.target }}-${{ github.run_attempt }}
           retention-days: 7
@@ -1903,7 +1905,7 @@ jobs:
 
       - name: Retain G2 campaign identity
         if: always() && matrix.target == 'linux-x64' && env.G2_IDENTITY != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: g2-identity-linux-x64-${{ github.run_attempt }}
           path: ${{ env.G2_CAMPAIGN_DIR }}
@@ -1916,7 +1918,7 @@ jobs:
 
       - &upload-final-compiler-handoff
         name: Upload final compiler handoff
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: final-compiler-${{ matrix.target }}
           path: ${{ env.CANGJIE_WORKSPACE }}/software/final-compiler.tar.gz
@@ -1929,7 +1931,7 @@ jobs:
 
       # Keep the archive and sidecar at the artifact root read by compose.
       - name: Upload complete source-built SDK
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}
           path: |
@@ -1939,7 +1941,7 @@ jobs:
 
       - name: Retain source SDK gate logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: srcbuild-gate-${{ matrix.target }}-${{ github.run_attempt }}
           path: |
@@ -1982,7 +1984,7 @@ jobs:
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -1993,7 +1995,7 @@ jobs:
         if: runner.os == 'Windows'
 
       - name: Download preceding source phase
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage3
           path: ${{ runner.temp }}/source-handoff
@@ -2046,7 +2048,7 @@ jobs:
 
       - name: Upload Android runtime and final std
         if: matrix.target == 'linux-x64' && inputs.build_android
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: final-std-android-aarch64
           path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-android-aarch64
@@ -2086,7 +2088,7 @@ jobs:
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -2097,7 +2099,7 @@ jobs:
         if: runner.os == 'Windows'
 
       - name: Download preceding source phase
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage3
           path: ${{ runner.temp }}/source-handoff
@@ -2149,7 +2151,7 @@ jobs:
 
       - name: Upload wasm32-wasi runtime and final std
         if: matrix.target == 'linux-x64' && inputs.build_wasm
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: final-std-wasm32-wasi
           path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-wasm32-wasi
@@ -2184,7 +2186,7 @@ jobs:
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -2195,7 +2197,7 @@ jobs:
         if: runner.os == 'Windows'
 
       - name: Download preceding source phase
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage3
           path: ${{ runner.temp }}/source-handoff
@@ -2244,7 +2246,7 @@ jobs:
 
       - name: Upload OHOS runtime and final std
         if: matrix.target == 'linux-x64' && inputs.build_ohos
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ matrix.artifact }}
           path: ${{ env.CANGJIE_WORKSPACE }}/software/${{ matrix.artifact }}
@@ -2279,7 +2281,7 @@ jobs:
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -2291,7 +2293,7 @@ jobs:
       - *resolve-actual-source-selection
 
       - name: Download the installed Darwin stage2 SDK for iOS
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: source-ios-stage2-${{ matrix.target }}
           path: ${{ runner.temp }}/ios-stage2-input
@@ -2331,7 +2333,7 @@ jobs:
 
       - name: Upload iOS runtime and final std
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ matrix.artifact }}
           path: ${{ env.CANGJIE_WORKSPACE }}/software/${{ matrix.artifact }}
@@ -2371,7 +2373,7 @@ jobs:
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -2405,7 +2407,7 @@ jobs:
       - name: Restore official MinGW toolchain
         if: matrix.target == 'linux-x64'
         id: windows-mingw-cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64
           key: windows-final-std-mingw-20220906-5c68a1cb123161b54b72ce90e7975d95a8eaf2a4-${{ hashFiles('build/toolchain/mingw.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
@@ -2420,7 +2422,7 @@ jobs:
 
       - name: Save official MinGW toolchain
         if: matrix.target == 'linux-x64' && steps.windows-mingw-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@v6.1.0
         with:
           path: ${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64
           key: ${{ steps.windows-mingw-cache.outputs.cache-primary-key }}
@@ -2429,7 +2431,7 @@ jobs:
         run: node build/sdk/producers/srcbuild/job-handoff.mjs pack mingw "$RUNNER_TEMP/source-handoff-output"
 
       - name: Upload source phase handoff
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-handoff-${{ matrix.target }}-mingw
           path: ${{ runner.temp }}/source-handoff-output
@@ -2470,7 +2472,7 @@ jobs:
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -2481,7 +2483,7 @@ jobs:
         if: runner.os == 'Windows'
 
       - name: Download native stage3 handoff
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: source-handoff-${{ matrix.target }}-stage3
           path: ${{ runner.temp }}/source-handoff
@@ -2490,7 +2492,7 @@ jobs:
         run: node build/sdk/producers/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
 
       - name: Download MinGW handoff
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: source-handoff-${{ matrix.target }}-mingw
           path: ${{ runner.temp }}/mingw-handoff
@@ -2548,7 +2550,7 @@ jobs:
 
       - name: Upload cross-built Windows cjlint artifact
         if: matrix.target == 'linux-x64'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cross-cjlint-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjlint
@@ -2566,7 +2568,7 @@ jobs:
 
       - name: Upload cross-built Windows cjprof artifact
         if: matrix.target == 'linux-x64'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cross-cjprof-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjprof
@@ -2584,7 +2586,7 @@ jobs:
 
       - name: Upload cross-built Windows cjcompat artifact
         if: matrix.target == 'linux-x64'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cross-cjcompat-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjcompat
@@ -2602,7 +2604,7 @@ jobs:
 
       - name: Upload cross-built Windows cjhead artifact
         if: matrix.target == 'linux-x64'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cross-cjhead-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjhead
@@ -2620,7 +2622,7 @@ jobs:
 
       - name: Upload cross-built Windows cjfmt artifact
         if: matrix.target == 'linux-x64'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cross-cjfmt-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjfmt
@@ -2638,7 +2640,7 @@ jobs:
 
       - name: Upload cross-built Windows LSPServer artifact
         if: matrix.target == 'linux-x64'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cross-LSPServer-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/LSPServer
@@ -2656,7 +2658,7 @@ jobs:
 
       - name: Upload cross-built Windows cjcov artifact
         if: matrix.target == 'linux-x64'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cross-cjcov-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjcov
@@ -2674,7 +2676,7 @@ jobs:
 
       - name: Upload cross-built Windows cjtrace-recover artifact
         if: matrix.target == 'linux-x64'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cross-cjtrace-recover-windows-x64
           path: ${{ github.workspace }}/.release-tools-windows/cjtrace-recover
@@ -2692,7 +2694,7 @@ jobs:
 
       - name: Upload cross-built Windows hle artifact
         if: matrix.target == 'linux-x64'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: source-cross-hle-windows-x64
           path: ${{ github.workspace }}/.release-hle-windows
@@ -2701,7 +2703,7 @@ jobs:
 
       - name: Upload Windows source-built std install root
         if: matrix.target == 'linux-x64'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: final-std-windows-x64
           path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-windows-stage2
@@ -2730,6 +2732,26 @@ jobs:
     steps:
       - *checkout-cjcj
       - *actions-setup-node-v7-1-0
+      # actions/checkout must run before native-windows-tools puts MSYS2's
+      # usr/bin git.exe ahead of Git for Windows on PATH. The native Windows SDK
+      # always builds the tools pair at ci/source_pin.env TOOLS_REF
+      # (source-selection.mjs windowsToolsSource); "Verify source revisions"
+      # later fails if the resolved TOOLS_REF/TOOLS_SRC_URL differ from this clone.
+      - name: Select the paired tools commit before MSYS2 enters PATH
+        id: paired-tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref=$(sed -n 's/^TOOLS_REF=\([0-9a-f]\{40\}\)$/\1/p' ci/source_pin.env)
+          test "$(printf '%s\n' "$ref" | wc -l)" = 1 && test -n "$ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - name: Checkout paired tools in the ordinary fetch workspace
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: ${{ vars.WINDOWS_TOOLS_REPOSITORY || 'cjcj-dev/cjcj-tools' }}
+          ref: ${{ steps.paired-tools.outputs.ref }}
+          path: .srcbuild/workspace/cjcj-tools
+          persist-credentials: false
       - uses: ./.github/actions/native-windows-tools
         with:
           native-compiler: 'true'
@@ -2742,7 +2764,7 @@ jobs:
       - *unpack-selected-native-inputs-with-their-file-modes
       - name: Receive optional completed N and AST installation
         if: inputs.native_build_inputs_artifact != ''
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: ${{ inputs.native_build_inputs_artifact }}-${{ matrix.target }}
           run-id: ${{ inputs.native_build_inputs_run_id }}
@@ -2756,13 +2778,6 @@ jobs:
       - *install-build-dependencies
       - *start-sccache
       - *generate-sdk-version
-      - name: Checkout paired tools in the ordinary fetch workspace
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ vars.WINDOWS_TOOLS_REPOSITORY || 'cjcj-dev/cjcj-tools' }}
-          ref: ${{ env.TOOLS_REF }}
-          path: .srcbuild/workspace/cjcj-tools
-          persist-credentials: false
       - *download-pinned-source
       - *verify-source-revisions
       - *receive-fixed-native-runtime-installation
@@ -2806,7 +2821,7 @@ jobs:
       # Both files share the same upload root: the receiver selects them by
       # basename. Logs in RUNNER_TEMP must not change that root.
       - name: Upload complete native Windows SDK
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}
           if-no-files-found: error
@@ -2816,7 +2831,7 @@ jobs:
             ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-windows-x64-${{ steps.version.outputs.value }}-cjcj.zip.sha256
       - name: Retain Windows source SDK consumer evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: srcbuild-lsp-${{ matrix.target }}-${{ github.run_attempt }}
           include-hidden-files: true

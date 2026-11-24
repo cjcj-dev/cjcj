@@ -22,5 +22,5 @@ test('the real workflow selector chooses the independently measured Linux publis
 test('the workflow selector uses the independently downloaded ARM release identity',()=>{
   const selected=spawnSync(process.execPath,[path.join(repository,'ci/host-toolchain-pin.mjs'),'--github-env','--platform','linux_aarch64'],{encoding:'utf8'});
   assert.equal(selected.status,0,selected.stderr);
-  assert.equal(selected.stdout.trim(),'CJCJ_TOOLCHAIN=nightly-'+'1.3.0-alpha.20261025001053');
+  assert.equal(selected.stdout.trim(),'CJCJ_TOOLCHAIN=nightly-'+'1.3.0-alpha.20261124001016');
 });

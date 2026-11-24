@@ -443,11 +443,11 @@ async function workflowStep(workflow, job, name) {
 }
 
 const independentHostVersions = Object.freeze({
-  linux_x86_64: '1.3.0-alpha.20261025001053',
-  linux_aarch64: '1.3.0-alpha.20261025001053',
-  darwin_x86_64: '1.3.0-alpha.20261025001053',
-  darwin_aarch64: '1.3.0-alpha.20261025001053',
-  windows_x86_64: '1.3.0-alpha.20261025001053',
+  linux_x86_64: '1.3.0-alpha.20261124001016',
+  linux_aarch64: '1.3.0-alpha.20261124001016',
+  darwin_x86_64: '1.3.0-alpha.20261124001016',
+  darwin_aarch64: '1.3.0-alpha.20261124001016',
+  windows_x86_64: '1.3.0-alpha.20261124001016',
 });
 
 for (const [platform, version] of Object.entries(independentHostVersions)) {
@@ -605,6 +605,6 @@ test('explicit native host archive selection retains the default pin and rejects
  assert.equal(baseSdkDownload('linux-x64',old,{selectedHost:true}).sha256,
   'fde68a5713968f5f875e013355d73aab8bd95bb1fbfd1f1b6a29b1adcf48943b');
  assert.equal(baseSdkDownload('linux-x64',readHostToolchainPin('linux-x64')).sha256,
-  '772cfec6e7e371b78ad487c7938dad296e2fb6fe9e2462fe4a5ff68b3d02984f');
+  '9f970f400666ffb64fa4865c6cb0b270b9e52562e7f2928405818447e3540166');
  assert.throws(()=>baseSdkDownload('linux-x64','nightly-'+'1.3.0-alpha.20260101000000',{selectedHost:true}),/no pinned archive identity/);
 });

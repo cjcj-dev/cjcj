@@ -70,7 +70,7 @@ jobs:
         run: |
           node -e 'const i = JSON.parse(process.env.PACKAGE_INPUTS); const miss = ["runner", "platform", "llvm_platform", "sdk_runtime_dir", "std_artifact", "version"].filter((k) => !i[k]); if (miss.length) { console.error("::error::package mode requires " + miss.join(", ")); process.exit(1); }'
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
@@ -79,9 +79,11 @@ jobs:
 
       - name: Install the Windows PE table reader
         if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@v2.34.0
         with:
           msystem: MINGW64
+          # MINGW64 is intentional: these tools follow the MSVCRT ABI.
+          suppress-deprecation-warnings: msystem-mingw64
           install: mingw-w64-x86_64-llvm
 
       - name: Select PE inspection tools outside the SDK loader path
@@ -116,7 +118,7 @@ jobs:
           if ($run.path -ne '.github/workflows/sdk-build.yml' -or $run.head_sha -ne $env:GITHUB_SHA -or $run.head_repository.full_name -ne $env:GITHUB_REPOSITORY -or $run.conclusion -ne 'success') { throw 'producer commit, repository or conclusion differs' }
 
       - name: Download complete native SDK
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: cjcj-srcbuild-${{ inputs.platform }}-${{ inputs.version }}
           path: ${{ env.NATIVE_SDK_ARTIFACT_DIR }}
@@ -133,7 +135,7 @@ jobs:
           test "$SELECTED_STD_ARTIFACT" = "$EXPECTED_STD_ARTIFACT"
 
       - name: Download same-platform source-built final std
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: ${{ inputs.std_artifact }}
           path: ${{ env.FINAL_STD_DIR }}
@@ -142,7 +144,7 @@ jobs:
 
       - name: Download cross-tuple comparison inputs
         if: inputs.cross_std_artifacts != '[]' || inputs.cross_std_artifact != ''
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           pattern: final-std-*
           path: ${{ env.CROSS_STD_DIR }}
@@ -156,7 +158,7 @@ jobs:
 
       - name: Retain installed and relocated Windows consumer evidence
         if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: consumer-${{ inputs.release_key || inputs.platform }}-${{ github.run_attempt }}
           if-no-files-found: warn
@@ -177,7 +179,7 @@ jobs:
 
       - name: Upload failure diagnostics
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pkg-diagnosis-${{ env.PACKAGE_KEY }}-${{ github.run_attempt }}
           retention-days: 7
@@ -192,7 +194,7 @@ jobs:
 
       - name: Upload SDK artifact
         if: inputs.validation_run_id == ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pkg-${{ env.PACKAGE_KEY }}
           path: |

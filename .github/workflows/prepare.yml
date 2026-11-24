@@ -93,26 +93,36 @@ jobs:
       CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.1'
-      - uses: ./.github/actions/native-windows-tools
-        if: runner.os == 'Windows'
-        with:
-          native-compiler: 'true'
       - name: Load native source pair
         id: pin
         run: node ci/native-llvm-inputs.mjs
       - name: Check out the fixed runtime source
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           repository: cjcj-dev/cangjie-runtime
           ref: ${{ steps.pin.outputs.runtime_sha }}
           path: runtime-source
           persist-credentials: false
+      - name: Check out the selected LLVM source
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: cjcj-dev/cjcj-llvm
+          ref: ${{ steps.pin.outputs.sha }}
+          path: llvm-fork
+          persist-credentials: false
+      # Every actions/checkout runs before native-windows-tools: that action puts
+      # MSYS2's usr/bin (and its git.exe) ahead of Git for Windows on PATH, and
+      # actions/checkout then fails to verify a pinned commit with that git.
+      - uses: ./.github/actions/native-windows-tools
+        if: runner.os == 'Windows'
+        with:
+          native-compiler: 'true'
       - name: Prepare fixed bounds source through normal Git inputs
         run: |
           node --input-type=module <<'JS'
@@ -155,7 +165,7 @@ jobs:
           NATIVE_RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
         run: node build/sdk/producers/platform_matrix/native_runtime_package.mjs
       - name: Upload native runtime installation
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: native-runtime-install-${{ matrix.llvm_platform }}
           # The package verified above (same bytes as the installation, modes
@@ -169,13 +179,6 @@ jobs:
           mkdir -p "$root"
           node build/sdk/producers/release/prepare_native_inputs.mjs install-host --root "$root" --target "${{ matrix.target }}"
           cp -a .platform-ci/runtime-install "$root/runtime"
-      - name: Check out the selected LLVM source
-        uses: actions/checkout@v7
-        with:
-          repository: cjcj-dev/cjcj-llvm
-          ref: ${{ steps.pin.outputs.sha }}
-          path: llvm-fork
-          persist-credentials: false
       - name: Fetch the selected compiler source for cjdb, the shim and AST support
         run: |
           set -euo pipefail
@@ -262,7 +265,7 @@ jobs:
           node build/sdk/producers/release/prepare_native_inputs.mjs pack
           --root "$RUNNER_TEMP/native-inputs" --out "$RUNNER_TEMP/native-inputs.tar"
       - name: Upload native inputs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: native-inputs-${{ matrix.target }}
           path: ${{ runner.temp }}/native-inputs.tar

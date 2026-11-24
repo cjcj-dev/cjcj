@@ -7,13 +7,58 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-      with:
-        arch: x64
-    - uses: msys2/setup-msys2@v2
+    # Import the x64 MSVC developer environment without a JavaScript action:
+    # vswhere selects the newest installation that has the x64 VC tools, and the
+    # variables VsDevCmd.bat adds or changes are exported for every later step
+    # (PATH additions through GITHUB_PATH, everything else through GITHUB_ENV).
+    - name: Import the x64 MSVC developer environment
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        Set-StrictMode -Version Latest
+        $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+        if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) { throw "MSVC_DEV_ENV vswhere.exe is missing: $vswhere" }
+        $found = @(& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+        if ($LASTEXITCODE -ne 0) { throw "MSVC_DEV_ENV vswhere.exe exited $LASTEXITCODE" }
+        $vsPath = ($found | Where-Object { "$_".Trim() } | Select-Object -First 1)
+        if (-not $vsPath) { throw 'MSVC_DEV_ENV no Visual Studio installation provides Microsoft.VisualStudio.Component.VC.Tools.x86.x64' }
+        $vsPath = "$vsPath".Trim()
+        $devCmd = Join-Path $vsPath 'Common7\Tools\VsDevCmd.bat'
+        if (-not (Test-Path -LiteralPath $devCmd -PathType Leaf)) { throw "MSVC_DEV_ENV VsDevCmd.bat is missing: $devCmd" }
+        $before = @{}
+        foreach ($item in Get-ChildItem env:) { $before[$item.Name] = $item.Value }
+        $lines = @(& cmd.exe /d /s /c "`"$devCmd`" -arch=amd64 -host_arch=amd64 >nul && set")
+        if ($LASTEXITCODE -ne 0) { throw "MSVC_DEV_ENV VsDevCmd.bat -arch=amd64 -host_arch=amd64 exited $LASTEXITCODE" }
+        $after = @{}
+        foreach ($line in $lines) {
+          $eq = "$line".IndexOf('=')
+          if ($eq -gt 0) { $after["$line".Substring(0, $eq)] = "$line".Substring($eq + 1) }
+        }
+        if (-not $after.ContainsKey('Path')) { throw 'MSVC_DEV_ENV VsDevCmd.bat produced no PATH' }
+        $oldPath = @("$($before['Path'])".Split(';') | Where-Object { $_ })
+        $added = @($after['Path'].Split(';') | Where-Object { $_ -and ($oldPath -notcontains $_) } | Select-Object -Unique)
+        if (-not ($added | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'cl.exe') -PathType Leaf })) {
+          throw 'MSVC_DEV_ENV VsDevCmd.bat did not add an x64 cl.exe directory to PATH'
+        }
+        # GITHUB_PATH prepends each line, so write in reverse to keep VsDevCmd's order.
+        [array]::Reverse($added)
+        $added | Add-Content -LiteralPath $env:GITHUB_PATH -Encoding utf8NoBOM
+        $exported = 0
+        foreach ($name in ($after.Keys | Sort-Object)) {
+          if ($name -eq 'Path') { continue }
+          $value = $after[$name]
+          if ($before.ContainsKey($name) -and $before[$name] -ceq $value) { continue }
+          if ("$name$value" -match '[\r\n]') { throw "MSVC_DEV_ENV multi-line variable $name" }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "$name=$value" -Encoding utf8NoBOM
+          $exported++
+        }
+        Write-Host "MSVC_DEV_ENV vs=$vsPath path_added=$($added.Count) variables_exported=$exported"
+    - uses: msys2/setup-msys2@v2.34.0
       id: msys2
       with:
         msystem: MINGW64
+        # MINGW64 is intentional: the source stages build against the MSVCRT ABI.
+        suppress-deprecation-warnings: msystem-mingw64
         update: true
         path-type: inherit
         install: >-

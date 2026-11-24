@@ -837,3 +837,88 @@ test('dynamic cross matrices produce exactly the artifacts declared by release c
   }
   assert.deepEqual(actual.filter(name => /^final-std-(ohos|ios)-/.test(name)).sort(), [...requested].sort());
 });
+
+// Every external action is pinned to its newest release; all of them run on
+// node24, so no Node 20 deprecation warning can come from a step. A new or
+// bumped action must be added here deliberately.
+const EXTERNAL_ACTIONS = Object.freeze({
+  'actions/checkout': 'v7.0.1',
+  'actions/setup-node': 'v7.1.0',
+  'actions/setup-python': 'v7.1.0',
+  'actions/setup-java': 'v6.3.0',
+  'actions/cache': 'v6.1.0',
+  'actions/cache/restore': 'v6.1.0',
+  'actions/cache/save': 'v6.1.0',
+  'actions/upload-artifact': 'v7.0.2',
+  'actions/download-artifact': 'v8.0.2',
+  'msys2/setup-msys2': 'v2.34.0',
+  'microsoft/setup-msbuild': 'v3',
+  'mozilla-actions/sccache-action': 'v0.0.11',
+});
+const githubYamlFiles = () => [
+  ...fsSync.readdirSync(path.join(root, '.github/workflows')).filter(name => name.endsWith('.yml')).map(name => `.github/workflows/${name}`),
+  ...fsSync.readdirSync(path.join(root, '.github/actions')).map(name => `.github/actions/${name}/action.yml`),
+].sort();
+const stepGroups = file => {
+  const document = loadYaml(fsSync.readFileSync(path.join(root, file), 'utf8'));
+  if (document.runs) return [[`${file}`, document.runs.steps ?? []]];
+  return Object.entries(document.jobs).map(([name, job]) => [`${file}#${name}`, job.steps ?? []]);
+};
+
+test('external actions are pinned to their latest node24 releases and no Node 20 action remains', () => {
+  const seen = new Set();
+  for (const file of githubYamlFiles()) {
+    for (const [owner, steps] of stepGroups(file)) {
+      for (const step of steps) {
+        if (!step.uses || step.uses.startsWith('./')) continue;
+        const [action, ref] = step.uses.split('@');
+        assert.ok(Object.hasOwn(EXTERNAL_ACTIONS, action), `${owner} uses unregistered external action ${step.uses}`);
+        assert.equal(ref, EXTERNAL_ACTIONS[action], `${owner} ${action}`);
+        seen.add(action);
+        if (action === 'msys2/setup-msys2' && step.with?.msystem === 'MINGW64') {
+          assert.match(String(step.with['suppress-deprecation-warnings'] ?? ''), /(^|\s)msystem-mingw64(\s|$)/,
+            `${owner} selects MINGW64 deliberately and must acknowledge its deprecation`);
+        }
+      }
+    }
+  }
+  assert.deepEqual([...seen].sort(), Object.keys(EXTERNAL_ACTIONS).sort());
+  const msvc = loadYaml(fsSync.readFileSync(path.join(root, '.github/actions/native-windows-tools/action.yml'), 'utf8')).runs.steps[0];
+  assert.equal(msvc.shell, 'pwsh');
+  assert.match(msvc.run, /Microsoft Visual Studio\\Installer\\vswhere\.exe/);
+  assert.match(msvc.run, /-requires Microsoft\.VisualStudio\.Component\.VC\.Tools\.x86\.x64 -property installationPath/);
+  assert.match(msvc.run, /Common7\\Tools\\VsDevCmd\.bat/);
+  assert.match(msvc.run, /-arch=amd64 -host_arch=amd64 >nul && set/);
+  assert.match(msvc.run, /GITHUB_PATH/);
+  assert.match(msvc.run, /GITHUB_ENV/);
+  assert.equal((msvc.run.match(/\$LASTEXITCODE -ne 0\) \{ throw/g) ?? []).length, 2, 'vswhere and VsDevCmd exits are both checked');
+});
+
+// native-windows-tools (and setup-msys2 itself) put MSYS2's usr/bin git.exe
+// ahead of Git for Windows; actions/checkout then cannot verify a pinned commit
+// ("The ref '' does not point to the expected commit"). Every checkout of a job
+// must therefore precede the first MSYS2 provisioning step.
+test('no actions/checkout runs after MSYS2 provisioning in any job', () => {
+  const offenders = [];
+  for (const file of githubYamlFiles().filter(name => name.startsWith('.github/workflows/'))) {
+    for (const [owner, steps] of stepGroups(file)) {
+      const first = steps.findIndex(step => step.uses === './.github/actions/native-windows-tools'
+        || String(step.uses ?? '').startsWith('msys2/setup-msys2@'));
+      if (first < 0) continue;
+      steps.forEach((step, index) => {
+        if (index > first && String(step.uses ?? '').startsWith('actions/checkout@')) offenders.push(`${owner}: ${step.name ?? step.uses}`);
+      });
+    }
+  }
+  assert.deepEqual(offenders, []);
+  const prepare = llvmWorkflow('prepare.yml').jobs['prepare-native'].steps;
+  const at = name => prepare.findIndex(step => step.name === name);
+  const tools = prepare.findIndex(step => step.uses === './.github/actions/native-windows-tools');
+  assert.ok(at('Load native source pair') < at('Check out the fixed runtime source'));
+  assert.ok(at('Check out the fixed runtime source') < tools && at('Check out the selected LLVM source') < tools);
+  const sdk = llvmWorkflow('sdk-build-target.yml').jobs['native-windows-sdk'].steps;
+  const paired = sdk.findIndex(step => step.name === 'Checkout paired tools in the ordinary fetch workspace');
+  assert.ok(paired >= 0 && paired < sdk.findIndex(step => step.uses === './.github/actions/native-windows-tools'));
+  assert.equal(sdk[paired].with.ref, '${{ steps.paired-tools.outputs.ref }}');
+  assert.ok(sdk.findIndex(step => step.name === 'Verify source revisions') > paired, 'the resolved TOOLS_REF is still verified against this clone');
+});

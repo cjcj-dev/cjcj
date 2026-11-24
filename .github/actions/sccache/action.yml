@@ -97,7 +97,7 @@ runs:
     - name: Restore sccache disk cache
       if: inputs.mode != 'report'
       id: restore
-      uses: actions/cache/restore@v6
+      uses: actions/cache/restore@v6.1.0
       with:
         path: ${{ runner.temp }}/sccache-${{ inputs.component }}
         key: sccache-${{ inputs.component }}-${{ inputs.platform }}-${{ inputs.pin }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -178,7 +178,7 @@ runs:
     # turning the job red -- would take its own stats.json and error log with it.
     - name: Upload sccache diagnostics
       if: always() && inputs.mode == 'report'
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@v7.0.2
       with:
         name: sccache-${{ inputs.component }}-${{ inputs.platform }}-${{ github.run_attempt }}
         path: |
@@ -189,7 +189,7 @@ runs:
 
     - name: Save sccache disk cache
       if: inputs.mode == 'report' && inputs.save == 'true' && steps.stats.outputs.save == 'true'
-      uses: actions/cache/save@v6
+      uses: actions/cache/save@v6.1.0
       with:
         path: ${{ runner.temp }}/sccache-${{ inputs.component }}
         key: ${{ env.CJCJ_SCCACHE_KEY }}

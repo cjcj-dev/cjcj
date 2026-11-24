@@ -263,7 +263,7 @@ jobs:
       has_runnable: ${{ steps.select.outputs.has_runnable }}
       has_blocked: ${{ steps.select.outputs.has_blocked }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0
@@ -330,7 +330,7 @@ jobs:
       CJCJ_NATIVE_BUILD_INPUTS_RUN_ID: ${{ inputs.native_build_inputs_run_id }}
       CJCJ_SOURCE_SELECTION: ${{ inputs.source_selection }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@v7.1.0

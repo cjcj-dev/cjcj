@@ -73,7 +73,7 @@ function sourceGating(name, text) {
   }
   for (const job of jobs) {
     assert.deepEqual(job.steps[0], {
-      uses: 'actions/checkout@v7', with: {ref: registration.source_ref},
+      uses: 'actions/checkout@v7.0.1', with: {ref: registration.source_ref},
     }, 'WORKFLOW_TEST_SOURCE_CHECKOUT');
   }
   return registration.gating;
