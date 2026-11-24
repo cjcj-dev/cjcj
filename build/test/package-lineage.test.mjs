@@ -301,8 +301,11 @@ for(const separateBackend of [false,true])test('normal install pair and language
   // comparison input (.host/runtime/lib/<H tuple>); H supplies that directory.
   await write(H,'runtime/lib/'+TUPLE+'/libcangjie-runtime.so','finite official host runtime');
   await write(N,'envsetup.sh','# finite environment entry');
+  // The native AST installation also carries the compiler CHIR members stdx
+  // compiles against (ci/bootstrap/native-ast-inputs.mjs:37-41).
+  const {stdxChirMembers}=await import('../../ci/bootstrap/sdk-platform.mjs');
   const astLibrary='lib/'+TUPLE+'/libcangjie-ast-support.a',astFiles={};
-  for(const rel of [astLibrary,'schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h','third_party/flatbuffers/bin/flatc']){
+  for(const rel of [astLibrary,'schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',...stdxChirMembers,'third_party/flatbuffers/bin/flatc']){
     const bytes='finite AST '+rel;await write(N,rel,bytes);astFiles[rel]={sha256:digest(bytes),bytes:Buffer.byteLength(bytes)};
   }
   const exec='#!'+process.execPath+'\nconsole.log("finite native recorder");\n';
