@@ -12,8 +12,12 @@ export async function pythonConfiguration(pythonRoot, platform, execute, executa
   const interpreter=executable || path.join(pythonRoot,native.os==='win32'?'python.exe':'bin/python3.11');
   const env={...process.env,PYTHONDONTWRITEBYTECODE:'1',
     [native.loader]:[pythonRoot,path.join(pythonRoot,'lib'),process.env[native.loader]].filter(Boolean).join(delimiter)};
-  const unixLibrary=installed?'os.path.join(sys.prefix,"lib",sysconfig.get_config_var("LDLIBRARY"))'
-    :'os.path.join(sysconfig.get_config_var("LIBDIR"),sysconfig.get_config_var("LDLIBRARY"))';
+  // Relocatable archives retain their build-time LIBDIR in sysconfig. Prefer
+  // the interpreter's own library. System Python may instead use a multiarch
+  // LIBDIR; the installed SDK check must never fall back to that directory.
+  const prefixLibrary='os.path.join(sys.prefix,"lib",sysconfig.get_config_var("LDLIBRARY"))';
+  const unixLibrary=installed?prefixLibrary:
+    `(${prefixLibrary} if os.path.isfile(${prefixLibrary}) else os.path.join(sysconfig.get_config_var("LIBDIR"),sysconfig.get_config_var("LDLIBRARY")))`;
   const {stdout}=await execute(interpreter,['-B','-c',
     `import json,sys,sysconfig,os; lib=os.path.join(sys.prefix,"libs","python311.lib") if os.name=="nt" else ${unixLibrary}; print(json.dumps(dict(executable=sys.executable,version=sys.version,include=sysconfig.get_path("include"),library=lib,suffix=sysconfig.get_config_var("EXT_SUFFIX"),configure=sysconfig.get_config_var("CONFIG_ARGS"))))`],{env});
   const selected=JSON.parse(stdout);
@@ -65,8 +69,8 @@ export async function pythonSourceInputs({record, sha256, root, nativeRoot, plat
     build:{producer:facts.producer,configuration:{configure:selected.configure??null,host:facts.host,target:facts.target},
       originalInputs:{path:record,sha256:recordHash}},artifacts:products};
 }
-export async function verifyCjdbPythonConfiguration(pythonRoot, lldbBuild, execute, platform='linux_x86_64', executable) {
-  const selected=await pythonConfiguration(pythonRoot,platform,execute,executable);
+export async function verifyCjdbPythonConfiguration(pythonRoot, lldbBuild, execute, platform='linux_x86_64', executable, relocatable=false) {
+  const selected=await pythonConfiguration(pythonRoot,platform,execute,executable,relocatable);
   const cache = await fs.readFile(path.join(lldbBuild, 'CMakeCache.txt'), 'utf8');
   const value = name => cache.match(new RegExp(`^${name}:[^=]+=([^\\n]*)$`, 'm'))?.[1];
   const actual = {executable:value('_Python3_EXECUTABLE') || value('Python3_EXECUTABLE'),
@@ -113,6 +117,10 @@ export async function verifyCjdbPythonInstallation(pythonRoot, nativeRoot, execu
   if (nativeRoot!==pythonRoot && await fileDigest(interpreter) !== await fileDigest(path.join(pythonRoot,relativeInterpreter)))
     reject('CJDB_PYTHON_IDENTITY','llvm-cjdb','exported interpreter bytes differ');
   const script = `import json,sys,os,sysconfig,importlib
+# CPython 3.8+ resolves extension dependencies only in registered DLL directories.
+if os.name=='nt':
+ root=os.environ['PYTHONHOME']
+ dll_dirs=[os.add_dll_directory(p) for p in [root,os.path.join(root,'bin'),os.path.normpath(os.path.join(root,'../../tools/bin'))] if os.path.isdir(p)]
 import lldb
 binding=importlib.import_module('lldb._lldb')
 lldb.SBDebugger.Initialize()

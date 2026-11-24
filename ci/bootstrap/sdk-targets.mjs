@@ -100,7 +100,10 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   if(layout==='h1-frontend')return h1FrontendRecipe(selection);
   const {platform,bootstrapHost:host,compilerExecution:execution,targetComponents:target}=selection;
   const native=sdkPlatform(platform),tuple=native.tuple,exe=native.exe;
-  const nLib=['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+tuple,'lib/'+tuple,'tools/lib'];
+  // Retained Windows tools need the separately installed Python and the
+  // compiler DLLs that originally lived beside cjdb.exe.
+  const nLib=['third_party/llvm/'+native.llvmDirectory,'runtime/lib/'+tuple,'lib/'+tuple,'tools/lib',
+    ...(native.os==='win32'?['third_party/llvm','tools/bin']:[])];
   if(tools)return {copies:[...tools.rows,...tools.payloads].map(row=>({...row,owner:'source-built tools'})),
     entries:tools.rows.map(row=>({directory:'tools/bin',retain:path.posix.dirname(retainedToolPath(row)),
       names:[row.name],libraries:toolExecutionLibraries(row.producer)})),links:{}};

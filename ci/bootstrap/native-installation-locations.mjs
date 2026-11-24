@@ -29,8 +29,8 @@ export async function nativeInstallationLocations(root, locations, env=process.e
       ...(row.sourceRoot?{sourceRoot:member(row.sourceRoot)}:{})};
   }
   if(locations.installations?.shim)result.shim={install:member(locations.installations.shim.install)};
-  if(env.CJCJ_NATIVE_CJDB_INSTALL) {
-    const install=await privateRoot(env.CJCJ_NATIVE_CJDB_INSTALL);
+  if(env.CJCJ_NATIVE_CJDB_INSTALL || (result.llvm && result.llvm.install===result.ast?.install)) {
+    const install=await privateRoot(env.CJCJ_NATIVE_CJDB_INSTALL || result.llvm.install);
     const buildResult=path.join(install,'BUILD-INPUTS.json');
     const facts=await readJson(buildResult);
     if(facts.platform!==locations.platform||!facts.configuration)throw Error('NATIVE_CJDB_INSTALL_PLATFORM');

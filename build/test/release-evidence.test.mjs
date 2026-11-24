@@ -379,7 +379,7 @@ test('G2 consumes declared archive admission before its independent identity gat
   const {source, archive, work, jobs} = await fixture();
   const checkout = path.join(work, 'checkout'), runtime = path.join(work, 'runtime');
   await fs.mkdir(path.join(checkout, 'ci'), {recursive: true});
-  await fs.mkdir(path.join(checkout, 'scripts'));
+  await fs.mkdir(path.join(checkout, 'build/sdk/producers/package'), {recursive:true});
   await fs.mkdir(runtime);
   function git(...args) {
     const result = spawnSync('git', ['-C', runtime, ...args], {encoding: 'utf8'});

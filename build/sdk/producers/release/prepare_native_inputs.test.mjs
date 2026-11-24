@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import crypto from 'node:crypto';
 import {PREPARE_HOSTS, PROVENANCE_KEYS, assembleNativeInputs, prepareProvenance, prepareWorkflowProblems,
-  installLlvm, installAst, componentCommits, prepareComponentProblems, installHost, prepareHostVersion,
+  checkSuperbuildInstall, installLlvm, installAst, componentCommits, prepareComponentProblems, installHost, prepareHostVersion,
   packNativeInputs, compilerSource, PREPARE_LLVM_TOOLS, PREPARE_AST_STD_HEADERS, PREPARE_PYTHON_RECORD, nativePairSelection, installHle, hleCjbindAsset, HLE_CJBIND, HLE_CJBIND_SOURCE_BUILD, hleCjbindSource, PREPARE_SHIM_OBJECT} from './prepare_native_inputs.mjs';
 import {configureHleInput, readHleDependencies} from '../../../../ci/bootstrap/hle-input.mjs';
 import {installHleDependencies} from '../../../srcbuild/hle-dependencies.mjs';
@@ -142,30 +142,24 @@ test('every prepare host runs its N/LLVM and AST producer and installs both', ()
   assert.deepEqual(prepareComponentProblems(job(read('sdk-build-target')).steps), []);
 });
 test('red cut: dropping one host family\'s N/LLVM or AST step names exactly that host and component', () => {
+  const entry='prepare_native_superbuild.mjs "${{ matrix.target }}"';
+  const step='      - name: Install N/LLVM and AST into the native input root\n';
   const cuts = [
-    ['  - name: Build the pinned in-process LLVM and its tools on this Windows host\n        if: runner.os == \'Windows\'',
-      '  - name: Build the pinned in-process LLVM and its tools on this Windows host\n        if: runner.os == \'Linux\'',
-      ['windows-x64 lacks llvm producer build/sdk/producers/release/build_prepare_llvm.mjs --platform']],
-    ['  - name: Build AST support on this Unix host\n        if: runner.os != \'Windows\'', '  - name: Build AST support on this Unix host\n        if: runner.os == \'Linux\'',
-      ['darwin-arm64 lacks ast producer ci/build_ast_support.sh', 'darwin-x64 lacks ast producer ci/build_ast_support.sh']],
-    ['  - name: Build the pinned in-process LLVM and its tools on this Unix host\n        if: runner.os != \'Windows\'',
-      '  - name: Build the pinned in-process LLVM and its tools on this Unix host\n        if: runner.os == \'macOS\'',
-      ['linux-x64 lacks llvm producer build/sdk/producers/release/build_prepare_llvm.mjs --platform',
-        'linux-aarch64 lacks llvm producer build/sdk/producers/release/build_prepare_llvm.mjs --platform']],
-    ['install-ast \\\n', 'echo-ast \\\n', PREPARE_HOSTS.map(h => `${h.target} lacks ast producer prepare_native_inputs.mjs install-ast`)],
-    ['prepare_native_inputs.mjs install-hle\n', 'prepare_native_inputs.mjs echo-hle\n',
-      PREPARE_HOSTS.map(h => `${h.target} lacks hle producer prepare_native_inputs.mjs install-hle`)],
-    ['  - name: Compile the LLVM shim object against this LLVM build on this Unix host\n        if: runner.os != \'Windows\'',
-      '  - name: Compile the LLVM shim object against this LLVM build on this Unix host\n        if: runner.os == \'Linux\'',
-      ['darwin-arm64 lacks shim producer build/sdk/producers/release/build_prepare_llvm.mjs shim',
-        'darwin-x64 lacks shim producer build/sdk/producers/release/build_prepare_llvm.mjs shim']],
-    ['--shim-commit "$GITHUB_SHA"', '', PREPARE_HOSTS.map(h => `${h.target} lacks shim producer --shim-commit`)],
+    ...['Linux','macOS','Windows'].map(os=>[step,step+`        if: runner.os != '${os}'\n`,
+      PREPARE_HOSTS.filter(h=>(h.target.startsWith('darwin')?'macOS':h.target.startsWith('windows')?'Windows':'Linux')===os)
+        .map(h=>`${h.target} lacks native producer ${entry}`)]),
+    ...[entry,'git -C compiler checkout','git -C flatbuffers checkout'].map(marker=>[marker,'cut-native-source',
+      PREPARE_HOSTS.map(h=>`${h.target} lacks native producer ${marker}`)]),
+    ['prepare_native_inputs.mjs install-hle\n','prepare_native_inputs.mjs echo-hle\n',
+      PREPARE_HOSTS.map(h=>`${h.target} lacks hle producer prepare_native_inputs.mjs install-hle`)],
   ];
   for (const [from, to, want] of cuts) {
-    const problems = prepareComponentProblems(job(once(read('sdk-build-target'), from, to)).steps)
+    const target=read('sdk-build-target'), start=target.indexOf('  prepare-native:');
+    const cutTarget=target.slice(0,start)+once(target.slice(start),from,to);
+    const problems = prepareComponentProblems(job(cutTarget).steps)
       .map(p => p.replace(/^prepare-native host /, ''));
     assert.deepEqual(problems, want, from);
-    assert.ok(prepareWorkflowProblems({...real(), target: once(read('sdk-build-target'), from, to)}).length >= want.length);
+    assert.ok(prepareWorkflowProblems({...real(), target: cutTarget}).length >= want.length);
   }
 });
 test('red cut: re-adding the private adapter deployment to prepare-native is refused', () => {
@@ -1156,4 +1150,72 @@ test('windows_x86_64: the imported _lldb pyd is the LLDB module, and only from i
     [path.join(root, 'python311.dll'), binding, path.join(outside, 'liblldb.dll')],
     [path.join(outside, 'python311.dll'), binding], [path.join(root, 'python311.dll')]])
     await assert.rejects(run(maps), identity);
+});
+
+for (const {target,llvm_platform:platform} of PREPARE_HOSTS) test(target + ': combined CMake installation survives the native tar and both readers',async t=>{
+  const {dir,root,native}=produced(t,target), install=path.join(root,'llvm'), ast=path.join(root,'ast');
+  const factsFile=path.join(install,'BUILD-INPUTS.json'), facts=JSON.parse(fs.readFileSync(factsFile));
+  facts.astInstallation=JSON.parse(fs.readFileSync(path.join(ast,'BUILD-INPUTS.json'))).astInstallation;
+  for(const name of fs.readdirSync(ast).filter(n=>n!=='BUILD-INPUTS.json'))
+    fs.cpSync(path.join(ast,name),path.join(install,name),{recursive:true,verbatimSymlinks:true});
+  fs.rmSync(ast,{recursive:true});
+  facts.commits.shim=SHIM;
+  const put=(file,body)=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,body);};
+  const nativeRoot=path.join(install,'third_party/llvm'), libdir=path.join(nativeRoot,native.llvmDirectory);
+  const liblldb=path.join(libdir,'liblldb'+native.shared);
+  if(!fs.existsSync(liblldb))fs.copyFileSync(path.join(nativeRoot,'lib',pythonLayout(platform).lldb),liblldb);
+  put(path.join(nativeRoot,'bin','clang'+native.exe),'clang');
+  if(native.os==='win32')put(path.join(nativeRoot,'bin/lldb-argdumper.exe'),'argdumper');
+  const libraries=['frontend','lsp'].map(key=>path.join(install,'tools',native.os==='win32'?'bin':'lib','libcangjie-'+key+native.shared));
+  for(const lib of libraries)put(lib,'compiler dependency');
+  const record=native.os==='win32'?'third_party/llvm/PYTHON-BUILD-INPUTS.json':'share/cjcj/build-inputs/python-original.json';
+  const bytes=fs.readFileSync(path.join(install,PREPARE_PYTHON_RECORD));
+  put(path.join(install,record),bytes);
+  const sha256=crypto.createHash('sha256').update(bytes).digest('hex');
+  if(native.os==='win32')facts.pythonInstallationInput={record,sha256};
+  else {delete facts.pythonInstallationInput;facts.pythonSource={build:{originalInputs:{path:'/producer/python.json',sha256}}};}
+  fs.writeFileSync(factsFile,JSON.stringify(facts));
+  put(path.join(install,'include/cangjie/Utils/Casting.h'),'umbrella header');
+  checkSuperbuildInstall(install,platform);
+  for(const file of libraries){
+    fs.renameSync(file,file+'.hold');
+    assert.throws(()=>checkSuperbuildInstall(install,platform),e=>e.message==='PREPARE_NATIVE_FILE '+file);
+    fs.renameSync(file+'.hold',file);
+  }
+  const input={root,target,env:{...env,CJCJ_NATIVE_LLVM_REF:LLVM,CJCJ_NATIVE_RUNTIME_REF:RUNTIME},pins:{...pins,COMPILER_REF:COMPILER}};
+  assert.throws(()=>assembleNativeInputs({...input,pins}),/PREPARE_NATIVE_SOURCE_PAIR/);
+  assembleNativeInputs(input);
+  const received=path.join(dir,'receiver');fs.mkdirSync(received);
+  packNativeInputs({root,out:path.join(received,'native-inputs.tar')});
+  unpackNativeArtifact({directory:received,archive:'native-inputs.tar'});
+  fs.rmSync(root,{recursive:true});
+  const locations=JSON.parse(fs.readFileSync(path.join(received,'locations.json')));
+  const resolved=await nativeInstallationLocations(received,locations,{});
+  assert.equal(resolved.ast.install,resolved.llvm.install);
+  assert.deepEqual(resolved.llvm.verification.python,{record:path.join(received,'llvm',record),sha256});
+  assert.deepEqual(fs.readFileSync(resolved.llvm.verification.python.record),bytes);
+  await readInstalledNativeAst({...resolved.ast,platform,commit:COMPILER,llvmCommit:LLVM});
+  await readInstalledNativeShim(resolved.shim);
+});
+
+test('Darwin standalone LLDB uses the parent boundscheck architecture and a relocatable install name',async t=>{
+  const {prepareDarwinLldbSource}=await import('../../../srcbuild/stages/fetch.mjs');
+  const work=fs.mkdtempSync(path.join(os.tmpdir(),'prepare-darwin-'));
+  t.after(()=>fs.rmSync(work,{recursive:true,force:true}));
+  const api=path.join(work,'lldb/source/API/CMakeLists.txt'), files=['ExpressionParser/Cangjie','Platform/OHOS'].map(plugin=>
+    path.join(work,'lldb/source/Plugins',plugin,'CMakeLists.txt'));
+  const put=(file,body)=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,body);};
+  for(const file of files)put(file,'string(REPLACE "AMD64" "x86_64" ARCH_NAME "${CMAKE_SYSTEM_PROCESSOR}")\nfile(WRITE "${OUT}" "${ARCH_NAME}")\n');
+  put(api,'target_link_options(liblldb PUBLIC "-Wl,-rpath,${CMAKE_SOURCE_DIR}/../utils/boundscheck/lib/${CMAKE_SYSTEM_PROCESSOR}")\n');
+  prepareDarwinLldbSource(work);
+  const before=[...files,api].map(f=>fs.readFileSync(f,'utf8'));
+  prepareDarwinLldbSource(work);
+  assert.deepEqual([...files,api].map(f=>fs.readFileSync(f,'utf8')),before);
+  for(const file of files)for(const [processor,want] of [['arm64','aarch64'],['x86_64','x86_64']]){
+    const out=path.join(work,'arch'),r=spawnSync('cmake',['-DCMAKE_SYSTEM_PROCESSOR='+processor,'-DOUT='+out,'-P',file]);
+    assert.equal(r.status,0,r.stderr?.toString());
+    assert.equal(fs.readFileSync(out,'utf8'),want);
+  }
+  assert.match(before[2],/target_link_options\(liblldb PRIVATE "-Wl,-rpath,@loader_path"\)/);
+  assert.ok(!before[2].includes('CMAKE_SOURCE_DIR'));
 });

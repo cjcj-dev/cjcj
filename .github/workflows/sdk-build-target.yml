@@ -2890,6 +2890,8 @@ jobs:
           node-version: '24.22.1'
       - uses: ./.github/actions/native-windows-tools
         if: runner.os == 'Windows'
+        with:
+          native-compiler: 'true'
       - name: Load native source pair
         id: pin
         run: node ci/native-llvm-inputs.mjs
@@ -2956,27 +2958,13 @@ jobs:
           mkdir -p "$root"
           node build/sdk/producers/release/prepare_native_inputs.mjs install-host --root "$root" --target "${{ matrix.target }}"
           cp -a .platform-ci/runtime-install "$root/runtime"
-      # N/LLVM: the pinned fork's in-process library and llc/llvm-as/llvm-dis,
-      # built on this host by one public producer (b2701d39 build-llvm-dylib.yml
-      # CMake configuration); Windows runs the same build under MSYS2 MINGW64.
-      - name: Prepare MSYS2/MinGW native toolchain
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
+      - name: Check out the selected LLVM source
+        uses: actions/checkout@v7
         with:
-          msystem: MINGW64
-          update: true
-          path-type: inherit
-          install: >-
-            git gzip unzip file binutils
-            mingw-w64-x86_64-clang
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-swig
-      # The compiler source the consumer compares against (explicit selection or
-      # ci/source_pin.env) feeds LLDB/cjdb in the LLVM build (CANGJIE_ROOT), the
-      # shim's CjoFormat schema and the AST support build (b2701d39
-      # build-ast-support.yml via ci/build_ast_support.sh).
+          repository: cjcj-dev/cjcj-llvm
+          ref: ${{ steps.pin.outputs.sha }}
+          path: llvm-fork
+          persist-credentials: false
       - name: Fetch the selected compiler source for cjdb, the shim and AST support
         run: |
           set -euo pipefail
@@ -2986,70 +2974,26 @@ jobs:
           git -C compiler fetch --depth=1 origin "$COMPILER_REF"
           git -C compiler checkout --detach FETCH_HEAD
           test "$(git -C compiler rev-parse HEAD)" = "$COMPILER_REF"
-          git init compiler/third_party/flatbuffers
-          git -C compiler/third_party/flatbuffers remote add origin "$FLATBUFFERS_URL"
-          git -C compiler/third_party/flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
-          git -C compiler/third_party/flatbuffers checkout --detach FETCH_HEAD
-      - name: Build the pinned in-process LLVM and its tools on this Unix host
-        if: runner.os != 'Windows'
-        env:
-          NATIVE_PLATFORM: ${{ matrix.llvm_platform }}
+          git init flatbuffers
+          git -C flatbuffers remote add origin "$FLATBUFFERS_URL"
+          git -C flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
+          git -C flatbuffers checkout --detach FETCH_HEAD
+      - name: Install native compiler build dependencies on Linux
+        if: runner.os == 'Linux'
         run: |
-          set -euo pipefail
-          ulimit -c 0
-          if [ "$RUNNER_OS" = Linux ]; then
-            sudo apt-get update -qq
-            # swig generates the lldb Python binding (LLDB_ENABLE_PYTHON=ON with
-            # the pinned Python prefix build_prepare_llvm.mjs fetches on every host).
-            sudo apt-get install -y -qq clang cmake ninja-build swig
-          else
-            brew install ninja swig
-          fi
-          node build/sdk/producers/release/build_prepare_llvm.mjs --platform "$NATIVE_PLATFORM" \
-            --sha "${{ steps.pin.outputs.sha }}" --compiler "$PWD/compiler" --out "$RUNNER_TEMP/llvm-out"
-      - name: Build the pinned in-process LLVM and its tools on this Windows host
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        env:
-          NATIVE_PLATFORM: ${{ matrix.llvm_platform }}
+          sudo apt-get update -qq
+          sudo apt-get install -y clang llvm lld cmake ninja-build swig libedit-dev libffi-dev libncurses-dev
+      - name: Install native compiler build dependencies on macOS
+        if: runner.os == 'macOS'
         run: |
-          set -euo pipefail
-          node build/sdk/producers/release/build_prepare_llvm.mjs --platform "$NATIVE_PLATFORM" \
-            --sha "${{ steps.pin.outputs.sha }}" --compiler "$(cygpath -m "$PWD")/compiler" --out "$(cygpath -m "$RUNNER_TEMP")/llvm-out"
-      - name: Build AST support on this Unix host
-        if: runner.os != 'Windows'
-        run: bash ci/build_ast_support.sh compiler ast-build "$RUNNER_TEMP/ast-out" "$RUNNER_TEMP/native-inputs/host"
-      - name: Build AST support on this Windows host
+          brew install ninja swig llvm
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+      - name: Install native compiler build dependencies on Windows
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: bash ci/build_ast_support.sh compiler ast-build "$RUNNER_TEMP/ast-out" "$RUNNER_TEMP/native-inputs/host"
-      - name: Compile the LLVM shim object against this LLVM build on this Unix host
-        if: runner.os != 'Windows'
-        env:
-          NATIVE_PLATFORM: ${{ matrix.llvm_platform }}
-        run: >-
-          node build/sdk/producers/release/build_prepare_llvm.mjs shim --platform "$NATIVE_PLATFORM"
-          --compiler compiler --flatc "$RUNNER_TEMP/ast-out/third_party/flatbuffers/bin/flatc" --out "$RUNNER_TEMP/llvm-out"
-      - name: Compile the LLVM shim object against this LLVM build on this Windows host
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        env:
-          NATIVE_PLATFORM: ${{ matrix.llvm_platform }}
-        run: >-
-          node build/sdk/producers/release/build_prepare_llvm.mjs shim --platform "$NATIVE_PLATFORM"
-          --compiler compiler --flatc "$(cygpath -m "$RUNNER_TEMP")/ast-out/third_party/flatbuffers/bin/flatc.exe"
-          --out "$(cygpath -m "$RUNNER_TEMP")/llvm-out"
+        run: pacman -S --needed --noconfirm mingw-w64-x86_64-swig
       - name: Install N/LLVM and AST into the native input root
-        env:
-          PREPARE_LLVM_COMMIT: ${{ steps.pin.outputs.sha }}
-          PREPARE_RUNTIME_COMMIT: ${{ steps.pin.outputs.runtime_sha }}
-        run: |
-          set -euo pipefail
-          node build/sdk/producers/release/prepare_native_inputs.mjs install-llvm \
-            --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}" --from "$RUNNER_TEMP/llvm-out" --producer llvm-dylib \
-            --shim-commit "$GITHUB_SHA"
-          node build/sdk/producers/release/prepare_native_inputs.mjs install-ast \
-            --root "$RUNNER_TEMP/native-inputs" --target "${{ matrix.target }}" --from "$RUNNER_TEMP/ast-out"
+        run: node build/sdk/producers/release/prepare_native_superbuild.mjs "${{ matrix.target }}"
       # HLE dependency package (ci/bootstrap/hle-input.mjs): this runner's Node,
       # the npm tree of the pinned tools dtsparser package.json and the pinned
       # public cjbind release, under hle/ of the native input root. darwin-x64

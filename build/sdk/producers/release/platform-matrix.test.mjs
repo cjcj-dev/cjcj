@@ -5,6 +5,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {checkPlatform, planMatrix, probeRequirement, runnerHost, selectPlatforms} from './platform-matrix.mjs';
+import {load as loadYaml} from '../../../../ci/vendor/js-yaml/js-yaml.mjs';
 import {nativeLlvmInputs} from '../../../../ci/native-llvm-inputs.mjs';
 import {allReleasePlatforms, getReleasePlatform, RELEASE_REQUIREMENTS, sourceBuildCells, releasePlatformReadiness} from '../../../lib/targets.mjs';
 
@@ -108,17 +109,23 @@ test('runtime build entry refuses an unusable gdb and records the root cause', {
   fs.mkdirSync(tools);
   const writeTool = (name, body) => fs.writeFileSync(path.join(tools, name), `#!/bin/bash\n${body}\n`, {mode: 0o755});
   writeTool('sudo', 'exit 0');
+  // npm may prepend its global bin directory to PATH. Resolve the requested
+  // zx once, then run the actual child with the fixture's sudo/gdb first.
+  const lookup = spawnSync('npx', ['--yes','--package=zx@8','-c','command -v zx'], {encoding:'utf8'});
+  assert.equal(lookup.status,0,lookup.stderr);
+  const zx = lookup.stdout.trim();
+  writeTool('npx','[[ "$1" == --yes && "$2" == zx@8 ]] || exit 65; shift 2; exec "$NODE_EXE" "$PINNED_ZX" "$@"');
   writeTool('gdb', 'echo "controlled gdb unavailable" >&2; exit 127');
   writeTool('python3', 'if [[ "$1" == "--version" ]]; then echo fixture-python; exit 0; fi\necho "$*" >> "$BUILD_CALLS"\nmkdir -p "$PLATFORM_CI_ROOT/runtime-install"\ntouch "$PLATFORM_CI_ROOT/runtime-install/libcangjie-runtime.so"');
   const output = path.join(temporary, 'output');
   const calls = path.join(temporary, 'build-calls');
   const selectedRuntime = spawnSync('git', ['-C', source, 'rev-parse', 'HEAD'], {encoding: 'utf8'});
   assert.equal(selectedRuntime.status, 0, selectedRuntime.stderr);
-  const result = spawnSync('npx', ['--yes', 'zx@8', 'build/sdk/producers/platform_matrix/build_runtime.mjs'], {
+  const result = spawnSync(process.execPath, [zx, 'build/sdk/producers/platform_matrix/build_runtime.mjs'], {
     cwd: root, encoding: 'utf8', timeout: 110000,
     env: {...process.env, PATH: `${tools}${path.delimiter}${process.env.PATH}`, RUNTIME_SOURCE: source,
       ...nativeLlvmInputs(), CJCJ_NATIVE_RUNTIME_REF: selectedRuntime.stdout.trim(), RUNTIME_TARGET: 'native', RUNTIME_TOOLCHAIN: '', PLATFORM_CI_ROOT: output,
-      BUILD_CALLS: calls, GITHUB_STEP_SUMMARY: path.join(temporary, 'summary.md')},
+      NODE_EXE: process.execPath, PINNED_ZX: zx, BUILD_CALLS: calls, GITHUB_STEP_SUMMARY: path.join(temporary, 'summary.md')},
   });
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(fs.readFileSync(path.join(output, 'logs/teardown-tools.log'), 'utf8'), /GC_UNIT_TEARDOWN_TOOL_FAIL tool=gdb rc=127/);
@@ -164,7 +171,10 @@ test('SDK input jobs cover the selected runner/requirement pairs and exclude aba
 
 test('phased release declares every host package behind its complete source admission gate', () => {
   const workflow = fs.readFileSync(path.resolve(import.meta.dirname, '../../../../.github/workflows/release.yml'), 'utf8');
-  const source = [...workflow.matchAll(/^      targets: (\S+)$/gm)].map(match => match[1]);
+  const calls = Object.entries(loadYaml(workflow).jobs).filter(([,job])=>job.with?.targets);
+  const prepare = calls.filter(([,job])=>job.if === "inputs.phase == 'prepare'");
+  assert.deepEqual(prepare.map(([id,job])=>[id,job.with.targets]),[['prepare-srcbuild-linux-x64','linux-x64']]);
+  const source = calls.filter(row=>!prepare.includes(row)).map(([,job])=>job.with.targets);
   const packages = [...workflow.matchAll(/^      release_key: (\S+)$/gm)].map(match => match[1]);
   const plan = planMatrix('all');
   assert.deepEqual(source.sort(), sourceBuildCells({nativeInputs:true}).map(row => row.target).sort(), 'declared source symmetric difference');

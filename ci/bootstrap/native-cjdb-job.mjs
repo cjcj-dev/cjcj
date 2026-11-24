@@ -10,10 +10,7 @@ import {nativeSourceSelection} from './native-source-selection.mjs';
 import {hostPlatform} from '../host-toolchain-pin.mjs';
 import {materializeNativeSource} from './sdk-source.mjs';
 
-// Package a completed ordinary native installation without repeating its build.
-// Preserve the Python producer's original bytes through the same job handoff.
-export async function packageNativeCjdb({install,work,env=process.env,records=[]}) {
-  install=await privateRoot(install);work=await privateRoot(work);
+export async function preserveNativePythonInput(install) {
   const facts=await readJson(path.join(install,'BUILD-INPUTS.json'));
   if(!facts.pythonInstallationInput) {
     const record=facts.configuration?.pythonInputs?.record;
@@ -22,6 +19,13 @@ export async function packageNativeCjdb({install,work,env=process.env,records=[]
     await fs.mkdir(path.dirname(destination),{recursive:true});
     await fs.copyFile(record,destination);
   }
+}
+
+// Package a completed ordinary native installation without repeating its build.
+// Preserve the Python producer's original bytes through the same job handoff.
+export async function packageNativeCjdb({install,work,env=process.env,records=[]}) {
+  install=await privateRoot(install);work=await privateRoot(work);
+  await preserveNativePythonInput(install);
   await fs.mkdir(work,{recursive:true});
   const archive=path.join(work,'native-install.tar');
   await command(['tar','-cf',archive,'-C',install,'.'],{env,records});

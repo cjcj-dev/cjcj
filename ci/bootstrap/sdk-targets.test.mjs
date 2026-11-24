@@ -103,6 +103,15 @@ test('public native fact copy and C2 reuse retain one input writer',async()=>{
  await invoke('current-copy',copies);await invoke('current-copy',copies,['--from','facts']);
  console.log('NATIVE_FACT_COPY_TARGET_REACHED '+root);
 });
+test('retained Windows cjdb locates its installed Python and compiler DLLs',()=>{
+ const stages=createBootstrapTargets(inputs('windows_x86_64')).stages;
+ const entries=stages.flatMap(s=>s.entries??[]).filter(e=>e.names?.includes('cjdb.exe'));
+ assert.ok(entries.length>0);
+ for(const entry of entries){
+  assert.ok(entry.libraries.includes('third_party/llvm'),'directory of python311.dll');
+  assert.ok(entry.libraries.includes('tools/bin'),'directory of compiler frontend and LSP DLLs');
+ }
+});
 test('all native platform configurations preserve eight phases and C3',()=>{
  for(const platform of Object.keys(PLATFORMS)){
   const c=createBootstrapTargets(inputs(platform)),order=targetOrder(c.stages,'stage3').map(s=>s.id);

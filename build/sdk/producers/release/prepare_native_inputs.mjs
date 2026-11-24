@@ -6,7 +6,7 @@
 // This module is the single source of the host set and assembles the
 // native-inputs root on the producing runner. It never invents a component:
 // a missing installation fails closed. N/LLVM and AST are built on each host by
-// the public in-repo producers and installed here (install-llvm / install-ast);
+// the native-cjdb superbuild and travel as a single prefix;
 // no private tools adapter is part of any native input.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -55,7 +55,7 @@ export function prepareProvenance(env = process.env, pins = readEnvFile(path.joi
   const record = {
     producer_sha: env.GITHUB_SHA, run_id: env.GITHUB_RUN_ID, run_attempt: env.GITHUB_RUN_ATTEMPT,
     native_llvm_ref: env.CJCJ_NATIVE_LLVM_REF, native_runtime_ref: env.CJCJ_NATIVE_RUNTIME_REF,
-    compiler_ref: pins.COMPILER_REF, tools_ref: pins.TOOLS_REF, stdx_ref: pins.STDX_REF,
+    compiler_ref: env.CJCJ_SOURCE_SELECTION ? compilerSource(env).commit : pins.COMPILER_REF, tools_ref: pins.TOOLS_REF, stdx_ref: pins.STDX_REF,
   };
   for (const key of PROVENANCE_KEYS) {
     const value = String(record[key] ?? '');
@@ -65,7 +65,15 @@ export function prepareProvenance(env = process.env, pins = readEnvFile(path.joi
   return record;
 }
 
-const sha256 = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+function sha256(file) {
+  // A complete, uncompressed SDK handoff can exceed Node's single Buffer limit.
+  const hash = crypto.createHash('sha256'), buffer = Buffer.allocUnsafe(256 * 1024), fd = fs.openSync(file, 'r');
+  try {
+    let size;
+    while ((size = fs.readSync(fd, buffer)) !== 0) hash.update(buffer.subarray(0, size));
+    return hash.digest('hex');
+  } finally { fs.closeSync(fd); }
+}
 function installation(root, name, manifest) {
   const install = path.join(root, name), buildResult = path.join(install, manifest);
   if (!fs.existsSync(buildResult)) throw new Error(`NATIVE_INPUTS_COMPONENT_MISSING ${name}`);
@@ -252,6 +260,13 @@ function installPython({from, install, platform, lldbNames}) {
   const installedPackage = path.join(nativeRoot, PREPARE_LLDB_PYTHON_PACKAGE);
   fs.cpSync(pkg, installedPackage, {recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false});
   fs.copyFileSync(six, path.join(path.dirname(installedPackage), PREPARE_LLDB_PYTHON_SIX), fs.constants.COPYFILE_EXCL);
+  verifyPackageLinks(nativeRoot, platform, path.join(from, 'lldb-lib'), lldbNames);
+  fs.copyFileSync(record, path.join(install, PREPARE_PYTHON_RECORD));
+  return {python: {configured}, pythonInstallationInput: {record: PREPARE_PYTHON_RECORD, sha256: sha256(path.join(install, PREPARE_PYTHON_RECORD))}};
+}
+
+export function verifyPackageLinks(nativeRoot, platform, libraryDir, lldbNames) {
+  const installedPackage = path.join(nativeRoot, PREPARE_LLDB_PYTHON_PACKAGE);
   // Each link the package carries (Unix _lldb -> liblldb, lldb-argdumper -> bin) resolves inside the native root.
   const nativeReal = fs.realpathSync(nativeRoot);
   for (const link of packageLinks(installedPackage)) {
@@ -264,14 +279,31 @@ function installPython({from, install, platform, lldbNames}) {
   // Unix: _lldb links to the same build's liblldb. Windows LLDB copies liblldb.dll
   // to _lldb*.pyd, so there the binding must be that library byte for byte.
   const sameLibrary = real && (sdkPlatform(platform).os === 'win32'
-    ? lldbNames.some(name => sha256(path.join(from, 'lldb-lib', name)) === sha256(real))
+    ? lldbNames.some(name => sha256(path.join(libraryDir, name)) === sha256(real))
     : lldbNames.includes(path.basename(real)));
   if (!real || !real.startsWith(fs.realpathSync(nativeRoot) + path.sep) || !sameLibrary)
     throw new Error('PREPARE_LLDB_PYTHON_BINDING ' + (binding || 'missing'));
-  fs.copyFileSync(record, path.join(install, PREPARE_PYTHON_RECORD));
-  return {python: {configured}, pythonInstallationInput: {record: PREPARE_PYTHON_RECORD, sha256: sha256(path.join(install, PREPARE_PYTHON_RECORD))}};
 }
 
+// Check the existing compiler installation in place. AST and shim keep their
+// ordinary build facts; the handoff needs only one physical N prefix.
+export function checkSuperbuildInstall(install, platform) {
+  const native = sdkPlatform(platform), root = path.join(install, 'third_party/llvm');
+  const libDir = path.join(root, native.llvmDirectory);
+  const liblldb = 'liblldb' + native.shared;
+  const required = [path.join(libDir, liblldb), path.join(install, 'tools/bin/cjdb' + native.exe),
+    ...['frontend','lsp'].map(name => path.join(install, 'tools', native.os === 'win32' ? 'bin' : 'lib', 'libcangjie-' + name + native.shared)),
+    ...[...PREPARE_LLVM_TOOLS, 'clang', 'lldb-argdumper'].map(name => path.join(root, 'bin', name + native.exe)),
+    path.join(install, PREPARE_SHIM_OBJECT), path.join(root, PREPARE_LLDB_PYTHON_PACKAGE, '../six.py'),
+    path.join(install,'include/cangjie/Parse/Parser.h'),path.join(install,'include/cangjie/Utils/Casting.h')];
+  for (const file of required) if (!fs.statSync(file,{throwIfNoEntry:false})?.isFile() || !fs.statSync(file).size) throw Error('PREPARE_NATIVE_FILE ' + file);
+  if (native.os !== 'win32') fs.accessSync(path.join(root, 'bin/lldb-argdumper'), fs.constants.X_OK);
+  const headers = clangResourceProblems(path.join(root,'lib/clang'));
+  if (headers.length) throw Error('PREPARE_CLANG_RESOURCES ' + headers.join(', '));
+  for (const {name} of compilerRtLibraries(platform))
+    if (!isStaticLibrary(path.join(install,'lib',native.tuple,name))) throw Error('PREPARE_COMPILER_RT_MISSING ' + name);
+  verifyPackageLinks(root, platform, libDir, fs.readdirSync(libDir).filter(n => n === liblldb || n.startsWith(liblldb + '.') || /^liblldb\.[0-9.]+\.dylib$/.test(n)));
+}
 // std reads the AST installation's include root (ci/bootstrap/sdk-std-resume.mjs
 // selectedStdAst) and requires these headers there (sdk-native-stage.mjs
 // STD_AST_HEADER); Parse/Parser.h includes the rest of the public tree, so the
@@ -540,7 +572,11 @@ export function assembleNativeInputs({root, target, hostVersion, env = process.e
   if (fs.existsSync(path.join(root, 'adapter'))) throw new Error('NATIVE_TOOLS_ADAPTER_UNEXPECTED');
   if (!fs.existsSync(path.join(root, HLE_DESCRIPTOR))) throw new Error('NATIVE_INPUTS_COMPONENT_MISSING hle');
   const llvm = installation(root, 'llvm', 'BUILD-INPUTS.json');
-  if (!JSON.parse(fs.readFileSync(path.join(root, llvm.buildResult), 'utf8')).nativeShim)
+  const facts = JSON.parse(fs.readFileSync(path.join(root, llvm.buildResult), 'utf8'));
+  if (facts.astInstallation && (facts.platform !== host.llvm_platform || facts.commits?.shim !== provenance.producer_sha
+    || facts.commits.llvm !== provenance.native_llvm_ref || facts.commits.runtime !== provenance.native_runtime_ref
+    || facts.commits.compiler !== provenance.compiler_ref)) throw Error('PREPARE_NATIVE_SOURCE_PAIR');
+  if (!facts.nativeShim)
     throw new Error('NATIVE_INPUTS_COMPONENT_MISSING shim');
   const locations = {
     platform: host.llvm_platform,
@@ -549,7 +585,7 @@ export function assembleNativeInputs({root, target, hostVersion, env = process.e
     installations: {
       llvm,
       runtime: installation(root, 'runtime', 'NATIVE-INPUTS.json'),
-      ast: installation(root, 'ast', 'BUILD-INPUTS.json'),
+      ast: facts.astInstallation ? llvm : installation(root, 'ast', 'BUILD-INPUTS.json'),
       // The shim object is a member of the same N install (native-shim-inputs.mjs).
       shim: {install: 'llvm'},
     },
@@ -619,27 +655,12 @@ export function prepareWorkflowProblems({release, sdkBuild, target}) {
 // is empty or a plain runner.os (in)equality that admits the host's OS; every
 // host needs its producer markers and the install step in its applicable steps.
 export const PREPARE_COMPONENT_STEPS = Object.freeze({
-  // One in-process LLVM producer on every host: the static platform_tuples
-  // build has no libLLVM-15.dll, so Windows runs the same dylib build.
-  llvm: Object.freeze({
-    Linux: ['build/sdk/producers/release/build_prepare_llvm.mjs --platform', 'prepare_native_inputs.mjs install-llvm'],
-    macOS: ['build/sdk/producers/release/build_prepare_llvm.mjs --platform', 'prepare_native_inputs.mjs install-llvm'],
-    Windows: ['build/sdk/producers/release/build_prepare_llvm.mjs --platform', 'prepare_native_inputs.mjs install-llvm'],
-  }),
-  shim: Object.freeze({
-    Linux: ['build/sdk/producers/release/build_prepare_llvm.mjs shim', '--shim-commit'],
-    macOS: ['build/sdk/producers/release/build_prepare_llvm.mjs shim', '--shim-commit'],
-    Windows: ['build/sdk/producers/release/build_prepare_llvm.mjs shim', '--shim-commit'],
-  }),
+  native: Object.fromEntries(['Linux','macOS','Windows'].map(os => [os,
+    ['prepare_native_superbuild.mjs "${{ matrix.target }}"', 'git -C compiler checkout', 'git -C flatbuffers checkout']])),
   hle: Object.freeze({
     Linux: ['prepare_native_inputs.mjs install-hle'],
     macOS: ['prepare_native_inputs.mjs install-hle'],
     Windows: ['prepare_native_inputs.mjs install-hle'],
-  }),
-  ast: Object.freeze({
-    Linux: ['ci/build_ast_support.sh', 'prepare_native_inputs.mjs install-ast'],
-    macOS: ['ci/build_ast_support.sh', 'prepare_native_inputs.mjs install-ast'],
-    Windows: ['ci/build_ast_support.sh', 'prepare_native_inputs.mjs install-ast'],
   }),
 });
 const hostOs = target => target.startsWith('windows-') ? 'Windows' : target.startsWith('darwin-') ? 'macOS' : 'Linux';
