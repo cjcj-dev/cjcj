@@ -355,3 +355,103 @@ test('native-windows-tools fails when MSYS2 git shadows Git for Windows', t => {
   assert.notEqual(msys.status, 0);
   assert.match(msys.stderr, /GIT_NOT_GIT_FOR_WINDOWS/);
 });
+
+// Pinned third_party_flatbuffers c3e4d69c commits these eight files; Git for
+// Windows refuses each one ("error: invalid path", run 45420757561). Linux Git
+// ignores core.protectNTFS for these names, so the test checks what each
+// checkout writes against Git's is_valid_win32_path rules instead.
+const FETCH_STEP = 'Fetch the selected compiler source for cjdb, the shim and AST support';
+const ZONE = ['android/gradle/wrapper/gradle-wrapper.jar', 'android/gradlew.bat', 'kotlin/gradle/wrapper/gradle-wrapper.jar',
+  'kotlin/gradlew.bat', 'tests/FlatBuffers.Test/NetTest.bat', 'tests/LobsterTest.bat', 'tests/LuaTest.bat', 'tests/RustTest.bat']
+  .map(file => `${file}:Zone.Identifier`);
+const REAL = ['CMakeLists.txt', 'include/flatbuffers/flatbuffers.h', 'src/flatc.cpp', 'android/gradlew.bat', 'tests/RustTest.bat'];
+const ntfsInvalid = file => file.split('/').some(part => /[:*?"<>|\\\x00-\x1f]/.test(part) || /[. ]$/.test(part)
+  || /^(aux|con|conin\$|conout\$|nul|prn|com[1-9]|lpt[1-9]) *(\.|$)/i.test(part));
+const git = (cwd, ...args) => spawnSync('git', ['-C', cwd, ...args], {encoding: 'utf8'});
+function flatbuffersSource(t, extra = []) {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'flatbuffers-ntfs-'));
+  t.after(() => fs.rmSync(work, {recursive: true, force: true}));
+  const source = path.join(work, 'source');
+  for (const file of [...REAL, ...ZONE, ...extra]) {
+    fs.mkdirSync(path.dirname(path.join(source, file)), {recursive: true});
+    fs.writeFileSync(path.join(source, file), `${file}\n`);
+  }
+  for (const args of [['init', '-q'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'fixture']])
+    assert.equal(git(source, ...args).status, 0);
+  return {work, source, sha: git(source, 'rev-parse', 'HEAD').stdout.trim()};
+}
+// What the checkout put on disk and kept in the index.
+function written(dir) {
+  const files = [];
+  const walk = rel => { for (const entry of fs.readdirSync(path.join(dir, rel), {withFileTypes: true})) {
+    const name = rel ? `${rel}/${entry.name}` : entry.name;
+    if (name === '.git') continue;
+    entry.isDirectory() ? walk(name) : files.push(name);
+  } };
+  walk('');
+  return files.sort();
+}
+function flatbuffersBlock() {
+  const script = runBlock(step(PREPARE, FETCH_STEP));
+  const start = script.indexOf('git init flatbuffers');
+  assert.notEqual(start, -1, 'the fetch step checks out flatbuffers');
+  return script.slice(start);
+}
+
+test('prepare checks out the pinned flatbuffers tree without its NTFS-invalid Zone.Identifier files', t => {
+  const {work, source, sha} = flatbuffersSource(t);
+  fs.mkdirSync(path.join(work, 'build/lib'), {recursive: true});
+  fs.copyFileSync(path.join(repo, 'build/lib/srcbuild_git.sh'), path.join(work, 'build/lib/srcbuild_git.sh'));
+  const result = bash(flatbuffersBlock(), {cwd: work, env: {...process.env, FLATBUFFERS_URL: `file://${source}`, FLATBUFFERS_SHA: sha,
+    GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.protectNTFS', GIT_CONFIG_VALUE_0: 'true'}});
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const dest = path.join(work, 'flatbuffers');
+  assert.equal(git(dest, 'rev-parse', 'HEAD').stdout.trim(), sha);
+  assert.equal(git(dest, 'status', '--porcelain').stdout, '');
+  assert.deepEqual(written(dest), [...REAL].sort());
+  assert.deepEqual(written(dest).filter(ntfsInvalid), []);
+  const skipped = git(dest, 'ls-files', '-t').stdout.split('\n').filter(line => line.startsWith('S ')).map(line => line.slice(2));
+  assert.deepEqual(skipped.sort(), [...ZONE].sort());
+});
+
+test('an unguarded flatbuffers checkout writes every NTFS-invalid Zone.Identifier file', t => {
+  const {work, source, sha} = flatbuffersSource(t);
+  const dest = path.join(work, 'plain');
+  for (const args of [['init', '-q', dest]]) assert.equal(spawnSync('git', args).status, 0);
+  assert.equal(git(dest, 'fetch', '-q', '--depth=1', `file://${source}`, sha).status, 0);
+  assert.equal(git(dest, '-c', 'core.protectNTFS=true', 'checkout', '--detach', 'FETCH_HEAD').status, 0);
+  assert.deepEqual(written(dest).filter(ntfsInvalid), [...ZONE].sort());
+});
+
+test('the Zone.Identifier checkout refuses any other NTFS-unsafe path before writing', t => {
+  const {work, source, sha} = flatbuffersSource(t, ['src/aux.c']);
+  const dest = path.join(work, 'flatbuffers');
+  assert.equal(spawnSync('git', ['init', '-q', dest]).status, 0);
+  assert.equal(git(dest, 'fetch', '-q', '--depth=1', `file://${source}`, sha).status, 0);
+  const refused = spawnSync('bash', ['-c', '. "$1"; srcbuild_git_checkout_skip_zone_identifier "$2"', 'checkout',
+    path.join(repo, 'build/lib/srcbuild_git.sh'), dest], {encoding: 'utf8'});
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /NTFS_UNSAFE_PATH src\/aux\.c/);
+  assert.notEqual(git(dest, 'rev-parse', '--verify', '-q', 'HEAD').status, 0, 'nothing was checked out');
+});
+
+test('the Zone.Identifier checkout refuses the CONIN$ and CONOUT$ console devices too', t => {
+  const devices = ['src/CONIN$', 'src/conin$.txt', 'tools/Conout$', 'tools/CONOUT$ .log'];
+  const {work, source, sha} = flatbuffersSource(t, [...devices, 'src/conin.c', 'src/conout$x.c']);
+  const dest = path.join(work, 'flatbuffers');
+  assert.equal(spawnSync('git', ['init', '-q', dest]).status, 0);
+  assert.equal(git(dest, 'fetch', '-q', '--depth=1', `file://${source}`, sha).status, 0);
+  const refused = spawnSync('bash', ['-c', '. "$1"; srcbuild_git_checkout_skip_zone_identifier "$2"', 'checkout',
+    path.join(repo, 'build/lib/srcbuild_git.sh'), dest], {encoding: 'utf8'});
+  assert.equal(refused.status, 1);
+  const named = refused.stderr.replace(/^NTFS_UNSAFE_PATH /, '').trim().split('\n').sort();
+  assert.deepEqual(named, [...devices].sort());
+  assert.deepEqual(devices.filter(file => !ntfsInvalid(file)), []);
+  assert.notEqual(git(dest, 'rev-parse', '--verify', '-q', 'HEAD').status, 0, 'nothing was checked out');
+});
+
+test('the Windows LLVM tuple fetch checks out flatbuffers through the Zone.Identifier checkout', () => {
+  const body = read('build/sdk/producers/platform_tuples/fetch_sources.mjs');
+  assert.match(body, /fetchExact\(required\('FLATBUFFERS_URL', \d+\), required\('FLATBUFFERS_SHA', \d+\), `\$\{root\}\/flatbuffers`, '', true\)/);
+  assert.match(body, /if \(skipZoneIdentifier\) await run\(\['bash', '-c', '[^']*srcbuild_git_checkout_skip_zone_identifier "\$2"'/);
+});

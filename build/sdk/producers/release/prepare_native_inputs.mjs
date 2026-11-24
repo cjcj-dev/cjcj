@@ -654,7 +654,7 @@ export function prepareWorkflowProblems({release, prepare, sdkBuild, target}) {
 // host needs its producer markers and the install step in its applicable steps.
 export const PREPARE_COMPONENT_STEPS = Object.freeze({
   native: Object.fromEntries(['Linux','macOS','Windows'].map(os => [os,
-    ['prepare_native_superbuild.mjs "${{ matrix.target }}"', 'git -C compiler checkout', 'git -C flatbuffers checkout']])),
+    ['prepare_native_superbuild.mjs "${{ matrix.target }}"', 'git -C compiler checkout', 'srcbuild_git_checkout_skip_zone_identifier flatbuffers']])),
   hle: Object.freeze({
     Linux: ['prepare_native_inputs.mjs install-hle'],
     macOS: ['prepare_native_inputs.mjs install-hle'],

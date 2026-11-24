@@ -154,7 +154,7 @@ test('red cut: dropping one host family\'s N/LLVM or AST step names exactly that
     ...['Linux','macOS','Windows'].map(os=>[step,step+`        if: runner.os != '${os}'\n`,
       PREPARE_HOSTS.filter(h=>(h.target.startsWith('darwin')?'macOS':h.target.startsWith('windows')?'Windows':'Linux')===os)
         .map(h=>`${h.target} lacks native producer ${entry}`)]),
-    ...[entry,'git -C compiler checkout','git -C flatbuffers checkout'].map(marker=>[marker,'cut-native-source',
+    ...[entry,'git -C compiler checkout','srcbuild_git_checkout_skip_zone_identifier flatbuffers'].map(marker=>[marker,'cut-native-source',
       PREPARE_HOSTS.map(h=>`${h.target} lacks native producer ${marker}`)]),
     ['prepare_native_inputs.mjs install-hle\n','prepare_native_inputs.mjs echo-hle\n',
       PREPARE_HOSTS.map(h=>`${h.target} lacks hle producer prepare_native_inputs.mjs install-hle`)],

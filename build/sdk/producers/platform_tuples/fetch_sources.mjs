@@ -6,7 +6,7 @@ await entry(async () => {
   const root = required('TUPLE_ROOT', 11, 'TUPLE_ROOT is required');
   await run(['mkdir', '-p', `${root}/logs`]);
   await logged(import.meta.url, `${root}/logs/source-fetch.log`, async () => {
-    async function fetchExact(url, sha, dest, sparse = '') {
+    async function fetchExact(url, sha, dest, sparse = '', skipZoneIdentifier = false) {
       let gitDirectory = false;
       try { gitDirectory = fs.statSync(`${dest}/.git`).isDirectory(); } catch {}
       if (!gitDirectory) {
@@ -16,7 +16,10 @@ await entry(async () => {
       if (sparse) await run(['git', '-C', dest, 'sparse-checkout', 'set', sparse]);
       await run(['bash', '-c', 'set -euo pipefail; source "$1"; srcbuild_git_fetch "$2" "$3" "$4"',
         'fetch-tuple', path.join(repo, 'build/lib/srcbuild_git.sh'), dest, url, sha]);
-      await run(['git', '-C', dest, 'checkout', '--detach', 'FETCH_HEAD']);
+      // The Windows tuple runs this too; see srcbuild_git_checkout_skip_zone_identifier.
+      if (skipZoneIdentifier) await run(['bash', '-c', 'set -euo pipefail; source "$1"; srcbuild_git_checkout_skip_zone_identifier "$2"',
+        'checkout-tuple', path.join(repo, 'build/lib/srcbuild_git.sh'), dest]);
+      else await run(['git', '-C', dest, 'checkout', '--detach', 'FETCH_HEAD']);
       const head = await capture(['git', '-C', dest, 'rev-parse', 'HEAD'], {check: false});
       process.stderr.write(head.stderr);
       if (head.stdout.replace(/\n+$/, '') !== sha) exit(1);
@@ -30,7 +33,7 @@ await entry(async () => {
       'reflection-count', `${root}/llvm-project/llvm/include/llvm/Transforms/Scalar/ReflectionInfo.h`]);
     await fetchExact(required('CANGJIE_COMPILER_URL', 41), required('CANGJIE_COMPILER_SHA', 41), `${root}/cangjie-compiler`, 'schema');
     await run(['test', '-f', `${root}/cangjie-compiler/schema/CjoFormat.fbs`]);
-    await fetchExact(required('FLATBUFFERS_URL', 44), required('FLATBUFFERS_SHA', 44), `${root}/flatbuffers`);
+    await fetchExact(required('FLATBUFFERS_URL', 44), required('FLATBUFFERS_SHA', 44), `${root}/flatbuffers`, '', true);
     await run(['test', '-f', `${root}/flatbuffers/CMakeLists.txt`]);
   });
 });

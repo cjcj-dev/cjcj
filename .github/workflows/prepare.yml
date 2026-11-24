@@ -217,7 +217,10 @@ jobs:
           git init flatbuffers
           git -C flatbuffers remote add origin "$FLATBUFFERS_URL"
           git -C flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
-          git -C flatbuffers checkout --detach FETCH_HEAD
+          # The pinned tree commits *:Zone.Identifier files Git for Windows rejects.
+          . build/lib/srcbuild_git.sh
+          srcbuild_git_checkout_skip_zone_identifier flatbuffers
+          test "$(git -C flatbuffers rev-parse HEAD)" = "$FLATBUFFERS_SHA"
       - name: Install native compiler build dependencies on Linux
         if: runner.os == 'Linux'
         run: |
