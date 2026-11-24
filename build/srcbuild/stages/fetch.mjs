@@ -137,6 +137,25 @@ export function prepareDarwinLldbSource(llvm) {
   applyTextPatch(file, [[before, after]], {stage:'prepare.darwin.rpath', marker:after});
 }
 
+// Applied to prepare-native's private LLVM checkout on Darwin. The pinned
+// compiler-rt (eb7ad012 compiler-rt/lib/builtins/assembly.h:257-265) opens the
+// CFI frame of every outline-atomic helper (aarch64/lse.S) before its global
+// label; Xcode 16.4's assembler rejects a non-private label between
+// .cfi_startproc and .cfi_endproc. Place the label first, as upstream LLVM
+// e34b743e6c24 (llvm/llvm-project#73526) does.
+const macroLine = text => text.padEnd(79) + '\\';
+export const DARWIN_COMPILER_RT_OUTLINE_CFI = Object.freeze({
+  before: [macroLine('  DECLARE_SYMBOL_VISIBILITY_UNMANGLED(name) SEPARATOR'), macroLine('  CFI_START SEPARATOR'),
+    macroLine('  DECLARE_FUNC_ENCODING'), '  name: SEPARATOR BTI_C'].join('\n'),
+  after: [macroLine('  DECLARE_SYMBOL_VISIBILITY_UNMANGLED(name) SEPARATOR'), macroLine('  DECLARE_FUNC_ENCODING'),
+    macroLine('  name: SEPARATOR'), '  CFI_START SEPARATOR BTI_C'].join('\n'),
+});
+export function prepareDarwinCompilerRtSource(llvm) {
+  const file = path.join(llvm, 'compiler-rt/lib/builtins/assembly.h');
+  const {before, after} = DARWIN_COMPILER_RT_OUTLINE_CFI;
+  applyTextPatch(file, [[before, after]], {stage:'prepare.darwin.compiler-rt-cfi', marker:after});
+}
+
 // The installed public compiler headers include several generated schemas.
 // Install the complete output set owned by the existing flatc target, including
 // libs-only builds; never synthesize headers or copy them after CMake install.

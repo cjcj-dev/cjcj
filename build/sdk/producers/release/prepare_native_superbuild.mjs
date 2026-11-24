@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
-import {prepareDarwinLldbSource} from '../../../srcbuild/stages/fetch.mjs';
+import {prepareDarwinCompilerRtSource,prepareDarwinLldbSource} from '../../../srcbuild/stages/fetch.mjs';
 import {sdkPlatform} from '../../../../ci/bootstrap/sdk-platform.mjs';
 import {download} from '../../../lib/archive.mjs';
 import {preserveNativePythonInput} from '../../../../ci/bootstrap/native-cjdb-job.mjs';
@@ -38,6 +38,7 @@ export async function prepareNativeSuperbuild({target,workspace,work,root,env=pr
   const tools={cc:'clang',cxx:'clang++',launcher:env.CMAKE_CXX_COMPILER_LAUNCHER};
   if(platform.startsWith('darwin_')) {
     prepareDarwinLldbSource(sources.llvm);
+    prepareDarwinCompilerRtSource(sources.llvm);
     tools.cc='/usr/bin/clang'; tools.cxx='/usr/bin/clang++';
   }
   let pythonInputs;

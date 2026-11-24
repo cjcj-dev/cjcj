@@ -144,6 +144,9 @@ jobs:
           component: native-runtime
           platform: ${{ matrix.llvm_platform }}
           pin: ${{ steps.pin.outputs.runtime_sha }}
+          # One session covers native-runtime and the whole LLVM/Clang/LLDB/compiler-rt
+          # superbuild; the report step at the end of this job persists it.
+          cache-size: 5G
       - name: Build and install the exact native runtime and bounds
         env:
           RUNTIME_NATIVE_PAIR: '1'
@@ -293,6 +296,16 @@ jobs:
           name: native-inputs-${{ matrix.target }}
           path: ${{ runner.temp }}/native-inputs.tar
           if-no-files-found: error
+      # Close out the session opened above and persist the disk cache, also when a
+      # late superbuild step fails; only a successful job requires compile requests.
+      - name: Report and save native sccache
+        if: always()
+        uses: ./.github/actions/sccache
+        with:
+          mode: report
+          component: native-runtime
+          platform: ${{ matrix.llvm_platform }}
+          require-compiles: ${{ job.status == 'success' }}
 
   prepare-srcbuild-linux-x64:
     needs: prepare-native

@@ -1336,3 +1336,87 @@ test('Darwin standalone LLDB uses the parent boundscheck architecture and a relo
   assert.match(before[2],/target_link_options\(liblldb PRIVATE "-Wl,-rpath,@loader_path"\)/);
   assert.ok(!before[2].includes('CMAKE_SOURCE_DIR'));
 });
+
+// eb7ad012 compiler-rt/lib/builtins/assembly.h:249-265, byte for byte (sha256
+// pinned below): the private-function macro and the outline-atomic macro whose
+// CFI frame Xcode 16.4 rejects (aarch64/lse.S, "non-private labels cannot appear
+// between .cfi_startproc / .cfi_endproc pairs").
+const ASSEMBLY_H_LINE = text => text.padEnd(79) + '\\';
+const ASSEMBLY_H_EB7AD012 = [...['#define DEFINE_COMPILERRT_PRIVATE_FUNCTION_UNMANGLED(name)', '  DEFINE_CODE_STATE',
+  '  .globl name SEPARATOR', '  SYMBOL_IS_FUNC(name) SEPARATOR', '  HIDDEN(name) SEPARATOR', '  DECLARE_FUNC_ENCODING'].map(ASSEMBLY_H_LINE),
+  '  name:', '', ...['#define DEFINE_COMPILERRT_OUTLINE_FUNCTION_UNMANGLED(name)', '  DEFINE_CODE_STATE', '  FUNC_ALIGN',
+  '  .globl name SEPARATOR', '  SYMBOL_IS_FUNC(name) SEPARATOR', '  DECLARE_SYMBOL_VISIBILITY_UNMANGLED(name) SEPARATOR',
+  '  CFI_START SEPARATOR', '  DECLARE_FUNC_ENCODING'].map(ASSEMBLY_H_LINE), '  name: SEPARATOR BTI_C', ''].join('\n');
+const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
+const outlineMacro = text => /#define DEFINE_COMPILERRT_OUTLINE_FUNCTION_UNMANGLED\(name\)((?:.*\\\n)*.*)/.exec(text)[1]
+  .split(/\s*\\\n\s*/).map(part => part.trim()).filter(Boolean);
+
+test('Darwin compiler-rt outline atomics name their global label before opening the CFI frame', async t => {
+  const {prepareDarwinCompilerRtSource} = await import('../../../srcbuild/stages/fetch.mjs');
+  assert.equal(sha256(ASSEMBLY_H_EB7AD012), '981c94078f5ae46f9b8d165f71fc09b6d4ebff5734f78ac3f523db8aea21969f');
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-darwin-crt-'));
+  t.after(() => fs.rmSync(work, {recursive: true, force: true}));
+  const file = path.join(work, 'compiler-rt/lib/builtins/assembly.h');
+  fs.mkdirSync(path.dirname(file), {recursive: true});
+  fs.writeFileSync(file, '#include "int_lib.h"\n' + ASSEMBLY_H_EB7AD012 + '#define END_COMPILERRT_FUNCTION(name)\n');
+  assert.deepEqual(outlineMacro(fs.readFileSync(file, 'utf8')).slice(-3), ['CFI_START SEPARATOR', 'DECLARE_FUNC_ENCODING', 'name: SEPARATOR BTI_C']);
+  prepareDarwinCompilerRtSource(work);
+  const patched = fs.readFileSync(file, 'utf8');
+  prepareDarwinCompilerRtSource(work);
+  assert.equal(fs.readFileSync(file, 'utf8'), patched);
+  // The same bytes the eb7ad012 header gives after this patch, which clang
+  // --target=arm64-apple-macos11 assembles for all 100 lse.S helpers.
+  assert.equal(sha256(patched.slice('#include "int_lib.h"\n'.length, -'#define END_COMPILERRT_FUNCTION(name)\n'.length)),
+    '7afaaa9c522f2f7ecac67eb13fe8ee418fbc3ad4ae9450db74bb1351342a65be');
+  const body = outlineMacro(patched);
+  assert.deepEqual(body, ['DEFINE_CODE_STATE', 'FUNC_ALIGN', '.globl name SEPARATOR', 'SYMBOL_IS_FUNC(name) SEPARATOR',
+    'DECLARE_SYMBOL_VISIBILITY_UNMANGLED(name) SEPARATOR', 'DECLARE_FUNC_ENCODING', 'name: SEPARATOR', 'CFI_START SEPARATOR BTI_C']);
+  assert.ok(patched.split('\n').every(line => !line.endsWith('\\') || line.length === 80), 'continuations stay in column 80');
+  assert.ok(patched.includes(ASSEMBLY_H_EB7AD012.split('\n\n')[0]), 'the private-function macro is untouched');
+});
+
+test('red cut: a drifted compiler-rt assembly.h anchor fails closed and stays untouched', async t => {
+  const {prepareDarwinCompilerRtSource} = await import('../../../srcbuild/stages/fetch.mjs');
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-darwin-crt-drift-'));
+  t.after(() => fs.rmSync(work, {recursive: true, force: true}));
+  const file = path.join(work, 'compiler-rt/lib/builtins/assembly.h');
+  fs.mkdirSync(path.dirname(file), {recursive: true});
+  for (const drifted of [ASSEMBLY_H_EB7AD012.replace('  CFI_START SEPARATOR ', '  CFI_START   SEPARATOR'),
+    ASSEMBLY_H_EB7AD012.replace('  name: SEPARATOR BTI_C', '  name: SEPARATOR'), ASSEMBLY_H_EB7AD012.replaceAll(' '.repeat(10) + '\\', '\t\\')]) {
+    assert.notEqual(drifted, ASSEMBLY_H_EB7AD012);
+    fs.writeFileSync(file, drifted);
+    assert.throws(() => prepareDarwinCompilerRtSource(work), /patch shape drift/);
+    assert.equal(fs.readFileSync(file, 'utf8'), drifted);
+  }
+  fs.rmSync(file);
+  assert.throws(() => prepareDarwinCompilerRtSource(work));
+});
+
+test('prepare-native patches the private LLVM checkout\'s compiler-rt on Darwin hosts only', () => {
+  const source = fs.readFileSync(path.join(import.meta.dirname, 'prepare_native_superbuild.mjs'), 'utf8');
+  assert.match(source, /^import \{[^}]*\bprepareDarwinCompilerRtSource\b[^}]*\} from '\.\.\/\.\.\/\.\.\/srcbuild\/stages\/fetch\.mjs';$/m);
+  const darwin = /\n  if\(platform\.startsWith\('darwin_'\)\) \{\n([^}]*)\n  \}\n/.exec(source);
+  assert.ok(darwin, 'prepareNativeSuperbuild keeps its Darwin source-preparation block');
+  assert.deepEqual(darwin[1].split('\n').map(line => line.trim()).filter(line => /^prepareDarwin/.test(line)),
+    ['prepareDarwinLldbSource(sources.llvm);', 'prepareDarwinCompilerRtSource(sources.llvm);']);
+  assert.equal(source.split('prepareDarwinCompilerRtSource(').length - 1, 1, 'called once, inside the Darwin block');
+  assert.ok(source.indexOf(darwin[0]) < source.indexOf('await nativeCjdb('), 'patched before the superbuild configures');
+});
+
+test('prepare.yml persists the one native sccache session that covers runtime and the LLVM superbuild', () => {
+  const steps = loadYaml(fs.readFileSync(path.join(import.meta.dirname, '../../../../.github/workflows/prepare.yml'), 'utf8'))
+    .jobs['prepare-native'].steps;
+  const sccache = steps.filter(step => step.uses === './.github/actions/sccache');
+  assert.equal(sccache.length, 2, JSON.stringify(sccache));
+  const [start, report] = sccache, at = step => steps.indexOf(step);
+  assert.equal(start.with.mode ?? 'start', 'start');
+  assert.equal(start.with['cache-size'], '5G');
+  assert.equal(start.with.component, 'native-runtime');
+  const superbuild = steps.findIndex(step => String(step.run || '').includes('prepare_native_superbuild.mjs'));
+  const runtime = steps.findIndex(step => String(step.run || '').includes('build_runtime.mjs'));
+  assert.ok(at(start) < runtime && runtime < superbuild && superbuild < at(report));
+  assert.equal(at(report), steps.length - 1, 'the report closes out the job');
+  assert.equal(report.if, 'always()');
+  assert.deepEqual(report.with, {mode: 'report', component: start.with.component, platform: start.with.platform,
+    'require-compiles': "${{ job.status == 'success' }}"});
+});
