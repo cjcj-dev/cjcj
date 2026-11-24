@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {sdkPlatform, cleanSdkEnvironment} from '../../../../ci/bootstrap/sdk-platform.mjs';
 import {verifyEntryFormat} from '../../../../ci/bootstrap/sdk-entry-producer.mjs';
 import {darwinCommand as command} from '../release/darwin_commands.mjs';
+import {boundsProbeSymbol} from './native_bounds_probe.mjs';
 
 const root = path.resolve(process.env.PLATFORM_CI_ROOT || '.platform-ci');
 const source = path.resolve(process.env.RUNTIME_SOURCE || 'runtime-source');
@@ -74,13 +75,13 @@ try {
     summary[phase] = {runtime:'NOT_RUN', bounds:'NOT_RUN', libraryDirectory};
     for (const [role, basename, symbol, mode] of [
       ['runtime', 'libcangjie-runtime', 'CJ_MCC_HandleReturnSafepoint', 'runtime'],
-      ['bounds', 'libboundscheck', 'memcpy_s', 'boundscheck'],
+      ['bounds', 'libboundscheck', boundsProbeSymbol(native.os), 'boundscheck'],
     ]) {
       const library = path.join(libraryDirectory, basename + native.shared);
       assert.ok(fs.existsSync(library), `NATIVE_LIBRARY_MISSING ${phase} ${role}: ${library}`);
       await verifyEntryFormat(library, platform);
       if (native.os === 'darwin') assert.equal(fs.readFileSync(library).readUInt32LE(12), 6, 'NATIVE_MACHO_DYLIB');
-      summary[phase][role] = {library, sha256:digest(library), rc:null};
+      summary[phase][role] = {library, symbol, sha256:digest(library), rc:null};
       run(`${phase}-${role}`, loader, [library, symbol, mode], {env});
       summary[phase][role].rc = 0;
     }

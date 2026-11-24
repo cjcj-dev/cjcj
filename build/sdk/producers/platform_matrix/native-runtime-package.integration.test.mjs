@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {boundsProbeSymbol} from './native_bounds_probe.mjs';
 
 // Real native objects, loader, tar and public package process; no runtime/SDK qualification.
 const platform = `${process.platform}_${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}`;
@@ -12,7 +13,7 @@ const entry = fileURLToPath(new URL('./native_runtime_package.mjs', import.meta.
 const evidence = process.env.NATIVE_PACKAGE_EVIDENCE;
 assert.ok(evidence && path.isAbsolute(evidence), 'NATIVE_PACKAGE_EVIDENCE must retain all cases');
 fs.mkdirSync(evidence, {recursive:true});
-function fixture(body, boundsBody = 'return dst && n <= cap ? (std::memcpy(dst, src, n), 0) : 22;') {
+function fixture(body, boundsBody = 'return dst && n <= cap ? (std::memcpy(dst, src, n), 0) : 22;', boundsSource = null) {
   const root = fs.mkdtempSync(path.join(evidence, 'case-'));
   const source = path.join(root, 'source'), output = path.join(root, 'output');
   const install = path.join(output, 'runtime-install'), lib = path.join(install, 'runtime/lib', `${platform}_cjnative`);
@@ -38,7 +39,7 @@ function fixture(body, boundsBody = 'return dst && n <= cap ? (std::memcpy(dst, 
   fs.writeFileSync(path.join(install, 'NATIVE-INPUTS.json'), JSON.stringify({platform, runtime_sha:sha, paired_llvm_sha:'b'.repeat(40)}));
   for (const [name, code] of [
     ['cangjie-runtime', '#include <cstdlib>\nextern "C" void CJ_MCC_HandleReturnSafepoint() { std::abort(); }\n'],
-    ['boundscheck', '#include <cstring>\nextern "C" int memcpy_s(void* dst, size_t cap, const void* src, size_t n) { '+boundsBody+' }\n'],
+    ['boundscheck', boundsSource ?? '#include <cstring>\nextern "C" int memcpy_s(void* dst, size_t cap, const void* src, size_t n) { '+boundsBody+' }\n'],
   ]) {
     const cpp = path.join(root, name+'.cpp'); fs.writeFileSync(cpp, code);
     const built = execute('build-'+name, [compiler, '-std=c++17', ...(process.platform === 'darwin' ? ['-dynamiclib'] : ['-shared', '-fPIC']),
@@ -67,6 +68,10 @@ test('public native package calls bounds and loads the same installed and unpack
   }
   assert.equal(facts.installed.runtime.sha256, facts.unpacked.runtime.sha256);
   assert.equal(facts.installed.bounds.sha256, facts.unpacked.bounds.sha256);
+  for (const stage of ['installed', 'unpacked']) {
+    assert.equal(facts[stage].bounds.symbol, boundsProbeSymbol(process.platform));
+    assert.equal(command(`${stage}-bounds`).args[1], boundsProbeSymbol(process.platform));
+  }
   assert.notEqual(facts.installed.runtime.library, facts.unpacked.runtime.library);
 }));
 test('public native package rejects missing bounds while runtime loading remains independent', () => fixture(({run, lib, command, summary, restored}) => {
@@ -102,3 +107,76 @@ test('public native package rejects a bounds symbol loaded from a different libr
   fs.renameSync(bounds+'.wrong-origin', path.join(root, 'rejected-origin'+suffix));
   restored();
 }));
+
+// Windows libboundscheck.dll is built from memset_s/snprintf_s/vsnprintf_s only
+// (the C runtime supplies memcpy_s), so its consumer probe must bind memset_s.
+test('bounds probe binds memset_s on Windows and memcpy_s on Linux and Darwin', () => {
+  assert.equal(boundsProbeSymbol('win32'), 'memset_s');
+  assert.equal(boundsProbeSymbol('linux'), 'memcpy_s');
+  assert.equal(boundsProbeSymbol('darwin'), 'memcpy_s');
+  assert.throws(() => boundsProbeSymbol('freebsd'), /NATIVE_BOUNDS_PROBE_PLATFORM freebsd/);
+});
+// A Windows-shaped bounds library (memset_s only) is rejected by the Linux/Darwin
+// public consumer: it must still bind memcpy_s there, not whatever is exported.
+test('public native package on Linux/Darwin still requires memcpy_s from a memset_s-only bounds library', () => fixture(({run, command, summary}) => {
+  const result = run(); assert.equal(result.status, 67, result.stdout+result.stderr);
+  assert.match(result.stderr, /DARWIN_LOADED_SYMBOL_MISSING memcpy_s/);
+  assert.equal(command('installed-runtime').rc, 0);
+  assert.equal(command('installed-bounds').rc, 67);
+  assert.equal(summary().installed.bounds.symbol, 'memcpy_s');
+  assert.equal(summary().package, 'NOT_RUN');
+}, undefined, memsetOnly('return dst && n <= cap ? (std::memset(dst, c, n), 0) : (dst && cap ? (std::memset(dst, 0, cap), 34) : 22);')));
+
+function memsetOnly(body) {
+  return '#include <cstring>\nextern "C" int memset_s(void* dst, size_t cap, int c, size_t n) { '+body+' }\n';
+}
+// The real loader against real shared libraries exporting ONLY memset_s.
+function loaderCase(label, body) {
+  const root = fs.mkdtempSync(path.join(evidence, `loader-${label}-`));
+  const run = (name, argv) => {
+    const result = spawnSync(argv[0], argv.slice(1), {encoding:'utf8', cwd:root});
+    fs.writeFileSync(path.join(root, `${name}.json`), JSON.stringify({argv, rc:result.status, signal:result.signal,
+      error:result.error?.message || null, stdout:result.stdout, stderr:result.stderr}, null, 2));
+    return result;
+  };
+  const compiler = process.env.CXX || 'clang++';
+  const loader = path.join(root, 'native-loader');
+  const built = run('compile-loader', [compiler, '-std=c++17', fileURLToPath(new URL('../release/darwin_loader.cpp', import.meta.url)),
+    ...(process.platform === 'linux' ? ['-ldl'] : []), '-o', loader]);
+  assert.equal(built.status, 0, built.stderr);
+  const cpp = path.join(root, 'boundscheck.cpp'), library = path.join(root, 'libboundscheck'+suffix);
+  fs.writeFileSync(cpp, memsetOnly(body));
+  const shared = run('build-bounds', [compiler, '-std=c++17', ...(process.platform === 'darwin' ? ['-dynamiclib'] : ['-shared', '-fPIC']),
+    cpp, '-o', library]);
+  assert.equal(shared.status, 0, shared.stderr);
+  const symbols = run('exports', ['nm', ...(process.platform === 'darwin' ? ['-gU'] : ['-D', '--defined-only']), library]);
+  assert.equal(symbols.status, 0, symbols.stderr);
+  assert.match(symbols.stdout, /\b_?memset_s\s*$/m);
+  assert.doesNotMatch(symbols.stdout, /\b_?memcpy_s\s*$/m);
+  return {probe: symbol => run(`probe-${symbol}`, [loader, library, symbol, 'boundscheck'])};
+}
+const conforming = 'return dst && n <= cap ? (std::memset(dst, c, n), 0) : (dst && cap ? (std::memset(dst, 0, cap), 34) : 22);';
+test('native loader calls memset_s from a memset_s-only bounds library and rejects a memcpy_s probe', () => {
+  const {probe} = loaderCase('memset-ok', conforming);
+  const ok = probe('memset_s');
+  console.log('NATIVE_LOADER_MEMSET_TARGET_REACHED');
+  assert.equal(ok.status, 0, ok.stdout+ok.stderr);
+  assert.match(ok.stdout, /NATIVE_BOUNDS_CALL_OK/);
+  const missing = probe('memcpy_s');
+  assert.equal(missing.status, 67, missing.stdout+missing.stderr);
+  assert.match(missing.stderr, /DARWIN_LOADED_SYMBOL_MISSING memcpy_s/);
+  assert.doesNotMatch(missing.stdout, /NATIVE_BOUNDS_CALL_OK/);
+});
+for (const [label, body] of [
+  ['nonzero', 'return 22;'],
+  ['unfilled', 'return 0;'],
+  ['short-fill', 'return dst && n <= cap ? (std::memset(dst, c, n - 1), 0) : 22;'],
+  ['unchecked-count', 'return (std::memset(dst, c, n), 0);'],
+  ['overflow-write', 'if (n > cap) { std::memset(dst, c, n); return 34; } return (std::memset(dst, c, n), 0);'],
+]) {
+  test(`native loader rejects a memset_s that is not a bounds-checked fill (${label}) with rc 71`, () => {
+    const result = loaderCase(label, body).probe('memset_s');
+    assert.equal(result.status, 71, result.stdout+result.stderr);
+    assert.doesNotMatch(result.stdout, /NATIVE_BOUNDS_CALL_OK/);
+  });
+}

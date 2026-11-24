@@ -73,7 +73,26 @@ int main(int argc, char** argv)
         dispose(context);
         std::cout << "DARWIN_LLVM_CONTEXT_OK\n";
     }
-    if (std::strcmp(argv[3], "boundscheck") == 0) {
+    if (std::strcmp(argv[3], "boundscheck") == 0 && std::strcmp(argv[2], "memset_s") == 0) {
+        // Windows libboundscheck.dll exports memset_s, not memcpy_s (the C
+        // runtime supplies that one). A valid call must succeed and fill every
+        // byte; a call whose count exceeds destMax must be refused without
+        // writing past destMax.
+        auto fill = reinterpret_cast<int (*)(void*, size_t, int, size_t)>(symbol);
+        constexpr size_t capacity = 24;
+        constexpr unsigned char pattern = 0x5a, guard = 0xc3;
+        unsigned char output[capacity * 2];
+        std::memset(output, guard, sizeof(output));
+        if (fill(output, capacity, pattern, capacity) != 0) return 71;
+        for (size_t i = 0; i < sizeof(output); ++i) {
+            if (output[i] != (i < capacity ? pattern : guard)) return 71;
+        }
+        if (fill(output, capacity, 0, capacity + 1) == 0) return 71;
+        for (size_t i = capacity; i < sizeof(output); ++i) {
+            if (output[i] != guard) return 71;
+        }
+        std::cout << "NATIVE_BOUNDS_CALL_OK\n";
+    } else if (std::strcmp(argv[3], "boundscheck") == 0) {
         auto copy = reinterpret_cast<int (*)(void*, size_t, const void*, size_t)>(symbol);
         const char input[] = "native installed bounds";
         char output[sizeof(input)]{};
