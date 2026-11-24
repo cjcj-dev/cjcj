@@ -73,6 +73,17 @@ dispatch 后第一项取证是 run JSON。`head_sha != FREEZE.json.head_sha`、`
 
 时间依据是 `/root/cj_build/reports/REPORT-citime.md:37-69`。这些是失败路径观测，不是成功时长承诺，只用于排序。
 
+### 3.1 release 四段全并行架构
+
+- 准备独立成 `prepare.yml`（`prepare-native`），`release.yml` 不再有 `phase` 输入。
+- `release.yml` 只有四段，按 `needs` 串联，段内全部并行：
+  1. `plan`：校验输入，缺任何 native 输入即失败（fail closed）。
+  2. `source`：调用一次 `sdk-build.yml`，产出各 host 的完整 SDK 与 final std。
+  3. `package`：一个 15 格 matrix 直接调用 `sdk-package.yml`（`workflow_call` only，无嵌套调用），
+     每格按 `release_key` 拿自己的 `cross_std_artifacts`。
+  4. `publish`：仅 `!inputs.dry_run` 时运行（无 `always()`），发布前由 `ci/release-publish.mjs` 再验。
+- 每个 workflow 展开后只有一份副本、均 < 300 KB（`node ci/workflow-expansion.mjs` 检查）。
+
 ## 4. 分层停损：先判身份，再读业务结果
 
 任何 `STOP-*` 都要求 phase DAG 阻止后续 phase，并让已开始的当前 phase 完成失败证据上传。不得为了“收齐五格”继续启动更贵平台，也不得用 rerun/cancel 绕过未获批外向动作边界。

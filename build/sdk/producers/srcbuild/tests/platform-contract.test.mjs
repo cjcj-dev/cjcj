@@ -70,13 +70,15 @@ test('native SDK consumers share the persisted selector and accept candidates by
   }
   // No other public workflow consumes the full SDK through a repository variable
   // or a by-name Actions artifact. sdk-build-target.yml uploads it and
-  // sdk-build.yml is the in-run release handoff (workflow_call only).
+  // sdk-package.yml is the in-run release handoff (workflow_call only).
   const workflows = path.join(root, '.github/workflows');
   for (const file of fsSync.readdirSync(workflows).filter(entry => /\.ya?ml$/.test(entry))) {
     const text = fsSync.readFileSync(path.join(workflows, file), 'utf8');
     assert.doesNotMatch(text, /vars\.CJCJ_NATIVE_SDK_/, file);
-    if (file !== 'sdk-build-target.yml' && file !== 'sdk-build.yml') assert.doesNotMatch(text, /name:\s*cjcj-srcbuild-/, file);
+    if (file !== 'sdk-build-target.yml' && file !== 'sdk-package.yml') assert.doesNotMatch(text, /name:\s*cjcj-srcbuild-/, file);
   }
+  // The by-name handoff stays reachable only from a caller in the same run.
+  assert.deepEqual(Object.keys(llvmWorkflow('sdk-package.yml').on), ['workflow_call']);
   // Package mode is reachable only through workflow_call: dispatch carries no mode input.
   assert.equal(llvmWorkflow('sdk-build.yml').on.workflow_dispatch.inputs.mode, undefined);
   const source = llvmWorkflow('sdk-build-target.yml');
@@ -400,6 +402,22 @@ function stepRuns(step, context) {
 
 const unquote = value => value?.replace(/^'(.*)'$/, '$1').replace(/^"(.*)"$/, '$1');
 
+// `a: x, b: 'y, z'` -> ['a: x', "b: 'y, z'"]: split a flow mapping body on the
+// commas outside quotes, keeping each scalar's raw spelling for scalar().
+function flowEntries(body) {
+  const entries = [];
+  let quote, current = '';
+  for (const char of body) {
+    if (quote) { if (char === quote) quote = undefined; }
+    else if (char === "'" || char === '"') quote = char;
+    else if (char === ',') { entries.push(current.trim()); current = ''; continue; }
+    current += char;
+  }
+  assert.equal(quote, undefined, `unterminated quote in flow mapping: ${body}`);
+  if (current.trim()) entries.push(current.trim());
+  return entries;
+}
+
 // name -> declaration block, for the inputs a called workflow accepts.
 function declaredInputs(text) {
   const body = block(uncommented(text), /^\s*workflow_call:\s*$/);
@@ -409,8 +427,14 @@ function declaredInputs(text) {
   let current;
   for (const line of inputsBlock.split('\n')) {
     const header = line.match(/^ {6}([A-Za-z0-9_-]+):\s*$/);
+    // Flow-style `name: {type: string, default: ''}` is the same declaration on one
+    // line; expand it so a flow-style input is never read as undeclared.
+    const flow = line.match(/^ {6}([A-Za-z0-9_-]+):\s*\{(.*)\}\s*$/);
     if (header) declared.set(current = header[1], []);
-    else if (current) declared.get(current).push(line);
+    else if (flow) {
+      declared.set(current = flow[1], flowEntries(flow[2]).map(entry => `        ${entry}`));
+      current = undefined;
+    } else if (current) declared.get(current).push(line);
   }
   return new Map([...declared].map(([name, lines]) => [name, lines.join('\n')]));
 }
@@ -754,7 +778,7 @@ test('final std install roots satisfy package_sdk layout (a) on every release ta
 test('an omitted optional input reads the way Actions reads it, not as undefined', async () => {
   // Cross artifacts are a JSON list. An omitted input resolves to its declared
   // empty list, so it must skip the download exactly as Actions does.
-  const consumer = await readWorkflow('sdk-build.yml');
+  const consumer = await readWorkflow('sdk-package.yml');
   // failClosedDownloads yields the artifact names the job will demand.
   const gated = 'final-std-windows-x64';
   // Every input the surviving download steps interpolate into their names.
@@ -782,7 +806,7 @@ test('an omitted optional input reads the way Actions reads it, not as undefined
   // value undefined, `undefined !== '[]'` holds, and the step reads as running.
   const resolved = effectiveInputs(consumer, new Map(base));
   assert.equal(resolved.get('cross_std_artifacts'), '[]');
-  assert.equal(scalar(block(uncommented(consumer), /^ {6}cross_std_artifacts:\s*$/), 'default'), "'[]'");
+  assert.equal(scalar(declaredInputs(consumer).get('cross_std_artifacts'), 'default'), "'[]'");
 });
 
 test('an input the caller omits and the workflow does not default is a failure, not a guess', async () => {
@@ -798,9 +822,13 @@ test('dynamic cross matrices produce exactly the artifacts declared by release c
   const workflow = await readWorkflow('sdk-build-target.yml');
   const actual = uploadedArtifacts(workflow);
   const release = loadYaml(await readWorkflow('release.yml'));
-  const requested = new Set(Object.values(release.jobs)
-    .filter(job => (job.uses === './.github/workflows/sdk-build.yml' && job.with?.mode === 'package'))
-    .flatMap(job => JSON.parse(job.with.cross_std_artifacts || '[]'))
+  // release.yml fans sdk-package.yml out as one matrix; each row names its cross std set.
+  const packages = Object.values(release.jobs).filter(job => job.uses === './.github/workflows/sdk-package.yml');
+  assert.equal(packages.length, 1, 'release.yml calls sdk-package.yml from exactly one matrix job');
+  for (const job of packages) assert.equal(job.with.cross_std_artifacts, '${{ matrix.cross_std_artifacts }}');
+  const requested = new Set(packages
+    .flatMap(job => job.strategy.matrix.include)
+    .flatMap(row => JSON.parse(row.cross_std_artifacts))
     .filter(row => /^(linux_ohos_|ios_)/.test(row.tuple)).map(row => row.artifact));
   for (const artifact of requested) {
     const count = actual.filter(name => name === artifact).length;

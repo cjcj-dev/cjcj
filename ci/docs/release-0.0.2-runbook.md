@@ -1,26 +1,26 @@
 # cjcj 0.0.2 release runbook
 
-## Current flow (four workflows): `phase=prepare` -> `ci.yml` -> `phase=publish`
+## Current flow: `prepare.yml` -> `ci.yml` -> `release.yml`
 
-`release.yml` takes a restricted `phase` choice (`prepare` | `publish`, default `prepare`, so an
-accidental dispatch never publishes) and an optional `ci_run_id`.
+Preparation is its own workflow, `prepare.yml` (job `prepare-native`); `release.yml` no longer
+carries a `phase` input and takes an optional `ci_run_id`.
 
-1. **`phase=prepare`** must produce, from fixed Git sources only, the five-host inputs
+1. **`prepare.yml`** must produce, from fixed Git sources only, the five-host inputs
    `native-inputs-{linux-x64,linux-aarch64,windows-x64,darwin-arm64,darwin-x64}` and
    `native-runtime-install-{linux_x86_64,linux_aarch64,windows_x86_64,darwin_aarch64,darwin_x86_64}`.
-   In this phase `plan`, every `source-p*`/`package-*` job and `publish` are skipped; no
-   `native_inputs_*` / `native_runtime_*` input is required.
+   `prepare.yml` runs no `release.yml` job; no `native_inputs_*` / `native_runtime_*` input is
+   required.
    **Status (impl_gha_002_prerelease_opus_1124): the prepare producer jobs are NOT wired yet** --
-   see that lane report. Do not dispatch `phase=prepare` expecting these artifacts.
+   see that lane report. Do not dispatch `prepare.yml` expecting these artifacts.
 2. **`ci.yml`** on the same commit, consuming the same generation; record its run id.
-3. **`phase=publish`** with `version=0.0.2 prerelease=true draft=false dry_run=false`, the
+3. **`release.yml`** with `version=0.0.2 prerelease=true draft=false dry_run=false`, the
    prepare run's `native_inputs_artifact`/`native_inputs_run_id`/`native_runtime_artifact`
    (the `plan` job fails closed when any is missing), the explicit pair
    `native_llvm_ref=eb7ad0120f43f802fbc60615e6c6f068183fffe3`,
    `native_runtime_ref=495052d6505a5d57dc172d605b5aa8ef14bb0027`,
    `native_host_version=1.3.0-alpha.20261025001053`, and `ci_run_id` from step 2.
 
-`publish` runs only when `inputs.phase == 'publish' && !inputs.dry_run` (no `always()`), and
+`publish` runs only when `!inputs.dry_run` (no `always()`), and
 before `gh release create` it fails closed unless (all in `ci/release-publish.mjs`):
 
 - all 20 direct `needs` (`source-p1..5`, `package-p1..5`, ten derived packages) are `success`;
