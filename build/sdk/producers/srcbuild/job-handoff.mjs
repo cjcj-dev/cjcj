@@ -250,6 +250,16 @@ async function restoreCheckouts(root, record) {
 }
 const sdkRel='.srcbuild/workspace/software/cangjie';
 const separateSdk=phase==='stage3'&&identity.target==='linux-x64';
+async function handoffEntries() {
+  const entries = [...roots];
+  for (const entry of optional) {
+    try { await fs.lstat(path.join(root, entry)); entries.push(entry); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  return entries;
+}
+const handoffExcluded = [/(^|\/)cjcj-src-stage[01]\/target$/, /(^|\/)stage0depot$/,
+  ...(separateSdk ? [new RegExp('^' + sdkRel.replace(/[.]/g, '\\.') + '$')] : [])];
 if (mode === 'pack') {
   await fs.mkdir(dir, {recursive: true});
   if (dir === root || roots.some(entry => dir.startsWith(path.join(root, entry) + path.sep))) {
@@ -261,18 +271,12 @@ if (mode === 'pack') {
   for (const [key, value] of Object.entries(environment)) {
     if (/[\r\n]/.test(value)) throw new Error(`multiline handoff environment: ${key}`);
   }
-  const entries = [...roots];
-  for (const entry of optional) {
-    try { await fs.lstat(path.join(root, entry)); entries.push(entry); }
-    catch (error) { if (error.code !== 'ENOENT') throw error; }
-  }
+  const entries = await handoffEntries();
   // tar preserves modes and links that upload-artifact's zip cannot preserve.
   // A checkout copied by bootstrap may contain Git's credential-bearing config;
   // retain its object identity, never that config or Actions command files.
   const sdkSha256=separateSdk?await stageSdkHandoff('pack',path.join(root,sdkRel),dir):undefined;
-  const excluded = [/(^|\/)cjcj-src-stage[01]\/target$/, /(^|\/)stage0depot$/,
-    ...(separateSdk ? [new RegExp('^' + sdkRel.replace(/[.]/g, '\\.') + '$')] : [])];
-  const plan = await payloadPlan(root, entries, excluded);
+  const plan = await payloadPlan(root, entries, handoffExcluded);
   if (plan.commit !== identity.commit) throw new Error('handoff checkout SHA mismatch: workspace');
   for (const row of plan.derivations)
     if (row.version !== environment.SOURCE_SDK_VERSION) throw new Error(`handoff derivation version is not SOURCE_SDK_VERSION: ${row.path}`);
@@ -307,6 +311,11 @@ if (mode === 'pack') {
   await assertNoSourcePayload(listed.stdout.split('\n').filter(Boolean), root, record.checkouts, record.overlay);
   tar(['-xf', archive, '-C', root]);
   await restoreEdits(root, record);
+  // The restored workspace obeys the pack rule too: an untracked source file the
+  // consumer already held beside or below tracked sources (not in the archive,
+  // which pack and assertNoSourcePayload already police) is source the pinned
+  // commits do not have. Generated sources in untracked build trees and objects pass.
+  if (phase !== 'mingw') await payloadPlan(root, await handoffEntries(), handoffExcluded);
   if(separateSdk)await stageSdkHandoff('restore',path.join(root,sdkRel),dir);
   if (phase !== 'mingw') { await verifyRuntimeHandoff(record.environment); await verifyHleHandoff(record.environment); await verifyNativeToolHandoff({root,environment:record.environment}); }
   await fs.appendFile(required('GITHUB_ENV'), Object.entries(record.environment)

@@ -15,7 +15,7 @@ import {readInstalledNativeShim} from '../../../../ci/bootstrap/native-shim-inpu
 import {unpackNativeArtifact} from '../../../../ci/bootstrap/native-artifact-archive.mjs';
 import {buildPrepareLlvm, llvmConfigureArgs, buildPrepareShim, shimRequiredSymbols, shimSymbolProblems, PREPARE_LLVM_TARGETS,
   llvmLibrarySymbolProblems, lldbPythonArgs, PREPARE_PYTHON, pythonCacheConfiguration, lldbPythonBuildPackage,
-  compilerRtLibraries, compilerRtTargets} from './build_prepare_llvm.mjs';
+  compilerRtLibraries, compilerRtTargets, compilerRtArgs, PREPARE_COMPILER_RT_TRIPLES} from './build_prepare_llvm.mjs';
 import {copyOutputs} from '../../../../ci/bootstrap/sdk-flow.mjs';
 import {selectedStdAst} from '../../../../ci/bootstrap/sdk-std-resume.mjs';
 import {createBootstrapTargets, FIXED_INPUTS, nativeTargetLibraryExcludes} from '../../../../ci/bootstrap/sdk-targets.mjs';
@@ -214,7 +214,8 @@ function putPython(out, platform) {
   for (const [rel, body] of Object.entries(products)) put('python/' + rel, body);
   put('python/' + L.stdlib, 'stdlib');
   // the same build's lldb package: _lldb is its liblldb (Unix: a link; Windows: a copy)
-  put('lldb-python/lldb/__init__.py', 'import _lldb');
+  put('lldb-python/lldb/__init__.py', 'import six\nimport _lldb');
+  put('lldb-python/six.py', 'six of the same LLDB tree');
   if (!fs.existsSync(path.join(out, 'lldb-lib', L.lldb))) put('lldb-lib/' + L.lldb, 'liblldb');
   if (L.copy) fs.copyFileSync(path.join(out, 'lldb-lib', L.lldb), path.join(out, 'lldb-python/lldb/_lldb' + L.suffix));
   else fs.symlinkSync('../../../' + L.lldb, path.join(out, 'lldb-python/lldb/_lldb' + L.suffix));
@@ -386,9 +387,9 @@ test('every native-inputs consumer unpacks the tar before the host or runtime is
 
 // ---- N/LLVM producer: the same dylib build with its tools on all hosts ----
 test('the N/LLVM producer configures the dylib build and installs library and tools', async t => {
-  const args = llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'win32', compiler: 'c'});
+  const args = llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', platform: 'windows_x86_64', compiler: 'c'});
   // Unix readers link the installed N library; Windows keeps the static tools.
-  const unix = llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'linux', compiler: 'c',
+  const unix = llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', platform: 'linux_x86_64', compiler: 'c',
     python: {executable: 'e', include: 'i', library: 'l'}});
   for (const flag of ['-DLLVM_LINK_LLVM_DYLIB=ON', '-DLLDB_ENABLE_PYTHON=ON', '-DPython3_EXECUTABLE=e', '-DPython3_INCLUDE_DIR=i', '-DPython3_LIBRARY=l'])
     assert.ok(unix.includes(flag), flag);
@@ -405,13 +406,32 @@ test('the N/LLVM producer configures the dylib build and installs library and to
     assert.ok(args.includes(flag), flag);
   assert.ok(!args.includes('-DLLVM_ENABLE_PROJECTS='), 'the LLVM build enables lldb');
   assert.ok(PREPARE_LLVM_TARGETS.includes('lldb'));
-  assert.throws(() => llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'linux'}), /PREPARE_LLVM_COMPILER_SOURCE/);
-  assert.ok(!llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', os: 'linux', compiler: 'c'}).includes('-DLLVM_ENABLE_ZLIB=OFF'));
+  assert.throws(() => llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', platform: 'linux_x86_64'}), /PREPARE_LLVM_COMPILER_SOURCE/);
+  assert.ok(!llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', platform: 'linux_x86_64', compiler: 'c'}).includes('-DLLVM_ENABLE_ZLIB=OFF'));
+  // compiler-rt target selection (pinned CompilerRTUtils.cmake:423-434): off Darwin the
+  // default-target-only build takes CMAKE_C_COMPILER_TARGET, the host triple whose arch is
+  // the installed library suffix; Darwin builds its fat osx libraries with neither.
+  for (const platform of PREPARE_HOSTS.map(host => host.llvm_platform)) {
+    const configure = llvmConfigureArgs({source: 's', build: 'b', runtime: 'r', sha: LLVM, jobs: '4', platform, compiler: 'c'});
+    const targets = configure.filter(arg => /^-DCMAKE_[A-Z]+_COMPILER_TARGET=/.test(arg));
+    if (sdkPlatform(platform).os === 'darwin') {
+      assert.deepEqual(targets, [], platform);
+      assert.ok(!configure.some(arg => arg.startsWith('-DCOMPILER_RT_DEFAULT_TARGET_ONLY')), platform);
+      continue;
+    }
+    assert.deepEqual(targets, ['-DCMAKE_C_COMPILER_TARGET=' + PREPARE_COMPILER_RT_TRIPLES[platform]], platform);
+    assert.ok(configure.includes('-DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON'), platform);
+    const arch = PREPARE_COMPILER_RT_TRIPLES[platform].split('-')[0];
+    for (const row of compilerRtLibraries(platform)) assert.ok(row.source.endsWith(`-${arch}.a`), `${platform} ${row.source}`);
+  }
+  assert.deepEqual(Object.keys(PREPARE_COMPILER_RT_TRIPLES).sort(),
+    PREPARE_HOSTS.map(host => host.llvm_platform).filter(platform => sdkPlatform(platform).os !== 'darwin').sort());
+  assert.throws(() => compilerRtArgs('linux_riscv64'), /PLATFORM|PREPARE_COMPILER_RT_TRIPLE/);
   for (const platform of PREPARE_HOSTS.map(host => host.llvm_platform)) {
     const native = sdkPlatform(platform), work = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-llvm-'));
     t.after(() => fs.rmSync(work, {recursive: true, force: true}));
     const seen = [];
-    let omitClangResources = false, omitCompilerRt;
+    let omitClangResources = false, omitCompilerRt, omitSix = false;
     const run = (file, argv) => { // records argv; the build step leaves the real output shape
       const all = [file, ...argv]; seen.push(all.join(' '));
       if (all[0] === 'git' && all.includes('rev-parse')) return {status: 0, stdout: LLVM + '\n'};
@@ -436,7 +456,8 @@ test('the N/LLVM producer configures the dylib build and installs library and to
         if (all.includes('lldb-python')) {
           const pkg = path.join(build, lldbPythonBuildPackage(native.os)), L = pythonLayout(platform);
           fs.mkdirSync(pkg, {recursive: true});
-          fs.writeFileSync(path.join(pkg, '__init__.py'), 'import _lldb');
+          fs.writeFileSync(path.join(pkg, '__init__.py'), 'import six\nimport _lldb');
+          if (!omitSix) fs.writeFileSync(path.join(path.dirname(pkg), 'six.py'), 'six of the same LLDB tree');
           if (L.copy) fs.copyFileSync(path.join(build, 'bin/liblldb.dll'), path.join(pkg, '_lldb' + L.suffix));
           else fs.symlinkSync('../../../liblldb.so.15', path.join(pkg, '_lldb' + L.suffix));
         }
@@ -457,6 +478,16 @@ test('the N/LLVM producer configures the dylib build and installs library and to
     if (python) {
       const binding = fs.lstatSync(path.join(out, 'lldb-python/lldb/_lldb' + pythonLayout(platform).suffix));
       assert.ok(pythonLayout(platform).copy ? binding.isFile() : binding.isSymbolicLink(), platform);
+      // the package's sibling six crosses with it, from the build tree's site-packages
+      assert.deepEqual(fs.readdirSync(path.join(out, 'lldb-python')).sort(), ['lldb', 'six.py'], platform);
+      assert.equal(fs.readFileSync(path.join(out, 'lldb-python/six.py'), 'utf8'), 'six of the same LLDB tree');
+      // red cut: an LLDB Python build without its six sibling is not exported, and the build path is named
+      omitSix = true;
+      const noSix = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-llvm-nosix-'));
+      t.after(() => fs.rmSync(noSix, {recursive: true, force: true}));
+      assert.throws(() => buildPrepareLlvm({platform, sha: LLVM, out: path.join(noSix, 'out'), work: noSix, env: {}, run, compiler, python}),
+        new RegExp(`^Error: PREPARE_LLDB_PYTHON_SIX_MISSING ${escape(path.posix.dirname(lldbPythonBuildPackage(native.os)))}/six\\.py$`));
+      omitSix = false;
     }
     for (const name of CLANG_HEADERS) assert.ok(fs.existsSync(path.join(out, 'clang-resources/15.0.4/include', name)), name);
     // compiler-rt is moved out of the resource tree under its installed names (ExtractRtlib.cmake)
@@ -559,6 +590,12 @@ test('the N/LLVM producer configures the dylib build and installs library and to
       const binding = path.join(root, 'llvm/third_party/llvm/lib/python3.11/site-packages/lldb/_lldb' + L.suffix);
       if (L.copy) assert.deepEqual(fs.readFileSync(binding), fs.readFileSync(path.join(root, 'llvm/third_party/llvm/lib', L.lldb)));
       else assert.equal(fs.realpathSync(binding), fs.realpathSync(path.join(root, 'llvm/third_party/llvm/lib', L.lldb)));
+      // six sits beside lldb in the one site-packages cjdb's PYTHONPATH names (sdk-cjdb-python.mjs)
+      assert.equal(fs.readFileSync(path.join(root, 'llvm/third_party/llvm/lib/python3.11/site-packages/six.py'), 'utf8'), 'six of the same LLDB tree');
+      // red cut: a producer output whose lldb package lost its six sibling is not installed
+      const nosix = path.join(work, 'out-nosix'); fs.cpSync(out, nosix, {recursive: true, verbatimSymlinks: true}); fs.rmSync(path.join(nosix, 'lldb-python/six.py'));
+      assert.throws(() => installLlvm({root: path.join(work, 'root-nosix'), target, from: nosix, commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER},
+        producer: 'x', shimCommit: SHIM}), /^Error: NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING lldb-python\/six\.py$/);
       assert.ok(seen.some(line => line.startsWith('cmake --build') && line.includes(' lldb clang-resource-headers lldb-python --parallel')), 'lldb-python target');
       // red cut: a Python LLDB build without its lldb package is not installed
       const nopkg = path.join(work, 'out-nopkg'); fs.cpSync(out, nopkg, {recursive: true, verbatimSymlinks: true}); fs.rmSync(path.join(nopkg, 'lldb-python'), {recursive: true});

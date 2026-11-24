@@ -16,7 +16,7 @@ import {spawnSync} from 'node:child_process';
 import {sdkPlatform, stdxChirMembers} from '../../../../ci/bootstrap/sdk-platform.mjs';
 import {readHostToolchainPin} from '../../../../ci/host-toolchain-pin.mjs';
 import {readSourcePins} from '../../../../ci/native-llvm-inputs.mjs';
-import {PREPARE_PYTHON, preparePythonMembers, PREPARE_LLDB_PYTHON_PACKAGE, PREPARE_CLANG_RESOURCES,
+import {PREPARE_PYTHON, preparePythonMembers, PREPARE_LLDB_PYTHON_PACKAGE, PREPARE_LLDB_PYTHON_SIX, PREPARE_CLANG_RESOURCES,
   clangResourceProblems, PREPARE_COMPILER_RT, PREPARE_LLVM_PROJECTS, compilerRtLibraries, isStaticLibrary} from './build_prepare_llvm.mjs';
 import {workflowSourceSelection} from '../srcbuild/source-selection.mjs';
 import {baseSdkDownload} from '../../../lib/release-component-provenance.mjs';
@@ -226,9 +226,14 @@ function installPython({from, install, platform, lldbNames}) {
   // the native root the relocated consumer imports from (PYTHONHOME there).
   const pkg = path.join(from, 'lldb-python/lldb');
   if (!fs.existsSync(pkg)) throw new Error('NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING lldb-python/lldb');
+  // The package imports its sibling six (build_prepare_llvm.mjs PREPARE_LLDB_PYTHON_SIX).
+  const six = path.join(from, 'lldb-python', PREPARE_LLDB_PYTHON_SIX);
+  if (!fs.existsSync(six) || !fs.lstatSync(six).isFile())
+    throw new Error('NATIVE_INPUTS_PRODUCER_OUTPUT_MISSING lldb-python/' + PREPARE_LLDB_PYTHON_SIX);
   for (const name of lldbNames) fs.copyFileSync(path.join(from, 'lldb-lib', name), path.join(nativeRoot, 'lib', name));
   const installedPackage = path.join(nativeRoot, PREPARE_LLDB_PYTHON_PACKAGE);
   fs.cpSync(pkg, installedPackage, {recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false});
+  fs.copyFileSync(six, path.join(path.dirname(installedPackage), PREPARE_LLDB_PYTHON_SIX), fs.constants.COPYFILE_EXCL);
   const binding = fs.readdirSync(installedPackage).find(name => name.startsWith('_lldb'));
   const real = binding && fs.existsSync(path.join(installedPackage, binding)) && fs.realpathSync(path.join(installedPackage, binding));
   // Unix: _lldb links to the same build's liblldb. Windows LLDB copies liblldb.dll

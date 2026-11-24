@@ -63,13 +63,25 @@ export function compilerRtLibraries(platform) {
 }
 // The compiler-rt components those libraries come from; the rest stay off.
 export const compilerRtTargets = os => ['builtins', 'profile', ...(os === 'win32' ? [] : ['fuzzer'])];
-export function compilerRtArgs(os) {
+// Off Darwin, COMPILER_RT_DEFAULT_TARGET_ONLY makes the pinned compiler-rt take
+// its one triple from CMAKE_C_COMPILER_TARGET (eb7ad012 compiler-rt/CMakeLists.txt:107
+// -> cmake/Modules/CompilerRTUtils.cmake:423-434); left unset, that macro's
+// string(REPLACE) fails at configure. Each value is the host triple the pinned
+// llvm/cmake/modules/GetHostTriple.cmake selects on that runner (config.guess on
+// Linux, MINGW64 clang on Windows), so compiler-rt and LLVM_TARGET_TRIPLE agree,
+// and its architecture is the suffix PREPARE_COMPILER_RT_LIBRARIES installs.
+export const PREPARE_COMPILER_RT_TRIPLES = Object.freeze({
+  linux_x86_64: 'x86_64-unknown-linux-gnu', linux_aarch64: 'aarch64-unknown-linux-gnu',
+  windows_x86_64: 'x86_64-w64-windows-gnu'});
+export function compilerRtArgs(platform) {
+  const {os} = sdkPlatform(platform), triple = PREPARE_COMPILER_RT_TRIPLES[platform];
+  if (os !== 'darwin' && !triple) throw new Error('PREPARE_COMPILER_RT_TRIPLE ' + platform);
   return ['-DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF', '-DCOMPILER_RT_ENABLE_IOS=OFF',
     '-DCOMPILER_RT_BUILD_BUILTINS=ON', '-DCOMPILER_RT_BUILD_PROFILE=ON', `-DCOMPILER_RT_BUILD_LIBFUZZER=${os === 'win32' ? 'OFF' : 'ON'}`,
     '-DCOMPILER_RT_BUILD_SANITIZERS=OFF', '-DCOMPILER_RT_BUILD_XRAY=OFF', '-DCOMPILER_RT_BUILD_MEMPROF=OFF',
     '-DCOMPILER_RT_BUILD_ORC=OFF', '-DCOMPILER_RT_BUILD_GWP_ASAN=OFF', '-DCOMPILER_RT_BUILD_CRT=OFF',
     // Darwin builds its fat osx libraries for the SDK's architectures.
-    ...(os === 'darwin' ? [] : ['-DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON'])];
+    ...(os === 'darwin' ? [] : ['-DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON', '-DCMAKE_C_COMPILER_TARGET=' + triple])];
 }
 // A static library is an ar archive, or on Darwin a fat (lipo) file of archives.
 export function isStaticLibrary(file) {
@@ -135,6 +147,12 @@ export const PREPARE_LLDB_PYTHON_PACKAGE = 'lib/python3.11/site-packages/lldb';
 // In the build tree LLDB places the package at the selected Python's platlib
 // relative path: Lib/site-packages on Windows. Installed N keeps one location.
 export const lldbPythonBuildPackage = os => os === 'win32' ? 'Lib/site-packages/lldb' : PREPARE_LLDB_PYTHON_PACKAGE;
+// The pinned binding imports six unconditionally (eb7ad012 lldb/bindings/python/
+// python.swig:88). With LLDB_USE_SYSTEM_SIX off (lldb/cmake/modules/LLDBConfig.cmake:67)
+// LLDB copies its own six.py beside the package (bindings/python/CMakeLists.txt:63-67)
+// and installs that parent directory (:174); none of the pinned Python prefixes has a
+// top-level six, so the sibling crosses with the package.
+export const PREPARE_LLDB_PYTHON_SIX = 'six.py';
 export function lldbPythonArgs(python, os) {
   if (!python) return ['-DLLDB_ENABLE_PYTHON=OFF'];
   for (const key of ['executable', 'include', 'library'])
@@ -144,8 +162,9 @@ export function lldbPythonArgs(python, os) {
   return ['-DLLDB_ENABLE_PYTHON=ON', `-DPython3_EXECUTABLE=${value('executable')}`, `-DPython3_INCLUDE_DIR=${value('include')}`,
     `-DPython3_LIBRARY=${value('library')}`, '-DLLDB_EMBED_PYTHON_HOME=OFF'];
 }
-export function llvmConfigureArgs({source, build, runtime, sha, jobs, os, compiler, python}) {
+export function llvmConfigureArgs({source, build, runtime, sha, jobs, platform, compiler, python}) {
   if (!compiler) throw new Error('PREPARE_LLVM_COMPILER_SOURCE');
+  const {os} = sdkPlatform(platform);
   return ['-G', 'Ninja', '-S', source, '-B', build,
     `-DCANGJIE_RUNTIME_SOURCE_DIR=${runtime}`, `-DCJ_LLVM_COMMIT=${sha}`,
     '-DCMAKE_BUILD_TYPE=RelWithDebInfo', '-DCMAKE_C_COMPILER=clang', '-DCMAKE_CXX_COMPILER=clang++',
@@ -155,7 +174,7 @@ export function llvmConfigureArgs({source, build, runtime, sha, jobs, os, compil
     // On Unix llc/llvm-as/llvm-dis link the in-process library itself, so the
     // installed readers load the installed N (sdk-native-input-check.mjs ldd domain).
     '-DBUILD_SHARED_LIBS=OFF', '-DLLVM_BUILD_LLVM_DYLIB=ON', `-DLLVM_LINK_LLVM_DYLIB=${os === 'win32' ? 'OFF' : 'ON'}`,
-    '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', ...PREPARE_LLDB_ARGS, ...compilerRtArgs(os), ...lldbPythonArgs(python, os), `-DCANGJIE_ROOT=${compiler}`,
+    '-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64', ...PREPARE_LLDB_ARGS, ...compilerRtArgs(platform), ...lldbPythonArgs(python, os), `-DCANGJIE_ROOT=${compiler}`,
     ...(os === 'win32' ? ['-DLLVM_ENABLE_ZLIB=OFF', '-DLLVM_ENABLE_LIBXML2=OFF'] : []),
     '-DCMAKE_CXX_FLAGS=-include cstdint -include unordered_map -include map -include vector -include string'];
 }
@@ -200,7 +219,7 @@ export function buildPrepareLlvm({platform, sha, out, compiler, python, work = p
     command(['npx', '--yes', 'zx@8', 'ci/fetch-llvm-runtime.mjs', runtime]);
     const jobs = command([process.execPath, 'ci/build-resources.mjs', '--jobs-only'], {capture: true}).trim();
     if (!/^[1-9][0-9]*$/.test(jobs)) throw new Error('PREPARE_LLVM_JOBS');
-    command(['cmake', ...llvmConfigureArgs({source: path.join(source, 'llvm'), build, runtime, sha, jobs, os: native.os, compiler: slash(path.resolve(compiler)), python})]);
+    command(['cmake', ...llvmConfigureArgs({source: path.join(source, 'llvm'), build, runtime, sha, jobs, platform, compiler: slash(path.resolve(compiler)), python})]);
     command(['cmake', '--build', build, '--target', ...compilerRtTargets(native.os), ...PREPARE_LLVM_TARGETS,
       ...(python ? [PREPARE_LLDB_PYTHON_TARGET] : []), '--parallel', jobs]);
     const library = path.join(build, native.llvmDirectory, native.llvmLibrary);
@@ -228,7 +247,11 @@ export function buildPrepareLlvm({platform, sha, out, compiler, python, work = p
       const pkg = path.join(build, lldbPythonBuildPackage(native.os));
       if (!fs.existsSync(pkg) || !fs.readdirSync(pkg).some(name => name.startsWith('_lldb')))
         throw new Error('PREPARE_LLDB_PYTHON_PACKAGE_MISSING ' + lldbPythonBuildPackage(native.os));
+      const six = path.join(path.dirname(pkg), PREPARE_LLDB_PYTHON_SIX);
+      if (!fs.existsSync(six) || !fs.lstatSync(six).isFile())
+        throw new Error('PREPARE_LLDB_PYTHON_SIX_MISSING ' + path.posix.join(path.posix.dirname(lldbPythonBuildPackage(native.os)), PREPARE_LLDB_PYTHON_SIX));
       fs.cpSync(pkg, path.join(out, 'lldb-python/lldb'), {recursive: true, verbatimSymlinks: true});
+      fs.copyFileSync(six, path.join(out, 'lldb-python', PREPARE_LLDB_PYTHON_SIX));
     }
     return {platform, sha, library: native.llvmLibrary, tools: ['llc', 'llvm-as', 'llvm-dis'], cjdb: 'bin/lldb' + native.exe, lldbLibraries,
       clangResources: PREPARE_CLANG_RESOURCES, compilerRt, build};

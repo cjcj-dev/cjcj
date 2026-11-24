@@ -241,3 +241,26 @@ test('red cut: restore re-checks each derivation and overlay and the exact edite
   await f.checkout();
   assert.equal(f.run('restore').rc, 0);
 });
+
+test('red cut: restore rejects untracked source the receiving workspace already holds; outputs and a clean receiver restore', async t => {
+  // The archive is legal and unchanged; only the receiver's checkout differs.
+  for (const rel of ['packages/cjc/src/local.cj', 'packages/cjc/src/more/local.cj', 'runtime_shim/extra_shim.c', 'packages/cjc/src/extra.h']) {
+    const f = await fixture(t);
+    assert.equal(f.run('pack').rc, 0);
+    await f.checkout();
+    await write(path.join(f.root, rel), 'receiver residue\n');
+    const rejected = f.run('restore');
+    assert.equal(rejected.rc, 1, `${rel}: ${rejected.output}`);
+    assert.match(rejected.output, new RegExp(`handoff untracked source: ${rel.replace(/[./]/g, '\\$&')}`));
+  }
+  // control: a generated source in an untracked build tree and an object beside
+  // tracked sources are build outputs, so that receiver still restores
+  const g = await fixture(t);
+  assert.equal(g.run('pack').rc, 0);
+  await g.checkout();
+  await write(path.join(g.root, 'packages/cjc/target/gen/generated.cj'), 'generated\n');
+  await write(path.join(g.root, 'runtime_shim/local.o'), 'object');
+  const restored = g.run('restore');
+  assert.equal(restored.rc, 0, restored.output);
+  assert.equal(await fs.readFile(path.join(g.root, 'runtime_shim/cjc_runtime_config.o'), 'utf8'), 'object');
+});
