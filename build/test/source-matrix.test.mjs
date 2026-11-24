@@ -129,6 +129,9 @@ test('workflow dependency edges gate expensive dispatch and retain visible block
   assert.match(job(target, 'source-stage0'), /needs: \[plan, fixed-llvm-plan, fixed-llvm, native-cjdb\]/);
   assert.match(job(target, 'source-stage0'), /needs\.fixed-llvm-plan\.result == 'success' \|\| needs\.fixed-llvm-plan\.result == 'skipped'/);
   assert.match(job(target, 'source-stage0'), /needs\.native-cjdb\.result == 'success' \|\| needs\.native-cjdb\.result == 'skipped'/);
-  assert.match(job(release, 'source-p1-linux-x64'), /needs: plan/);
+  assert.match(job(release, 'source'), /needs: plan\n/);
+  assert.match(job(release, 'source'), /uses: \.\/\.github\/workflows\/sdk-build\.yml\n/);
+  assert.match(job(release, 'source'), /\n      targets: all\n/);
+  assert.match(job(release, 'package'), /needs: source\n/);
   for (const text of [source, target]) assert.doesNotMatch(text, /all='\[/);
 });

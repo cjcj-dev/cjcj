@@ -38,13 +38,13 @@ test('iOS release workflow consumes the same tuple artifacts and requires packag
   const root = path.resolve(import.meta.dirname, '../../../..');
   const source = fs.readFileSync(path.join(root, '.github/workflows/sdk-build-target.yml'), 'utf8');
   const release = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
-  const jobs = release.split(/\n  (?=[a-z0-9-]+:\n)/);
-  const job = jobs.find(entry => entry.includes('release_key: darwin-arm64-ios')) ?? '';
-  const scalar = (text, key) => text.match(new RegExp(String.raw`^\s*${key}:\s*(.+?)\s*$`, 'm'))?.[1];
-  assert.equal(scalar(job, 'platform'), 'darwin-arm64');
-  assert.equal(scalar(job, 'std_artifact'), 'final-std-darwin-arm64');
-  assert.equal(scalar(job, 'needs'), '[package-p4-darwin-arm64, source-p4-darwin-arm64]');
-  assert.deepEqual(JSON.parse(scalar(job, 'cross_std_artifacts')?.replace(/^'|'$/g, '') ?? '[]'), entries);
+  const workflow = loadYaml(release);
+  const job = workflow.jobs.package.strategy.matrix.include.find(row => row.release_key === 'darwin-arm64-ios') ?? {};
+  assert.equal(job.platform, 'darwin-arm64');
+  assert.equal(job.std_artifact, 'final-std-darwin-arm64');
+  assert.equal(workflow.jobs.package.needs, 'source');
+  assert.equal(workflow.jobs.package.uses, './.github/workflows/sdk-package.yml');
+  assert.deepEqual(JSON.parse(job.cross_std_artifacts ?? '[]'), entries);
   const crossJob = loadYaml(source).jobs['source-ios'];
   assert.deepEqual(crossJob.needs, ['plan', 'source-stage3']);
   assert.equal(crossJob.strategy.matrix, '${{ fromJson(needs.plan.outputs.ios_matrix) }}');
@@ -52,10 +52,11 @@ test('iOS release workflow consumes the same tuple artifacts and requires packag
   assert.equal(upload.with.name, '${{ matrix.artifact }}');
   assert.equal(upload.with.path, '${{ env.CANGJIE_WORKSPACE }}/software/${{ matrix.artifact }}');
   assert.ok(crossJob.steps.some(step => step.run?.includes('ios-stage2-handoff.mjs restore')));
-  const producer = jobs.find(entry => entry.includes('targets: darwin-arm64')) ?? '';
-  assert.equal(scalar(producer, 'build_ios'), 'true');
-  const publish = jobs.find(entry => entry.startsWith('publish:')) ?? '';
-  assert.ok(scalar(publish, 'needs')?.includes('package-darwin-arm64-ios'));
+  // The single source call builds every host cell, so darwin-arm64 owns source-ios.
+  assert.equal(workflow.jobs.source.with.targets, 'all');
+  assert.equal(workflow.jobs.source.with.build_ios, true);
+  const publish = release.slice(release.indexOf('\n  publish:\n'));
+  assert.deepEqual(workflow.jobs.publish.needs, ['plan', 'package']);
   // Publication requires success through default needs semantics (no always()) plus the
   // explicit all-needs check of ci/release-publish.mjs.
   assert.ok(!publish.includes('always()'));

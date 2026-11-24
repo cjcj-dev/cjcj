@@ -117,9 +117,11 @@ test('ordinary and release host nightly literals use the host pins', async () =>
   }
   assert.deepEqual(offenders, []);
   console.log(`ORDINARY-HOST-SCAN offenders=${offenders.length}`);
-  const release = await fs.readFile(path.join(root, '.github', 'workflows', 'sdk-build.yml'), 'utf8');
+  // Release packaging lives in sdk-package.yml; sdk-build.yml only fans out source cells.
+  const release = await fs.readFile(path.join(root, '.github', 'workflows', 'sdk-package.yml'), 'utf8');
   assert.ok(release.includes('name: cjcj-srcbuild-${{ inputs.platform }}-${{ inputs.version }}'));
-  assert.doesNotMatch(release, /setup_sdk|prepare_base_sdk/);
+  for (const name of ['sdk-package.yml', 'sdk-build.yml'])
+    assert.doesNotMatch(await fs.readFile(path.join(root, '.github', 'workflows', name), 'utf8'), /setup_sdk|prepare_base_sdk/, name);
 });
 
 // Run the real scan entry in an isolated tree, not a duplicate classifier.
@@ -156,8 +158,8 @@ for (const [name, changedFile, mutate] of scanControls) {
         'ci/bootstrap/sdk-platform.mjs', 'ci/bootstrap/sdk-io.mjs', 'ci/bootstrap/sdk-flow.mjs',
         'ci/bootstrap/sdk-command-lifetime.mjs', 'ci/bootstrap/sdk-std-resume.mjs',
         'ci/bootstrap/sdk-source.mjs', 'ci/bootstrap/sdk-install-entries.mjs', 'ci/build-resources.mjs',
-        'build/lib/targets.mjs', 'build/lib/errors.mjs', 'build/srcbuild/tool-layout.mjs',
-        '.github/workflows/sdk-build.yml',
+        'build/lib/targets.mjs', 'build/lib/errors.mjs', 'build/srcbuild/tool-layout.mjs', 'build/lib/pe-symbols.mjs', 'ci/bootstrap/sdk-archive.mjs',
+        '.github/workflows/sdk-build.yml', '.github/workflows/sdk-package.yml',
         'ci/cangjie-test/README.md', 'ci/host-runtime/release.json',
       ]) {
         const destination = path.join(fixture, relative);
@@ -352,8 +354,9 @@ test('measured cjc version is converted to the exact nightly identity', () => {
 });
 
 test('release consumes native installs while official archive selectors retain the declared host pin', async () => {
-  const release = await fs.readFile(path.join(root, '.github/workflows/sdk-build.yml'), 'utf8');
-  assert.doesNotMatch(release, /Load release host pin|prepare_base_sdk|setup_sdk/);
+  const release = await fs.readFile(path.join(root, '.github/workflows/sdk-package.yml'), 'utf8');
+  for (const name of ['sdk-package.yml', 'sdk-build.yml'])
+    assert.doesNotMatch(await fs.readFile(path.join(root, '.github/workflows', name), 'utf8'), /Load release host pin|prepare_base_sdk|setup_sdk/, name);
   assert.ok(release.includes('run: node build/sdk/producers/release/compose-package.mjs'));
   assert.equal(RELEASE_HOST_TOOLCHAIN, await hostPin());
   for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64'])
@@ -553,7 +556,7 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
             'ci/bootstrap/sdk-flow.mjs', 'ci/bootstrap/sdk-install-entries.mjs', 'ci/bootstrap/sdk-io.mjs',
             'ci/bootstrap/sdk-platform.mjs', 'ci/bootstrap/sdk-source.mjs', 'ci/bootstrap/sdk-std-resume.mjs',
             'ci/bootstrap/sdk-targets.mjs', 'ci/bootstrap/compiler-option-visibility.mjs',
-            'build/srcbuild/tool-layout.mjs']) {
+            'build/srcbuild/tool-layout.mjs', 'build/lib/pe-symbols.mjs']) {
             const destination = path.join(work, input);
             await fs.mkdir(path.dirname(destination), {recursive: true});
             await fs.copyFile(path.join(root, input), destination);

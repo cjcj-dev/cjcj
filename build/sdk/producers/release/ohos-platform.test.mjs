@@ -5,6 +5,7 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {releasePlatformReadiness, getTarget} from '../../../lib/targets.mjs';
 import {crossStdArguments} from './cross-std-arguments.mjs';
+import {load as loadYaml} from '../../../../ci/vendor/js-yaml/js-yaml.mjs';
 
 const tuples = ['linux_ohos_aarch64_cjnative', 'linux_ohos_x86_64_cjnative'];
 const keys = ['linux-x64-ohos', 'darwin-arm64-ohos', 'win32-x64-ohos'];
@@ -62,8 +63,9 @@ test('OHOS real release workflow selects the shared SDK probe and both source ar
   assert.ok(job.includes('job-handoff.mjs restore stage3'));
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
   assert.match(workflow, /build_ohos: true/);
-  for (const key of keys) {
-    assert.ok(workflow.includes(`release_key: ${key}\n`));
-    assert.match(workflow, new RegExp(`^    needs: \\[[^\\]]*\\bpackage-${key}\\b[^\\]]*\\]\\n    # Default needs semantics`, 'm'));
-  }
+  const rows = loadYaml(workflow).jobs.package.strategy.matrix.include.map(row => row.release_key);
+  for (const key of keys) assert.ok(rows.includes(key), `${key}: package matrix row`);
+  // Every package cell gates publication: publish needs the whole matrix job with
+  // default needs semantics (any failed cell skips publish).
+  assert.match(workflow, /^    needs: \[plan, package\]\n    # Default needs semantics/m);
 });

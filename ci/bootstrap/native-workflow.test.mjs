@@ -54,8 +54,10 @@ test('native workflow builds N via the existing producer and transports installa
  assert.ok(unpack>=0&&host>unpack&&configure>host);
  assert.match(consumer.env.CJCJ_NATIVE_CJDB_INSTALL,/native-cjdb-install/);
  const release=workflow('release.yml');
- assert.equal(release.jobs['source-p3-windows-x64'].with.targets,'windows-x64');
- assert.ok(release.jobs['package-p3-windows-x64'].needs.includes('source-p3-windows-x64'));
+ // One source call covers every host cell (windows-x64 included); every package cell waits for it.
+ assert.equal(release.jobs.source.with.targets,'all');
+ assert.equal(release.jobs.package.needs,'source');
+ assert.ok(release.jobs.package.strategy.matrix.include.some(row=>row.release_key==='win32-x64'&&row.platform==='windows-x64'));
 });
 test('native Windows install/unpack consumer uses native build target; Linux cross remains non-executable',()=>{
  const native=getBuildTarget('windows-x64',{platform:'win32',arch:'x64',env:{}});
@@ -112,8 +114,8 @@ test('public installation unpack transports original facts and refuses an existi
 
 
 test('Windows source plan, upload and package receive the same native std for pinned and explicit pairs',t=>{
- const wf=workflow('sdk-build.yml'),job=wf.jobs.package,source=workflow('sdk-build-target.yml');
- const release=workflow('release.yml'),caller=release.jobs['package-p3-windows-x64'].with;
+ const wf=workflow('sdk-package.yml'),job=wf.jobs.package,source=workflow('sdk-build-target.yml');
+ const release=workflow('release.yml'),caller={...release.jobs.package.with,...release.jobs.package.strategy.matrix.include.find(row=>row.release_key==='win32-x64')};
  const root=fixture(t),entry=job.steps.find(s=>s.id==='package-inputs');
  const gate=job.steps.find(s=>s.name==='Validate same-platform final std contract');
  const native=source.jobs['native-windows-sdk'];
@@ -135,7 +137,7 @@ test('Windows source plan, upload and package receive the same native std for pi
  assert.equal(paths[1],paths[0]+'.sha256');
  const upload=native.steps.find(s=>s.name==='Upload final source-built std install root');
  assert.equal(gate.env.EXPECTED_STD_ARTIFACT,'${{ steps.package-inputs.outputs.std_artifact }}');
- assert.equal(caller.std_artifact,'${{ needs.source-p3-windows-x64.outputs.std_artifact }}');
+ assert.equal(caller.std_artifact,'final-std-native-windows-x64'); // literal matrix row, re-checked at run time by the gate above
  for(const mode of ['default','explicit']){
   const fields={...inputs,...(mode==='default'?{native_llvm_ref:'',native_runtime_ref:'',native_host_version:''}:{})};
   const env={...process.env,RELEASE_PLATFORM:caller.platform,RELEASE_KEY:caller.release_key,

@@ -216,6 +216,8 @@ export const GATING = Object.freeze([
   // Release publication contract and the G4 source-phase graph.
   'ci/release-publish.test.mjs',
   'ci/release-gates-g4.test.mjs',
+  // Static guard: reusable-workflow expansion stays one copy per workflow.
+  'ci/release-workflow-expansion.test.mjs',
 ]);
 
 // Registered, not executed. `needs` is what CI would have to provide; `verified`

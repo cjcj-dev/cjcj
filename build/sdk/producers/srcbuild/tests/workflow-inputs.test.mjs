@@ -33,7 +33,8 @@ function declaredInputs(text) {
   const declared = {call: new Set(), any: new Set()};
   for (const trigger of ['workflow_call', 'workflow_dispatch']) {
     const inputs = section(section(on, trigger, 2), 'inputs', 4);
-    for (const [, name] of inputs.matchAll(/^ {6}([A-Za-z0-9_-]+):\s*$/gm)) {
+    // Block (`name:` then an indented body) or flow (`name: {type: ..}`) form.
+    for (const [, name] of inputs.matchAll(/^ {6}([A-Za-z0-9_-]+):\s*(?:\{.*\}\s*)?$/gm)) {
       if (trigger === 'workflow_call') declared.call.add(name);
       declared.any.add(name);
     }

@@ -171,16 +171,20 @@ test('SDK input jobs cover the selected runner/requirement pairs and exclude aba
 
 test('phased release declares every host package behind its complete source admission gate', () => {
   const workflow = fs.readFileSync(path.resolve(import.meta.dirname, '../../../../.github/workflows/release.yml'), 'utf8');
-  const calls = Object.entries(loadYaml(workflow).jobs).filter(([,job])=>job.with?.targets);
-  const prepare = calls.filter(([,job])=>job.if === "inputs.phase == 'prepare'");
-  assert.deepEqual(prepare.map(([id,job])=>[id,job.with.targets]),[['prepare-srcbuild-linux-x64','linux-x64']]);
-  const source = calls.filter(row=>!prepare.includes(row)).map(([,job])=>job.with.targets);
-  const packages = [...workflow.matchAll(/^      release_key: (\S+)$/gm)].map(match => match[1]);
+  const jobs = loadYaml(workflow).jobs;
+  const calls = Object.entries(jobs).filter(([,job])=>job.with?.targets);
+  assert.deepEqual(calls.map(([id,job])=>[id,job.with.targets]),[['source','all']]);
+  const prepareJobs = loadYaml(fs.readFileSync(path.resolve(import.meta.dirname, '../../../../.github/workflows/prepare.yml'), 'utf8')).jobs;
+  assert.deepEqual(Object.entries(prepareJobs).filter(([,job])=>job.with?.targets).map(([id,job])=>[id,job.with.targets]),[['prepare-srcbuild-linux-x64','linux-x64']]);
+  const sdkBuild = fs.readFileSync(path.resolve(import.meta.dirname, '../../../../.github/workflows/sdk-build.yml'), 'utf8');
+  assert.match(sdkBuild, /target-matrix\.mjs/);
+  const packages = jobs.package.strategy.matrix.include.map(row => row.release_key);
   const plan = planMatrix('all');
-  assert.deepEqual(source.sort(), sourceBuildCells({nativeInputs:true}).map(row => row.target).sort(), 'declared source symmetric difference');
+  assert.equal(sourceBuildCells({nativeInputs:true}).length, 5, 'one source call covers all five host cells');
   assert.deepEqual(packages.sort(), allReleasePlatforms().filter(key => !getReleasePlatform(key).excluded && !getReleasePlatform(key).crossCompiledHost).sort(), 'declared package symmetric difference');
   assert.match(workflow, /run: node build\/sdk\/producers\/srcbuild\/target-matrix.mjs --targets all --require-ready/);
-  assert.match(workflow, /source-p1-linux-x64:\n    needs: plan/);
+  assert.equal(jobs.source.needs, 'plan');
+  assert.equal(jobs.package.needs, 'source');
   for (const row of plan.package) assert.equal(releasePlatformReadiness(row.release_key).status, 'buildable');
 });
 

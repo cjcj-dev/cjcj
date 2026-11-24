@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import {load as loadYaml} from '../../ci/vendor/js-yaml/js-yaml.mjs';
 import {
   DAG_REQUIREMENT_PRODUCERS,
   RELEASE_REQUIREMENTS,
@@ -112,15 +113,20 @@ test('asking the build for a blocked release platform fails closed with the miss
   assert.throws(() => getTarget('plan9-mips'), /unknown target 'plan9-mips'/);
 });
 
-// release.yml still spells its five package jobs by hand; they must agree with
+// release.yml spells its package matrix rows by hand; they must agree with
 // the table so there is one truth about which runner packages which platform.
 test('release.yml package jobs agree with the release platform table', () => {
   const release = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
   assert.match(release, /run: node build\/sdk\/producers\/srcbuild\/target-matrix.mjs --targets all --require-ready/);
-  assert.match(release, /source-p1-linux-x64:\n    needs: plan/);
-  const jobs = release.split(/\n  (?=[a-z0-9-]+:\n)/).filter(job => (job.includes('uses: ./.github/workflows/sdk-build.yml') && job.includes('mode: package')));
+  const workflow = loadYaml(release);
+  assert.equal(workflow.jobs.source.needs, 'plan');
+  assert.equal(workflow.jobs.package.needs, 'source');
+  assert.equal(workflow.jobs.package.uses, './.github/workflows/sdk-package.yml');
+  for (const field of ['runner', 'platform', 'llvm_platform', 'sdk_runtime_dir', 'release_key', 'std_artifact', 'cross_std_artifacts'])
+    assert.equal(workflow.jobs.package.with[field], `$\{{ matrix.${field} }}`, `package.with.${field} must come from the matrix row`);
+  const jobs = workflow.jobs.package.strategy.matrix.include;
   assert.equal(jobs.length, allReleasePlatforms().filter(key => !getReleasePlatform(key).excluded && !getReleasePlatform(key).crossCompiledHost).length);
-  const scalar = (job, key) => job.match(new RegExp(String.raw`^\s*${key}: '?([^'\n]*)'?\s*$`, 'm'))?.[1];
+  const scalar = (job, key) => job[key];
   const seen = [];
   for (const job of jobs) {
     const platform = scalar(job, 'platform');
@@ -133,7 +139,7 @@ test('release.yml package jobs agree with the release platform table', () => {
     assert.equal(scalar(job, 'llvm_platform'), readiness.llvmPlatform, `${key}: llvm_platform`);
     assert.equal(scalar(job, 'sdk_runtime_dir'), readiness.runtimeTuple, `${key}: sdk_runtime_dir`);
     if (readiness.host === 'windows-x64') {
-      assert.equal(scalar(job, 'std_artifact'), '${{ needs.source-p3-windows-x64.outputs.std_artifact }}', key);
+      assert.equal(scalar(job, 'std_artifact'), 'final-std-native-windows-x64', key);
       assert.equal(sourceBuildCells({nativeInputs:true}).find(row=>row.target===readiness.host).std_artifact,
         'final-std-native-windows-x64', key);
     } else assert.equal(scalar(job, 'std_artifact'), `final-std-${readiness.host}`, key);

@@ -85,7 +85,7 @@ test('G5 distinguishes an unwired checker from the same checker wired fail-close
   git(fixture, 'init', '-q');
   await write(fixture, 'build/sdk/producers/package/check_packaged_std.mjs',
     "const CLASS_NAMES = ['cjo', 'bc', 'static-ffi', 'shared', 'provenance'];\n");
-  await write(fixture, '.github/workflows/sdk-build.yml', [
+  await write(fixture, '.github/workflows/sdk-package.yml', [
     'jobs:',
     '  package:',
     '    steps:',
@@ -94,7 +94,7 @@ test('G5 distinguishes an unwired checker from the same checker wired fail-close
     '',
   ].join('\n'));
   const before = commit(fixture, 'checker exists but has no consumer');
-  await write(fixture, '.github/workflows/sdk-build.yml', [
+  await write(fixture, '.github/workflows/sdk-package.yml', [
     'jobs:',
     '  package:',
     '    steps:',
@@ -250,13 +250,12 @@ test('new registry platform makes each dependent gate red until its package job 
   // A newly supported platform can be wired without editing the gate itself.
   await mutateFile(root, '.github/workflows/release.yml', source => {
     const release = loadYaml(source);
-    const native = Object.values(release.jobs).find(job => job.with?.release_key === 'linux-x64');
-    assert.ok(native, 'real native package is the reusable caller template');
-    release.jobs['fixture-new-package'] = {...native, needs: ['package-p1-linux-x64'],
-      with: {...native.with, release_key: 'fixture-new-platform', cross_std_artifacts: '[]'}};
-    release.jobs.publish.needs.push('fixture-new-package');
-    release.jobs.publish.if = release.jobs.publish.if.replace(/\s*}}\s*$/,
-      " && needs.fixture-new-package.result == 'success' }}");
+    // Packages are rows of the one sdk-package.yml matrix; the new platform is a
+    // new row copied from the real native linux-x64 row.
+    const rows = release.jobs.package.strategy.matrix.include;
+    const native = rows.find(row => row.release_key === 'linux-x64');
+    assert.ok(native, 'real native package row is the reusable template');
+    rows.push({...native, release_key: 'fixture-new-platform', cross_std_artifacts: '[]'});
     return dumpYaml(release, {lineWidth: -1});
   });
   for (const name of platformGates) {
@@ -272,7 +271,7 @@ test('deleting a real package job cannot shrink the required gate set', async t 
   const original = gate(root, 'G7').value.scope;
   const removed = original.jobs.at(-1);
   await mutateFile(root, '.github/workflows/release.yml', source => source.replace(
-    new RegExp(`^  ${removed.id}:[\\s\\S]*?(?=^  [\\w-]+:|$(?![\\s\\S]))`, 'm'), ''));
+    new RegExp(`^ +- \\{release_key: ${removed.key},[^\\n]*\\n`, 'm'), ''));
   for (const name of platformGates) {
     const {result, value} = gate(root, name);
     assert.equal(result.status, 1, JSON.stringify(value));
@@ -286,7 +285,7 @@ test('job identity and host mapping matter even when the package job count is un
   const scope = gate(root, 'G7').value.scope;
   const [first, second] = scope.jobs;
   await mutateFile(root, '.github/workflows/release.yml', source => source.replace(
-    `release_key: ${first.key}\n`, `release_key: ${second.key}\n`));
+    `{release_key: ${first.key},`, `{release_key: ${second.key},`));
   const duplicate = gate(root, 'G15');
   assert.equal(duplicate.result.status, 1, JSON.stringify(duplicate.value));
   assert.equal(duplicate.value.scope.jobs.length, scope.jobs.length);
@@ -294,7 +293,7 @@ test('job identity and host mapping matter even when the package job count is un
   assert.ok(duplicate.value.scope.failures.includes(`${second.key}: expected one package job, found 2`));
   await fs.copyFile(path.join(repo, '.github/workflows/release.yml'), path.join(root, '.github/workflows/release.yml'));
   await mutateFile(root, '.github/workflows/release.yml', source => source.replace(
-    `platform: ${first.host}\n`, 'platform: fixture-wrong-host\n'));
+    new RegExp(`(\\{release_key: ${first.key},[^\\n]*?platform: )${first.host},`), '$1fixture-wrong-host,'));
   const wrongHost = gate(root, 'G15');
   assert.equal(wrongHost.result.status, 1, JSON.stringify(wrongHost.value));
   assert.match(wrongHost.value.value, /host\/LLVM mismatch/);
@@ -360,10 +359,15 @@ test('release YAML formatting preserves real CLI gate results', async t => {
   const reordered = loadYaml(original);
   for (const job of Object.values(reordered.jobs)) {
     if (job.with) job.with = Object.fromEntries(Object.entries(job.with).reverse());
+    for (const [index, row] of (job.strategy?.matrix?.include ?? []).entries())
+      job.strategy.matrix.include[index] = Object.fromEntries(Object.entries(row).reverse());
   }
+  // The linux-x64 package row, as written: the formatting variants edit around it.
+  const nativeRow = original.match(/^ +- \{release_key: linux-x64,[^\n]*\n/m)?.[0];
+  assert.ok(nativeRow, 'release.yml declares the linux-x64 package row');
   const variants = {
-    'blank line': original.replace('      release_key: linux-x64\n', '      release_key: linux-x64\n\n'),
-    'comment': original.replace('      release_key: linux-x64\n', '      release_key: linux-x64 # release identity\n    # comment between inputs\n'),
+    'blank line': original.replace(nativeRow, nativeRow + '\n'),
+    'comment': original.replace(nativeRow, nativeRow.replace(/\n$/, ' # release identity\n') + '          # comment between rows\n'),
     'key order': dumpYaml(reordered, {lineWidth: -1}),
     'flow mapping': dumpYaml(expected, {flowLevel: 3, lineWidth: -1}),
   };
@@ -429,8 +433,9 @@ test('every source-blocked declared package remains mandatory without gaining re
   for (const row of scope.platforms.filter(p => p.packageDeclared && p.status === 'blocked')) {
     const job = scope.jobs.find(j => j.key === row.key);
     assert.ok(job, row.key);
-    await write(root, '.github/workflows/release.yml', original.replace(
-      new RegExp(`^  ${job.id}:[\\s\\S]*?(?=^  [\\w-]+:|$(?![\\s\\S]))`, 'm'), ''));
+    const removed = original.replace(new RegExp(`^ +- \\{release_key: ${row.key},[^\\n]*\\n`, 'm'), '');
+    assert.notEqual(removed, original, `${row.key}: package row not found`);
+    await write(root, '.github/workflows/release.yml', removed);
     const {result, value} = gate(root, 'G7');
     console.log(`DECLARED_BLOCKED_ASSERT key=${row.key} rc=${result.status} failures=${JSON.stringify(value.scope.failures)}`);
     assert.equal(result.status, 1);

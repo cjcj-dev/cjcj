@@ -7,7 +7,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {load as loadYaml} from '../../../../ci/vendor/js-yaml/js-yaml.mjs';
 const repo=path.resolve(import.meta.dirname,'../../../..');
-const workflow=loadYaml(fs.readFileSync(path.join(repo,'.github/workflows/sdk-build.yml'),'utf8'));
+const workflow=loadYaml(fs.readFileSync(path.join(repo,'.github/workflows/sdk-package.yml'),'utf8'));
 const entry=workflow.jobs.package.steps.find(step=>step.run?.includes('build/sdk/producers/release/package-key.mjs'));
 assert.ok(entry,'formal release package identity entry');
 const argv=entry.run.trim().split(/\s+/);assert.equal(argv.shift(),'node');
