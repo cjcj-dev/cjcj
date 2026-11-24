@@ -6,6 +6,9 @@ import {fileURLToPath} from 'node:url';
 import {atomicJson,fileDigest,readJson,command,privateRoot} from './sdk-flow.mjs';
 import {execute} from './sdk-io.mjs';
 
+// CMake reparses cache values (including lists) in child projects and install scripts.
+export const cmakePath = value => value.replaceAll('\\', '/');
+
 export async function selectedExecutable(value,env=process.env) {
  if(!value)throw Error('WINDOWS_COMPILER_REQUIRED');
  const candidates=path.isAbsolute(value)||/[\\/]/.test(value)?[path.resolve(value)]:
@@ -89,12 +92,12 @@ install(TARGETS toolchain_probe RUNTIME DESTINATION bin)
 include("\${CANGJIE_RUNTIME_INSTALL_RULE}")
 `);
   const run=argv=>command(argv,{env:probeEnv,records});
-  await run([tools.cmake||'cmake','-S',source,'-B',build,'-G','Ninja',
-   '-DCMAKE_BUILD_TYPE=Release',`-DCMAKE_C_COMPILER=${cc}`,`-DCMAKE_CXX_COMPILER=${cxx}`,
+  const definitions=['-DCMAKE_BUILD_TYPE=Release',`-DCMAKE_C_COMPILER=${cc}`,`-DCMAKE_CXX_COMPILER=${cxx}`,
    `-DCMAKE_TOOLCHAIN_FILE=${path.join(compiler,'cmake/mingw_x86_64_toolchain.cmake')}`,
    `-DCMAKE_C_COMPILER_LAUNCHER=${tools.launcher||''}`,`-DCMAKE_CXX_COMPILER_LAUNCHER=${tools.launcher||''}`,
    `-DCANGJIE_RUNTIME_INSTALL_RULE=${path.join(compiler,'cmake/modules/InstallWindowsToolchain.cmake')}`,
-   `-DCANGJIE_TOOLCHAIN_RUNTIME_FILES=${runtimeFiles.join(';')}`,`-DCMAKE_INSTALL_PREFIX=${install}`]);
+   `-DCANGJIE_TOOLCHAIN_RUNTIME_FILES=${runtimeFiles.join(';')}`,`-DCMAKE_INSTALL_PREFIX=${install}`];
+  await run([tools.cmake||'cmake','-S',source,'-B',build,'-G','Ninja',...definitions.map(cmakePath)]);
   await run([tools.cmake||'cmake','--build',build,'--parallel','1']);
   await run([tools.cmake||'cmake','--install',build]);
   const program=path.join(install,'bin/toolchain_probe.exe');

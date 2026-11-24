@@ -18,7 +18,7 @@ import {sdkPlatform} from './sdk-platform.mjs';
 import {execute} from './sdk-io.mjs';
 import {nativeWindowsPython} from './native-python-windows.mjs';
 import {copyWindowsPythonInstallation} from './native-python-install.mjs';
-import {probeWindowsToolchain,windowsInstalledEnvironment,selectedExecutable,selectedWindowsToolchainEnvironment} from './native-windows-toolchain.mjs';
+import {cmakePath,probeWindowsToolchain,windowsInstalledEnvironment,selectedExecutable,selectedWindowsToolchainEnvironment} from './native-windows-toolchain.mjs';
 export const CJDB_SHIM_CXX_FLAGS=Object.freeze(['-std=c++17','-O2','-fPIC','-fno-rtti','-fno-exceptions','-DNDEBUG']);
 export async function compileCjdbShim({flatc, compiler, llvm, llvmBuild, flatbuffers,
   generatedHeaders, repository, object, clang, launcher, env, commit, sourceArchive,
@@ -223,7 +223,7 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
  await fs.stat(toolchain);
  const llvmArgs=[`-DCANGJIE_RUNTIME_SOURCE_DIR=${runtime}`,`-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`,
   `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,`-DLLVM_PARALLEL_LINK_JOBS=${linkJobs}`,`-DCJ_LLVM_COMMIT=${commits.llvm}`];
- await run([tools.cmake||'cmake','-G','Ninja','-S',compiler,'-B',build,'-DCMAKE_BUILD_TYPE=Release',
+ const definitions=['-DCMAKE_BUILD_TYPE=Release',
   `-DCJCJ_NATIVE_NODE=${process.execPath}`,`-DCJ_LLVM_COMMIT=${commits.llvm}`,
   `-DCMAKE_TOOLCHAIN_FILE=${toolchain}`,`-DCMAKE_C_COMPILER=${tools.cc}`,
   `-DCMAKE_CXX_COMPILER=${tools.cxx}`,`-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`,`-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,
@@ -234,9 +234,11 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
   '-DCANGJIE_LLVM_BUILD_TYPE=Release','-DCANGJIE_CJDB_BUILD_TYPE=Release',`-DCANGJIE_CJNATIVE_SOURCE_DIR=${llvm}`,
   `-DCANGJIE_RUNTIME_SOURCE_DIR=${runtime}`,`-DCANGJIE_XML2_SOURCE_DIR=${xml2}`,
   `-DCMAKE_PREFIX_PATH=${[python,build+'/third_party/xml2',libedit].filter(Boolean).join(';')}`,`-DPython3_EXECUTABLE=${selectedPython.executable}`,
-  `-DCJCJ_LLDB_ARGS=${lldbArgs.join(';').replaceAll('\\','/')}`,
+  `-DCJCJ_LLDB_ARGS=${lldbArgs.join(';')}`,
   `-DLLVM_BUILD_ARG=${pythonArgs.join(';')}`,`-DCANGJIE_LLVM_BUILD_ARGS=${llvmArgs.join(';')}`,
-  `-DCANGJIE_LINK_JOB_POOL=${linkJobs}`,`-DCMAKE_INSTALL_PREFIX=${install}`]);
+  `-DCANGJIE_LINK_JOB_POOL=${linkJobs}`,`-DCMAKE_INSTALL_PREFIX=${install}`];
+ await run([tools.cmake||'cmake','-G','Ninja','-S',compiler,'-B',build,
+  ...(native.os==='win32'?definitions.map(cmakePath):definitions)]);
  const targets=[...new Set([...native.nativeTargets,'cangjie-ast-support'])];
  if(!installOnly) {
  await run([tools.cmake||'cmake','--build',build,'--target',...targets.filter(t=>!['all','install'].includes(t)),'-j',jobs]);

@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {coffImports,requireMsvcrtImports,selectedExecutable,selectedWindowsToolchainEnvironment,windowsInstalledEnvironment} from './native-windows-toolchain.mjs';
+import {cmakePath,coffImports,requireMsvcrtImports,selectedExecutable,selectedWindowsToolchainEnvironment,windowsInstalledEnvironment} from './native-windows-toolchain.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
 const out=process.env.TOOLCHAIN_TEST_EVIDENCE;
 if(!out)throw Error('TOOLCHAIN_TEST_EVIDENCE required');
@@ -71,10 +71,18 @@ for(const mode of ['probe','native','install-only']){
   assert.equal(child.status,0,child.stderr||child.error?.message);
   const {commands,bin,probeInstall,incomingProbePath}=JSON.parse(child.stdout.trim().split('\n').at(-1));
   const main=commands.find(c=>c.argv.includes('-DCANGJIE_BUILD_CJDB=ON'));
+  for(const {argv} of commands.filter(c=>c.argv[0]==='cmake')){
+   for(const def of argv.filter(arg=>arg.startsWith('-D')))assert.doesNotMatch(def,/\\/);
+   if(argv.includes('-S')){
+    const dlls=argv.find(arg=>arg.startsWith('-DCANGJIE_TOOLCHAIN_RUNTIME_FILES=')).split('=').at(1).split(';');
+    assert.deepEqual(dlls.map(file=>path.posix.basename(file)),['libc++.dll','libunwind.dll']);
+   }
+  }
   const probeCmake=commands.filter(c=>c.argv[0]==='cmake'&&c!==main);
   assert.equal(probeCmake.length,mode==='install-only'?0:3,'expected probe configure/build/install');
   if(mode!=='install-only'){
    assert.ok(probeCmake[0].argv.includes('-S'));
+   assert.ok(probeCmake[0].argv.includes('-DCMAKE_INSTALL_PREFIX='+probeInstall.replaceAll('\\','/')));
    assert.equal(probeCmake[1].argv[1],'--build');
    assert.equal(probeCmake[2].argv[1],'--install');
    for(const c of probeCmake)assert.equal(c.path.split(';')[0],bin,'probe CMake must search selected bin first: '+c.argv[1]);
@@ -85,12 +93,39 @@ for(const mode of ['probe','native','install-only']){
   if(mode!=='probe'){
    if(mode==='native')assert.equal(incomingProbePath.split(';')[0],bin,'nativeCjdb must bind PATH before invoking probe');
    assert.equal(main.path.split(';')[0],bin,'main configure must search selected bin first: '+mode);
+   assert.ok(main.argv.includes('-DCANGJIE_CJNATIVE_SOURCE_DIR=D:/a/cjcj/cjcj/llvm-fork'));
    const childArgs=main.argv.find(s=>s.startsWith('-DCJCJ_LLDB_ARGS=')).slice('-DCJCJ_LLDB_ARGS='.length).split(';');
    for(const [key,name] of [['AR','llvm-ar.exe'],['RANLIB','llvm-ranlib.exe']]){
-    const arg='-DCMAKE_'+key+'='+path.join(bin,name);
+    const arg='-DCMAKE_'+key+'='+path.join(bin,name).replaceAll('\\','/');
     assert.ok(main.argv.includes(arg),arg);
-    assert.ok(childArgs.includes(arg.replaceAll('\\','/')),'standalone LLDB '+arg);
+    assert.ok(childArgs.includes(arg),'standalone LLDB '+arg);
    }
   }
  });
 }
+
+test('CMake configure reparses the LLVM source path without corrupting Windows escapes',async t=>{
+ const source=await fs.mkdtemp(path.join(out,'cmake-'));
+ t.after(()=>fs.rm(source,{recursive:true,force:true}));
+ // Like a generated install script, a macro substitutes its argument as CMake source.
+ await fs.writeFile(path.join(source,'CMakeLists.txt'),[
+  'cmake_minimum_required(VERSION 3.20)','project(path_probe NONE)',
+  'macro(select_source root)',
+  ' file(WRITE "${CMAKE_BINARY_DIR}/selected.txt" "${root}/llvm/lib/Support/ConvertUTF.cpp")',
+  'endmacro()','select_source("${CANGJIE_CJNATIVE_SOURCE_DIR}")',''].join('\n'));
+ const windows='D:\\a\\cjcj\\cjcj\\llvm-fork';
+ for(const [label,value] of [['raw',windows],['normalized',cmakePath(windows)]]){
+  const build=path.join(source,label);
+  const args=['-S',source,'-B',build,'-DCANGJIE_CJNATIVE_SOURCE_DIR='+value];
+  const r=spawnSync('cmake',args,{encoding:'utf8'});
+  assert.ifError(r.error);
+  await fs.writeFile(path.join(out,'cmake-'+label+'.json'),JSON.stringify({args,rc:r.status,stderr:r.stderr,stdout:r.stdout}));
+  if(label==='raw'){
+   assert.equal(r.status,1,r.stderr);
+   assert.match(r.stderr,/Invalid character escape '\\a'/);
+  }else{
+   assert.equal(r.status,0,r.stderr);
+   assert.equal(await fs.readFile(path.join(build,'selected.txt'),'utf8'),'D:/a/cjcj/cjcj/llvm-fork/llvm/lib/Support/ConvertUTF.cpp');
+  }
+ }
+});
