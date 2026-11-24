@@ -592,8 +592,9 @@ test('final component install carries the official host comparison runtime requi
   targetComponents:{compiler:{install:root+'/stage3',product:root+'/stage3/bin/cjcj-stage1'},runtime:{install:product,buildResult:product+'/NATIVE-INPUTS.json'},
    std:{install:root+'/std'},llvm:{install:root+'/N'},ast:{install:root+'/AST'}}};
  const recipe=installationRecipe(selection);
+ // Install exactly what the production recipe yields for .host; the layout gate,
+ // not a recipe assertion, is the first judge of whether H's runtime is present.
  const rows=recipe.copies.filter(row=>row.to.startsWith('.host'));
- assert.deepEqual(rows,[{from:host+'/runtime/lib/'+tuple,to:'.host/runtime/lib/'+tuple,owner:'bootstrap host comparison runtime'}]);
  const productRow=recipe.copies.find(row=>row.from===product&&row.to==='');
  assert.ok(productRow,'product runtime row');
  const put=async(file,bytes)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,bytes);};
@@ -613,6 +614,8 @@ test('final component install carries the official host comparison runtime requi
  assert.equal(layout.hostSha,sha256(host+'/'+lib));
  assert.equal(sha256(runtimeLibrary(green,tuple,'host')),sha256(host+'/'+lib));
  assert.notEqual(layout.productSha,layout.hostSha);
+ // Only the comparison runtime crosses into .host; components never copy all of H.
+ assert.deepEqual(rows,[{from:host+'/runtime/lib/'+tuple,to:'.host/runtime/lib/'+tuple,owner:'bootstrap host comparison runtime'}]);
  console.log('SDK_HOST_RUNTIME_LAYOUT_PASS '+JSON.stringify(layout));
  const cut=await install('cut',[productRow]);
  assert.throws(()=>verifyLayout(cut,'linux-x64'),/^Error: SDK_MISSING_HOST_RUNTIME$/);

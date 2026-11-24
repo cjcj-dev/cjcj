@@ -297,6 +297,9 @@ for(const separateBackend of [false,true])test('normal install pair and language
   await write(C,'compiler-inputs.json',JSON.stringify({commit:STD,compilerSha256:digest(await fs.readFile(C+'/bin/cjcj-stage1')),stdCoreSha256:digest('finite compiler std')}));
   await fs.mkdir(C+'/share/cjcj',{recursive:true});
   for(const rel of ['LICENSE','Open_Source_Software_Notice.docx'])await write(H,rel,'finite legal text');
+  // Component installs carry H's untouched official runtime as the layout gate's
+  // comparison input (.host/runtime/lib/<H tuple>); H supplies that directory.
+  await write(H,'runtime/lib/'+TUPLE+'/libcangjie-runtime.so','finite official host runtime');
   await write(N,'envsetup.sh','# finite environment entry');
   const astLibrary='lib/'+TUPLE+'/libcangjie-ast-support.a',astFiles={};
   for(const rel of [astLibrary,'schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h','third_party/flatbuffers/bin/flatc']){
