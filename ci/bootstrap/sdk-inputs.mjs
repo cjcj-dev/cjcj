@@ -1,5 +1,6 @@
 #!/usr/bin/env zx
 import {embeddedStamp} from '../../build/lib/toolchain-identity.mjs';
+import {rejectPrivateTools} from './deploy-native-tools.mjs';
 import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {visibleOptionsOnly,requireOptionVisibility} from './compiler-option-visibility.mjs';
@@ -14,6 +15,7 @@ import {promisify, isDeepStrictEqual} from 'node:util';
 import {randomUUID} from 'node:crypto';
 import {atomicJson, readJson, privateRoot, fileDigest} from './sdk-flow.mjs';
 import {FIXED_INPUTS,backendArtifactPath} from './sdk-targets.mjs';
+import {h1HeapDefaultsBuild} from './sdk-native-stage.mjs';
 import {sdkPlatform,stdxChirMembers} from './sdk-platform.mjs';
 import {javaInteropInput} from './sdk-java-interop.mjs';
 import {stage2Input} from './sdk-stage2-input.mjs';
@@ -125,6 +127,9 @@ export async function installedFinalStd(supplied, input) {
   }
   return {install, commands};
 }
+const MACRO_SOURCE='packages/macro/src/InvokeUtil.cj';
+// Git blob of MACRO_SOURCE at FIXED_INPUTS.h1 (8390179).
+export const FIXED_H1_MACRO_BLOB='2d51c6f26491adc07fed754bc94b64ca8a7c8430';
 // Check source compatibility before opening installations, and again when a
 // saved build graph is consumed. Ordinary CJPM has no H1 execution node.
 async function validateSourceTrees(input, env) {
@@ -140,7 +145,17 @@ async function validateSourceTrees(input, env) {
     // installed compiler still must satisfy the current macro source contract;
     // normal bootstrap and historical C2 retain their H1 compatibility check.
     if(name==='compiler'||name==='h1'&&input.stage2?.mode!=='ordinary-cjpm') {
-      const {stdout}=await execute('git',['-C',row.repository,'show',row.commit+':packages/macro/src/InvokeUtil.cj']);
+      // The approved fixed H1 predates the current macro runtime contract and
+      // only runs the transitional stages, which never serve as a macro SDK
+      // (sdk-targets.mjs macroSdk 'UNSUPPORTED'). Its macro source is bound to
+      // its own approved blob; every other H1 and every compiler must carry
+      // the candidate's macro source byte for byte.
+      if(name==='h1'&&row.commit===FIXED_INPUTS.h1) {
+        const {stdout}=await execute('git',['-C',row.repository,'rev-parse',row.commit+':'+MACRO_SOURCE]);
+        if(stdout.trim()!==FIXED_H1_MACRO_BLOB)throw new Error('NATIVE_MACRO_SOURCE '+name);
+        continue;
+      }
+      const {stdout}=await execute('git',['-C',row.repository,'show',row.commit+':'+MACRO_SOURCE]);
       if(workingText(stdout)!==workingText(expectedMacro))throw new Error('NATIVE_MACRO_SOURCE '+name);
     }
   }
@@ -173,6 +188,12 @@ async function validateInstalledInputs(input) {
   if(input.reuseFinalStd && !isDeepStrictEqual(await installedFinalStd(input.reuseFinalStd,input),input.reuseFinalStd))
     throw Error('FINAL_STD_REUSE_INPUT_CHANGED');
 }
+// Linux and Darwin build H1 with the public producer, which takes the
+// prepare-native shim when that shim was built from H1's own commit. Windows
+// H1 selects the compiler shim in the graph instead.
+export function h1ShimInstall(platform,{compilerCommit,h1Commit,shimInstall}) {
+  return sdkPlatform(platform).os!=='win32'&&compilerCommit===h1Commit?shimInstall:undefined;
+}
 async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,windowsShimInstall}) {
   if(!reused.product||!reused.buildInputs||!reused.buildResult)throw Error('H1_REUSE_LOCATIONS_REQUIRED');
   const native=sdkPlatform(platform), product=path.resolve(reused.product), buildResult=path.resolve(reused.buildResult);
@@ -193,13 +214,9 @@ async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,
       mismatch('Windows commands');
     return {product,configuration:facts,buildResult};
   }
-  if(native.os!=='linux') {
-    if(!tools.privateRoot||!Array.isArray(commands)||commands.length!==1
-      ||commands[0].rc!==0||commands[0].signal||commands[0].cwd!==h1.repository
-      ||commands[0].argv?.[1]!==path.join(path.resolve(tools.privateRoot),'ts/src/sharedbuild/cjcj-stage1.mjs'))
-      mismatch('native command');
-    return {product,configuration:facts,buildResult};
-  }
+  // Linux and Darwin share the public cjpm H1 producer below; the retired
+  // private Darwin command shape is never accepted.
+  rejectPrivateTools(tools);
 
   const hostRuntimeFile=path.join(host.install,'runtime/lib',native.tuple,'libcangjie-runtime'+native.shared);
   const hostRuntimeSupportsConfigV1=(await nativeSymbolRows(hostRuntimeFile,{platform,runtime:true,defined:true})).includes('CJ_MRT_CjRuntimeInitWithConfigV1');
@@ -215,12 +232,18 @@ async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,
   // Neither the number of rows nor leftover files may pick the legacy shape.
   const git=(...args)=>execute('git',['-C',h1.repository,...args]).then(result=>result.stdout);
   const chirInterface=Boolean((await git('ls-tree',h1.commit,'--',compilerChirSchema)).trim());
-  if(!Array.isArray(commands)||commands.length!==(chirInterface?4:3)
+  // The heap-default object is compiled exactly where the producer compiles it:
+  // when the pinned H1 manifests name it (sdk-native-stage.mjs h1HeapDefaultsBuild).
+  const heapBuilt=h1HeapDefaultsBuild({workspaceText:await git('show',h1.commit+':cjpm.toml'),
+    packageText:await git('show',h1.commit+':packages/cjc/cjpm.toml'),platform,
+    sourcePresent:Boolean((await git('ls-tree',h1.commit,'--','runtime_shim/cjc_heap_defaults.c')).trim())});
+  if(!Array.isArray(commands)||commands.length!==2+Number(heapBuilt)+Number(chirInterface)
     ||commands.some(row=>row?.rc!==0||row.signal||row.error||row.cancelled
       ||row.cwd!==facts.sourceRoot||!Array.isArray(row.argv)||row.argv.some(arg=>typeof arg!=='string')))
     mismatch('command results');
 
-  const [config,heap,cjpm,generate]=commands.map(row=>row.argv);
+  const argvs=commands.map(row=>row.argv);
+  const config=argvs.shift(), heap=heapBuilt?argvs.shift():undefined, [cjpm,generate]=argvs;
   const shimDir=path.join(facts.sourceRoot,'runtime_shim');
   const compile=(name,defines)=>['-std=c11','-O2','-fPIC',...defines,
     '-c',path.join(shimDir,name+'.c'),'-o',path.join(shimDir,name+'.o')];
@@ -231,8 +254,8 @@ async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,
       &&isDeepStrictEqual(argv.slice(prefix),args);
   };
   if(!compilerArgs(config,compile('cjc_runtime_config',['-D_POSIX_C_SOURCE=200809L','-DCJCJ_COMMIT="'+h1.commit+'"']))
-    ||!compilerArgs(heap,compile('cjc_heap_defaults',hostRuntimeSupportsConfigV1?[]:['-DCJCJ_LEGACY_HOST_RUNTIME']))
-    ||config[0]!==heap[0]||config[1]!==heap[1]
+    ||heapBuilt&&(!compilerArgs(heap,compile('cjc_heap_defaults',hostRuntimeSupportsConfigV1?[]:['-DCJCJ_LEGACY_HOST_RUNTIME']))
+      ||config[0]!==heap[0]||config[1]!==heap[1])
     ||cjpm[0]!==path.join(host.install,'tools/bin/cjpm')||cjpm[1]!=='build'||!/^-j[1-9]\d*$/.test(cjpm.at(-1))
     ||!(cjpm.length===3||cjpm.length===5&&cjpm[2]==='--target-dir'&&path.isAbsolute(cjpm[3])))
     mismatch('compiler commands');
@@ -257,7 +280,7 @@ async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,
     const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'h1-flatc-'));
     try {
       await execute(flatc,['--no-warnings','-c','-o',tmp,path.join(root,compilerChirSchema)],{cwd:root,
-        env:{...process.env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:''}});
+        env:{...process.env,LD_LIBRARY_PATH:'',LD_PRELOAD:'',LD_AUDIT:'',[native.loader]:''}});
       if(!generated.equals(await fs.readFile(path.join(tmp,path.basename(compilerChirGenerated)))))
         mismatch(compilerChirGenerated);
     } finally {await fs.rm(tmp,{recursive:true,force:true});}
@@ -381,7 +404,8 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   if(installations.shim) {
     if(!installations.shim.install)throw Error('NATIVE_SHIM_INSTALL_REQUIRED');
     rows.compiler.shimInstall=await privateRoot(installations.shim.install);
-    if(native.os==='linux'&&compilerCommit===h1Commit)rows.h1.shimInstall=rows.compiler.shimInstall;
+    const h1Shim=h1ShimInstall(platform,{compilerCommit,h1Commit,shimInstall:rows.compiler.shimInstall});
+    if(h1Shim)rows.h1.shimInstall=h1Shim;
   }
   // Optional reuse is an original H1 producer, not a copied flow directory.
   // A new candidate/configuration gets a new work domain while retaining the
@@ -390,14 +414,9 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
     rows.h1={...rows.h1,...await installedH1(installations.h1,{h1:rows.h1,host,llvm:rows.llvm,
       platform,optionVisibility,tools,windowsShimInstall:rows.compiler.shimInstall})};
   }
-  // Only the Darwin producer still consumes private tools.
-  // Linux preparation and H1 reuse must not require retired private scripts.
-  if(native.os==='darwin'&&!installations.stage2) {
-    if(!tools.privateRoot)throw Error('NATIVE_H1_PRIVATE_PRODUCER_REQUIRED');
-    tools.privateRoot=path.resolve(tools.privateRoot);
-    for(const rel of ['cjcj-stage1.mjs','stage1-transform.mjs'])
-      await fs.stat(path.join(tools.privateRoot,'ts/src/sharedbuild',rel));
-  }
+  // No host consumes private tools: Linux and Darwin build H1 through the
+  // public in-repo cjpm path, Windows through its own public producer.
+  rejectPrivateTools(tools);
   const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,visibleOptionsOnly:optionVisibility,
     ...(descriptor.stdLocalModeApi!==undefined?{stdLocalModeApi:descriptor.stdLocalModeApi}:{}),
     ...(descriptor.stdDependencies?{stdDependencies:await stdDependencyInputs(descriptor.stdDependencies)}:{}),

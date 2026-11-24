@@ -141,6 +141,9 @@ export const GATING = Object.freeze([
   'ci/sccache/report.test.mjs',
   'build/sdk/producers/srcbuild/tests/inject-version.test.mjs',
   'build/sdk/producers/srcbuild/tests/job-handoff.test.mjs',
+  'build/sdk/producers/srcbuild/tests/job-handoff-pinned-source.test.mjs',
+  'build/sdk/producers/release/prepare_native_inputs.test.mjs',
+  'ci/bootstrap/deploy-native-tools.test.mjs',
   'build/sdk/producers/srcbuild/tests/phase-control.test.mjs',
   'build/sdk/producers/srcbuild/tests/ohos-ios-segmented.test.mjs',
   'build/sdk/producers/srcbuild/tests/pin-compiler-llvm.test.mjs',
@@ -158,6 +161,7 @@ export const GATING = Object.freeze([
   'ci/producer-evidence.test.mjs',
   'ci/bootstrap/sdk-flow.test.mjs',
   'ci/bootstrap/sdk-targets.test.mjs',
+  'ci/bootstrap/h1-package-link.test.mjs',
   'ci/bootstrap/sdk-resume.test.mjs',
   'ci/bootstrap/sdk-install-entries.test.mjs',
   'ci/bootstrap/sdk-installed-macros.test.mjs',
@@ -197,6 +201,21 @@ export const GATING = Object.freeze([
   'build/sdk/producers/srcbuild/tests/segmented-workflow.test.mjs',
   'scripts/difftest-timeout.test.mjs',
   'ci/bootstrap/sdk-archive-readonly.test.mjs',
+  // Unified SDK production line (node build/cli.mjs sdk ...) and its producers.
+  'build/sdk/test/chain.test.mjs',
+  'build/sdk/test/cross.test.mjs',
+  'build/sdk/test/install-relocate.test.mjs',
+  'build/sdk/test/pins-targets.test.mjs',
+  'build/sdk/test/pipeline.test.mjs',
+  'build/sdk/test/producers.test.mjs',
+  'build/sdk/test/wasm-std.test.mjs',
+  'ci/wasm-std-full-args.test.mjs',
+  'build/sdk/producers/release/windows-source-package.test.mjs',
+  'build/sdk/producers/srcbuild/tests/android-install.test.mjs',
+  'build/sdk/producers/srcbuild/tests/ohos-split-sdk.test.mjs',
+  // Release publication contract and the G4 source-phase graph.
+  'ci/release-publish.test.mjs',
+  'ci/release-gates-g4.test.mjs',
 ]);
 
 // Registered, not executed. `needs` is what CI would have to provide; `verified`

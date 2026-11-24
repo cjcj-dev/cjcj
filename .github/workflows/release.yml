@@ -9,6 +9,16 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      phase:
+        description: "prepare builds and uploads the five-host native inputs only; publish builds the 15 packages and creates the prerelease"
+        type: choice
+        options: [prepare, publish]
+        default: prepare
+      ci_run_id:
+        description: "publish only: a successful ci.yml run of this exact commit, verified before the release is created"
+        type: string
+        required: false
+        default: ''
       native_runtime_artifact:
         description: Existing native-runtime-install artifact prefix
         type: string
@@ -55,13 +65,15 @@ on:
         required: false
         default: '{}'
       native_inputs_artifact:
-        description: Reviewed complete native installation artifact prefix, suffixed by source target
-        required: true
+        description: "publish only: reviewed complete native installation artifact prefix, suffixed by source target"
+        required: false
         type: string
+        default: ''
       native_inputs_run_id:
-        description: Original native installation producer run
-        required: true
+        description: "publish only: original native installation producer run"
+        required: false
         type: string
+        default: ''
 
       version:
         description: "Release version, e.g. 0.0.1"
@@ -107,6 +119,7 @@ env:
 jobs:
   plan:
     name: Check all source platform inputs before release
+    if: inputs.phase == 'publish'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -115,8 +128,53 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.22.1'
+      - name: Require the native inputs that phase=prepare produced
+        env:
+          NATIVE_INPUTS_ARTIFACT: ${{ inputs.native_inputs_artifact }}
+          NATIVE_INPUTS_RUN_ID: ${{ inputs.native_inputs_run_id }}
+          NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
+        run: |
+          [ -n "$NATIVE_INPUTS_ARTIFACT" ] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_inputs_artifact"; exit 1; }
+          [[ "$NATIVE_INPUTS_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_inputs_run_id"; exit 1; }
+          [ -n "$NATIVE_RUNTIME_ARTIFACT" ] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_runtime_artifact"; exit 1; }
       - name: Check release source targets
         run: node build/sdk/producers/srcbuild/target-matrix.mjs --targets all --require-ready
+
+  # phase=prepare never reaches plan, source, package or publish. It builds the
+  # five-host native inputs from fixed Git sources, then the Linux x64 source SDK
+  # (cjcj-srcbuild-linux-x64-<version>) from those same-run inputs for ci.yml.
+  prepare-native:
+    if: inputs.phase == 'prepare'
+    name: prepare · five-host native inputs and runtime installations
+    uses: ./.github/workflows/sdk-build.yml
+    with:
+      mode: prepare
+      cangjie_ref: ${{ inputs.version }}
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
+      source_selection: ${{ inputs.source_selection }}
+
+  prepare-srcbuild-linux-x64:
+    needs: prepare-native
+    if: inputs.phase == 'prepare'
+    name: prepare · linux-x64 source SDK from the same-run native inputs
+    uses: ./.github/workflows/sdk-build.yml
+    with:
+      cangjie_ref: ${{ inputs.version }}
+      source_selection: ${{ inputs.source_selection }}
+      shim_source_selection: ${{ inputs.shim_source_selection }}
+      native_inputs_artifact: native-inputs
+      native_inputs_run_id: ${{ github.run_id }}
+      native_runtime_artifact: native-runtime-install
+      native_runtime_run_id: ${{ github.run_id }}
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
+      build_type: relwithdebinfo
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+      targets: linux-x64
 
   # Each phase produces its own native SDK and consumes that same installation.
   # Linux retains its separate cross std artifact for Linux's FFI payload.
@@ -171,8 +229,6 @@ jobs:
     name: phase 3 · windows-x64 / source SDK and final std
     uses: ./.github/workflows/sdk-build.yml
     needs: package-p2-linux-aarch64
-    secrets:
-      WINDOWS_TOOLS_READ_TOKEN: ${{ secrets.WINDOWS_TOOLS_READ_TOKEN }}
     with:
       cangjie_ref: ${{ inputs.version }}
       native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
@@ -428,6 +484,7 @@ jobs:
     uses: ./.github/workflows/sdk-build.yml
     with:
       mode: package
+      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
       native_host_version: ${{ inputs.native_host_version }}
@@ -449,6 +506,7 @@ jobs:
     uses: ./.github/workflows/sdk-build.yml
     with:
       mode: package
+      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
       native_host_version: ${{ inputs.native_host_version }}
@@ -466,10 +524,11 @@ jobs:
 
   package-win32-x64-wasm:
     name: win32-x64-wasm / Build release package
-    needs: [package-p3-windows-x64, source-p1-linux-x64]
+    needs: [package-p3-windows-x64, source-p1-linux-x64, source-p3-windows-x64]
     uses: ./.github/workflows/sdk-build.yml
     with:
       mode: package
+      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
       native_llvm_ref: ${{ inputs.native_llvm_ref }}
       native_runtime_ref: ${{ inputs.native_runtime_ref }}
       native_host_version: ${{ inputs.native_host_version }}
@@ -478,7 +537,7 @@ jobs:
       llvm_platform: windows_x86_64
       sdk_runtime_dir: windows_x86_64_cjnative
       release_key: win32-x64-wasm
-      std_artifact: final-std-native-windows-x64
+      std_artifact: ${{ needs.source-p3-windows-x64.outputs.std_artifact }}
       cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
@@ -576,28 +635,32 @@ jobs:
   publish:
     name: Publish release
     needs: [source-p1-linux-x64, source-p2-linux-aarch64, source-p3-windows-x64, source-p4-darwin-arm64, source-p5-darwin-x64, package-p1-linux-x64, package-p2-linux-aarch64, package-p3-windows-x64, package-p4-darwin-arm64, package-p5-darwin-x64, package-linux-x64-android, package-darwin-arm64-android, package-win32-x64-android, package-linux-x64-wasm, package-darwin-arm64-wasm, package-win32-x64-wasm, package-linux-x64-ohos, package-darwin-arm64-ohos, package-win32-x64-ohos, package-darwin-arm64-ios]
-    if: >-
-      ${{
-        always() &&
-        !inputs.dry_run &&
-        needs.source-p5-darwin-x64.result == 'success' &&
-        needs.package-p5-darwin-x64.result == 'success' &&
-        needs.package-linux-x64-android.result == 'success' &&
-        needs.package-darwin-arm64-android.result == 'success' &&
-        needs.package-win32-x64-android.result == 'success' &&
-        needs.package-linux-x64-wasm.result == 'success' &&
-        needs.package-darwin-arm64-wasm.result == 'success' &&
-        needs.package-win32-x64-wasm.result == 'success' &&
-        needs.package-linux-x64-ohos.result == 'success' &&
-        needs.package-darwin-arm64-ohos.result == 'success' &&
-        needs.package-win32-x64-ohos.result == 'success' &&
-        needs.package-darwin-arm64-ios.result == 'success'
-      }}
+    # Default needs semantics: any failed, cancelled or skipped upstream job skips
+    # publication, and the first step re-checks all 20 direct needs explicitly.
+    if: inputs.phase == 'publish' && !inputs.dry_run
+    # Manual approval entry: required reviewers are configured on this
+    # environment in the repository settings (not by this workflow).
+    environment: release-publish
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Require every direct upstream job to have succeeded
+        env:
+          PUBLISH_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node ci/release-publish.mjs verify-needs
+      - name: Verify the candidate CI run of this commit
+        if: inputs.ci_run_id != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: |
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::PUBLISH_CI_RUN_ID $CI_RUN_ID"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/ci-run.json"
+          node ci/release-publish.mjs verify-ci-run --run-json "$RUNNER_TEMP/ci-run.json" --sha "$GITHUB_SHA"
       - name: Download SDK artifacts
         uses: actions/download-artifact@v8
         with:
@@ -605,8 +668,16 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ github.run_id }}
           pattern: pkg-*
-          path: dist
-          merge-multiple: true
+          # One directory per artifact: selection is by artifact name, so
+          # pkg-diagnosis-* never reaches dist (file names cannot tell them apart).
+          path: dist-artifacts
+          merge-multiple: false
+      - name: Select the 15 package artifacts by name
+        run: node ci/release-publish.mjs select-packages --from dist-artifacts --to dist
+      - name: Verify exactly 15 package cells and 60 assets
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: node ci/release-publish.mjs verify-assets --dist dist --version "$RELEASE_VERSION" --output "$RUNNER_TEMP/publish-assets.txt"
       - name: Render release notes from package manifests
         run: |
           node scripts/render_release_notes.mjs \
@@ -616,12 +687,47 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_DRAFT: ${{ inputs.draft }}
         run: |
-          flags=(--title "cjcj v${{ inputs.version }}" --notes-file "$RUNNER_TEMP/release-notes.md")
-          if [ "${{ inputs.prerelease }}" = "true" ]; then flags+=(--prerelease); fi
-          if [ "${{ inputs.draft }}" = "true" ]; then flags+=(--draft); fi
-          mapfile -t assets < <(find dist -type f \( -name '*.tar.gz' -o -name '*.sha256' -o -name '*.zip' -o -name '*.RELEASE-MANIFEST.jsonl' -o -name '*.SHA256SUMS' \) | sort)
-          gh release create "v${{ inputs.version }}" "${flags[@]}" "${assets[@]}"
+          tag="v$RELEASE_VERSION"
+          # A formal/latest release needs its own user authorization; this job creates prereleases only.
+          [ "$RELEASE_PRERELEASE" = "true" ] || { echo "::error::PUBLISH_FORMAL_RELEASE_NOT_AUTHORIZED $tag"; exit 1; }
+          # Fail closed: never overwrite an existing release or tag, and never let gh fall back
+          # to the default branch -- the tag is created at the exact commit this run built.
+          if out=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>&1); then
+            echo "::error::RELEASE_ALREADY_EXISTS $tag"; exit 1
+          elif ! grep -q 'HTTP 404' <<<"$out"; then
+            echo "::error::RELEASE_LOOKUP_FAILED $tag: $out"; exit 1
+          fi
+          if out=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" 2>&1); then
+            echo "::error::TAG_ALREADY_EXISTS $tag"; exit 1
+          elif ! grep -q 'HTTP 404' <<<"$out"; then
+            echo "::error::TAG_LOOKUP_FAILED $tag: $out"; exit 1
+          fi
+          mapfile -t assets < "$RUNNER_TEMP/publish-assets.txt"
+          [ "${#assets[@]}" -eq 60 ] || { echo "::error::PUBLISH_ASSET_COUNT ${#assets[@]}"; exit 1; }
+          # Claim the tag atomically at the built commit: creating the ref fails
+          # (422) if any other writer created it after the lookup above. The
+          # release is then attached to that claimed tag only (--verify-tag).
+          if ! out=$(gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" 2>&1); then
+            echo "::error::TAG_ALREADY_EXISTS $tag (claim refused): $out"; exit 1
+          fi
+          flags=(--verify-tag --title "cjcj $tag" --notes-file "$RUNNER_TEMP/release-notes.md" --prerelease --latest=false)
+          if [ "$RELEASE_DRAFT" = "true" ]; then flags+=(--draft); fi
+          if ! gh release create "$tag" "${flags[@]}" "${assets[@]}"; then
+            # Release the claim only while it is still exactly this run's tag.
+            if [ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null)" = "$GITHUB_SHA" ]; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" || true
+            fi
+            echo "::error::PUBLISH_RELEASE_CREATE_FAILED $tag"; exit 1
+          fi
+          # Read back what GitHub now serves for this tag.
+          ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.type + " " + .object.sha')
+          [ "$ref" = "commit $GITHUB_SHA" ] || { echo "::error::PUBLISH_READBACK_TAG $tag $ref"; exit 1; }
+          release=$(gh release view "$tag" --json isPrerelease,assets --jq '[.isPrerelease, (.assets | length)] | map(tostring) | join(" ")')
+          [ "$release" = "true 60" ] || { echo "::error::PUBLISH_READBACK_RELEASE $tag $release"; exit 1; }
 
 # Source-build owns the four native LLVM artifacts; the platform_tuples producer (build/sdk/producers/platform_tuples) owns
 # only the Windows tuple. Each release cell consumes final-std-${platform} from

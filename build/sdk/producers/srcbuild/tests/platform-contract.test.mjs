@@ -80,9 +80,14 @@ test('native SDK consumers share the persisted selector and accept candidates by
   // Package mode is reachable only through workflow_call: dispatch carries no mode input.
   assert.equal(llvmWorkflow('sdk-build.yml').on.workflow_dispatch.inputs.mode, undefined);
   const source = llvmWorkflow('sdk-build-target.yml');
-  const producer = Object.values(source.jobs).flatMap(job => job.steps || []).find(step => step.name === 'Upload self-hosted SDK and gate logs');
-  assert.equal(producer.with.name, 'cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}');
-  assert.match(producer.with.path, /cangjie-sdk-.*-cjcj/);
+  // The two source SDK producers: srcbuild (Unix) and native-windows-sdk.
+  const producers = [['srcbuild', 'Upload complete source-built SDK'], ['native-windows-sdk', 'Upload complete native Windows SDK']]
+    .map(([job, name]) => source.jobs[job].steps.find(step => step.name === name));
+  for (const producer of producers) {
+    assert.ok(producer, 'source SDK producer step');
+    assert.equal(producer.with.name, 'cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}');
+    assert.match(producer.with.path, /cangjie-sdk-.*-cjcj/);
+  }
 });
 
 const producer = llvmWorkflow('sdk-build-target.yml');

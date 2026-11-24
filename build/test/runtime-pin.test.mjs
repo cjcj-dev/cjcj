@@ -30,14 +30,32 @@ test('runtime source defaults to the checked-in pin', async () => {
   assert.equal(source.overrideRef, '');
 });
 
+// Route (b): ci/colour-runtime/* is the immutable record of already-published Darwin
+// libraries. It is checked against its own producer run, never rewritten to the RC pin;
+// the active RC runtime is checked against the explicit native producer pin instead.
+const envPins = text => Object.fromEntries(text.trim().split('\n').map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+
+test('active runtime pin is the explicit RC native producer runtime', async () => {
+  const source = await resolveRuntimeSource({});
+  const producer = envPins(await fs.readFile(new URL('../sdk/source_pin.env', import.meta.url), 'utf8')
+    .then(text => text.split('\n').filter(line => line && !line.startsWith('#')).join('\n')));
+  assert.equal(source.pinRef, producer.RUNTIME_REF, 'RUNTIME_PIN_NOT_RC_PRODUCER');
+  console.log(`ASSERT ACTIVE_RUNTIME_PIN_RC ${source.pinRef}`);
+});
+
 for (const platform of ['darwin_aarch64', 'darwin_x86_64']) {
-  test(`runtime pin matches published native libraries for ${platform}`, async () => {
+  test(`legacy published native libraries for ${platform} stay bound to their producer run`, async () => {
     const source = await resolveRuntimeSource({});
     const release = JSON.parse(await fs.readFile(
       new URL('../../ci/colour-runtime/release.json', import.meta.url), 'utf8'));
-    assert.equal(release.platforms[platform]?.runtime_sha, source.pinRef,
-      `DARWIN_RUNTIME_PIN_MISMATCH: ${platform}; rebuild and publish the native libraries with the runtime pin`);
-    console.log(`ASSERT DARWIN_RUNTIME_PIN_MATCH ${platform} ${source.pinRef}`);
+    const legacy = envPins(await fs.readFile(new URL(`../../ci/colour-runtime/${platform}.env`, import.meta.url), 'utf8'));
+    const row = release.platforms[platform];
+    assert.match(row?.runtime_sha ?? '', /^[0-9a-f]{40}$/, `DARWIN_LEGACY_RUNTIME_SHA: ${platform}`);
+    assert.equal(row.run_id, legacy.COLOUR_RT_RUN_ID, `DARWIN_LEGACY_RUN_MISMATCH: ${platform}`);
+    assert.equal(row.run_attempt, legacy.COLOUR_RT_RUN_ATTEMPT, `DARWIN_LEGACY_RUN_MISMATCH: ${platform}`);
+    assert.notEqual(row.runtime_sha, source.pinRef,
+      `DARWIN_LEGACY_IMPERSONATES_RC: ${platform}; rotate it only with a real rebuilt and republished tuple`);
+    console.log(`ASSERT DARWIN_LEGACY_RUNTIME ${platform} ${row.runtime_sha} active=${source.pinRef}`);
   });
 }
 

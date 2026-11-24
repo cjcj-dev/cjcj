@@ -18,6 +18,7 @@ import {checkoutExactSource,fetchSource} from '../../build/lib/git.mjs';
 import {buildConfig} from '../../build/lib/config.mjs';
 import {checkoutSourceRepository} from './checkout-source.mjs';
 import {nativeSourceSelection} from './native-source-selection.mjs';
+import {rejectPrivateTools} from './deploy-native-tools.mjs';
 import {stdDependencySources} from './stdlib-build.mjs';
 export {NATIVE_REPOSITORIES} from './native-source-selection.mjs';
 export async function windowsJobSeed(checkout,locations,env) {
@@ -102,8 +103,8 @@ export async function configureGhaInputs(env=process.env) {
   if (pair && (path.resolve(selectedHost.install) !== path.resolve(env.CJCJ_BOOTSTRAP_BASE)
     || !selectedHost.archive || path.resolve(selectedHost.archive) !== path.resolve(env.CJCJ_BOOTSTRAP_BASE_ARCHIVE || '')))
     throw new Error('GHA_NATIVE_SELECTED_HOST_CHANGED');
-  const tools={...(windows?{}:locations.tools),
-    ...(locations.tools?.privateRoot===undefined?{}:{privateRoot:member(locations.tools.privateRoot)}),
+  // native-inputs never names a private tools root; a stale one fails closed.
+  const tools={...(windows?{}:rejectPrivateTools(locations.tools??{})),
     cc:env.CC||'clang',cxx:env.CXX||'clang++',launcher:env.CMAKE_CXX_COMPILER_LAUNCHER||'sccache',zx:windows?env.CJCJ_ZX_CLI:'zx'};
   if(env.GITHUB_ENV)await fs.appendFile(env.GITHUB_ENV,'CJCJ_BOOTSTRAP_WORK='+path.join(workspace,'native-bootstrap')+'\n');
   return prepareNativeInputs({platform,sources,installations,tools,sourceSelection:selection,

@@ -49,3 +49,38 @@ test('non-cjc workspace consumers retain the shared config dependency', async ()
   }
   console.log(`NON_CJC_CONFIG_ASSERT_REACHED members=${paths.length - 1}`);
 });
+
+// packages/cjc/cjpm.toml: ELF inputs per Linux target, Mach-O inputs per Darwin target.
+import {cjcLinkContractProblems, effectiveLinkOptions, DARWIN_CJC_LINK} from '../../ci/bootstrap/cjc-link-sections.mjs';
+import {assembleCjcLinkOption} from '../sdk/producers/platform_matrix/link_option.mjs';
+test('cjc manifest: Linux effective link equals the ELF set, Darwin carries the Mach-O set', () => {
+  assert.deepEqual(cjcLinkContractProblems(cjc), []);
+  const darwin = assembleCjcLinkOption('darwin', '${CANGJIE_HOME}', '').split(' ');
+  assert.deepEqual([...DARWIN_CJC_LINK].sort(), [...darwin].map(x => x.replace('${CANGJIE_HOME}/third_party/llvm/lib/libLLVM.dylib',
+    '${CANGJIE_HOME}/third_party/llvm/lib/libLLVM.dylib')).sort());
+  assert.deepEqual(effectiveLinkOptions(cjc, 'windows_x86_64'), ['runtime_shim/cjselfhost_llvmshim.o']);
+});
+test('red cut: global ELF options or a missing Darwin section are refused precisely', () => {
+  const once = (text, from, to) => { assert.equal(text.split(from).length, 2, from); return text.replace(from, to); };
+  const globalElf = once(cjc, '  link-option = "runtime_shim/cjselfhost_llvmshim.o"',
+    '  link-option = "--export-dynamic runtime_shim/cjselfhost_llvmshim.o ${CANGJIE_HOME}/third_party/llvm/lib/libLLVM-15.so -lstdc++"');
+  const problems = cjcLinkContractProblems(globalElf);
+  assert.ok(problems.includes('global ELF link option --export-dynamic'), problems.join('\n'));
+  assert.ok(problems.includes('darwin_aarch64 link differs from the Mach-O option set'));
+  assert.ok(problems.includes('windows_x86_64 link carries ELF/Mach-O options'));
+  const noDarwin = once(cjc, '[target.x86_64-apple-darwin]', '[target.x86_64-apple-darwin-disabled]');
+  assert.deepEqual(cjcLinkContractProblems(noDarwin), ['darwin_x86_64 lacks its target section']);
+  const noLinux = once(cjc, ' -lstdc++ runtime_shim/cjc_heap_defaults.o --wrap=CJ_MRT_CjRuntimeInit --wrap=CJ_MRT_CjRuntimeInitWithConfigV1"\n\n[target.aarch64',
+    ' runtime_shim/cjc_heap_defaults.o --wrap=CJ_MRT_CjRuntimeInit --wrap=CJ_MRT_CjRuntimeInitWithConfigV1"\n\n[target.aarch64');
+  assert.deepEqual(cjcLinkContractProblems(noLinux), ['linux_x86_64 link differs from the ELF option set']);
+});
+test('darwin platform rewrite links the Mach-O inputs exactly once', () => {
+  let manifest = cjc;
+  for (const sdk of ['/sdk/seed', '/sdk/final']) {
+    manifest = platformizeCjcToml(manifest, 'darwin', sdk);
+    const combined = effectiveLinkOptions(manifest, 'darwin_aarch64');
+    assert.equal(combined.filter(x => x.endsWith('libLLVM.dylib')).length, 1);
+    assert.equal(combined.filter(x => x === 'runtime_shim/cjselfhost_llvmshim.o').length, 1);
+    assert.ok(combined.includes(sdk + '/third_party/llvm/lib/libLLVM.dylib'));
+  }
+});

@@ -101,6 +101,42 @@ export function applyCompilerCjdbPatches(repoDir) {
   verifyCompilerCjdbPatches(repoDir);
 }
 
+export function applyNativeCjdbConfigure(repoDir) {
+  // Keep the public umbrella include in the same tree CMake installs. More
+  // recent explicit compiler sources may already provide their own version.
+  const header = path.join(repoDir,'include/cangjie/Utils/Casting.h');
+  if (!fs.existsSync(header)) {
+    fs.mkdirSync(path.dirname(header),{recursive:true});
+    fs.copyFileSync(new URL('../patches/Casting.h',import.meta.url),header,fs.constants.COPYFILE_EXCL);
+  }
+  // The pinned LLDB plugin assumes compiler/build/build/schema. Our generated
+  // headers live in the outer binary directory, including on resumed builds.
+  const file = path.join(repoDir, 'third_party', 'cmake', 'BuildCJDB.cmake');
+  const anchor = 'if(NOT "${LLDB_CMAKE_CXX_FLAGS}" STREQUAL "")';
+  const replacement = 'string(APPEND LLDB_CMAKE_CXX_FLAGS " -I\\"${CMAKE_BINARY_DIR}/schema\\"")\n' + anchor;
+  applyTextPatch(file, [[anchor, replacement]], {stage:'fetch.patch.cjdb-schema',marker:replacement});
+  // LLVM_BUILD_ARG is Unix-only upstream. Python and the launcher must also
+  // reach the standalone LLDB configure on native Windows.
+  const args = '    CMAKE_ARGS ${LLDB_CMAKE_ARGS}';
+  applyTextPatch(file, [[args, args + ' ${CJCJ_LLDB_ARGS}']], {stage:'fetch.patch.cjdb-args',marker:args + ' ${CJCJ_LLDB_ARGS}'});
+}
+
+// Applied to prepare-native's private LLVM checkout. The parent toolchain
+// stages boundscheck under aarch64; standalone CMake reports arm64 on macOS.
+export function prepareDarwinLldbSource(llvm) {
+  const base = path.join(llvm, 'lldb/source');
+  for (const plugin of ['ExpressionParser/Cangjie', 'Platform/OHOS']) {
+    const file = path.join(base, 'Plugins', plugin, 'CMakeLists.txt');
+    const anchor = 'string(REPLACE "AMD64" "x86_64" ARCH_NAME "${CMAKE_SYSTEM_PROCESSOR}")';
+    const normalize = 'string(REPLACE "arm64" "aarch64" ARCH_NAME "${ARCH_NAME}")';
+    applyTextPatch(file, [[anchor, anchor + '\n' + normalize]], {stage:'prepare.darwin.bounds', marker:normalize});
+  }
+  const file = path.join(base, 'API/CMakeLists.txt');
+  const before = 'target_link_options(liblldb PUBLIC "-Wl,-rpath,${CMAKE_SOURCE_DIR}/../utils/boundscheck/lib/${CMAKE_SYSTEM_PROCESSOR}")';
+  const after = 'target_link_options(liblldb PRIVATE "-Wl,-rpath,@loader_path")';
+  applyTextPatch(file, [[before, after]], {stage:'prepare.darwin.rpath', marker:after});
+}
+
 // The installed public compiler headers include several generated schemas.
 // Install the complete output set owned by the existing flatc target, including
 // libs-only builds; never synthesize headers or copy them after CMake install.

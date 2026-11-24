@@ -484,6 +484,10 @@ jobs:
           run-id: ${{ inputs.native_inputs_run_id || vars.CJCJ_NATIVE_INPUTS_RUN_ID }}
           github-token: ${{ github.token }}
           path: ${{ github.workspace }}/.srcbuild/native-inputs
+      # The native-inputs producer (release phase=prepare) ships one mode-preserving tar.
+      - name: Unpack native SDK producer inputs with their file modes
+        shell: bash
+        run: node ci/bootstrap/native-artifact-archive.mjs unpack "$GITHUB_WORKSPACE/.srcbuild/native-inputs" native-inputs.tar
 
       - name: Prepare paired coloured target SDK
         env:

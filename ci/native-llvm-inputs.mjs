@@ -19,12 +19,19 @@ export function nativeLlvmInputs(env=process.env) {
   for (const ref of [requestedLlvm || llvm.LLVM_SHA, requestedRuntime || runtime.RUNTIME_REF]) {
     if (!/^[a-f0-9]{40}$/.test(ref || '')) throw new Error('NATIVE_LLVM_REF_INVALID');
   }
+  // The pair this step resolves from the pin files is exported through GITHUB_ENV
+  // with CJCJ_NATIVE_PAIR_SELECTION=pinned, so a later step that inherits it does
+  // not mistake it for a caller's explicit pair (that one still needs an explicit
+  // host version). A re-run keeps 'pinned' only for exactly the checked-in pair.
+  const pinned = !requestedLlvm || (env.CJCJ_NATIVE_PAIR_SELECTION === 'pinned'
+    && requestedLlvm === llvm.LLVM_SHA && requestedRuntime === runtime.RUNTIME_REF);
   // Pin-file keys describe source facts; the process boundary has one pair.
   return {LLVM_URL:llvm.LLVM_URL, CANGJIE_COMPILER_URL:llvm.CANGJIE_COMPILER_URL,
     CANGJIE_COMPILER_SHA:llvm.CANGJIE_COMPILER_SHA, FLATBUFFERS_URL:llvm.FLATBUFFERS_URL,
     FLATBUFFERS_SHA:llvm.FLATBUFFERS_SHA,
     CJCJ_NATIVE_LLVM_REF:requestedLlvm || llvm.LLVM_SHA,
-    CJCJ_NATIVE_RUNTIME_REF:requestedRuntime || runtime.RUNTIME_REF};
+    CJCJ_NATIVE_RUNTIME_REF:requestedRuntime || runtime.RUNTIME_REF,
+    CJCJ_NATIVE_PAIR_SELECTION:pinned ? 'pinned' : 'explicit'};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   const selected=nativeLlvmInputs(),output=Object.entries(selected).map(([key,value])=>`${key}=${value}\n`).join('');

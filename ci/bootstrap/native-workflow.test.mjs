@@ -65,7 +65,7 @@ test('native Windows install/unpack consumer uses native build target; Linux cro
 });
 test('ordinary stdx source selection preserves distinct full sources and actual native AST/runtime',()=>{
  const env=selectedEnv(workflow('sdk-build-target.yml'));
- const base=workflowSourceSelection(env);assert.equal(base.STDX_REF,'b10784b27a5b3f815c9542d28f3ba02f48db48d5');
+ const base=workflowSourceSelection(env);assert.equal(base.STDX_REF,(key=>new RegExp(`^${key}=([0-9a-f]{40})$`,'m').exec(fs.readFileSync(new URL('../source_pin.env',import.meta.url),'utf8'))[1])('STDX_REF'));
  const tools=/^TOOLS_REF=([a-f0-9]{40})$/m.exec(fs.readFileSync(path.join(repo,'ci/source_pin.env'),'utf8'))[1];
  assert.equal(base.TOOLS_REF,tools);
  assert.equal(base.CJPM_REF,undefined,'CJPM has no independent source selector');
@@ -147,11 +147,12 @@ test('Windows source plan, upload and package receive the same native std for pi
   const sourcePlan=plan(t,'windows-x64',Object.fromEntries(Object.entries(env).filter(([k])=>k.startsWith('CJCJ_NATIVE_'))));
   assert.equal(sourcePlan.status,0,sourcePlan.stderr);
   const selection=native.steps.find(s=>s.name==='Resolve actual source selection'),selectedFile=path.join(root,mode+'-selected');
-  const invoke=target=>spawnSync('bash',['-eu','-c',selection.run],{cwd:repo,encoding:'utf8',env:{...selectedEnv(source),...env,WINDOWS_TOOLS_REPOSITORY:'private-fixture/tools',GITHUB_SERVER_URL:'https://github.com',CJCJ_SRCBUILD_TARGET:target,GITHUB_ENV:selectedFile}});
+  const invoke=target=>spawnSync('bash',['-eu','-c',selection.run],{cwd:repo,encoding:'utf8',env:{...selectedEnv(source),...env,WINDOWS_TOOLS_REPOSITORY:'cjcj-dev/cjcj-tools',GITHUB_SERVER_URL:'https://github.com',CJCJ_SRCBUILD_TARGET:target,GITHUB_ENV:selectedFile}});
   const win=invoke('windows-x64'),linux=invoke('linux-x64');
   assert.equal(win.status,0,win.stderr);assert.equal(linux.status,0,linux.stderr);
   const pin=JSON.parse(win.stdout).TOOLS_REF,other=JSON.parse(linux.stdout).TOOLS_REF;
-  assert.equal(pin,'7ed733230e9997a0bcfa3e1b9822d8a0ce0b7e32');assert.equal(other,'52adc7a2b67f8f1e711b6a50fbd0c83d85558a58');
+  // Windows now builds the same public product tools commit as every other host.
+  assert.equal(pin,(key=>new RegExp(`^${key}=([0-9a-f]{40})$`,'m').exec(fs.readFileSync(new URL('../source_pin.env',import.meta.url),'utf8'))[1])('TOOLS_REF'));assert.equal(other,pin);
   const [cell]=JSON.parse(sourcePlan.output.matrix).include;
   assert.equal(cell.runner,'windows-2025');
   const artifact=cell[upload.with.name.match(/^\$\{\{ matrix\.(\w+) \}\}$/)[1]];

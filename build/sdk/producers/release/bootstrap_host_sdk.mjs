@@ -54,7 +54,11 @@ export async function prepareHostSdk(platform, work) {
   const actual = crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
   if (actual !== pin.sha256) throw new Error(`HOST_SDK_SHA256_MISMATCH expected=${pin.sha256} actual=${actual}`);
   const destination = fs.mkdtempSync(path.join(work, 'host-sdk-'));
-  const extracted = spawnSync('tar', [native.os === 'win32' ? '-xf' : '-xzf', archive, '-C', destination], {stdio: 'inherit'});
+  // The Windows archive is a zip: only the system bsdtar reads it; a Git/MSYS
+  // GNU tar earlier on PATH does not (and would read "C:" as a remote host).
+  const tar = native.os === 'win32'
+    ? path.join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+  const extracted = spawnSync(tar, [native.os === 'win32' ? '-xf' : '-xzf', archive, '-C', destination], {stdio: 'inherit'});
   if (extracted.error) throw extracted.error;
   if (extracted.status !== 0) throw new Error('HOST_SDK_EXTRACT_FAILED');
   const sdk = path.join(destination, 'cangjie');

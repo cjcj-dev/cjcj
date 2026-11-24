@@ -9,6 +9,7 @@ import {installEntries} from '../../ci/bootstrap/sdk-install-entries.mjs';
 import {sdkPlatform} from '../../ci/bootstrap/sdk-platform.mjs';
 import {assertLauncherFormat} from '../../ci/bootstrap/sdk-install-entries.mjs';
 import {toolExecutionPayloads} from './tool-build-inputs.mjs';
+import {HLE_CJBIND_SOURCE_BUILD} from '../sdk/producers/release/prepare_native_inputs.mjs';
 export async function installHleDependencies({toolsRoot,sdk,platform,input,prepareOnly=false}) {
   if(!input)throw new Error('HLE_DEPENDENCIES_REQUIRED: target Node, npm dependency tree and cjbind input');
   const native=sdkPlatform(platform);
@@ -25,7 +26,17 @@ export async function installHleDependencies({toolsRoot,sdk,platform,input,prepa
   // optional --no-detect-include-path, -p/-o and header -- clang arguments.
   // Both the original release and upstream 0.3.6 provide that CLI contract.
   // Preserve the producer's version/source; this is not production qualification.
-  if(!['v1.1.0-alpha.53.1','0.3.6'].includes(input.cjbind.version))throw new Error('HLE_DEPENDENCY_VERSION cjbind');
+  // v1.1.0-alpha.53.1-source is that release's tag commit built from source on
+  // darwin_x86_64, the one host without a release asset.
+  if(!['v1.1.0-alpha.53.1','v1.1.0-alpha.53.1-source','0.3.6'].includes(input.cjbind.version))throw new Error('HLE_DEPENDENCY_VERSION cjbind');
+  // The source version names one approved build: its host, repository and
+  // commit are the producer's (prepare_native_inputs.mjs HLE_CJBIND_SOURCE_BUILD).
+  const sourceBuild=Object.hasOwn(HLE_CJBIND_SOURCE_BUILD,platform)?HLE_CJBIND_SOURCE_BUILD[platform]:undefined;
+  if(input.cjbind.version==='v1.1.0-alpha.53.1-source'||input.cjbind.commit!==undefined) {
+    if(!sourceBuild||input.cjbind.version!==sourceBuild.version||input.cjbind.commit!==sourceBuild.commit
+      ||input.cjbind.source!==sourceBuild.repo+'@'+sourceBuild.commit)
+      throw new Error('HLE_DEPENDENCY_SOURCE_IDENTITY cjbind');
+  }
   await assertLauncherFormat({binary:input.node.path,native,platform});
   await assertLauncherFormat({binary:input.cjbind.path,native,platform});
   sdk=await privateRoot(sdk);

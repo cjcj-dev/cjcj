@@ -602,5 +602,25 @@
     "file": "test/runtime_param_layout/run.sh",
     "kind": "driver",
     "reason": "manual driver: nothing under .github/workflows names it and it needs a shell script inputs only; documented invocation `bash test/runtime_param_layout/run.sh \"$candidate_repo\" \"$runtime_header\" \\`"
+  },
+  {
+    "file": "tests/modal_default_compat/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a built local-mode-api cjc for it; documented invocation `bash tests/modal_default_compat/run.sh /absolute/cjc /fresh/output-dir`"
+  },
+  {
+    "file": "tests/modal_iface_diamond/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a built local-mode-api cjc for it; documented invocation `bash tests/modal_iface_diamond/run.sh /absolute/cjc /fresh/output-dir`"
+  },
+  {
+    "file": "tests/modal_prop_inherit/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a built local-mode-api cjc for it; documented invocation `bash tests/modal_prop_inherit/run.sh /absolute/cjc /fresh/output-dir`"
+  },
+  {
+    "file": "tests/modal_std_collection/run.sh",
+    "kind": "driver",
+    "reason": "manual driver: no workflow provisions a built local-mode-api cjc for it; documented invocation `bash tests/modal_std_collection/run.sh /absolute/cjc /fresh/output-dir`"
   }
 ]

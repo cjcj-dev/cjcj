@@ -83,11 +83,27 @@ test('release runtime loader selects the stack-slot-root runtime paired with LLV
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
 
-test('release LLVM source and both dylib provenance pins use the stack-slot-root and RawData safepoint producer', () => {
+// Route (b): the ci/llvm-dylib/* pins and ci/llvm-dylib/release.json are an immutable record of
+// the already-published legacy tuple. They are checked against that record, never rewritten to
+// impersonate the current RC; the current RC pair is checked separately against the explicit
+// native producer pins of the unified SDK production line (build/sdk/source_pin.env).
+const legacyDylib = JSON.parse(read('ci/llvm-dylib/release.json'));
+const rcProducer = pins('build/sdk/source_pin.env');
+
+test('active RC pair is the explicit native producer pair, distinct from the legacy dylib archive', () => {
   assert.match(llvm.LLVM_SHA, /^[0-9a-f]{40}$/, 'LLVM source identity comes from ci/llvm_pin.env');
+  assert.equal(llvm.LLVM_SHA, rcProducer.LLVM_REF, 'ci/llvm_pin.env LLVM_SHA must be the RC native producer LLVM');
+  assert.equal(runtime.RUNTIME_REF, rcProducer.RUNTIME_REF, 'ci/runtime_pin.env RUNTIME_REF must be the RC native producer runtime');
+  assert.notEqual(legacyDylib.llvm_sha, llvm.LLVM_SHA,
+    'the legacy dylib archive must not be presented as the active RC producer; rotating it needs a real new tuple');
+  console.log(`ASSERT active-rc-pair llvm=${llvm.LLVM_SHA} runtime=${runtime.RUNTIME_REF} legacy=${legacyDylib.llvm_sha}`);
+});
+
+test('legacy Linux dylib provenance pins stay bound to their immutable published tuple', () => {
+  assert.match(legacyDylib.llvm_sha, /^[0-9a-f]{40}$/, 'legacy LLVM source identity comes from ci/llvm-dylib/release.json');
   for (const platform of ['linux_x86_64', 'linux_aarch64']) {
     const dylib = pins(`ci/llvm-dylib/${platform}.env`);
-    assert.equal(dylib.LLVM_DYLIB_SOURCE_SHA, llvm.LLVM_SHA, platform);
+    assert.equal(dylib.LLVM_DYLIB_SOURCE_SHA, legacyDylib.llvm_sha, platform);
     assert.equal(dylib.LLVM_DYLIB_RUN_ID, llvm.LLVM_TUPLE_RUN_ID, platform);
     assert.equal(dylib.LLVM_DYLIB_RUN_ATTEMPT, llvm.LLVM_TUPLE_RUN_ATTEMPT, platform);
   }
@@ -95,14 +111,14 @@ test('release LLVM source and both dylib provenance pins use the stack-slot-root
 });
 
 test('every platform dylib pin names the paired prerelease that published it', () => {
-  const release = JSON.parse(read('ci/llvm-dylib/release.json'));
-  assert.equal(release.llvm_sha, llvm.LLVM_SHA);
+  const release = legacyDylib;
+  assert.match(release.tag, new RegExp(`^llvm-dylib-${release.llvm_sha.slice(0, 12)}-${release.run_id}-${release.run_attempt}-prerelease$`));
   assert.equal(release.run_id, llvm.LLVM_TUPLE_RUN_ID);
   assert.equal(release.run_attempt, llvm.LLVM_TUPLE_RUN_ATTEMPT);
   assert.equal(release.prerelease, true, 'the tuple must ship as a prerelease, never a full release');
   for (const platform of ['linux_x86_64', 'linux_aarch64', 'darwin_x86_64', 'darwin_aarch64']) {
     const dylib = pins(`ci/llvm-dylib/${platform}.env`);
-    assert.equal(dylib.LLVM_DYLIB_SOURCE_SHA, llvm.LLVM_SHA, platform);
+    assert.equal(dylib.LLVM_DYLIB_SOURCE_SHA, release.llvm_sha, platform);
     assert.equal(String(release.platforms[platform].artifact_id), dylib.LLVM_DYLIB_ARTIFACT_ID, platform);
     assert.equal(release.platforms[platform].library_sha256, dylib.LLVM_DYLIB_SHA256, platform);
   }

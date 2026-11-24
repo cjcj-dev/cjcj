@@ -11,6 +11,7 @@ import {
   getTarget,
   isDroppedArm32Tuple,
   releasePlatformReadiness,
+  sourceBuildCells,
 } from '../lib/targets.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
@@ -131,7 +132,11 @@ test('release.yml package jobs agree with the release platform table', () => {
     assert.equal(scalar(job, 'runner'), readiness.runner, `${key}: runner`);
     assert.equal(scalar(job, 'llvm_platform'), readiness.llvmPlatform, `${key}: llvm_platform`);
     assert.equal(scalar(job, 'sdk_runtime_dir'), readiness.runtimeTuple, `${key}: sdk_runtime_dir`);
-    assert.equal(scalar(job, 'std_artifact'), readiness.host==='windows-x64'?'final-std-native-windows-x64':`final-std-${readiness.host}`, `${key}: std_artifact`);
+    if (readiness.host === 'windows-x64') {
+      assert.equal(scalar(job, 'std_artifact'), '${{ needs.source-p3-windows-x64.outputs.std_artifact }}', key);
+      assert.equal(sourceBuildCells({nativeInputs:true}).find(row=>row.target===readiness.host).std_artifact,
+        'final-std-native-windows-x64', key);
+    } else assert.equal(scalar(job, 'std_artifact'), `final-std-${readiness.host}`, key);
     const cross = JSON.parse(scalar(job, 'cross_std_artifacts'));
     assert.deepEqual(Object.keys(readiness.crossStd), cross.map(entry => entry.tuple), `${key}: cross tuples`);
   }

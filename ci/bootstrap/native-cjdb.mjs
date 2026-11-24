@@ -1,7 +1,7 @@
 #!/usr/bin/env zx
 // Fixed compiler CMake targets build the complete native LLVM/CJDB dependency closure.
 import fs from 'node:fs/promises';
-import {applyCompilerBoundscheckDependencies,applyCompilerLlvmVersion,applyCompilerXml2Install,applyCompilerCjdbPatches,applyCompilerWindowsPatches,applyCompilerSchemaInstall} from '../../build/srcbuild/stages/fetch.mjs';
+import {applyNativeCjdbConfigure,applyCompilerBoundscheckDependencies,applyCompilerLlvmVersion,applyCompilerXml2Install,applyCompilerCjdbPatches,applyCompilerWindowsPatches,applyCompilerSchemaInstall} from '../../build/srcbuild/stages/fetch.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
@@ -164,10 +164,10 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
  }
  // BuildCJDB.cmake disables libedit on Windows. Unix uses the native ABI directory.
  const editDir=native.os==='win32'?null:config.libeditLibraryDirectory || path.join(libedit,'lib',...(native.os==='linux'?[(native.arch==='arm64'?'aarch64':'x86_64')+'-linux-gnu']:[]));
- const env={...process.env,CMAKE_BUILD_PARALLEL_LEVEL:jobs,
+ const env={...process.env,CMAKE_BUILD_PARALLEL_LEVEL:jobs,TARGET_PYTHON_PATH:python,
   [native.loader]:[python,python+'/lib',editDir,process.env[native.loader]].filter(Boolean).join(delimiter),
   ...(native.loader==='PATH'?{}:{PATH:[python+'/bin',process.env.PATH].join(delimiter)})};
- const selectedPython=await pythonConfiguration(python,platform,execute,config.pythonExecutable);
+ const selectedPython=await pythonConfiguration(python,platform,execute,config.pythonExecutable,config.relocatablePython);
  const run=(argv,options={})=>command(argv,{env,records,...options});
  const prepared=installOnly?{compiler:original.compilerSource.root,source:original.compilerSource}:await prepareNativeCompilerSource({compiler,compilerArchive:config.compilerArchive,
   bounds,flatbuffers,build,install,commits,commit:commits.compiler},run);
@@ -175,6 +175,7 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
  if(!installOnly) {
  // Preserve the existing frontend ordering fixes on the selected upstream source.
  applyCompilerCjdbPatches(compiler);
+ applyNativeCjdbConfigure(compiler);
  applyCompilerBoundscheckDependencies(compiler);
  applyCompilerSchemaInstall(compiler);
  applyCompilerLlvmVersion(compiler);
@@ -193,14 +194,22 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
  if(!installOnly) {
  if(await fileDigest(xml2Archive.file)!==xml2Archive.sha256)throw new Error('XML2_ARCHIVE_IDENTITY');
  await fs.mkdir(xml2,{recursive:true});
- await run(['tar','-xJf',xml2Archive.file,'--strip-components=1','-C',xml2]);
+ await run([native.os==='win32'?path.join(process.env.SystemRoot,'System32/tar.exe'):'tar','-xJf',xml2Archive.file,'--strip-components=1','-C',xml2]);
  await run([selectedPython.executable,'-I','-c','import sys,sysconfig,ssl,_ctypes; assert sys.version_info[:2]==(3,11); print(sys.version)']);
  }
  // Reconfigure the existing graph for the new install prefix: upstream CJDB
  // symlink install(CODE) embeds that prefix at configure time. --prefix alone
  // would still write aliases into the old installation. No build target runs
  // in install-only mode.
+ const llvmBuild=path.join(build,'third_party/cjnative-prefix/src/cjnative-build');
  const pythonArgs=[`-DPython3_EXECUTABLE=${selectedPython.executable}`,`-DPython3_INCLUDE_DIR=${selectedPython.include}`,`-DPython3_LIBRARY=${selectedPython.library}`];
+ // Set the standalone child's inputs explicitly. find_package(Clang) can
+ // otherwise select an unrelated runner installation before LLVM's hints.
+ const lldbArgs=[...pythonArgs,'-DLLDB_PYTHON_EXT_SUFFIX='+selectedPython.suffix,'-DClang_DIR='+path.join(llvmBuild,'lib/cmake/clang'),
+  '-DLLVM_TABLEGEN='+path.join(llvmBuild,'bin','llvm-tblgen'+native.exe),
+  '-DLIBXML2_INCLUDE_DIR='+path.join(build,'third_party/xml2/include/libxml2'),
+  '-DLIBXML2_LIBRARY='+path.join(build,'third_party/xml2/lib',native.os==='win32'?'libxml2.dll.a':'libxml2'+native.shared),
+  '-DCMAKE_C_COMPILER_LAUNCHER='+launcher,'-DCMAKE_CXX_COMPILER_LAUNCHER='+launcher,'-DLLVM_PARALLEL_LINK_JOBS='+linkJobs];
  const toolchain=config.toolchain || path.join(compiler,'cmake',platform==='windows_x86_64'?'mingw_x86_64_toolchain.cmake':platform+'_toolchain.cmake');
  await fs.stat(toolchain);
  const llvmArgs=[`-DCANGJIE_RUNTIME_SOURCE_DIR=${runtime}`,`-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`,
@@ -214,7 +223,8 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
     original?.windowsToolchain?[`-DCANGJIE_TOOLCHAIN_RUNTIME_FILES=${[...new Set(original.windowsToolchain.installedFiles.map(row=>path.join(config.nativeInstall,row.path)))].join(';')}`]:[]),
   '-DCANGJIE_LLVM_BUILD_TYPE=Release','-DCANGJIE_CJDB_BUILD_TYPE=Release',`-DCANGJIE_CJNATIVE_SOURCE_DIR=${llvm}`,
   `-DCANGJIE_RUNTIME_SOURCE_DIR=${runtime}`,`-DCANGJIE_XML2_SOURCE_DIR=${xml2}`,
-  `-DCMAKE_PREFIX_PATH=${[python,libedit,build+'/third_party/xml2'].filter(Boolean).join(';')}`,`-DPython3_EXECUTABLE=${selectedPython.executable}`,
+  `-DCMAKE_PREFIX_PATH=${[python,build+'/third_party/xml2',libedit].filter(Boolean).join(';')}`,`-DPython3_EXECUTABLE=${selectedPython.executable}`,
+  `-DCJCJ_LLDB_ARGS=${lldbArgs.join(';').replaceAll('\\','/')}`,
   `-DLLVM_BUILD_ARG=${pythonArgs.join(';')}`,`-DCANGJIE_LLVM_BUILD_ARGS=${llvmArgs.join(';')}`,
   `-DCANGJIE_LINK_JOB_POOL=${linkJobs}`,`-DCMAKE_INSTALL_PREFIX=${install}`]);
  const targets=[...new Set([...native.nativeTargets,'cangjie-ast-support'])];
@@ -234,7 +244,7 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
 
  const edit=editDir;
  if(edit)await copyOutputs(nativeRoot,(await fs.readdir(edit)).filter(n=>(native.os==='darwin'?/^libedit.*\.dylib$/:native.os==='win32'?/^(?:lib)?edit.*\.dll$/i:/^libedit\.so(?:\.|$)/).test(n)).map(name=>({from:edit+'/'+name,to:'lib/'+name,owner:'libedit'})));
- const observed=await verifyCjdbPythonConfiguration(python,build+'/third_party/lldb-build',execute,platform,selectedPython.executable);
+ const observed=await verifyCjdbPythonConfiguration(python,build+'/third_party/lldb-build',execute,platform,selectedPython.executable,config.relocatablePython);
  const installed=await verifyCjdbPythonInstallation(python,nativeRoot,execute,platform,selectedPython.executable);
  const pythonSource=await pythonSourceInputs({...config.pythonInputs,root:python,nativeRoot,platform,selected:observed.selected});
  const fixed=nativeRoot+'/fixed-llc';await fs.mkdir(fixed,{recursive:true});

@@ -5,15 +5,13 @@ on:
     secrets:
       GITCODE_API_KEY:
         required: false
-      WINDOWS_TOOLS_READ_TOKEN:
-        required: false
     outputs:
       std_artifact:
         description: Native final std name for a single runnable source target
         value: ${{ jobs.plan.outputs.std_artifact }}
     inputs:
       mode:
-        description: build (default) runs the source SDK plan and fan-out; package builds one release package from a finished build.
+        description: build (default) runs the source SDK plan and fan-out; package builds one release package from a finished build; prepare builds the five-host native inputs (release.yml phase=prepare).
         required: false
         type: string
         default: build
@@ -301,9 +299,24 @@ jobs:
   # of them before phase 1 has reported anything is what the phase policy exists
   # to prevent. Selecting here lets each phase call this workflow for its own
   # target; the tuple list stays in one place.
+  # phase=prepare: the five native hosts build native-inputs-<target> and
+  # native-runtime-install-<llvm_platform> from fixed Git sources. No source
+  # target, package or publication job runs in this mode.
+  prepare:
+    name: Prepare five-host native inputs
+    if: inputs.mode == 'prepare'
+    uses: ./.github/workflows/sdk-build-target.yml
+    with:
+      prepare_native: true
+      native_llvm_ref: ${{ inputs.native_llvm_ref }}
+      native_runtime_ref: ${{ inputs.native_runtime_ref }}
+      native_host_version: ${{ inputs.native_host_version }}
+      source_selection: ${{ inputs.source_selection }}
+      cangjie_ref: ${{ inputs.cangjie_ref }}
+
   plan:
     name: Select targets
-    if: inputs.mode != 'package'
+    if: inputs.mode != 'package' && inputs.mode != 'prepare'
     runs-on: ubuntu-24.04
     env:
       CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
@@ -350,8 +363,6 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     uses: ./.github/workflows/sdk-build-target.yml
-    secrets:
-      WINDOWS_TOOLS_READ_TOKEN: ${{ github.event.repository.private && matrix.target == 'windows-x64' && secrets.WINDOWS_TOOLS_READ_TOKEN || '' }}
     with:
       native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
       native_build_inputs_run_id: ${{ inputs.native_build_inputs_run_id }}
@@ -479,11 +490,9 @@ jobs:
         if: inputs.validation_run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          PRIVATE: ${{ github.event.repository.private }}
           SOURCE_RUN_ID: ${{ inputs.validation_run_id }}
         shell: pwsh
         run: |
-          if ($env:PRIVATE -ne 'true') { throw 'private validation repository required' }
           if ($env:SOURCE_RUN_ID -notmatch '^[1-9][0-9]*$') { throw 'invalid producer run id' }
           $run = Invoke-RestMethod "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID" -Headers @{Authorization="Bearer $env:GH_TOKEN"}
           if ($run.path -ne '.github/workflows/sdk-build.yml' -or $run.head_sha -ne $env:GITHUB_SHA -or $run.head_repository.full_name -ne $env:GITHUB_REPOSITORY -or $run.conclusion -ne 'success') { throw 'producer commit, repository or conclusion differs' }

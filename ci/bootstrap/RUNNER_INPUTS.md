@@ -132,16 +132,49 @@ The source workflow requires `native_inputs_artifact` and its original
 `native_inputs_run_id`. The artifact contains complete N/R/AST native install
 roots. On Windows the job checks out the exact workflow SHA for both the H1
 seed and the next compiler stages; Node runs the job-installed zx CLI.
-Native Windows validation requires a private workflow repository with the selected cjcj commit,
-repository variable WINDOWS_TOOLS_REPOSITORY (owner/name) containing the paired tools commit,
-and a contents-read WINDOWS_TOOLS_READ_TOKEN for that repository. Neither a pin nor this
-workflow supplies those objects or grants that access.
-Do not put adapter sources or a tools.privateRoot in the Windows artifact.
-The Darwin adapter currently uses the two paired modules exported with
-`node ci/bootstrap/deploy-native-tools.mjs TOOLS_REPO COMMIT EMPTY_DESTINATION`.
-Its `locations.json` records `platform`, `installations` (each has relative
-`install`, original `buildResult`, and `configuration`) and
-`tools.privateRoot`. No removed receipt or SDK lock is a prerequisite.
+Native Windows builds the public `cjcj-dev/cjcj-tools` at the `TOOLS_REF` of
+`ci/source_pin.env` (`build/sdk/producers/srcbuild/source-selection.mjs`); no
+read token is needed. The repository variable WINDOWS_TOOLS_REPOSITORY can still
+name another owner/name, which must serve that same pinned commit.
+Do not put adapter sources or a tools.privateRoot in any native-inputs artifact;
+`configure-gha-inputs.mjs` rejects a `tools.privateRoot`. Linux and Darwin build
+H1 through the same public CJPM producer of `sdk-native-stage.mjs`: H's cjpm/cjc
+compile the pinned workspace, the host's `packages/cjc` target section supplies
+the ELF or Mach-O link inputs, and the H LLVM library and directory (the Mach-O
+`-rpath`) become N's, so the transitional stages execute H1 with N LLVM. The
+fixed H1 source (`FIXED_INPUTS.h1`) has no `[target.<triple>]` section, only the
+ELF link in `[package]`; on Darwin that line is translated to the same Mach-O
+contract (`-export_dynamic`, `-headerpad_max_install_names`, N's library,
+`-rpath <N lib>`, `-lc++`), with no H LLVM, `libLLVM-15.so`, `--export-dynamic` or
+`-lstdc++` left. `runtime_shim/cjc_heap_defaults.c` is compiled only when a
+manifest names `runtime_shim/cjc_heap_defaults.o` (the Linux sections of later
+sources); a named object without its source fails closed.
+`locations.json` records `platform`, `host` (`install`, the original official
+`archive` file and `version`), `installations` (each has relative `install`,
+original `buildResult`, and `configuration`), `tools` and, for tools builds,
+`hleDependencies`. No removed receipt or SDK lock is a prerequisite.
+
+The release `phase=prepare` producer (`prepare_native_inputs.mjs`) uploads each
+native-inputs root and each runtime installation as one tar
+(`native-inputs.tar`, `runtime-install.tar`) because Actions artifacts drop
+POSIX modes; consumers run `ci/bootstrap/native-artifact-archive.mjs unpack`,
+which requires that single archive, before the host is executed. The host is
+the pinned official archive downloaded by `bootstrap_host_sdk.mjs` and kept
+under `host-archive/` with its original name; `HOST-INPUT.json` binds its size
+and SHA-256. The same producer supplies the HLE dependency package, the N shim
+object and cjdb. Its cjbind is the fixed cjbind-cangjie v1.1.0-alpha.53.1
+release on linux-x64, linux-aarch64, windows-x64 and darwin-arm64 (four pinned
+size/SHA-256 assets). That release has no darwin-x64 asset, so darwin-x64 uses
+the approved source identity `HLE_CJBIND_SOURCE_BUILD`: the release's tag commit
+`https://gitcode.com/Cangjie-SIG/cjbind-cangjie.git@d9ba9709906fda36fdb486fa55ec615cdb1fa2cb`,
+fetched and checked by `git rev-parse HEAD`, built in prepare-native on
+macos-15-intel with the installed official darwin-x64 host SDK (as installed,
+not patched) and uv, and probed with `--version`. `install-hle --cjbind-file F
+--cjbind-source-commit C` records it as version `v1.1.0-alpha.53.1-source` with
+that `source`, `commit`, `sha256` and `size`; a missing, empty or
+non-executable file, any other commit, or a source commit on another host fails
+closed (`HLE_CJBIND_SOURCE_FILE_REQUIRED`, `HLE_CJBIND_SOURCE_FILE`,
+`HLE_CJBIND_SOURCE_COMMIT`, `HLE_CJBIND_SOURCE_UNAPPROVED`).
 `configure-gha-inputs.mjs` checks out the fixed LLVM, runtime, AST compiler and
 H1 repositories, reads the actual candidate checkout, selects execution-host H,
 and writes `CJCJ_SDK_INPUTS` into GITHUB_ENV. The artifact must contain genuine

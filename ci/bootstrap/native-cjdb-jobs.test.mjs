@@ -77,6 +77,17 @@ endforeach()
   assert.ok(observed.startsWith(expected.join('|')+'|'),observed);
   assert.ok(observed.includes('-DLLVM_PARALLEL_LINK_JOBS='+expected[1]),observed);
   assert.doesNotMatch(r.stderr,/NATIVE_CPUS/);
+  const child=await fs.readFile(config.build+'.compiler-source/third_party/cmake/BuildCJDB.cmake','utf8');
+  const cache=await fs.readFile(config.build+'/CMakeCache.txt','utf8');
+  const args=cache.split('\n').find(line=>line.startsWith('CJCJ_LLDB_ARGS:'))??'';
+  console.log('LLDB_CHILD_CONFIG_ASSERTION_REACHED '+label);
+  assert.ok(child.includes('CMAKE_ARGS ${LLDB_CMAKE_ARGS} ${CJCJ_LLDB_ARGS}'));
+  assert.ok(child.includes('${CMAKE_BINARY_DIR}/schema'));
+  for(const arg of ['-DClang_DIR='+config.build+'/third_party/cjnative-prefix/src/cjnative-build/lib/cmake/clang',
+    '-DLLVM_TABLEGEN='+config.build+'/third_party/cjnative-prefix/src/cjnative-build/bin/llvm-tblgen',
+    '-DLIBXML2_LIBRARY='+config.build+'/third_party/xml2/lib/libxml2.so','-DPython3_EXECUTABLE=',
+    '-DPython3_LIBRARY=','-DLLDB_PYTHON_EXT_SUFFIX=','-DCMAKE_CXX_COMPILER_LAUNCHER='+launcher])
+    assert.ok(args.includes(arg),arg);
   const dependencyFile=config.build+'.compiler-source/third_party/CMakeLists.txt';
   const before='DEPENDS cangjie-demangler boundscheck)',after='DEPENDS cangjie-demangler boundscheck boundscheck-static)';
   const prepared=await fs.readFile(dependencyFile,'utf8');

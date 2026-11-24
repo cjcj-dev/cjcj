@@ -64,6 +64,6 @@ test('OHOS real release workflow selects the shared SDK probe and both source ar
   assert.match(workflow, /build_ohos: true/);
   for (const key of keys) {
     assert.ok(workflow.includes(`release_key: ${key}\n`));
-    assert.ok(workflow.includes(`needs.package-${key}.result == 'success'`));
+    assert.match(workflow, new RegExp(`^    needs: \\[[^\\]]*\\bpackage-${key}\\b[^\\]]*\\]\\n    # Default needs semantics`, 'm'));
   }
 });
