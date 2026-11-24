@@ -299,11 +299,15 @@ test('job identity and host mapping matter even when the package job count is un
   assert.match(wrongHost.value.value, /host\/LLVM mismatch/);
   const workflow = await fs.readFile(path.join(repo, '.github/workflows/release.yml'), 'utf8');
   for (const [from, to, expected] of [
-    [`llvm_platform: ${first.llvm_platform}\n`, 'llvm_platform: fixture-wrong-llvm\n', 'host/LLVM mismatch'],
-    [`release_key: ${first.key}\n`, 'release_key: fixture-unknown-key\n', 'unexpected release_key=fixture-unknown-key'],
-    [`      release_key: ${first.key}\n`, '', 'unexpected release_key=<missing>'],
+    [new RegExp(`(\\{release_key: ${first.key},[^\\n]*?llvm_platform: )${first.llvm_platform},`), '$1fixture-wrong-llvm,', 'host/LLVM mismatch'],
+    [`{release_key: ${first.key},`, '{release_key: fixture-unknown-key,', 'unexpected release_key=fixture-unknown-key'],
+    [`{release_key: ${first.key}, `, '{', 'unexpected release_key=<missing>'],
   ]) {
-    await write(root, '.github/workflows/release.yml', workflow.replace(from, to));
+    // Matrix rows are flow mappings; a mutation that does not apply would
+    // silently test the unmodified workflow.
+    const mutated = workflow.replace(from, to);
+    assert.notEqual(mutated, workflow, `mutation not applied: ${from}`);
+    await write(root, '.github/workflows/release.yml', mutated);
     const bad = gate(root, 'G15');
     assert.equal(bad.result.status, 1, JSON.stringify(bad.value));
     assert.ok(bad.value.value.includes(expected), bad.value.value);
