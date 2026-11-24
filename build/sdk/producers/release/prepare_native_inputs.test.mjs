@@ -1351,6 +1351,15 @@ const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
 const outlineMacro = text => /#define DEFINE_COMPILERRT_OUTLINE_FUNCTION_UNMANGLED\(name\)((?:.*\\\n)*.*)/.exec(text)[1]
   .split(/\s*\\\n\s*/).map(part => part.trim()).filter(Boolean);
 
+// The xray x86_64 trampoline's branch targets, jump then definition, as eb7ad012 spells them.
+async function writeXrayFixture(work) {
+  const {DARWIN_XRAY_X86_64_LOCAL_LABELS} = await import('../../../srcbuild/stages/fetch.mjs');
+  const file = path.join(work, 'compiler-rt/lib/xray/xray_trampoline_x86_64.S');
+  fs.mkdirSync(path.dirname(file), {recursive: true});
+  fs.writeFileSync(file, DARWIN_XRAY_X86_64_LOCAL_LABELS.map(name => `\tje\t.L${name}\n.L${name}:\n`).join(''));
+  return file;
+}
+
 test('Darwin compiler-rt outline atomics name their global label before opening the CFI frame', async t => {
   const {prepareDarwinCompilerRtSource} = await import('../../../srcbuild/stages/fetch.mjs');
   assert.equal(sha256(ASSEMBLY_H_EB7AD012), '981c94078f5ae46f9b8d165f71fc09b6d4ebff5734f78ac3f523db8aea21969f');
@@ -1360,6 +1369,7 @@ test('Darwin compiler-rt outline atomics name their global label before opening 
   fs.mkdirSync(path.dirname(file), {recursive: true});
   fs.writeFileSync(file, '#include "int_lib.h"\n' + ASSEMBLY_H_EB7AD012 + '#define END_COMPILERRT_FUNCTION(name)\n');
   assert.deepEqual(outlineMacro(fs.readFileSync(file, 'utf8')).slice(-3), ['CFI_START SEPARATOR', 'DECLARE_FUNC_ENCODING', 'name: SEPARATOR BTI_C']);
+  await writeXrayFixture(work);
   prepareDarwinCompilerRtSource(work);
   const patched = fs.readFileSync(file, 'utf8');
   prepareDarwinCompilerRtSource(work);
@@ -1390,6 +1400,43 @@ test('red cut: a drifted compiler-rt assembly.h anchor fails closed and stays un
   }
   fs.rmSync(file);
   assert.throws(() => prepareDarwinCompilerRtSource(work));
+});
+
+// Control arm on the real pinned sources: Mach-O rejects the unpatched trampoline
+// exactly as Xcode 16.4 did (run 45385716455 step 5510/6066); the patched one
+// assembles for x86_64-apple-macos and keeps assembling for x86_64 ELF.
+const LLVM_SOURCE = process.env.CJCJ_LLVM_SOURCE || '/root/cj_build/llvm_rebase';
+const XRAY_INPUTS = ['xray/xray_trampoline_x86_64.S', 'builtins/assembly.h', 'sanitizer_common/sanitizer_asm.h'];
+test('Darwin xray x86_64 trampoline uses assembler-local labels that Mach-O and ELF both assemble', async t => {
+  const {prepareDarwinCompilerRtSource} = await import('../../../srcbuild/stages/fetch.mjs');
+  const real = XRAY_INPUTS.map(name => path.join(LLVM_SOURCE, 'compiler-rt/lib', name));
+  if (!real.every(file => fs.existsSync(file))) return t.skip(`no compiler-rt sources under ${LLVM_SOURCE}`);
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-darwin-xray-'));
+  t.after(() => fs.rmSync(work, {recursive: true, force: true}));
+  XRAY_INPUTS.forEach((name, i) => {
+    const to = path.join(work, 'compiler-rt/lib', name);
+    fs.mkdirSync(path.dirname(to), {recursive: true});
+    fs.copyFileSync(real[i], to);
+  });
+  const file = path.join(work, 'compiler-rt/lib/xray/xray_trampoline_x86_64.S');
+  const clang = spawnSync('clang', ['--version'], {encoding: 'utf8'}).status === 0;
+  const assemble = target => spawnSync('clang', [`--target=${target}`, '-c', file, '-o', path.join(work, `${target}.o`)], {encoding: 'utf8'});
+  if (clang) {
+    const before = assemble('x86_64-apple-macos10.13');
+    assert.notEqual(before.status, 0);
+    assert.match(before.stderr, /invalid CFI advance_loc expression/);
+  }
+  prepareDarwinCompilerRtSource(work);
+  const patched = fs.readFileSync(file, 'utf8');
+  prepareDarwinCompilerRtSource(work);
+  assert.equal(fs.readFileSync(file, 'utf8'), patched, 'idempotent');
+  assert.deepEqual(patched.match(/\.L[A-Za-z_]\w*/g), null, 'no .L label is left');
+  assert.equal(patched.split('LOCAL_LABEL(').length - 1, 14);
+  if (!clang) return t.skip('clang is not installed');
+  for (const target of ['x86_64-apple-macos10.13', 'x86_64h-apple-macos10.13', 'x86_64-unknown-linux-gnu']) {
+    const after = assemble(target);
+    assert.equal(after.status, 0, `${target}: ${after.stderr}`);
+  }
 });
 
 test('prepare-native patches the private LLVM checkout\'s compiler-rt on Darwin hosts only', () => {

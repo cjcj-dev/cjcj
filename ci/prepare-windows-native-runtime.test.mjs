@@ -6,6 +6,7 @@ import test from 'node:test';
 import {spawnSync} from 'node:child_process';
 import {WINDOWS_RUNTIME_CC, defaultWindowsCandidates} from '../build/sdk/producers/platform_matrix/pick_cc.mjs';
 import {resolveSccachePath} from './sccache/resolve-path.mjs';
+import {windowsRuntimeGitGuard} from '../build/sdk/producers/platform_matrix/windows_runtime_git.mjs';
 
 // prepare.yml reaches build_runtime.mjs on all five hosts. On windows-x64 that
 // path needs the windows-x86_64 runtime target (native_runtime.mjs
@@ -250,9 +251,11 @@ function msys2Install() {
 test('native-windows-tools installs the MINGW64 compiler-rt, libc++, libunwind and LLD the runtime links with', () => {
   const packages = msys2Install();
   const mingw = ['clang', 'gcc', 'ninja', 'llvm', 'openssl', 'binutils', 'compiler-rt', 'libc++', 'libunwind', 'lld', 'llvm-tools'];
-  for (const name of ['git', 'tar', 'patch', 'make', 'file', 'gzip', 'unzip', ...mingw.map(name => `mingw-w64-x86_64-${name}`)])
+  for (const name of ['tar', 'patch', 'make', 'file', 'gzip', 'unzip', ...mingw.map(name => `mingw-w64-x86_64-${name}`)])
     assert.ok(packages.includes(name), `${name} in setup-msys2 install: ${packages.join(' ')}`);
   assert.equal(new Set(packages).size, packages.length, 'no package is listed twice');
+  // MSYS2 git would be first on GITHUB_PATH and mark the Git for Windows checkouts dirty.
+  assert.ok(!packages.includes('git') && !packages.some(name => /(^|-)git$/.test(name)), packages.join(' '));
   // The consumer that selects the linker these packages provide.
   assert.match(read('build/sdk/producers/platform_matrix/windows_runtime_toolchain.cmake'), /^set\(CMAKE_LINKER_TYPE LLD\)$/m);
 });
@@ -301,4 +304,54 @@ test('native-windows-tools stops before CMake when any MINGW64 linker input is m
   } finally {
     fs.rmSync(work, {recursive: true, force: true});
   }
+});
+
+// Run 45401980497: MSYS2 git saw the Git for Windows runtime checkout as dirty and
+// the provenance stamp became <sha>-dirty. The guard runs with fake gits on PATH.
+test('Windows runtime build refuses a non-Git-for-Windows git and prints the porcelain status first', t => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-git-guard-'));
+  t.after(() => fs.rmSync(work, {recursive: true, force: true}));
+  const run = version => {
+    const bin = path.join(work, version.replace(/\W/g, '_'));
+    fs.mkdirSync(bin, {recursive: true});
+    fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\nif [ "$1" = --version ]; then echo "${version}"; else echo "git $*"; fi\n`, {mode: 0o755});
+    fs.writeFileSync(path.join(bin, 'cygpath'), '#!/bin/sh\n[ "$1" = -m ] && printf "%s\\n" "$2" | sed -E "s|^/([a-z])/|\\1:/|"\n', {mode: 0o755});
+    const script = ['set -euo pipefail', 'runtime_source=/d/a/cjcj/cjcj/runtime-source', ...windowsRuntimeGitGuard('runtime_source'), 'echo REACHED_BUILD'].join('\n');
+    return spawnSync('bash', ['-c', script], {encoding: 'utf8', env: {...process.env, PATH: `${bin}:/usr/bin:/bin`}});
+  };
+  const windows = run('git version 2.56.1.windows.1');
+  assert.equal(windows.status, 0, windows.stderr);
+  assert.match(windows.stdout, /RUNTIME_SOURCE_STATUS_BEGIN\ngit -C d:\/a\/cjcj\/cjcj\/runtime-source status --porcelain\nRUNTIME_SOURCE_STATUS_END\nREACHED_BUILD/);
+  const msys = run('git version 2.56.1');
+  assert.equal(msys.status, 5);
+  assert.match(msys.stderr, /FATAL: runtime provenance needs Git for Windows/);
+  assert.doesNotMatch(msys.stdout, /REACHED_BUILD/);
+  const source = read('build/sdk/producers/platform_matrix/build_runtime.mjs');
+  const guard = source.indexOf("...windowsRuntimeGitGuard('runtime_source'),");
+  assert.ok(guard > source.indexOf('runtime_source="$(cygpath -u') && guard < source.indexOf('run build -- python3 build.py build'), 'guard runs before build.py build');
+});
+
+// The composite action itself refuses an MSYS2 git before any producer runs.
+test('native-windows-tools fails when MSYS2 git shadows Git for Windows', t => {
+  const lines = runBlock(step(TOOLS, MINGW_TOOLS_STEP)).split('\n');
+  const at = lines.findIndex(line => line.includes('MSYS2_GIT_SHADOWS_GIT_FOR_WINDOWS'));
+  assert.ok(at > 0 && lines[at + 1].includes('GIT_NOT_GIT_FOR_WINDOWS'), lines.join('\n'));
+  assert.ok(at < lines.findIndex(line => line.includes('MSYS2_BASH=')), 'checked before producers are exposed');
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'tools-git-'));
+  t.after(() => fs.rmSync(work, {recursive: true, force: true}));
+  const run = (version, msysGit) => {
+    const usr = path.join(work, `usr-${msysGit}`), bin = path.join(work, version.replace(/\W/g, '_'));
+    fs.mkdirSync(usr, {recursive: true}); fs.mkdirSync(bin, {recursive: true});
+    if (msysGit) fs.writeFileSync(path.join(usr, 'git.exe'), '');
+    fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\necho "${version}"\n`, {mode: 0o755});
+    const script = lines.slice(at, at + 2).join('\n').replaceAll('/usr/bin/', `${usr}/`) + '\necho CHECKED';
+    return bash(script, {env: {...process.env, PATH: `${bin}:/usr/bin:/bin`}});
+  };
+  const ok = run('git version 2.56.1.windows.1', false);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /CHECKED/);
+  assert.match(run('git version 2.56.1.windows.1', true).stderr, /MSYS2_GIT_SHADOWS_GIT_FOR_WINDOWS/);
+  const msys = run('git version 2.56.1', false);
+  assert.notEqual(msys.status, 0);
+  assert.match(msys.stderr, /GIT_NOT_GIT_FOR_WINDOWS/);
 });

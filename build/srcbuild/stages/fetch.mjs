@@ -154,7 +154,17 @@ export function prepareDarwinCompilerRtSource(llvm) {
   const file = path.join(llvm, 'compiler-rt/lib/builtins/assembly.h');
   const {before, after} = DARWIN_COMPILER_RT_OUTLINE_CFI;
   applyTextPatch(file, [[before, after]], {stage:'prepare.darwin.compiler-rt-cfi', marker:after});
+  // xray_trampoline_x86_64.S (built for x86_64/x86_64h osx) spells its branch
+  // targets .Lxxx, which Mach-O does not treat as assembler-local: each becomes a
+  // symbol that splits the function into atoms, and Xcode 16.4 then rejects the
+  // following .cfi_adjust_cfa_offset ("invalid CFI advance_loc expression", run
+  // 45385716455 step 5510/6066). assembly.h's LOCAL_LABEL is L_ on Apple and
+  // .L_ on ELF, as current upstream LLVM uses in this file.
+  const xray = path.join(llvm, 'compiler-rt/lib/xray/xray_trampoline_x86_64.S');
+  applyTextPatch(xray, DARWIN_XRAY_X86_64_LOCAL_LABELS.flatMap(name => [[`.L${name}`, `LOCAL_LABEL(${name})`], [`.L${name}`, `LOCAL_LABEL(${name})`]]),
+    {stage:'prepare.darwin.compiler-rt-xray-labels', marker:'LOCAL_LABEL(typedEventCleanup):'});
 }
+export const DARWIN_XRAY_X86_64_LOCAL_LABELS = Object.freeze(['tmp0', 'tmp2', 'tmp4', 'arg1entryLog', 'arg1entryFail', 'customEventCleanup', 'typedEventCleanup']);
 
 // The installed public compiler headers include several generated schemas.
 // Install the complete output set owned by the existing flatc target, including

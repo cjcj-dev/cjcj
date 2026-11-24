@@ -15,6 +15,7 @@ import {pickWindowsCC} from './pick_cc.mjs';
 import {runMsysScript} from './windows_runtime_shell.mjs';
 import {configureNativeRuntime, installNativeRuntimeDependencies, installNativeRuntimeInputs, recordNativeRuntime} from './native_runtime.mjs';
 import {darwinCommand} from '../release/darwin_commands.mjs';
+import {windowsRuntimeGitGuard} from './windows_runtime_git.mjs';
 
 export async function buildRuntime({sourceSelection,objectRepository}={}) {
 const {selection}=nativeSourceSelection(process.env,undefined,sourceSelection);
@@ -191,6 +192,7 @@ if (process.platform === 'linux') {
     `runtime_install="$(cygpath -u ${shellQuote(configuredInstallRoot)})"`,
     `capture_node="$(cygpath -u ${shellQuote(process.execPath)})"`,
     `capture_script="$(cygpath -u ${shellQuote(captureScript)})"`,
+    ...windowsRuntimeGitGuard('runtime_source'),
     'cd "$runtime_source"',
     `"$capture_node" "$capture_script" run build -- python3 build.py build${jobs?' --jobs '+jobs:''} --target ${runtimeTarget} --build-type ${buildType} --target-toolchain "$runtime_toolchain" --prefix "$runtime_preinstall" -v ${shellQuote(version)}`,
     '"$capture_node" "$capture_script" run install -- python3 build.py install --prefix "$runtime_install"',

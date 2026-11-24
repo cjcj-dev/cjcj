@@ -67,8 +67,12 @@ runs:
         # selects LLD (run 45385716455: ld.lld could not open
         # libclang_rt.builtins.a). llvm already pulls llvm-tools and lld; they
         # stay named because readobj/ld.lld are checked below.
+        # No MSYS2 git: actions/checkout clones every tree with Git for Windows
+        # (core.autocrlf=true); /usr/bin/git (autocrlf=false) is first on
+        # GITHUB_PATH and reports that checkout dirty, which made
+        # GenerateRuntimeProvenance stamp the runtime <sha>-dirty (run 45401980497).
         install: >-
-          git tar patch make file gzip unzip
+          tar patch make file gzip unzip
           mingw-w64-x86_64-clang mingw-w64-x86_64-gcc
           mingw-w64-x86_64-ninja mingw-w64-x86_64-llvm mingw-w64-x86_64-openssl
           mingw-w64-x86_64-binutils mingw-w64-x86_64-compiler-rt
@@ -91,6 +95,10 @@ runs:
         builtins="$(/mingw64/bin/clang.exe --target=x86_64-w64-mingw32 --rtlib=compiler-rt -print-libgcc-file-name)"
         test -f "$(cygpath -u "$builtins")" || { echo "MINGW64_COMPILER_RT_MISSING $builtins" >&2; exit 1; }
         test -d /mingw64/lib
+        # Git for Windows wrote every checkout; an MSYS2 git pulled in by any package
+        # would shadow it on GITHUB_PATH and mark the runtime <sha>-dirty (run 45401980497).
+        test ! -e /usr/bin/git.exe || { echo "MSYS2_GIT_SHADOWS_GIT_FOR_WINDOWS /usr/bin/git.exe" >&2; exit 1; }
+        case "$(git --version)" in *.windows.*) ;; *) echo "GIT_NOT_GIT_FOR_WINDOWS $(command -v git) $(git --version)" >&2; exit 1;; esac
         # setup-msys2 installs under RUNNER_TEMP, not C:\msys64: name the actual
         # MSYS2 bash for producers that enter MSYS2 (build_runtime/build_cjcj).
         test -x /usr/bin/bash.exe
