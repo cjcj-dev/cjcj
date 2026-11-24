@@ -577,3 +577,44 @@ test('independent compiler shim reaches C2 and C3 only; default retains native S
  for(const s of stages.filter(s=>!['stage2','stage3'].includes(s.id)))
   for(const c of s.commands||[])assert.ok(!c.argv.includes('--shim-install'));
 });
+
+test('final component install carries the official host comparison runtime required by the layout gate',async t=>{
+ const fs=await import('node:fs/promises'),os=await import('node:os'),path=await import('node:path');
+ const {spawnSync}=await import('node:child_process');
+ const {installationRecipe}=await import('./sdk-targets.mjs');
+ const {verifyLayout,runtimeLibrary,sha256}=await import('../../build/sdk/verify.mjs');
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'sdk-host-runtime-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const platform='linux_x86_64',tuple='linux_x86_64_cjnative',lib='runtime/lib/'+tuple+'/libcangjie-runtime.so';
+ const host=root+'/H',product=root+'/R',exec=root+'/stage3/.compiler-exec';
+ // The 09-install shape: a components layout whose compiler executes from a separate stage3 product.
+ const selection={platform,hostPlatform:platform,bootstrapHost:{install:host,platform},
+  compilerExecution:{role:'separate',stage:'stage3',platform,...Object.fromEntries(['runtime','std','llvm'].map(name=>[name,{install:exec,platform}]))},
+  targetComponents:{compiler:{install:root+'/stage3',product:root+'/stage3/bin/cjcj-stage1'},runtime:{install:product,buildResult:product+'/NATIVE-INPUTS.json'},
+   std:{install:root+'/std'},llvm:{install:root+'/N'},ast:{install:root+'/AST'}}};
+ const recipe=installationRecipe(selection);
+ const rows=recipe.copies.filter(row=>row.to.startsWith('.host'));
+ assert.deepEqual(rows,[{from:host+'/runtime/lib/'+tuple,to:'.host/runtime/lib/'+tuple,owner:'bootstrap host comparison runtime'}]);
+ const productRow=recipe.copies.find(row=>row.from===product&&row.to==='');
+ assert.ok(productRow,'product runtime row');
+ const put=async(file,bytes)=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,bytes);};
+ const elf=label=>{const b=Buffer.alloc(64);b.writeUInt32BE(0x7f454c46,0);b.writeUInt16LE(62,18);b.write(label,24);return b;};
+ await put(product+'/'+lib,elf('coloured product runtime'));
+ await put(host+'/'+lib,elf('untouched official host runtime'));
+ const install=async(label,copies)=>{
+  const installed=root+'/'+label,config={work:root+'/'+label+'-work',install:installed,repos:{},stages:[{id:'sdk',output:'${install}',copies}],finalStage:'sdk'};
+  const file=root+'/'+label+'.json';await put(file,JSON.stringify(config));
+  const r=spawnSync(process.execPath,[new URL('./sdk-flow.mjs',import.meta.url).pathname,'--config',file,'--no-package'],{encoding:'utf8'});
+  assert.equal(r.status,0,r.stderr);
+  await put(installed+'/bin/cjc','installed compiler entry');
+  return installed;
+ };
+ const green=await install('normal',[productRow,...rows]);
+ const layout=verifyLayout(green,'linux-x64');
+ assert.equal(layout.hostSha,sha256(host+'/'+lib));
+ assert.equal(sha256(runtimeLibrary(green,tuple,'host')),sha256(host+'/'+lib));
+ assert.notEqual(layout.productSha,layout.hostSha);
+ console.log('SDK_HOST_RUNTIME_LAYOUT_PASS '+JSON.stringify(layout));
+ const cut=await install('cut',[productRow]);
+ assert.throws(()=>verifyLayout(cut,'linux-x64'),/^Error: SDK_MISSING_HOST_RUNTIME$/);
+ console.log('SDK_HOST_RUNTIME_CUT_REJECTED');
+});

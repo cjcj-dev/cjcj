@@ -117,6 +117,11 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     prefix?prefix+'/lib/'+execTuple:'lib/'+execTuple,
     prefix?prefix+'/third_party/llvm/'+executionNative.llvmDirectory:'third_party/llvm/'+executionNative.llvmDirectory,'tools/lib'];
   const hostToolLib=['.host/runtime/lib/'+tuple,'.host/lib/'+tuple,'.host/third_party/llvm/'+native.llvmDirectory,'.host/tools/lib'];
+  // Every non-bootstrap SDK carries the untouched official host runtime beside
+  // the coloured product runtime; the layout verifier and the colour contrast
+  // read it from .host/runtime/lib/<host tuple>. Bootstrap copies all of H.
+  const hostComparisonRuntime=()=>{const hostTuple=sdkPlatform(host.platform??platform).tuple;
+    return {from:host.install+'/runtime/lib/'+hostTuple,to:'.host/runtime/lib/'+hostTuple,owner:'bootstrap host comparison runtime'};};
   const copies=[
     ...(bootstrap?[
       {from:host.install,to:'.host',owner:'H',exclude:['SDK.lock.json']},
@@ -155,6 +160,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     ]:[]),
     {from:product,to:compilerName,owner:'compiler'},
     ...(!bootstrap&&layout!=='native-output'?[
+      hostComparisonRuntime(),
       // Compiler payloads retain their own producer, independently of N facts.
       {from:path.join(target.compiler.install,'share/cjcj'),to:'share/cjcj',owner:'compiler',exclude:['build-inputs']},
       {from:path.join(target.compiler.install,'compiler-inputs.json'),to:'compiler-inputs.json',owner:'compiler'},
@@ -171,7 +177,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
         {from:execution.runtime.install+'/runtime/lib/'+execTuple,to:prefix+'/runtime/lib/'+execTuple,owner:'compiler execution runtime'},
         {from:execution.std.install+'/lib/'+execTuple,to:prefix+'/lib/'+execTuple,owner:'compiler execution std'},
         {from:execution.llvm.install+'/third_party/llvm/'+executionNative.llvmDirectory+'/'+executionNative.llvmLibrary,to:prefix+'/third_party/llvm/'+executionNative.llvmDirectory+'/'+executionNative.llvmLibrary,owner:'compiler execution LLVM'}]),
-      {from:host.install+'/runtime/lib/'+sdkPlatform(host.platform??platform).tuple,to:'.host/runtime/lib/'+sdkPlatform(host.platform??platform).tuple,owner:'bootstrap host comparison runtime'},
+      hostComparisonRuntime(),
       {from:product,to:compilerName,owner:'compiler'});
   }
   // Component installation lacks the root assets carried by the ordinary
