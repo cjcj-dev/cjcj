@@ -748,13 +748,15 @@ private func AdmissionOnlyInOpenedImage(hostHasAdmission: Bool, opened: RuntimeH
 
 @When[os == "Windows"]
 private func GetHostRuntimeMethodPointer(name: String): CPointer<Unit> {
+    var method = CPointer<Unit>()
     try (moduleName = unsafe { LibC.mallocCString("libcangjie-runtime.dll") }.asResource()) {
         // GetModuleHandle borrows the startup module; do not FreeLibrary it.
         let host = RuntimeHandle("", raw: unsafe { GetModuleHandleA(moduleName.value) })
-        return GetMethodPointer(host, name)
+        method = GetMethodPointer(host, name)
     } catch (e: Exception) {
-        return CPointer<Unit>()
+        method = CPointer<Unit>()
     }
+    return method
 }
 
 public func CloseSymbolTable(handle: RuntimeHandle): Int64 {

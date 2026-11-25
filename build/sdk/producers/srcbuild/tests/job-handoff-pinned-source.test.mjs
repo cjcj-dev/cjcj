@@ -7,6 +7,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {patchFetchedCompiler, prepareWindowsLlvmSource} from '../../../../srcbuild/stages/fetch.mjs';
+import {putLlvmFolders, putLlvmWindowsFixes} from '../../../../test/fixtures/windows-llvm-source.mjs';
 
 const product = path.resolve(import.meta.dirname, '../job-handoff.mjs');
 const VERSION_FILE = 'packages/basic/src/Version.cj';
@@ -263,4 +265,92 @@ test('red cut: restore rejects untracked source the receiving workspace already 
   const restored = g.run('restore');
   assert.equal(restored.rc, 0, restored.output);
   assert.equal(await fs.readFile(path.join(g.root, 'runtime_shim/cjc_runtime_config.o'), 'utf8'), 'object');
+});
+
+const compilerCheckout = '.srcbuild/workspace/cangjie_compiler';
+async function fetchedFixture(t, windows) {
+  const f = await fixture(t);
+  const upstream = path.join(f.dir, 'compiler-origin');
+  const fixtures = path.resolve(import.meta.dirname, '../../../../test/fixtures');
+  await fs.cp(path.join(fixtures, 'compiler-41b223-windows'), upstream, {recursive: true});
+  await fs.cp(path.join(fixtures, 'compiler-41b223-schema/schema'), path.join(upstream, 'schema'), {recursive: true});
+  // Exercise a pin which also needs the boundscheck edit and whose schema
+  // checks out with CRLF; pack must replay checked-out bytes from HEAD.
+  const thirdParty = path.join(upstream, 'third_party/CMakeLists.txt');
+  await fs.writeFile(thirdParty, (await fs.readFile(thirdParty, 'utf8')).replaceAll('boundscheck boundscheck-static)', 'boundscheck)'));
+  await repository(upstream, {'.gitattributes': 'schema/CMakeLists.txt text eol=crlf\n'});
+  const compilerDir = path.join(f.root, compilerCheckout);
+  git(f.dir, 'clone', '-q', upstream, compilerDir);
+  patchFetchedCompiler(compilerDir, windows);
+  const checkouts = [[compilerCheckout, compilerDir]];
+  if (windows) {
+    const origin = path.join(f.dir, 'llvm-origin'), llvm = 'third_party/llvm-project';
+    putLlvmFolders(origin);
+    putLlvmWindowsFixes(origin);
+    await repository(origin, {});
+    git(f.dir, 'clone', '-q', origin, path.join(compilerDir, llvm));
+    prepareWindowsLlvmSource(path.join(compilerDir, llvm));
+    checkouts.push([compilerCheckout + '/' + llvm, path.join(compilerDir, llvm)]);
+  }
+  const expected = new Map();
+  for (const [checkout, dir] of checkouts) {
+    const files = git(dir, 'diff', '--name-only', 'HEAD').split('\n');
+    if (windows && checkout === compilerCheckout) files.push('cmake/modules/InstallWindowsToolchain.cmake');
+    for (const rel of files) expected.set(checkout + '/' + rel, {checkout, bytes: await fs.readFile(path.join(dir, rel))});
+  }
+  return {...f, expected, handoff: mode => f.run(mode, 'stage0', {
+    SOURCE_SDK_VERSION: '0.0.2', CJCJ_SRCBUILD_TARGET: windows ? 'windows-x64' : 'linux-x64',
+  })};
+}
+
+for (const windows of [false, true]) {
+  test('fetch patch round trip (' + (windows ? 'Windows compiler and LLVM' : 'common compiler') + ')', async t => {
+    const f = await fetchedFixture(t, windows);
+    const packed = f.handoff('pack');
+    assert.equal(packed.rc, 0, packed.output);
+    const manifest = JSON.parse(await fs.readFile(path.join(f.archive, 'manifest.json')));
+    const names = members(path.join(f.archive, 'payload.tar'));
+    assert.equal(f.expected.size, windows ? 22 : 4);
+    assert.deepEqual(new Set(manifest.derivations.map(row => row.path)), new Set(f.expected.keys()));
+    for (const row of manifest.derivations) {
+      const {checkout, bytes} = f.expected.get(row.path);
+      assert.equal(row.kind, 'compiler-fetch-patch');
+      assert.equal(row.checkout, checkout);
+      assert.equal(row.sha256, crypto.createHash('sha256').update(bytes).digest('hex'));
+      assert.ok(!names.includes(row.path), row.path);
+    }
+    await f.checkout();
+    const restored = f.handoff('restore');
+    assert.equal(restored.rc, 0, restored.output);
+    for (const [rel, {bytes}] of f.expected) assert.deepEqual(await fs.readFile(path.join(f.root, rel)), bytes, rel);
+  });
+}
+
+test('fetch patch rejects an extra schema line, dirty receiver, missing row or wrong digest', async t => {
+  const f = await fetchedFixture(t, false), rel = compilerCheckout + '/schema/CMakeLists.txt';
+  const file = path.join(f.root, rel);
+  assert.equal(f.handoff('pack').rc, 0);
+  await fs.appendFile(file, '# unrelated edit\n');
+  const rejected = f.handoff('pack');
+  assert.notEqual(rejected.rc, 0);
+  assert.ok(rejected.output.includes('handoff modified tracked source: ' + rel), rejected.output);
+  await fs.writeFile(file, f.expected.get(rel).bytes);
+  git(f.root, 'restore', 'cjpm.toml');
+  const dirty = f.handoff('restore');
+  assert.notEqual(dirty.rc, 0);
+  assert.match(dirty.output, /handoff derivation target is not the pinned file/);
+  const manifest = path.join(f.archive, 'manifest.json'), data = JSON.parse(await fs.readFile(manifest));
+  const row = data.derivations.find(row => row.path === rel);
+  row.sha256 = '0'.repeat(64);
+  await fs.writeFile(manifest, JSON.stringify(data));
+  await f.checkout();
+  const digest = f.handoff('restore');
+  assert.notEqual(digest.rc, 0);
+  assert.ok(digest.output.includes('handoff derivation digest mismatch: ' + rel), digest.output);
+  data.derivations = data.derivations.filter(r => r !== row);
+  await fs.writeFile(manifest, JSON.stringify(data));
+  await f.checkout();
+  const missing = f.handoff('restore');
+  assert.notEqual(missing.rc, 0);
+  assert.ok(missing.output.includes('handoff restored checkout differs from its manifest: ' + rel), missing.output);
 });

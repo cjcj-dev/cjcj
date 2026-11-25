@@ -17,6 +17,7 @@ foreign {
 @When[os == "Windows"]
 private func ResolveWindowsEntry(candidate: String): Option<String> {
     if (candidate.isEmpty() || candidate.contains("\0")) { return None }
+    var result: Option<String> = None
     try (utf8 = unsafe { LibC.mallocCString(candidate) }.asResource()) {
         if (utf8.value.isNull()) { return None }
         let count = unsafe { MultiByteToWideChar(65001u32, 8u32, utf8.value, -1, CPointer<UInt16>(), 0) }
@@ -47,12 +48,13 @@ private func ResolveWindowsEntry(candidate: String): Option<String> {
                 }
                 if (written != bytes) { return None }
                 unsafe { (output.value + Int64(bytes)).write(0u8) }
-                return Some(FileUtil.Normalize(CString(output.value).toString()))
+                result = Some(FileUtil.Normalize(CString(output.value).toString()))
             }
         }
     } catch (e: Exception) {
         return None
     }
+    return result
 }
 
 @When[os == "Windows"]

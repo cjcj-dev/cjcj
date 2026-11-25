@@ -7,6 +7,7 @@ import {readHleDependencies} from '../../../../ci/bootstrap/hle-input.mjs';
 import {resolveRuntimeSource} from '../../../../ci/runtime-pin.mjs';
 import {createReadStream} from 'node:fs';
 import crypto from 'node:crypto';
+import {deriveFetchPatches, fetchPatchRecipe, restoreFetchPatches} from './fetch-patch-handoff.mjs';
 import {stageSdkHandoff} from './stage-sdk-handoff.mjs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -98,6 +99,7 @@ async function exists(file) {
 // Edited tracked files: the injected product version crosses as data (the
 // value and the digest of the re-derived file), never as Version.cj bytes;
 // only build manifests (cjpm.toml/cjpm.lock) may cross as digest-bound bytes.
+// Compiler fetch patches are independently replayed against their checkout.
 // Any other edited tracked file is source and fails the pack.
 const OVERLAY_MANIFEST = /(^|\/)cjpm\.(toml|lock)$/;
 // A new untracked source file inside a tracked directory of the workflow
@@ -132,9 +134,19 @@ async function payloadPlan(root, entries, excluded) {
   const repos = [{prefix: '', tracked: trackedPaths(root)}];
   const workflowDirectories = trackedDirectories(repos[0].tracked), workflowSources = sourceDirectories(repos[0].tracked);
   const checkouts = [], files = [], overlay = new Map(), derivations = [];
+  const derivedPaths = new Set();
   const addOverlay = async (prefix, dir) => {
-    for (const rel of modifiedPaths(dir)) {
+    const dirty = modifiedPaths(dir), recipe = fetchPatchRecipe(prefix, identity.target);
+    if (recipe && (dirty.some(rel => recipe.files.includes(rel)) ||
+      (recipe.generated && await exists(path.join(dir, recipe.generated))))) {
+      for (const row of await deriveFetchPatches(dir, prefix, recipe, dirty)) {
+        derivedPaths.add(row.path);
+        derivations.push(row);
+      }
+    }
+    for (const rel of dirty) {
       const full = prefix ? prefix + '/' + rel : rel;
+      if (derivedPaths.has(full)) continue;
       // A deleted tracked file would silently reappear from the pinned checkout
       // on the consumer, so the producer's tree could not be reproduced.
       if (!await exists(path.join(root, full))) throw new Error(`handoff deleted tracked source: ${full}`);
@@ -156,7 +168,7 @@ async function payloadPlan(root, entries, excluded) {
     const file = path.join(root, rel);
     const stat = await fs.lstat(file);
     if (!stat.isDirectory()) {
-      if (tracked(rel)) return;
+      if (tracked(rel) || derivedPaths.has(rel)) return;
       const owner = repos.filter(repo => repo.prefix === '' || rel.startsWith(repo.prefix + '/'))
         .sort((a, b) => b.prefix.length - a.prefix.length)[0];
       if (owner?.prefix === '' && SOURCE_FILE.test(rel) && (workflowDirectories.has(path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel))
@@ -196,7 +208,30 @@ async function restoreEdits(root, record) {
     if (!await exists(path.join(root, row.path)) || await hash(path.join(root, row.path)) !== row.sha256)
       throw new Error(`handoff overlay bytes mismatch: ${row.path}`);
   }
+  const patches = new Map();
   for (const row of record.derivations) {
+    if (row?.kind !== 'compiler-fetch-patch') continue;
+    if (!patches.has(row.checkout)) patches.set(row.checkout, []);
+    patches.get(row.checkout).push(row);
+  }
+  const generated = [];
+  for (const [checkout, rows] of patches) {
+    const recipe = fetchPatchRecipe(checkout, identity.target);
+    if (!recipe || !record.checkouts.some(repo => repo.path === checkout)) throw new Error('handoff invalid fetch checkout: ' + checkout);
+    const dir = path.join(root, checkout), dirty = modifiedPaths(dir);
+    const seen = new Set();
+    for (const row of rows) {
+      if (seen.has(row.path) || !recipe.files.some(rel => row.path === checkout + '/' + rel) || !/^[a-f0-9]{64}$/.test(row.sha256))
+        throw new Error('handoff derivation row invalid: ' + row.path);
+      seen.add(row.path);
+    }
+    generated.push(...await restoreFetchPatches(dir, checkout, recipe, dirty));
+    for (const row of rows) {
+      if (await hash(path.join(root, row.path)) !== row.sha256) throw new Error('handoff derivation digest mismatch: ' + row.path);
+    }
+  }
+  for (const row of record.derivations) {
+    if (row?.kind === 'compiler-fetch-patch') continue;
     if (row?.path !== VERSION_SOURCE || row.kind !== 'cangjie-version' || !/^[a-f0-9]{64}$/.test(row.sha256 || ''))
       throw new Error(`handoff derivation row invalid: ${row?.path}`);
     if (row.version !== record.environment?.SOURCE_SDK_VERSION) throw new Error(`handoff derivation version is not SOURCE_SDK_VERSION: ${row.path}`);
@@ -209,7 +244,7 @@ async function restoreEdits(root, record) {
   // phase that owns the workspace.
   if (phase === 'mingw') return;
   const expected = new Set([...record.overlay.map(row => row.path), ...record.derivations.map(row => row.path)]);
-  const actual = new Set([...modifiedPaths(root),
+  const actual = new Set([...generated, ...modifiedPaths(root),
     ...record.checkouts.flatMap(row => modifiedPaths(path.join(root, row.path)).map(rel => row.path + '/' + rel))]);
   const differs = [...new Set([...expected, ...actual])].filter(rel => expected.has(rel) !== actual.has(rel)).sort();
   if (differs.length) throw new Error(`handoff restored checkout differs from its manifest: ${differs.join(',')}`);
@@ -224,13 +259,15 @@ async function assertNoSourcePayload(members, root, checkouts, overlay) {
   }
   const repos = [{prefix: '', tracked: trackedPaths(root)},
     ...checkouts.map(row => ({prefix: row.path, tracked: trackedPaths(path.join(root, row.path))}))];
+  for (const repo of repos) repo.generated = fetchPatchRecipe(repo.prefix, identity.target)?.generated;
   for (const raw of members) {
     const rel = raw.replace(/^\.\//, '').replace(/\/$/, '');
     if (!rel) continue;
     if (rel.split('/').includes('.git')) throw new Error(`handoff payload carries source: ${rel}`);
     for (const repo of repos) {
       const inside = repo.prefix === '' ? rel : rel.startsWith(repo.prefix + '/') ? rel.slice(repo.prefix.length + 1) : null;
-      if (inside !== null && repo.tracked.has(inside) && !edited.has(rel)) throw new Error(`handoff payload carries source: ${rel}`);
+      if (inside !== null && (inside === repo.generated ||
+          (repo.tracked.has(inside) && !edited.has(rel)))) throw new Error(`handoff payload carries source: ${rel}`);
     }
   }
 }
@@ -279,7 +316,7 @@ if (mode === 'pack') {
   const plan = await payloadPlan(root, entries, handoffExcluded);
   if (plan.commit !== identity.commit) throw new Error('handoff checkout SHA mismatch: workspace');
   for (const row of plan.derivations)
-    if (row.version !== environment.SOURCE_SDK_VERSION) throw new Error(`handoff derivation version is not SOURCE_SDK_VERSION: ${row.path}`);
+    if (row.kind === 'cangjie-version' && row.version !== environment.SOURCE_SDK_VERSION) throw new Error(`handoff derivation version is not SOURCE_SDK_VERSION: ${row.path}`);
   const list = path.join(dir, 'payload.list');
   await fs.writeFile(list, plan.files.map(rel => rel + '\0').join(''));
   try { tar(['-cf', archive, '--null', '--no-recursion', '-C', root, '-T', list]); }

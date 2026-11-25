@@ -1,5 +1,6 @@
 // Native SDK filenames belong to the frozen platform, including configuration-only
 // consumers running on a different host. Never select them from process.arch.
+import childProcess from 'node:child_process';
 import {PLATFORMS, reject} from './sdk-io.mjs';
 
 export function sdkPlatform(platform) {
@@ -55,9 +56,22 @@ function pathEnvironment(base,native) {
   }
   return env;
 }
+// xcrun follows the active Xcode selection. An explicit caller SDK always wins.
+const macosSdkRoots = new Map();
+function macosSdkRoot(env) {
+  const selection = env.DEVELOPER_DIR || '';
+  if (!macosSdkRoots.has(selection)) {
+    const root = childProcess.execFileSync('xcrun', ['--sdk', 'macosx', '--show-sdk-path'], {encoding: 'utf8', env}).trim();
+    if (!root) throw new Error('xcrun returned an empty macOS SDK path');
+    macosSdkRoots.set(selection, root);
+  }
+  return macosSdkRoots.get(selection);
+}
+
 export function sdkEnvironment(sdk, platform, base = process.env, runtimeRoot = sdk) {
   const native = sdkPlatform(platform), delimiter = native.os === 'win32' ? ';' : ':';
   base=pathEnvironment(base,native);
+  if (native.os === 'darwin' && process.platform === 'darwin' && !base.SDKROOT) base.SDKROOT = macosSdkRoot(base);
   const tools = [sdk+'/bin', sdk+'/tools/bin', sdk+'/third_party/llvm/bin'];
   const libraries = [runtimeRoot+'/runtime/lib/'+native.tuple, runtimeRoot+'/lib/'+native.tuple,
     sdk+'/third_party/llvm/'+native.llvmDirectory, sdk+'/tools/lib'];

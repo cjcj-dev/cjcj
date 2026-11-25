@@ -428,17 +428,21 @@ export async function fetchRepos(config,names) {
   }
 }
 
+// Fetch and the source handoff must replay the same edits in the same order.
+export function patchFetchedCompiler(dir, windows) {
+  applyCompilerCjdbPatches(dir);
+  applyCompilerBoundscheckDependencies(dir);
+  applyCompilerSchemaInstall(dir);
+  if (windows) applyCompilerWindowsPatches(dir);
+}
+
 export async function run(config) {
   ensureDir(config.workspace);
   await stage('fetch', async () => {
     await fetchRepos(config,Object.keys(config.repos));
-    applyCompilerCjdbPatches(config.repoPath('compiler'));
-    applyCompilerBoundscheckDependencies(config.repoPath('compiler'));
-    applyCompilerSchemaInstall(config.repoPath('compiler'));
-    if (config.target.spec.nodePlatform === 'win32') {
-      applyCompilerWindowsPatches(config.repoPath('compiler'));
-      prepareWindowsLlvmSource(config.repoPath('llvm'));
-    }
+    const windows = config.target.spec.nodePlatform === 'win32';
+    patchFetchedCompiler(config.repoPath('compiler'), windows);
+    if (windows) prepareWindowsLlvmSource(config.repoPath('llvm'));
     saveSourceSelection(config);
   });
 }

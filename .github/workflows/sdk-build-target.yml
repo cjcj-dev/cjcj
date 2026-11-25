@@ -1535,6 +1535,17 @@ jobs:
       - name: Verify preceding source phase
         run: node build/sdk/producers/srcbuild/job-handoff.mjs restore stage3 "$RUNNER_TEMP/source-handoff"
 
+      # The standalone stdx/tools producers below inherit the job environment.
+      - name: Select macOS SDK for source tools
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [[ -z "${SDKROOT:-}" ]]; then
+            sdkroot=$(xcrun --sdk macosx --show-sdk-path)
+            test -n "$sdkroot"
+            echo "SDKROOT=$sdkroot" >> "$GITHUB_ENV"
+          fi
+
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
 
