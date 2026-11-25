@@ -334,6 +334,23 @@ export function applyCompilerWindowsPatches(repoDir, patch = new URL('../patches
     throw new BuildError(stage, `compiler Windows patch shape drift: ${check.stderr || check.error?.message}`);
   }
 
+  // An explicit system name makes even a Windows-hosted LLVM configure a
+  // cross build. Only a real cross build needs the separate NATIVE tools.
+  const thirdParty = path.join(root, 'third_party/CMakeLists.txt');
+  const system = 'list(APPEND LLVM_CMAKE_ARGS -DCMAKE_SYSTEM_NAME=Windows)';
+  const triple = 'list(APPEND LLVM_CMAKE_ARGS -DLLVM_HOST_TRIPLE=x86_64-w64-mingw32)';
+  const native = 'set(NATIVE_LLVM_CMAKE_ARGS -Wno-dev|-Wno-deprecated)';
+  const flags = 'list(APPEND LLVM_CMAKE_ARGS -DCROSS_TOOLCHAIN_FLAGS_LLVM_NATIVE=${NATIVE_LLVM_CMAKE_ARGS})';
+  const block = lines => ['            list(APPEND LLVM_CMAKE_ARGS -DSANITIZER_CXX_ABI=libc++)',
+    ...lines.map(line => '            ' + line), ''].join('\n');
+  const before = block([system, triple, native, flags]);
+  const after = block([triple, 'if(NOT CMAKE_HOST_WIN32)', '    ' + system, '    ' + native, '    ' + flags, 'endif()']);
+  const source = fs.readFileSync(thirdParty, 'latin1').replaceAll('\r\n', '\n');
+  if ((!source.includes(before) && !source.includes(after)) ||
+      [system, triple, native, flags].some(line => source.split(line).length !== 2))
+    throw new BuildError(stage, `patch shape drift: expected one MinGW cjnative argument block in ${thirdParty}`);
+  applyTextPatch(thirdParty, [[before, after]], {stage, marker: after});
+
   // Both demangler targets use std::vector with BUILD_LIB_CANGJIE_DEMANGLE set.
   const guard = '#ifndef BUILD_LIB_CANGJIE_DEMANGLE';
   const vector = '#include <vector>';

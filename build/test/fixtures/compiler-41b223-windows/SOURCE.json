@@ -9,6 +9,7 @@
     },
     {
       "path": "third_party/CMakeLists.txt",
+      "alsoAt": "2e7b7dd9f363b8b7ae1fc724273e5399a5ea7c0d",
       "sha256": "a03052e115558b7d3b8755e00e864bac0e5bbc004991201fbdba712acaf8a4b2"
     },
     {

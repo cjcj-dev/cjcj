@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {assertCjnativeHostArgs} from '../../build/test/fixtures/windows-cjnative-args.mjs';
 import {assertCompilerLibcxxEdits} from '../../build/test/fixtures/windows-compiler-libcxx.mjs';
 import {cmakePath,coffImports,requireMsvcrtImports,selectedExecutable,selectedWindowsToolchainEnvironment,windowsInstalledEnvironment} from './native-windows-toolchain.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -104,6 +105,10 @@ for(const mode of ['probe','native','install-only']){
     assert.ok(main.argv.includes(arg),arg);
     assert.ok(childArgs.includes(arg),'standalone LLDB '+arg);
    }
+   const build=main.argv[main.argv.indexOf('-B')+1];
+   const tblgen=cmakePath(path.join(build,'third_party/cjnative-prefix/src/cjnative-build/bin/llvm-tblgen.exe'));
+   assert.deepEqual(childArgs.filter(arg=>arg.startsWith('-DLLVM_TABLEGEN=')),['-DLLVM_TABLEGEN='+tblgen]);
+   assertCjnativeHostArgs(main.argv[main.argv.indexOf('-S')+1],work);
   }
  });
 }

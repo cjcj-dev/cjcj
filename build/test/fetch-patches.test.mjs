@@ -10,6 +10,7 @@ import {buildConfig, saveSourceSelection} from '../lib/config.mjs';
 import {getBuildTarget} from '../lib/build-target.mjs';
 import {applyCompilerBoundscheckDependencies, applyCompilerCjdbPatches, applyCompilerLlvmVersion, applyCompilerSchemaInstall,
   applyCompilerWindowsPatches, applyCompilerXml2Install, applyNativeCjdbConfigure, prepareLldbSwigPython3Source, prepareWindowsLlvmSource, run as fetchRun, verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
+import {assertCjnativeHostArgs} from './fixtures/windows-cjnative-args.mjs';
 import {assertCompilerLibcxxEdits, libcxxEdits} from './fixtures/windows-compiler-libcxx.mjs';
 import {BuildError} from '../lib/errors.mjs';
 import {applyTextPatch} from '../srcbuild/stages/common.mjs';
@@ -261,6 +262,7 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
     await fetchRun(config);
     assert.deepEqual(script('selected-reentry', `set(CMAKE_C_COMPILER "${cc}")\nset(CMAKE_CXX_COMPILER "${cxx}")`), selected);
     for (const {file, expected} of fixes) assert.equal(fs.readFileSync(file, 'utf8'), expected, file);
+    assertCjnativeHostArgs(compiler, workspace);
   } finally { fs.rmSync(workspace, {recursive: true, force: true}); }
 });
 
@@ -606,12 +608,31 @@ for (const [target, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
         const text = fs.readFileSync(path.resolve(root, rel), 'utf8');
         assert.equal(text, withEol(text, eol), rel);
       }
+      assertNoRewrite(path.join(root, 'third_party/CMakeLists.txt'), apply);
       assertNoRewrite(installed, apply);
       fs.writeFileSync(installed, fs.readFileSync(installed, 'utf8').replace('install(FILES', 'changed(FILES'));
       assert.throws(apply, /compiler Windows patch shape drift/);
+      assertCjnativeHostArgs(root, root);
     });
   }
 }
+
+test('Windows cjnative patch rejects missing, changed, partial and ambiguous argument blocks', t => {
+  const root = tempTree(t), file = path.join(root, 'third_party/CMakeLists.txt');
+  fs.cpSync(WINDOWS_PIN_FIXTURE, root, {recursive: true});
+  const apply = () => applyCompilerWindowsPatches(root);
+  apply();
+  const patched = fs.readFileSync(file, 'utf8');
+  const flag = 'list(APPEND LLVM_CMAKE_ARGS -DCMAKE_SYSTEM_NAME=Windows)';
+  for (const drift of [patched.replace('NATIVE_LLVM_CMAKE_ARGS -Wno-dev', 'NATIVE_LLVM_CMAKE_ARGS -Wdev'),
+    patched.replace(flag, ''), patched + '\n' + flag]) {
+    fs.writeFileSync(file, drift);
+    assert.throws(apply, err => err instanceof BuildError && err.message.includes('patch shape drift') && err.message.includes(file));
+    assert.equal(fs.readFileSync(file, 'utf8'), drift);
+  }
+  fs.unlinkSync(file);
+  assert.throws(apply, err => err instanceof BuildError && err.message.includes('third_party/CMakeLists.txt'));
+});
 
 for (const nested of [false, true]) {
   test('Windows Git patch: ' + (nested ? 'nested plain copy' : 'standalone copy') + ' with per-file EOL', t => {
