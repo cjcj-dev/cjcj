@@ -99,6 +99,8 @@ for(const mode of ['probe','native','install-only']){
    if(mode==='native')assert.equal(incomingProbePath.split(';')[0],bin,'nativeCjdb must bind PATH before invoking probe');
    assert.equal(main.path.split(';')[0],bin,'main configure must search selected bin first: '+mode);
    assert.ok(main.argv.includes('-DCANGJIE_CJNATIVE_SOURCE_DIR=D:/a/cjcj/cjcj/llvm-fork'));
+   const llvmArgs=main.argv.find(s=>s.startsWith('-DCANGJIE_LLVM_BUILD_ARGS=')).slice('-DCANGJIE_LLVM_BUILD_ARGS='.length).split(';');
+   assert.deepEqual(llvmArgs.filter(arg=>arg.startsWith('-DCOMPILER_RT_INCLUDE_TESTS=')),['-DCOMPILER_RT_INCLUDE_TESTS=OFF']);
    const childArgs=main.argv.find(s=>s.startsWith('-DCJCJ_LLDB_ARGS=')).slice('-DCJCJ_LLDB_ARGS='.length).split(';');
    for(const [key,name] of [['AR','llvm-ar.exe'],['RANLIB','llvm-ranlib.exe']]){
     const arg='-DCMAKE_'+key+'='+path.join(bin,name).replaceAll('\\','/');

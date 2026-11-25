@@ -222,7 +222,8 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
  const toolchain=config.toolchain || path.join(compiler,'cmake',platform==='windows_x86_64'?'mingw_x86_64_toolchain.cmake':platform+'_toolchain.cmake');
  await fs.stat(toolchain);
  const llvmArgs=[`-DCANGJIE_RUNTIME_SOURCE_DIR=${runtime}`,`-DCMAKE_C_COMPILER_LAUNCHER=${launcher}`,
-  `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,`-DLLVM_PARALLEL_LINK_JOBS=${linkJobs}`,`-DCJ_LLVM_COMMIT=${commits.llvm}`];
+  `-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}`,`-DLLVM_PARALLEL_LINK_JOBS=${linkJobs}`,`-DCJ_LLVM_COMMIT=${commits.llvm}`,
+  ...(native.os==='win32'?['-DCOMPILER_RT_INCLUDE_TESTS=OFF']:[])];
  const definitions=['-DCMAKE_BUILD_TYPE=Release',
   `-DCJCJ_NATIVE_NODE=${process.execPath}`,`-DCJ_LLVM_COMMIT=${commits.llvm}`,
   `-DCMAKE_TOOLCHAIN_FILE=${toolchain}`,`-DCMAKE_C_COMPILER=${tools.cc}`,

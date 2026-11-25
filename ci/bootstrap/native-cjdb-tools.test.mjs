@@ -53,6 +53,7 @@ endforeach()
  console.log('NATIVE_TOOL_CASE_ASSERTION_REACHED');assert.equal(r.status,1);
  assert.match(r.stdout,/NATIVE_TOOL_COMPILED_ENTRY_REACHED/);
  const observed=await fs.readFile(config.build+'/jobs.txt','utf8');
+ assert.doesNotMatch(observed,/COMPILER_RT_INCLUDE_TESTS=/);
  assert.ok(observed.startsWith(jobs+'|'+linkJobs+'|'),observed);
  assert.ok(observed.includes('-DLLVM_PARALLEL_LINK_JOBS='+linkJobs),observed);
  const events=r.stdout.split('\n').filter(line=>line.startsWith('{"event":')).map(line=>JSON.parse(line));

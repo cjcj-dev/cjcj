@@ -74,6 +74,7 @@ endforeach()
   assert.ok(buildCommand,'public producer invoked the actual CMake build');
   assert.deepEqual(buildCommand.argv.slice(-2),['-j',String(expected[0])]);
   const observed=await fs.readFile(config.build+'/jobs-observed.txt','utf8');
+  assert.doesNotMatch(observed,/COMPILER_RT_INCLUDE_TESTS=/);
   assert.ok(observed.startsWith(expected.join('|')+'|'),observed);
   assert.ok(observed.includes('-DLLVM_PARALLEL_LINK_JOBS='+expected[1]),observed);
   assert.doesNotMatch(r.stderr,/NATIVE_CPUS/);
