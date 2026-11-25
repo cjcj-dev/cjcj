@@ -1,5 +1,13 @@
 [
   {
+    "file": "ci/bootstrap/sdk-platform.test.mjs",
+    "executor": "node-test"
+  },
+  {
+    "file": "ci/source-stage-guards.test.mjs",
+    "executor": "node-test"
+  },
+  {
     "file": "build/test/srcbuild-git-shell-contract.test.mjs",
     "executor": "zx",
     "args": []

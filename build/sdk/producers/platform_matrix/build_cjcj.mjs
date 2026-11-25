@@ -23,7 +23,7 @@ import {
 import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {platformizeCjcToml} from './link_option.mjs';
 import {buildWindowsFinalCompiler} from './windows-final-compiler.mjs';
-import {PRODUCT_NAMES} from '../srcbuild/lib/product-binary.mjs';
+import {PRODUCT_NAMES, resolveProductBinary} from '../srcbuild/lib/product-binary.mjs';
 
 const {root} = stageBegin('cjcj');
 const toolchain = requireHostToolchain();
@@ -458,7 +458,8 @@ if (process.platform === 'win32') {
   build = await $({nothrow: true, env: await colourEnvironment('build')})`cjpm build`;
 }
 if (build.exitCode === 0) {
-  await $`node ci/check-colour-tlab.mjs ${path.join('target', 'release', 'bin', 'cjcj::cjc')}`;
+  const product = await resolveProductBinary(path.join('target', 'release', 'bin'), 'cjpm build', {windows: process.platform === 'win32'});
+  await $`node ci/check-colour-tlab.mjs ${product}`;
 }
 console.log(`setup_rc=${setupRc} shim_rc=${shim.exitCode} build_rc=${build.exitCode}`);
 if (shim.exitCode !== 0) process.exit(shim.exitCode);

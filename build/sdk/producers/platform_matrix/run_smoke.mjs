@@ -44,7 +44,7 @@ let product = '';
 // Smoke accepts both cjpm product names and plain deploy names, in preference order.
 const productNames = process.platform === 'win32'
   ? ['cjcj.exe', ...PRODUCT_NAMES.map((name) => `${name}.exe`)]
-  : [...PRODUCT_NAMES, 'cjcj', 'cjc'];
+  : [...PRODUCT_NAMES, 'cjcj'];
 for (const name of productNames) {
   const candidate = path.join('target', 'release', 'bin', name);
   if (await isFile(candidate)) { product = candidate; break; }

@@ -1,7 +1,7 @@
 # Test execution registry
 
 `node ci/test-manifest.mjs check` compares discovered tests and registrations in
-both directions. Node contracts retain `GATING` and `DEFERRED`; Python, shell and
+both directions. Node contracts with executor `node-test` join the existing `GATING` shards; Python, shell and
 Cangjie entries live in `test-registry.json`. Test naming conventions are
 `*.test.mjs`, `test_*.py`, `test-*.py`, `test_*.sh`, `test-*.sh`, `*_test.sh`,
 `*-test.sh`, `*.test.sh`, `*_test.cj`, shell files under `build/test/`, and
@@ -42,7 +42,7 @@ Existing failures must stay visible; this registry contains no failure allowlist
 Workspace tests require same-tree declaration modules, not a Darwin runtime.
 Build the release compiler with the pinned official host and prepared LLVM shim.
 CI builds into an explicit private target directory and requires exactly one of
-`release/bin/cjcj::cjc` or `release/bin/cjc@cjcj`, then physically copies it as
+`release/bin/cjc`, `release/bin/cjcj::cjc` or `release/bin/cjc@cjcj`, then physically copies it as
 `cjcj-stage1`. Set `OBJC_PREAMBLE_PRODUCER` to that absolute product path before
 running `node ci/run-registered-tests.mjs cj NEW_OUTPUT_DIR`. The runner prepares
 internal then lang with that producer, verifies `fixture.json` hashes, and passes

@@ -23,7 +23,7 @@ test('native compiler build/install, source restoration and repeated publication
  await write(sdk+'/tools/lib/libcangjie-frontend.so','independent native frontend');
  await fs.symlink('../../../tools/lib/libcangjie-frontend.so',sdk+'/third_party/llvm/lib/libcangjie-frontend.so');
  await write(sdk+'/.host/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so','older build-process runtime');
- await write(sdk+'/.host/tools/bin/cjpm',`#!${process.execPath}\nconst fs=require('fs'),cp=require('child_process');fs.appendFileSync(${JSON.stringify(root+'/calls')},'build\\n');if(process.env.SDK_COMPILER_FIXTURE_FAIL)process.exit(7);fs.mkdirSync('target/release/bin',{recursive:true});cp.execFileSync('cc',['main.c','-o','target/release/bin/cjcj::cjc']);`,0o755);
+ await write(sdk+'/.host/tools/bin/cjpm',`#!${process.execPath}\nconst fs=require('fs'),cp=require('child_process');fs.appendFileSync(${JSON.stringify(root+'/calls')},'build\\n');if(process.env.SDK_COMPILER_FIXTURE_FAIL)process.exit(7);fs.mkdirSync('target/release/bin',{recursive:true});cp.execFileSync('cc',['main.c','-o','target/release/bin/cjc']);`,0o755);
  for(const args of [['init','-q',source],['-C',source,'add','.'],['-C',source,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-qm','test: finite native compiler adapter']]){const p=run('git',args);assert.equal(p.status,0,p.stderr);}
  const commit=run('git',['-C',source,'rev-parse','HEAD']).stdout.trim(),tree=run('git',['-C',source,'rev-parse','HEAD^{tree}']).stdout.trim();
  const relative='third_party/llvm/fixed-llc/cjselfhost_llvmshim.o',bytes=Buffer.from('fixture shim');

@@ -23,7 +23,8 @@ import fs from 'node:fs';
 // reason that shows up in the diff.
 
 export const repoRoot = path.resolve(import.meta.dirname, '..');
-export const REGISTERED = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-registry.json', import.meta.url), 'utf8')));
+const registry = JSON.parse(fs.readFileSync(new URL('./test-registry.json', import.meta.url), 'utf8'));
+export const REGISTERED = Object.freeze(registry.filter(entry => entry.executor !== 'node-test'));
 
 // This workflow must execute this candidate, including its registered native
 // boundary test. The checker rejects missing, branch or foreign checkouts.
@@ -43,7 +44,7 @@ export const DRIVERS = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-
 export const GATING = Object.freeze([
   'build/sdk/producers/platform_matrix/windows_runtime_capture.test.mjs',
   'ci/bootstrap/sdk-python-source.test.mjs',
-  'ci/bootstrap/sdk-platform.test.mjs',
+  ...registry.filter(entry => entry.executor === 'node-test').map(entry => entry.file),
   'ci/bootstrap/sdk-cjdb-python.test.mjs',
   'ci/colour-sdk.test.mjs',
   'build/sdk/producers/release/receive_native_sdk.test.mjs',

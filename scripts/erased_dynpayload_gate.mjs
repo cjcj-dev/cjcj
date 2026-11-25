@@ -59,14 +59,16 @@ function checkSource() {
     'if (!item.isCalleeMutOrCtor)', '        }\n    }\n}', 'withoutTI step 5');
   const flatBox = box.replaceAll(/\s+/g, '');
   const flatStep5 = step5.replaceAll(/\s+/g, '');
-  const boxTyped = flatBox.includes(
+  const boxTyped = flatBox.includes('CallGCWriteGenericPayloadFromSrc(tmp,copySource,size,typeInfo)') || flatBox.includes(
     'CallGCWriteGenericPayloadFromSrc(tmp,sourceRawValue,size,typeInfo)') || flatBox.includes(
     'CallGCWriteGenericPayload(tmp,sourceRawValue,size)');
-  const boxRaw = flatBox.includes(
+  const boxRaw = flatBox.includes('CreateMemCpy(payloadPtr,0u32,copySource,0u32,size)') || flatBox.includes(
     'CreateMemCpy(payloadPtr,0u32,sourceRawValue,0u32,size)');
   const boxTypeInfo = flatBox.includes('lettypeInfo=irBuilder.CreateTypeInfo(sourceType)') &&
     flatBox.includes('CallClassIntrinsicAlloc(ArrayList<LLVMValueRef>([typeInfo,size]))');
-  const step5Typed = flatStep5.includes(
+  const step5Typed = (flatStep5.includes('if(thisCGType.GetSize().isNone())') &&
+    flatStep5.includes('CallGCWriteGeneric(owner,thisParamWithoutTI,thisParamWithTI,size32)') &&
+    flatStep5.includes('CallGCReadGenericPayload(nativeReceiver,thisParamWithTI,size32)')) || flatStep5.includes(
     'CallGCWriteGenericPayloadFromSrc(thisParamWithoutTI,payloadPtr,size32,thisParamTypeInfo)') ||
     flatStep5.includes(
       'CallGCReadGeneric(thisParamWithoutTI,thisParamWithTI,payloadPtr,size32)');

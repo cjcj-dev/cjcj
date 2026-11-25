@@ -15,9 +15,13 @@ export function pinnedRemote(root, name, ref) {
   };
   git(['init', '--bare', '--quiet', remote]);
   fs.writeFileSync(path.join(remote, 'shallow'), `${ref}\n`);
-  git(['--git-dir', remote, 'index-pack', '--stdin'], {
-    input: fs.readFileSync(new URL(`./${name}.pack`, import.meta.url)),
-  });
+  // Keep the unchanged objects in the base pack across pin updates.
+  // LLVM's base pack is split to fit the repository file-size limit.
+  const base = name === 'llvm'
+    ? Buffer.concat(['00','01','02'].map(part => fs.readFileSync(new URL(`./llvm.pack.${part}`, import.meta.url))))
+    : fs.readFileSync(new URL(`./${name}.pack`, import.meta.url));
+  for (const input of [base, fs.readFileSync(new URL(`./${name}.update.pack`, import.meta.url))])
+    git(['--git-dir', remote, 'index-pack', '--stdin'], {input});
   git(['--git-dir', remote, 'update-ref', 'refs/heads/main', ref]);
   git(['--git-dir', remote, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
   assert.equal(git(['--git-dir', remote, 'rev-parse', 'HEAD']), ref);

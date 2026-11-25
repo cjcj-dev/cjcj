@@ -27,10 +27,11 @@ const PHASES = new Map([
   ['linux-x64', 1], ['linux-aarch64', 2], ['windows-x64', 3],
   ['darwin-arm64', 4], ['darwin-x64', 5],
 ]);
-function packageJobName(platform) {
-  const {host} = PLATFORM_CONTRACTS.get(platform);
+function packageJobNames(platform) {
+  const {key, host} = PLATFORM_CONTRACTS.get(platform);
   const caller = platform === host ? `phase ${PHASES.get(host)} · ${host}` : platform;
-  return `${caller} / Build release package / ${host} / Build release package`;
+  return [`package / ${key} / ${host} / Build release package`,
+    `${caller} / Build release package / ${host} / Build release package`];
 }
 
 // Only these conditional jobs may skip (sdk-build-target.yml:15-24,48,366).
@@ -191,7 +192,7 @@ function validateJobs(jobs) {
   }
 
   for (const platform of PLATFORMS) {
-    const packageJobs = jobs.filter(job => job.name === packageJobName(platform));
+    const packageJobs = jobs.filter(job => packageJobNames(platform).includes(job.name));
     if (packageJobs.length !== 1 || packageJobs[0].conclusion !== 'success') {
       throw new Error(`${platform} package grid is not exactly one success (found ${packageJobs.length})`);
     }
@@ -237,7 +238,7 @@ function findExactlyOne(files, basename, label) {
 }
 
 async function validateManifest(file, platform) {
-  const {host} = PLATFORM_CONTRACTS.get(platform);
+  const {key, host} = PLATFORM_CONTRACTS.get(platform);
   const text = await fs.readFile(file, 'utf8');
   const lines = text.split(/\r?\n/).filter(line => line.length > 0);
   if (lines.length !== REQUIRED_MANIFEST_ROWS) {

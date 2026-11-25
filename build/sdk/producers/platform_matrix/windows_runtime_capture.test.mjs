@@ -9,6 +9,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 const entry=fileURLToPath(new URL('./windows_runtime_capture.mjs',import.meta.url));
 const base=process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir();
+fs.mkdirSync(base, {recursive: true});
 for(const rc of [0,7])test('native linker evidence survives its own rc '+rc+' and a later deletion',()=>{
  const root=fs.mkdtempSync(path.join(base,'windows-capture-')),build=path.join(root,'build'),out=path.join(root,'evidence');fs.mkdirSync(build);
  const child=path.join(root,'finite-link.mjs');fs.writeFileSync(child,`import fs from 'node:fs';\nfs.writeFileSync('fixture.dll','not PE: finite bytes');fs.writeFileSync('fixture.dll.a','finite import');fs.writeFileSync('windows_x86_64_exports.raw.def','EXPORTS\\nfixture @7 DATA\\n');console.log('finite output');console.error('finite stderr');process.exitCode=${rc};\n`);

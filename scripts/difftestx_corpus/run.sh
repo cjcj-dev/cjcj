@@ -6,7 +6,7 @@ REPO=$(cd "$ROOT/.." && pwd)
 OFFICIAL_TC=${OFFICIAL_TC:-${CANGJIE_HOME:-/root/.cjv/toolchains/nightly-1.2.0-alpha.20260721165458}}
 SELFHOST_TC=${SELFHOST_TC:-$OFFICIAL_TC}
 OFFICIAL_CJC=${OFFICIAL_CJC:-$OFFICIAL_TC/bin/cjc}
-SELFHOST_CJC=${SELFHOST_CJC:-$REPO/target/release/bin/cjcj::cjc}
+SELFHOST_CJC=${SELFHOST_CJC:-$REPO/target/release/bin/cjc}
 JOBS=${JOBS:-4}
 CJC_JOBS=${CJC_JOBS:-1}
 

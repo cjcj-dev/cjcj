@@ -36,7 +36,7 @@ test('ordinary CJPM source-build is an explicit C2 input without fabricated comp
  const f=await stage2Fixture();
  await fs.rm(path.join(f.root,'sdk/compiler-inputs.json'));
  await f.write('source/cjpm.toml','[package]\nname="ordinary"\n');
- const sourceProduct=path.join(f.root,'producer/target/release/bin/cjcj::cjc');
+ const sourceProduct=path.join(f.root,'producer/target/release/bin/cjc');
  const command=path.join(f.root,'producer/workspace.command.json');
  const buildResult=path.join(f.root,'producer/workspace.result.json');
  await f.write('sdk/STAGE-INPUTS.json',JSON.stringify({

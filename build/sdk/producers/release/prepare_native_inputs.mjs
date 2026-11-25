@@ -226,6 +226,18 @@ function packageLinks(dir, rel = '') {
     return entry.isSymbolicLink() ? [child] : entry.isDirectory() ? packageLinks(dir, child) : [];
   });
 }
+// Python and LLVM share bin/ and lib/, but no two inputs may own the same leaf.
+function installExclusive(source, destination) {
+  const existing = fs.lstatSync(destination, {throwIfNoEntry: false});
+  if (!existing) {
+    fs.cpSync(source, destination, {recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false});
+    return;
+  }
+  if (!existing.isDirectory() || !fs.lstatSync(source).isDirectory())
+    throw new Error('PREPARE_PYTHON_INSTALL_COLLISION ' + destination);
+  for (const name of fs.readdirSync(source))
+    installExclusive(path.join(source, name), path.join(destination, name));
+}
 function installPython({from, install, platform, lldbNames}) {
   const record = path.join(from, 'PYTHON-BUILD-INPUTS.json'), configuredFile = path.join(from, 'PYTHON-CONFIGURED.json');
   if (!PREPARE_PYTHON[platform]) {
@@ -243,8 +255,7 @@ function installPython({from, install, platform, lldbNames}) {
   const nativeRoot = path.join(install, 'third_party/llvm');
   for (const name of preparePythonMembers(platform)) {
     const source = path.join(from, 'python', name);
-    if (fs.existsSync(source)) fs.cpSync(source, path.join(nativeRoot, name), {recursive: true, verbatimSymlinks: true,
-      errorOnExist: true, force: false});
+    if (fs.existsSync(source)) installExclusive(source, path.join(nativeRoot, name));
   }
   for (const [rel, row] of Object.entries(facts.files))
     if (sha256(path.join(nativeRoot, rel)) !== row.sha256) throw new Error('PREPARE_PYTHON_PRODUCT_BYTES ' + rel);

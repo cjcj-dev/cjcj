@@ -1,4 +1,4 @@
-package cjcj::cjc
+package cjc
 
 import cjcj::basic.PrintVersion
 import cjcj::chir.{CHIRBuilder, CHIRContext, CHIRDeserializer, CHIRPrinter, ToCHIRPhase}

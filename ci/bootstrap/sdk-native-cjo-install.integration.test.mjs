@@ -76,7 +76,7 @@ await fs.mkdir(path.join(process.env.CANGJIE_HOME,'runtime/lib',${JSON.stringify
 await fs.writeFile(path.join(process.env.CANGJIE_HOME,'runtime/lib',${JSON.stringify(tuple)},'libcangjie-runtime.so'),'fixture runtime');
 await fs.writeFile('package-manager-observed.json',JSON.stringify({selected:${JSON.stringify(selected)},argv:process.argv.slice(2),sdk:process.env.CANGJIE_HOME,path:process.env.PATH,loader:process.env.LD_LIBRARY_PATH}));
 await fs.mkdir(path.join(target,'release/bin'), {recursive: true});
-await fs.writeFile(path.join(target,'release/bin/cjcj::cjc'), 'fixture compiler product\\n');
+await fs.writeFile(path.join(target,'release/bin/cjc'), 'fixture compiler product\\n');
 // cjpm also emits the package CJO beside bin; that is the content the CJO
 // prefix is supposed to carry.
 await fs.mkdir(path.join(target,'release/cjcj'), {recursive: true});

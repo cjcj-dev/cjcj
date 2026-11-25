@@ -122,7 +122,7 @@ test('release.yml package jobs agree with the release platform table', () => {
   assert.equal(workflow.jobs.source.needs, 'plan');
   assert.equal(workflow.jobs.package.needs, 'source');
   assert.equal(workflow.jobs.package.uses, './.github/workflows/sdk-package.yml');
-  for (const field of ['runner', 'platform', 'llvm_platform', 'sdk_runtime_dir', 'release_key', 'std_artifact', 'cross_std_artifacts'])
+  for (const field of ['runner', 'platform', 'release_key', 'std_artifact', 'cross_std_artifacts'])
     assert.equal(workflow.jobs.package.with[field], `$\{{ matrix.${field} }}`, `package.with.${field} must come from the matrix row`);
   const jobs = workflow.jobs.package.strategy.matrix.include;
   assert.equal(jobs.length, allReleasePlatforms().filter(key => !getReleasePlatform(key).excluded && !getReleasePlatform(key).crossCompiledHost).length);
@@ -137,7 +137,7 @@ test('release.yml package jobs agree with the release platform table', () => {
     assert.equal(platform, readiness.host);
     assert.equal(scalar(job, 'runner'), readiness.runner, `${key}: runner`);
     assert.equal(scalar(job, 'llvm_platform'), readiness.llvmPlatform, `${key}: llvm_platform`);
-    assert.equal(scalar(job, 'sdk_runtime_dir'), readiness.runtimeTuple, `${key}: sdk_runtime_dir`);
+    assert.equal(getTarget(platform).spec.runtimeTuple, readiness.runtimeTuple, `${key}: native runtime tuple`);
     if (readiness.host === 'windows-x64') {
       assert.equal(scalar(job, 'std_artifact'), 'final-std-native-windows-x64', key);
       assert.equal(sourceBuildCells({nativeInputs:true}).find(row=>row.target===readiness.host).std_artifact,

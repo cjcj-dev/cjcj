@@ -7,7 +7,7 @@ import path from 'node:path';
 export const repo = path.resolve(import.meta.dirname, '../..');
 export const fixture = path.join(repo, 'scripts/septest');
 export const reference = process.env.REF_CJC || '/root/.cjv/bin/cjc';
-export const selfhost = process.env.SELF_CJC || `${repo}/target/release/bin/cjcj::cjc`;
+export const selfhost = process.env.SELF_CJC || `${repo}/target/release/bin/cjc`;
 export const home = process.env.CANGJIE_HOME || '/root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029';
 process.env.CANGJIE_HOME = home;
 process.env.LD_LIBRARY_PATH = `${home}/third_party/llvm/lib:${home}/runtime/lib/linux_x86_64_cjnative:${home}/tools/lib:${process.env.LD_LIBRARY_PATH || ''}`;

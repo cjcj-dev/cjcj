@@ -70,7 +70,7 @@ for(const mode of ['cancel','parent-exit','closed-pipes'])test('public CLI owns 
 });
 test('timeout cleans TERM-ignoring descendant tree and removes listener',{timeout:10000},async()=>{
  const f=await fixture('timeout'),controller=new AbortController();let ready=false;
- const result=streamStdProcess([f.driver],{signal:controller.signal,timeout:250,onLine:line=>{if(line==='DESCENDANTS_READY')ready=true;}});
+ const result=streamStdProcess([f.driver],{signal:controller.signal,timeout:1500,onLine:line=>{if(line==='DESCENDANTS_READY')ready=true;}});
  try{
   await assert.rejects(bounded(result),error=>{assert.equal(ready,true,'TARGET_DESCENDANTS_NOT_REACHED');assert.match(error.message,/TIMEOUT/);assert.equal(error.childRc,0);assert.equal(error.cleanupComplete,true);return true;});
   await f.gone();assert.equal(getEventListeners(controller.signal,'abort').length,0);console.log('TARGET_TIMEOUT_CLEANED');

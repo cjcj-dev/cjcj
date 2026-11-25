@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
 import {recordRuntimeInputs} from '../build/lib/runtime-source-inputs.mjs';
 
 const repo = path.resolve(import.meta.dirname, '..');
@@ -389,26 +390,21 @@ for (const runtimeMode of ['git','archive']) test('G2 workflow capture and gate 
   // FREEZE's base SDK is the host toolchain this job provisions for itself:
   // an input the workflow already produces, so the freeze is reachable in
   // every real run and downloads nothing extra (cjcj#556).
-  assert.ok(source.indexOf('- name: Provision uncoloured host SDK') < source.indexOf('- name: Freeze G2 identity inputs'));
-  const freezeStep = source.split(/^      - name:/m)
-    .find(value => /^[ \t]*node ci\/generate-freeze\.mjs[ \t]/m.test(value));
-  assert.ok(freezeStep, 'G2_WORKFLOW_FREEZE: workflow must generate the campaign skeleton');
-  assert.ok(freezeStep.includes('tar -cf "$base_archive" -C "$CJCJ_OFFICIAL_SDK_ROOT" .'));
-  assert.ok(freezeStep.includes('--base-sdk "$base_archive"'));
-  assert.ok(!freezeStep.includes('prepare_base_sdk'), 'G2_WORKFLOW_FREEZE: no network download feeds the freeze');
-  assert.ok(source.indexOf('- name: Freeze G2 identity inputs') < source.indexOf('- name: Test and archive installed SDK'));
-  assert.ok(source.indexOf('- name: Test and archive installed SDK') < source.indexOf('- name: Capture G2 SDK identity'));
-  assert.ok(source.indexOf('- name: Capture G2 SDK identity') < source.indexOf('- name: Retain G2 campaign identity'));
-  const step = source.split(/^      - name:/m)
-    .find(value => /^[ \t]*node ci\/capture-g2-identity\.mjs[ \t]/m.test(value));
-  const lines = step.split('\n');
-  const runStart = lines.indexOf('        run: |');
-  assert.ok(runStart >= 0, 'capture workflow must expose its shell run block');
-  const body = [];
-  for (const line of lines.slice(runStart + 1)) {
-    if (line && !line.startsWith('          ')) break;
-    body.push(line.slice(10));
+  const jobs = loadYaml(source).jobs;
+  const first = jobs['source-stage0'].steps, last = jobs.srcbuild.steps;
+  function before(steps, a, b) {
+    const i = steps.findIndex(s => s.name === a), j = steps.findIndex(s => s.name === b);
+    assert.ok(i >= 0 && j > i, `${a} must precede ${b}`);
   }
+  before(first, 'Provision uncoloured host SDK', 'Freeze G2 identity inputs');
+  const freeze = first.find(s => s.name === 'Freeze G2 identity inputs').run;
+  assert.ok(freeze.includes('node ci/generate-freeze.mjs '));
+  assert.ok(freeze.includes('tar -cf "$base_archive" -C "$CJCJ_OFFICIAL_SDK_ROOT" .'));
+  assert.ok(freeze.includes('--base-sdk "$base_archive"'));
+  assert.ok(!freeze.includes('prepare_base_sdk'), 'no network download feeds the freeze');
+  before(last, 'Test and archive installed SDK', 'Capture G2 SDK identity');
+  before(last, 'Capture G2 SDK identity', 'Retain G2 campaign identity');
+  const body = last.find(s => s.name === 'Capture G2 SDK identity').run;
   const state = await fixture(t);
   await writeIdentity(state, skeleton());
   const runtimeStamp=runtimeMode==='archive'?'src-'+'e'.repeat(64):state.runtimePin;
@@ -463,7 +459,7 @@ for (const runtimeMode of ['git','archive']) test('G2 workflow capture and gate 
     artifacts:['runtime_dynamic','runtime_static'].map(name=>locations[name]),
     configuration:{platform:'linux_x86_64',buildType:'Release'},work:sdk});
   assert.equal('source_materialization' in facts.build,false);
-  const result = run('bash', ['-e', '-o', 'pipefail', '-c', body.join('\n')], {
+  const result = run('bash', ['-e', '-o', 'pipefail', '-c', body], {
     cwd: repo,
     env: {...process.env, CANGJIE_WORKSPACE: workspace,
       G2_IDENTITY: path.join(state.campaign, 'G2_IDENTITY.json')},

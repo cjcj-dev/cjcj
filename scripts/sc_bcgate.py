@@ -4,7 +4,7 @@ baseline (reference C++) cjc, compare emitted bitcode function-by-function. A FA
 signal than the 113 single-file difftest corpus (packages exercise generics/casts/closures/imports/...).
 
 Usage: python3 scripts/sc_bcgate.py <pkg> [<pkg2> ...] [--self PATH] [--timeout N] [--jobs K] [--no-cache]
-  default --self = ./target/release/bin/<module>::cjc (auto-detected) ; baseline = $CANGJIE_HOME/bin/cjc
+  default --self = ./target/release/bin/cjc ; baseline = $CANGJIE_HOME/bin/cjc
 Set SC_BCGATE_CACHE_DIR to override the workspace cache under target/.
 Reuses bcgate.py's IR normalization (function-by-function, module-layout independent).
 """
@@ -129,8 +129,7 @@ def compile_pkg(base_cc, self_cc, pkg, workdir, e, timeout, cache_context):
 
 def main():
     args = sys.argv[1:]
-    self_cc_candidates = sorted((ROOT / "target/release/bin").glob("*::cjc")) if (ROOT / "target/release/bin").exists() else []
-    self_cc = str(self_cc_candidates[0]) if self_cc_candidates else str(ROOT / "target/release/bin/cjcj::cjc")
+    self_cc = str(ROOT / "target/release/bin/cjc")
     base_cc = f"{CANGJIE_HOME}/bin/cjc"; timeout = 600; jobs = 1; use_cache = True; pkgs = []
     i = 0
     while i < len(args):

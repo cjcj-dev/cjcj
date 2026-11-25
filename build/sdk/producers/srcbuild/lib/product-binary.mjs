@@ -1,11 +1,11 @@
-// cjpm names its compiler product cjc@cjcj or cjcj::cjc, depending on the SDK.
+// The unqualified cjc package has a portable name; older producers qualified it.
 // Require exactly one so a stale product from another stage cannot be selected.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 /** Names cjpm is known to give the selfhost compiler, in no significant order. */
-export const PRODUCT_NAMES = ['cjc@cjcj', 'cjcj::cjc'];
+export const PRODUCT_NAMES = ['cjc', 'cjc@cjcj', 'cjcj::cjc'];
 
 const isFile = async (target) => {
   try {

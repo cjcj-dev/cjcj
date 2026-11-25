@@ -1,4 +1,4 @@
-package cjcj::cjc
+package cjc
 
 import std.env.*
 import std.collection.*

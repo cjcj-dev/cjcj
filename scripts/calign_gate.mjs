@@ -7,7 +7,7 @@ import path from 'node:path';
 import {configureToolchain} from './zx_gate_lib.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
-const self = argv._[0] || `${root}/target/release/bin/cjcj::cjc`;
+const self = argv._[0] || `${root}/target/release/bin/cjc`;
 const work = await fs.mkdtemp(path.join(os.tmpdir(), 'calign-gate-'));
 configureToolchain(process.env.CANGJIE_HOME || '/root/.cjv/toolchains/nightly-1.2.0-alpha.20260721165458');
 try {

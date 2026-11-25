@@ -275,7 +275,7 @@ test('ordinary C2 reuse keeps command, bootstrap std identity, and one compiler 
  const input=inputs('linux_x86_64');
  input.stage2={mode:'ordinary-cjpm',install:'/fixture/C2',bootstrapStd:'/fixture/bootstrap-std',
   buildResult:'/fixture/C2/original-result.json',command:'/fixture/C2/workspace.command.json',
-  sourceRoot:'/fixture/compiler-source',sourceProduct:'/fixture/compiler-source/target/release/bin/cjcj::cjc',
+  sourceRoot:'/fixture/compiler-source',sourceProduct:'/fixture/compiler-source/target/release/bin/cjc',
   compilerFile:'libexec/compiler/cjcj-stage1',compilerCommit:'c'.repeat(40),llvmCommit:input.llvm.commit,
   bootstrapRuntimeCommit:input.runtime.commit,compilerSha256:'d'.repeat(64),stdSha256:'e'.repeat(64),stdCoreSha256:'f'.repeat(64)};
  const c=createBootstrapTargets(input),stage=c.stages.find(s=>s.id==='stage2');
@@ -313,7 +313,7 @@ test('only explicit final std reuse skips production in the complete target grap
  input.stage2={mode:'ordinary-cjpm',install:'/fixture/C2',bootstrapStd:'/fixture/bootstrap-std',
   stdSourceInstall:'/fixture/bootstrap-std',stdSource:{repository:'/fixture/std.git',commit:'e'.repeat(40),identity:'e'.repeat(64)},
   buildResult:'/fixture/C2/original-result.json',command:'/fixture/C2/workspace.command.json',
-  sourceRoot:'/fixture/compiler-source',sourceProduct:'/fixture/compiler-source/target/release/bin/cjcj::cjc',
+  sourceRoot:'/fixture/compiler-source',sourceProduct:'/fixture/compiler-source/target/release/bin/cjc',
   compilerFile:'libexec/compiler/cjcj-stage1',compilerCommit:'c'.repeat(40),llvmCommit:input.llvm.commit,
   bootstrapRuntimeCommit:input.runtime.commit,compilerSha256:'d'.repeat(64),stdSha256:'e'.repeat(64),stdCoreSha256:'f'.repeat(64)};
  assert.ok(createBootstrapTargets(input).stages.find(row=>row.id==='stage3-std').commands.length);

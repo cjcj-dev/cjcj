@@ -364,6 +364,14 @@ function produced(t, target) {
   installAst({root, target, from: path.join(dir, 'ast-out'), commits});
   return {dir, root, native};
 }
+test('prepare refuses a Python leaf that would replace an LLVM tool in the shared bin directory', t => {
+  const {dir} = produced(t, 'linux-x64'), from = path.join(dir, 'llvm-out'), root = path.join(dir, 'collision');
+  fs.writeFileSync(path.join(from, 'python/bin/llc'), 'different producer');
+  assert.throws(() => installLlvm({root, target: 'linux-x64', from,
+    commits: {llvm: LLVM, runtime: RUNTIME, compiler: COMPILER}, producer: 'test', shimCommit: SHIM}),
+    /PREPARE_PYTHON_INSTALL_COLLISION .*[/\\]llc$/);
+  assert.equal(fs.readFileSync(path.join(root, 'llvm/third_party/llvm/bin/llc'), 'utf8'), 'llc linux-x64');
+});
 for (const host of PREPARE_HOSTS) test(`${host.target}: prepare output is read by the downstream native consumers`, async t => {
   const {root, native} = produced(t, host.target);
   const {locations} = assembleNativeInputs({root, target: host.target, hostVersion: '1.1.0', env, pins});

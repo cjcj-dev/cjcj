@@ -8,6 +8,22 @@ import {spawnSync} from 'node:child_process';
 import {retainedToolPath,toolName} from '../../build/srcbuild/tool-layout.mjs';
 import {buildFlow, targetOrder, copyOutputs, privateRoot, fileDigest} from './sdk-flow.mjs';
 
+import {stdxChirMembers} from './sdk-platform.mjs';
+
+// The staged CLI fixtures exercise publication. Stand in for the native Java
+// build while leaving the real handoff's pin, target and file checks active.
+const finiteJavaProducer = `export async function produceJava({sdk,metadata}) {
+  const {JAVA_INTEROP_REF:commit,JAVA_INTEROP_SRC_URL:repository}=readSourcePins().source;
+  for (const rel of javaInteropFiles) {
+    const file=path.join(sdk,rel);
+    await fs.mkdir(path.dirname(file),{recursive:true});
+    await fs.writeFile(file,'finite Java handoff member');
+  }
+  return {install:sdk,commit,repository,compilerSha256:metadata.compilerSha256,runtimeCommit:metadata.runtimeCommit};
+}`;
+const javaBoundary = `if(url.endsWith('/build-java-interop.mjs'))return {...result,source:String(result.source)
+  .replace('export async function produceJava(', 'async function originalProduceJava(') + '\\n' + ${JSON.stringify(finiteJavaProducer)}};`;
+
 const parent = process.env.SDK_FLOW_TEST_ROOT || (process.env.RELEASE_EVIDENCE_TEST_ROOT && path.join(process.env.RELEASE_EVIDENCE_TEST_ROOT,'sdk-flow'));
 if (!parent) throw new Error('SDK_FLOW_TEST_ROOT must name an owned persistent directory');
 await fs.mkdir(parent, {recursive: true});
@@ -288,9 +304,12 @@ const r=cp.spawnSync('cc',[c,'-o',output],{stdio:'inherit'});process.exit(r.stat
   'third_party/llvm/lib/clang/15/include/stdint.h'])await put(native+'/'+relative,'controlled native dependency');
  await fs.mkdir(native+'/tools/bin',{recursive:true});
  await put(work+'/host/runtime/lib/'+tuple+'/libcangjie-runtime.so','controlled host runtime');
+ const {directSource,directBuild}=await import('../fixtures/runtime-direct-inputs.mjs');
+ const runtimeRoot=workspace+'/cangjie_runtime/runtime'; directSource(runtimeRoot);directBuild(runtimeRoot);
  await put(sdk+'/old-success','previous SDK');
  const loader=work+'/boundaries.mjs',trace=work+'/trace.jsonl';
  await put(loader,`export async function load(url,context,next){const result=await next(url,context);
+${javaBoundary}
 const stage=/\\/build\\/srcbuild\\/stages\\/(fetch|compiler|runtime|stdlib|stdx|tools|package|verify)\\.mjs$/.exec(url)?.[1];
 const verify=url.endsWith('/ci/bootstrap/sdk-verify-install.mjs');if(!stage&&!verify)return result;
 const name=verify?'verifyInstall':'run';let source=String(result.source);source=source.replace('export async function '+name+'(','async function ORIGINAL_'+name+'(');
@@ -324,7 +343,9 @@ source+='\\nexport async function '+name+'(config){const fs=await import("node:f
  assert.equal(await fs.readFile(sdk+'/old-success','utf8'),'previous SDK');
  let rows=(await fs.readFile(trace,'utf8')).trim().split('\n').map(JSON.parse);
  assert.equal(rows.some(row=>row.name==='package'),false);
- assert.ok(rows.find(row=>row.name==='stdx').sdk.startsWith(sdk+'.pending-'));
+ const pending=rows.find(row=>row.name==='stdx').sdk;
+ assert.match(pending,/\/stage-handoff-[^/]+\/cangjie\.pending-[^/]+$/);
+ assert.equal(rows.find(row=>row.name==='tools').sdk,pending);
  r=await invoke('restored');assert.equal(r.status,0,r.stdout+r.stderr);
  assert.equal(await fs.stat(sdk+'/old-success').catch(()=>null),null);
  rows=(await fs.readFile(trace,'utf8')).trim().split('\n').map(JSON.parse);
@@ -369,7 +390,7 @@ fs.writeFileSync(out+'.c','#include <stdio.h>\\nint main(void){puts("hello from 
 `,0o755);
  for(const rel of ['modules/'+tuple+'/std/std.core.cjo','lib/'+tuple+'/libcangjie-std-core.a',
   'lib/'+tuple+'/libcangjie-ast-support.a','runtime/lib/'+tuple+'/libcangjie-runtime.so',
-  'third_party/llvm/lib/libLLVM-15.so','third_party/llvm/lib/clang/15/include/stdint.h','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',
+  'third_party/llvm/lib/libLLVM-15.so','third_party/llvm/lib/clang/15/include/stdint.h','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',...stdxChirMembers,
   'third_party/flatbuffers/bin/flatc','stdx/'+tuple+'/fixture',
   ...['llc','llvm-as','llvm-dis','opt'].map(name=>'third_party/llvm/bin/'+name),
   ...['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'].flatMap(name=>{
@@ -394,6 +415,7 @@ fs.writeFileSync(out+'.c','#include <stdio.h>\\nint main(void){puts("hello from 
  for(const name of ['check_sdk_usable.mjs','verifier_artifact_gate.mjs'])assert.equal(await fs.stat(output+'/tools/'+name).catch(()=>null),null);
  const loader=work+'/boundaries.mjs';
  await put(loader,`export async function load(url,context,next){const result=await next(url,context);if(result.source==null)return result;let source=String(result.source);
+${javaBoundary}
 const stage=/\\/build\\/srcbuild\\/stages\\/(compiler|runtime|stdlib|stdx|tools|fetch|verify)\\.mjs$/.exec(url)?.[1];
 if(stage){source=source.replace('export async function run(','async function ORIGINAL_run(');source+='\\nexport async function run(config){const name='+JSON.stringify(stage)+';if(!["compiler","runtime","stdlib"].includes(name))return;const {runBuildPy}=await import("./common.mjs");for(const step of ["build","install"])await runBuildPy(config,config.repoPath(name==="stdlib"?"runtime":name),[step],{stageName:name+"."+step,extraEnv:{FINITE_PRODUCER:name}});}';}
 else if(url.endsWith('/sdk-verify-install.mjs')) {source=source.replace('export async function verifyInstall(','async function ORIGINAL_verifyInstall(');source+='\\nexport async function verifyInstall(){console.log("FINITE_LANGUAGE_BOUNDARY");}';}

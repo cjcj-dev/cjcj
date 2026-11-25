@@ -66,7 +66,7 @@ if(windows)assertX64PeImage(actualBinary,false);
 if(await fileDigest(actualBinary)!==row.sha256||producer.install.artifact?.sha256!==row.sha256)throw Error('SOURCE_TOOL_ARTIFACT_BYTES '+values.tool);
 // Do not stamp a currently selected source onto changed runtime payloads.
 // These are the producer's ordinary install facts, not a second selector.
-const aliasInput = values.tool === 'cjlint' ? await cjlintRuntimeInput(sourceSdk, producer.install.payloads) : null;
+const aliasInput = values.tool === 'cjlint' && !windows ? await cjlintRuntimeInput(sourceSdk, producer.install.payloads) : null;
 const payloadInput = rel => safePayloadPath(sourceSdk, aliasInput && rel === runtimeAlias ? aliasInput : rel);
 for(const [rel,payload]of Object.entries(producer.install.payloads??{})) {
   const input=await payloadInput(rel);

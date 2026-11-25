@@ -15,7 +15,7 @@ export async function stage2Fixture(){
  await write('stdlib/source.cj','fixed std source');git('init','-q');git('add','packages','stdlib');git('commit','-qm','test: C2 record sources');
  const commit=git('rev-parse','HEAD'),tree=git('rev-parse','HEAD^{tree}'),tuple='linux_x86_64_cjnative';
  for(const base of ['sdk','R'])for(const h of ['RuntimeConfig.h','Cangjie.h','CangjieRuntimeLayout.h','RuntimeAPI.h','RTInterface.h'])await write(base+'/include/'+h,h);
- const product=await write('producer/target/release/bin/cjcj::cjc','C2 interface bytes');await write('sdk/libexec/compiler/cjcj-stage1','C2 interface bytes');
+ const product=await write('producer/target/release/bin/cjc','C2 interface bytes');await write('sdk/libexec/compiler/cjcj-stage1','C2 interface bytes');
  const parentProduct=await write('H1/cjcj-stage1','H1 interface bytes');
  await write('std/PROVENANCE.txt','original bootstrap std');
  await write('std/lib/'+tuple+'/libcangjie-std-core.a','bootstrap std bytes');await write('sdk/lib/'+tuple+'/libcangjie-std-core.a','bootstrap std bytes');

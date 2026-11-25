@@ -7,6 +7,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {readJson, fileDigest, privateRoot} from './sdk-flow.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
+import {resolveProductBinary} from '../../build/sdk/producers/srcbuild/lib/product-binary.mjs';
 import {stdIdentity} from '../../build/sdk/producers/srcbuild/lib/final-compiler.mjs';
 const execute = promisify(execFile);
 const sha = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
@@ -43,7 +44,8 @@ async function ordinaryCjpmInput(supplied, input) {
   const targetDirValue = targetDirArg >= 0 ? command.argv[targetDirArg + 1] : undefined;
   if (!targetDirValue || targetDirValue.startsWith('-')) throw new Error('C2_ORDINARY_TARGET_DIR');
   const targetDir = path.resolve(command.cwd, targetDirValue);
-  const expectedSourceProduct = path.join(targetDir, 'release', 'bin', 'cjcj::cjc');
+  const expectedSourceProduct = await resolveProductBinary(path.join(targetDir, 'release', 'bin'),
+    'C2_ORDINARY_COMPILER_OUTPUT', {windows: native.os === 'win32'});
   if (sourceProduct !== expectedSourceProduct) throw new Error('C2_ORDINARY_COMPILER_OUTPUT');
   if (await fileDigest(product) !== metadata.compilerSha256
       || await fileDigest(sourceProduct) !== metadata.compilerSha256)

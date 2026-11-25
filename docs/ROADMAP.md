@@ -109,7 +109,7 @@ WebAssembly 当前是调研结论，尚未立项。线性内存路线需要重�
 ```sh
 cjpm build
 npx --yes zx@8 scripts/difftest.mjs -j 10
-python3 scripts/bcgate.py --self target/release/bin/cjcj::cjc -j 10
+python3 scripts/bcgate.py --self target/release/bin/cjc -j 10
 JOBS=4 CJC_JOBS=1 bash scripts/difftestx_corpus/run.sh
 ```
 

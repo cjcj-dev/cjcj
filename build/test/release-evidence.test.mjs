@@ -24,9 +24,12 @@ const VERSION = '0.0.2';
 const RUN_ID = 42420002;
 // Keep all declared platform obligations, including blocked source recipes.
 const RELEASE_WORKFLOW = loadYaml(readFileSync('.github/workflows/release.yml', 'utf8'));
-const CONTRACTS = Object.values(RELEASE_WORKFLOW.jobs)
-  .filter(job => (job.uses === './.github/workflows/sdk-build.yml' && job.with?.mode === 'package'))
-  .map(job => getReleasePlatform(job.with.release_key));
+const packageCaller = RELEASE_WORKFLOW.jobs.package;
+const CONTRACTS = packageCaller.strategy.matrix.include.map(row => getReleasePlatform(row.release_key));
+const packageNameFor = platform => {
+  const row = CONTRACTS.find(p => p.archiveKey === platform);
+  return `package / ${row.key} / ${row.host} / Build release package`;
+};
 const PLATFORMS = CONTRACTS.map(p => p.archiveKey);
 const hostFor = platform => CONTRACTS.find(p => p.archiveKey === platform).host;
 const COMPONENTS = [
@@ -124,12 +127,11 @@ async function fixture() {
   }
   // Package job names come from the actual caller and callee, independently
   // of the archive consumer's naming/uniqueness logic.
-  const workflow = loadYaml(await fs.readFile('.github/workflows/release.yml', 'utf8'));
-  const callee = loadYaml(await fs.readFile('.github/workflows/sdk-build.yml', 'utf8'));
-  const calleeJob = Object.values(callee.jobs).find(job => job.name?.includes('Build release package'));
+  const callee = loadYaml(await fs.readFile(packageCaller.uses, 'utf8')).jobs.package;
   let id = 100000;
-  for (const job of Object.values(workflow.jobs).filter(job => (job.uses === './.github/workflows/sdk-build.yml' && job.with?.mode === 'package'))) {
-    const name = `${job.name} / ${calleeJob.name.replace('${{ inputs.platform }}', job.with.platform)}`;
+  for (const row of packageCaller.strategy.matrix.include) {
+    const caller = packageCaller.name.replace('${{ matrix.release_key }}', row.release_key);
+    const name = `${caller} / ${callee.name.replace('${{ inputs.platform }}', row.platform)}`;
     jobs.push({id: ++id, name, conclusion: 'success', html_url: `https://github.com/cjcj-dev/cjcj/actions/runs/${RUN_ID}/job/${id}`});
   }
   await fs.writeFile(path.join(source, 'run.json'), `${JSON.stringify(runMetadata, null, 2)}\n`);
@@ -207,8 +209,7 @@ for (const platform of PLATFORMS) {
       const {source, archive, jobs} = await fixture();
       const collected = collect(source, archive);
       assert.equal(collected.status, 0, collected.stderr);
-      const job = jobs.find(j => j.name.startsWith(`${platform} / Build release package /`) ||
-        j.name.includes(`· ${platform} / Build release package /`));
+      const job = jobs.find(j => j.name === packageNameFor(platform));
       job.conclusion = conclusion;
       await writeJobs(source, jobs);
       // collect must reject before creating an archive, not only in its final verify.
@@ -221,8 +222,7 @@ for (const platform of PLATFORMS) {
   }
   test(`requires exactly one canonical ${platform} package job`, async () => {
     const {source, archive, jobs} = await fixture();
-    const job = jobs.find(j => j.name.startsWith(`${platform} / Build release package /`) ||
-      j.name.includes(`· ${platform} / Build release package /`));
+    const job = jobs.find(j => j.name === packageNameFor(platform));
     assert.equal(collect(source, archive).status, 0);
     const expected = `${platform} package grid is not exactly one success (found 0)`;
     job.name += ' extra';
@@ -408,7 +408,7 @@ test('G2 consumes declared archive admission before its independent identity gat
   assert.equal(valid.value.status, 'UNKNOWN');
   assert.match(valid.value.value, /archive=valid/);
   const blocked = CONTRACTS.find(row => row.archiveKey !== row.host && row.host !== 'linux-x64');
-  const job = jobs.find(row => row.name.startsWith(`${blocked.archiveKey} / Build release package /`));
+  const job = jobs.find(row => row.name === packageNameFor(blocked.archiveKey));
   const canonical = job.name;
   job.name += ' renamed';
   await resealJobs(archive, jobs);

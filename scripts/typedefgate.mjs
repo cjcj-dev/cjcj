@@ -12,7 +12,7 @@ import {promisify} from 'node:util';
 const accessAsync = promisify(access);
 const repo = path.resolve(import.meta.dirname, '..');
 const tc = process.env.DIFFTEST_TC || '/root/.cjv/toolchains/nightly-1.2.0-alpha.20260721165458';
-const self = process.env.DIFFTEST_SELF || `${repo}/target/release/bin/cjcj::cjc`;
+const self = process.env.DIFFTEST_SELF || `${repo}/target/release/bin/cjc`;
 const ref = process.env.DIFFTEST_REF || '/root/.cjv/bin/cjc';
 const RUNTIME_SUB = 'runtime/lib/linux_x86_64_cjnative';
 const HARNESS_TAG = 'HARNESS';

@@ -116,7 +116,7 @@ function makeFixture({packageLayout=false}={}) {
   const stdxRoot = directory(workspace, 'cangjie_stdx');
 
   directory(compilerRoot, 'output');
-  for (const subdirectory of ['lib', 'runtime']) {
+  for (const subdirectory of ['lib', 'runtime', 'include']) {
     file(runtimeRoot, ['runtime', 'output', 'common', 'linux_relwithdebinfo_x86_64', subdirectory, '.keep']);
   }
   directory(runtimeRoot, 'runtime', 'output');
@@ -821,7 +821,7 @@ test('Linux source stages emit the Python command order', async () => {
       if(!nativeBuild.includes('--build-dir')&&name!=='lsp')nativeBuild.push('--build-dir',path.join(config.buildRoot,name));
       expectedCommands.push(expected(root,cwd,[...prefix,process.execPath,'build.mjs','build','--tool',name,'--build-root',config.buildRoot,'--',...nativeBuild]));
       const nativeInstall=name==='lsp'?['--build',path.join(config.buildRoot,name)]:['--build-dir',path.join(config.buildRoot,name),...(name==='cjlint'?['--analysis-sdk',config.toolsAnalysisSdk]:[])];
-      expectedCommands.push(expected(root,cwd,[process.execPath,'build.mjs','install','--tool',name,'--build-root',config.buildRoot,'--prefix',path.join(toolsRoot,'packages',name,'dist'),'--',...nativeInstall]));
+      expectedCommands.push(expected(root,cwd,[process.execPath,'build.mjs','install','--tool',name,'--build-root',config.buildRoot,'--prefix',path.join(workspace,'build/tools',name,'install'),'--',...nativeInstall]));
     }
     // This gate observes producer command ordering. Installed SDK packaging,
     // ABI, hello/macro and relocation checks are retained in the registered
@@ -868,6 +868,24 @@ test('finite package preserves layout; real archive primitive retains roots with
   }
 });
 
+// The reference SDK exposes PCRE2 directly; source-built std keeps the
+// same SONAME and relative link chain in its private pcre2 directory.
+function pcreFixture(input, official, tuple) {
+  const name = 'libpcre2-8.so', soname = name + '.0', versioned = soname + '.14.0';
+  const dir = directory(input, 'runtime', 'lib', tuple, 'pcre2');
+  const library = path.join(dir, versioned);
+  const linked = spawnSync('cc', ['-shared', '-fPIC', '-Wl,-soname,' + soname, '-x', 'c', '-', '-o', library],
+    {input:'int fixture(void){return 7;}\n', encoding:'utf8'});
+  assert.equal(linked.status, 0, linked.stderr);
+  const flat = directory(official, 'runtime', 'lib', tuple);
+  fs.copyFileSync(library, path.join(flat, versioned));
+  for (const base of [dir, flat]) {
+    fs.symlinkSync(versioned, path.join(base, soname));
+    fs.symlinkSync(soname, path.join(base, name));
+  }
+  return fs.readFileSync(library);
+}
+
 test('package retains compiler and pcre relative links after input removal', async () => {
   const {root, config} = makeFixture({packageLayout:true});
   try {
@@ -876,11 +894,7 @@ test('package retains compiler and pcre relative links after input removal', asy
     const compilerBytes=fs.readFileSync(path.join(input,'bin/cjc'));
     fs.renameSync(path.join(input,'bin/cjc'),path.join(input,'bin/cjcj-stage1'));
     for (const name of ['cjc', 'cjc-frontend']) fs.symlinkSync('cjcj-stage1', path.join(input, 'bin', name));
-    for (const sdk of [input, config.officialSdkRoot]) {
-      file(sdk, ['runtime', 'lib', tuple, 'libpcre2-8.so.0.14.0'], 'producer pcre');
-      fs.symlinkSync('libpcre2-8.so.0.14.0', path.join(sdk, 'runtime', 'lib', tuple, 'libpcre2-8.so.0'));
-      fs.symlinkSync('libpcre2-8.so.0', path.join(sdk, 'runtime', 'lib', tuple, 'libpcre2-8.so'));
-    }
+    const pcreBytes = pcreFixture(input, config.officialSdkRoot, tuple);
     file(config.officialSdkRoot, ['bin', 'cjc'], 'official compiler');
     fs.symlinkSync('cjc', path.join(config.officialSdkRoot, 'bin', 'cjc-frontend'));
     let archives, packageError;
@@ -890,7 +904,7 @@ test('package retains compiler and pcre relative links after input removal', asy
     assert.equal(fs.readlinkSync(path.join(staged, 'bin', 'cjc')), 'cjcj-stage1', packageError?.message);
     assert.equal(fs.readlinkSync(path.join(staged, 'bin', 'cjc-frontend')), 'cjcj-stage1');
     console.log('PACKAGE_RELATIVE_PCRE_ASSERT_REACHED');
-    assert.equal(fs.readlinkSync(path.join(staged, 'runtime', 'lib', tuple, 'libpcre2-8.so')), 'libpcre2-8.so.0');
+    assert.equal(fs.readlinkSync(path.join(staged, 'runtime', 'lib', tuple, 'pcre2', 'libpcre2-8.so')), 'libpcre2-8.so.0');
     assert.equal(packageError?.rc,1);assert.match(packageError.message,/ENOENT.*STAGE-INPUTS\.json/);
     archives=[await archiveFiniteLayout(config)];
     const extracted = directory(root, 'extracted');
@@ -900,7 +914,7 @@ test('package retains compiler and pcre relative links after input removal', asy
     console.log('PACKAGE_INPUT_INDEPENDENCE_ASSERT_REACHED');
     const published = path.join(extracted, 'cangjie');
     for (const name of ['cjc', 'cjc-frontend']) assert.deepEqual(fs.readFileSync(path.join(published,'bin',name)),compilerBytes);
-    assert.equal(fs.readFileSync(path.join(published, 'runtime', 'lib', tuple, 'libpcre2-8.so'), 'utf8'), 'producer pcre');
+    assert.deepEqual(fs.readFileSync(path.join(published, 'runtime', 'lib', tuple, 'pcre2', 'libpcre2-8.so')), pcreBytes);
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
 
@@ -909,11 +923,7 @@ test('package retains pcre and stdx links independently of compiler aliases', as
   try {
     const input = config.consumerSdk;
     const tuple = 'linux_x86_64_cjnative';
-    for (const sdk of [input, config.officialSdkRoot]) {
-      file(sdk, ['runtime', 'lib', tuple, 'libpcre2-8.so.0.14.0'], 'producer pcre');
-      fs.symlinkSync('libpcre2-8.so.0.14.0', path.join(sdk, 'runtime', 'lib', tuple, 'libpcre2-8.so.0'));
-      fs.symlinkSync('libpcre2-8.so.0', path.join(sdk, 'runtime', 'lib', tuple, 'libpcre2-8.so'));
-    }
+    const pcreBytes = pcreFixture(input, config.officialSdkRoot, tuple);
     const stdxInput = path.join(input,'stdx',config.target.stdxTargetSubdir());
     directory(stdxInput);
     const bitcode=path.join(stdxInput,'target.bc');
@@ -927,8 +937,8 @@ test('package retains pcre and stdx links independently of compiler aliases', as
     try { await publicPackage(config,{CJCJ_VERIFIER_LLVM_DIS:llvmDis}); } catch (error) { packageError = error; }
     const staged = path.join(config.softwareDir, 'cangjie');
     console.log('PACKAGE_INDEPENDENT_PCRE_ASSERT_REACHED');
-    assert.equal(fs.readlinkSync(path.join(staged, 'runtime', 'lib', tuple, 'libpcre2-8.so')), 'libpcre2-8.so.0', packageError?.message);
-    assert.equal(fs.readlinkSync(path.join(staged, 'runtime', 'lib', tuple, 'libpcre2-8.so.0')), 'libpcre2-8.so.0.14.0');
+    assert.equal(fs.readlinkSync(path.join(staged, 'runtime', 'lib', tuple, 'pcre2', 'libpcre2-8.so')), 'libpcre2-8.so.0', packageError?.message);
+    assert.equal(fs.readlinkSync(path.join(staged, 'runtime', 'lib', tuple, 'pcre2', 'libpcre2-8.so.0')), 'libpcre2-8.so.0.14.0');
     assert.equal(packageError?.rc,1);assert.match(packageError.message,/ENOENT.*STAGE-INPUTS\.json/);
     archives=[await archiveFiniteLayout(config),await packageStage.packageStdx(config)];
     const stdxStaged = stdxInput; // Archive the accepted install; no second SDK assembly.
@@ -937,7 +947,7 @@ test('package retains pcre and stdx links independently of compiler aliases', as
     const extracted = directory(root, 'extracted');
     for (const archive of archives) await runCommand(['tar', '-xzf', archive, '-C', extracted]);
     for (const directory of [input, stdxInput, staged, stdxStaged]) fs.rmSync(directory, {recursive: true, force: true});
-    assert.equal(fs.readFileSync(path.join(extracted, 'cangjie', 'runtime', 'lib', tuple, 'libpcre2-8.so'), 'utf8'), 'producer pcre');
+    assert.deepEqual(fs.readFileSync(path.join(extracted, 'cangjie', 'runtime', 'lib', tuple, 'pcre2', 'libpcre2-8.so')), pcreBytes);
     assert.deepEqual(fs.readFileSync(path.join(extracted,path.basename(stdxInput),'module.bc')),bitcodeBytes);
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
@@ -965,7 +975,7 @@ test('public package requires the installed private analysis bodies, not stale c
     const sdk=config.consumerSdk;
     await rejectsMissingStage(config); // Correct layout reaches the unchanged native SDK gate.
     for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead']) {
-      const producer={LSPServer:'lsp',cjhead:'cjhead',cjlint:'cjlint'}[name];
+      const producer={LSPServer:'lsp',cjhead:'cjhead',cjlint:'cjlint','cjtrace-recover':'cjtrace-recover'}[name];
       const relative='.target-tools/tools/'+(producer?producer+'/':'')+'bin/'+name;
       const body=path.join(sdk,relative),saved=fs.readFileSync(body);
       if(producer)file(sdk,['.target-tools/tools/bin',name],'stale common body must not satisfy private install');
@@ -1007,7 +1017,7 @@ test('Windows complete target path obligations remain; public package rejects mi
     const input=directory(config.consumerSdk);
     file(input,['envsetup.sh']);directory(input,'stdx',config.target.stdxTargetSubdir());
     for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead']) {
-      const privateDir={LSPServer:'lsp',cjlint:'cjlint',cjhead:'cjhead'}[name];
+      const privateDir={LSPServer:'lsp',cjlint:'cjlint','cjtrace-recover':'cjtrace-recover',cjhead:'cjhead'}[name];
       for(const relative of ['tools/bin/'+name+'.exe','tools/bin/'+name+'.exe.entry',
         '.target-tools/tools/'+(privateDir?privateDir+'/':'')+'bin/'+name+'.exe'])file(input,[relative],'finite Windows layout');
     }

@@ -1117,6 +1117,7 @@ jobs:
   source-stage1-initial-std:
     name: ${{ matrix.target }} / source-stage1-initial-std
     needs: [plan, source-stage0]
+    if: "!cancelled() && needs.plan.result == 'success' && needs.source-stage0.result == 'success'"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -1199,6 +1200,7 @@ jobs:
   source-stage1-std:
     name: ${{ matrix.target }} / source-stage1-std
     needs: [plan, source-stage1-initial-std]
+    if: "!cancelled() && needs.plan.result == 'success' && needs.source-stage1-initial-std.result == 'success'"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -1281,6 +1283,7 @@ jobs:
   source-stage1-compiler:
     name: ${{ matrix.target }} / source-stage1-compiler
     needs: [plan, source-stage1-std]
+    if: "!cancelled() && needs.plan.result == 'success' && needs.source-stage1-std.result == 'success'"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -1363,6 +1366,7 @@ jobs:
   source-stage3:
     name: ${{ matrix.target }} / source-stage3
     needs: [plan, source-stage1-compiler]
+    if: "!cancelled() && needs.plan.result == 'success' && needs.source-stage1-compiler.result == 'success'"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -1496,8 +1500,9 @@ jobs:
     # job is why it is a predecessor again rather than an optional copy.
     needs: [plan, source-stage3, source-windows, source-android, source-ios]
     if: >-
-      always() && needs.plan.result == 'success' && needs.source-stage3.result == 'success' &&
-      (needs.source-windows.result == 'success' || needs.source-windows.result == 'skipped') &&
+      !cancelled() && needs.plan.result == 'success' && needs.source-stage3.result == 'success' &&
+      (needs.source-windows.result == 'success' ||
+       (needs.source-windows.result == 'skipped' && !contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64'))) &&
       (needs.source-android.result == 'success' ||
        (needs.source-android.result == 'skipped' && !(inputs.build_android && contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64')))) &&
       (needs.source-ios.result == 'success' ||
@@ -1915,7 +1920,7 @@ jobs:
   source-android:
     name: linux-x64 / source-android
     needs: [plan, source-stage3]
-    if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64') && inputs.build_android
+    if: "!cancelled() && needs.plan.result == 'success' && needs.source-stage3.result == 'success' && contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64') && inputs.build_android"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -2010,7 +2015,7 @@ jobs:
   source-wasm:
     name: linux-x64 / source-wasm
     needs: [plan, source-stage3]
-    if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64') && inputs.build_wasm
+    if: "!cancelled() && needs.plan.result == 'success' && needs.source-stage3.result == 'success' && contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64') && inputs.build_wasm"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -2100,7 +2105,7 @@ jobs:
   source-ohos:
     name: ${{ matrix.runtime_target }} / source-ohos
     needs: [plan, source-stage3]
-    if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64') && inputs.build_ohos
+    if: "!cancelled() && needs.plan.result == 'success' && needs.source-stage3.result == 'success' && contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64') && inputs.build_ohos"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -2188,7 +2193,7 @@ jobs:
   source-ios:
     name: ${{ matrix.runtime_target }} / source-ios
     needs: [plan, source-stage3]
-    if: contains(needs.plan.outputs.llvm_platforms, 'darwin_aarch64') && inputs.build_ios
+    if: "!cancelled() && needs.plan.result == 'success' && needs.source-stage3.result == 'success' && contains(needs.plan.outputs.llvm_platforms, 'darwin_aarch64') && inputs.build_ios"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
@@ -2362,7 +2367,7 @@ jobs:
   source-windows:
     name: linux-x64 / source-windows
     needs: [plan, source-stage3, source-mingw]
-    if: contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64')
+    if: "!cancelled() && needs.plan.result == 'success' && needs.source-stage3.result == 'success' && needs.source-mingw.result == 'success' && contains(needs.plan.outputs.llvm_platforms, 'linux_x86_64')"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:

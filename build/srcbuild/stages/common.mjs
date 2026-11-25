@@ -268,6 +268,11 @@ export function requireFile(file, {stage: stageName}) {
 
 function copy(source, target) {
   fs.cpSync(source, target, {
+    // Reinstalling a std tree can revisit the same relative loader links.
+    filter: !fs.lstatSync(target, {throwIfNoEntry: false}) ? undefined
+      : (from, to) => !(fs.lstatSync(from).isSymbolicLink()
+      && fs.lstatSync(to, {throwIfNoEntry: false})?.isSymbolicLink()
+      && fs.readlinkSync(from) === fs.readlinkSync(to)),
     recursive: true,
     dereference: false,
     preserveTimestamps: true,

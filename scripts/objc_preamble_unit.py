@@ -28,7 +28,7 @@ def prepare(tree, sdk, out, producer=None, stub_imports=None):
               'phase': 'copy', 'rc': None, 'argv': None, 'logs': {}, 'error': None}
     try:
         if producer is None:
-            products = [tree / 'target/release/bin' / n for n in ('cjcj::cjc', 'cjc@cjcj')]
+            products = [tree / 'target/release/bin' / n for n in ('cjc', 'cjcj::cjc', 'cjc@cjcj')]
             products = [p for p in products if p.is_file()]
             if len(products) != 1:
                 raise ValueError('expected exactly one same-tree release compiler')

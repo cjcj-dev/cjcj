@@ -9,7 +9,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 fixtures="$root/scripts/objc_interop_fixtures"
 toolchain=${CANGJIE_HOME:-/root/.cjv/toolchains/nightly-1.2.0-alpha.20260721165458}
 reference=${OBJC_GATE_REFERENCE:-$toolchain/bin/cjc}
-self=${OBJC_GATE_SELF:-$root/target/release/bin/cjcj::cjc}
+self=${OBJC_GATE_SELF:-$root/target/release/bin/cjc}
 jobs=${OBJC_GATE_JOBS:-24}
 
 while [ "$#" -gt 0 ]; do

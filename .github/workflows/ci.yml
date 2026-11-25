@@ -388,9 +388,9 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: target
-          key: cjpm-${{ runner.os }}-${{ matrix.runner }}-${{ env.CJCJ_TOOLCHAIN }}-${{ github.sha }}
+          key: cjpm-portable-${{ runner.os }}-${{ matrix.runner }}-${{ env.CJCJ_TOOLCHAIN }}-${{ github.sha }}
           restore-keys: |
-            cjpm-${{ runner.os }}-${{ matrix.runner }}-${{ env.CJCJ_TOOLCHAIN }}-
+            cjpm-portable-${{ runner.os }}-${{ matrix.runner }}-${{ env.CJCJ_TOOLCHAIN }}-
       - name: Install SDK
         id: setup
         env:
@@ -505,9 +505,9 @@ jobs:
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
       - name: Compose compiler
         run: |
-          test -f "target/release/bin/cjcj::cjc"
-          node ci/check-colour-tlab.mjs "target/release/bin/cjcj::cjc"
-          cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
+          test -f "target/release/bin/cjc"
+          node ci/check-colour-tlab.mjs "target/release/bin/cjc"
+          cp "target/release/bin/cjc" "target/release/bin/cjcj"
       - name: Run smoke tests
         run: node ci/with-colour-sdk.mjs run -- npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj" "$RUNNER_TEMP/smoke-tests"
       - name: Preserve smoke producer evidence

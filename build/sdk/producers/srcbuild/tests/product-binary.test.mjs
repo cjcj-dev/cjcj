@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {PRODUCT_NAMES, resolveProductBinary} from '../lib/product-binary.mjs';
+import {resolveProductBinary} from '../lib/product-binary.mjs';
 
 const withBin = async (names, body) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'product-binary-'));
@@ -24,6 +24,12 @@ test('resolves the cjc@cjcj product name', async () => {
   });
 });
 
+test('resolves the portable cjc product name', async () => {
+  await withBin(['cjc', 'cjc.cjo'], async dir => {
+    assert.equal(await resolveProductBinary(dir), path.join(dir, 'cjc'));
+  });
+});
+
 test('resolves the other name too', async () => {
   await withBin(['cjcj::cjc'], async (dir) => {
     const found = await resolveProductBinary(dir, 'stage1');
@@ -38,7 +44,7 @@ test('the .cjo alongside the product is not mistaken for a second product', asyn
 });
 
 test('two products is an error, not a first-match', async () => {
-  await withBin(PRODUCT_NAMES, async (dir) => {
+  await withBin(['cjc', 'cjc@cjcj'], async (dir) => {
     await assert.rejects(
       () => resolveProductBinary(dir, 'stage1'),
       (error) => error.message.includes('found 2'),
@@ -63,15 +69,21 @@ test('an unreadable directory says so rather than reporting an empty listing', a
   );
 });
 
-for (const name of ['cjc@cjcj.exe', 'cjcj.exe']) {
+for (const name of ['cjc.exe', 'cjc@cjcj.exe', 'cjcj.exe']) {
   test(`resolves Windows producer ${name}`, async () => {
     await withBin([name], async dir => {
       assert.equal(path.basename(await resolveProductBinary(dir, 'Windows W2', {windows: true})), name);
     });
   });
 }
+test('Windows producer rejects an unsuffixed compiler', async () => {
+  await withBin(['cjc'], async dir => {
+    await assert.rejects(resolveProductBinary(dir, 'Windows W1', {windows: true}), /Windows W1: none of cjc\.exe/);
+  });
+});
+
 test('Windows producer refuses ambiguous seeds', async () => {
-  await withBin(['cjc@cjcj.exe', 'cjcj.exe'], async dir => {
+  await withBin(['cjc.exe', 'cjc@cjcj.exe'], async dir => {
     await assert.rejects(resolveProductBinary(dir, 'Windows W1', {windows: true}), /expected exactly one/);
   });
 });

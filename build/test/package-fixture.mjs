@@ -9,7 +9,7 @@ export function finiteNativeLayout(root,sdk) {
  const write=(rel,body)=>{const f=path.join(sdk,rel);fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,body);};
  for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead']) {
   write('tools/bin/'+name,'installed launcher '+name);write('tools/bin/'+name+'.entry','finite recipe, not executable');
-  const privateDir={LSPServer:'lsp',cjlint:'cjlint',cjhead:'cjhead'}[name];
+  const privateDir={LSPServer:'lsp',cjlint:'cjlint','cjtrace-recover':'cjtrace-recover',cjhead:'cjhead'}[name];
   write('.target-tools/tools/'+(privateDir?privateDir+'/':'')+'bin/'+name,'source-built '+name);
  }
  for(const rel of ['tools/config/cangjie-format.toml','tools/config/cangjie-repo.toml',

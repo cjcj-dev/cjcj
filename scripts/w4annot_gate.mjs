@@ -8,7 +8,7 @@ import {configureToolchain} from './zx_gate_lib.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const fixtures = path.join(root, 'scripts/w4annot_fixtures');
-const cjc = argv._[0] || `${root}/target/release/bin/cjcj::cjc`;
+const cjc = argv._[0] || `${root}/target/release/bin/cjc`;
 const home = process.env.CANGJIE_HOME || '/root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029';
 configureToolchain(home);
 const work = await fs.mkdtemp(path.join(os.tmpdir(), 'w4annot-'));

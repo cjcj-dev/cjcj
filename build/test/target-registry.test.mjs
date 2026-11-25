@@ -140,5 +140,5 @@ test('source workflows drop unused final outputs while retaining artifact upload
     assert.doesNotMatch(workflow(file), /final_(?:std|compiler)_|artifact-contract:/);
   }
   assert.match(workflow('sdk-build-target.yml'), /name: final-compiler-\$\{\{ matrix.target \}\}/);
-  assert.match(workflow('sdk-build-target.yml'), /name: final-std-\$\{\{ matrix.target \}\}/);
+  assert.match(workflow('sdk-build-target.yml'), /name: \$\{\{ matrix.std_artifact \}\}/);
 });

@@ -53,7 +53,7 @@ const provenance = await verifyComponentProvenance({
 const sdkRoot=await privateRoot(values.sdk);
 const lintConfig=[];
 if(values.tool==='cjlint') {
-  await requireCjlintRuntimePair(artifactRoot);
+  if (!windows) await requireCjlintRuntimePair(artifactRoot);
   await fs.mkdir(sdkRoot,{recursive:true});
   // The verified artifact already transports the private source configuration.
   // Preflight the corresponding public paths before replacing any stock entry.

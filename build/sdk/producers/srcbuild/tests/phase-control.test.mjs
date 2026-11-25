@@ -139,7 +139,7 @@ test('Windows and optional iOS source paths reach only their own packaging jobs'
         // Android is not requested here (inputs.build_android unset): its skip admits srcbuild.
         'source-android':{result:'skipped'}};
       assert.equal(evalSourceCondition(workflow.jobs.srcbuild.if,inputs,needs),
-        !windows && ['success','skipped'].includes(winResult) && (iosResult==='success' || iosResult==='skipped'&&!ios));
+        !windows && (winResult==='success' || winResult==='skipped' && cell.target!=='linux-x64') && (iosResult==='success' || iosResult==='skipped'&&!ios));
     }
   }
 });

@@ -3,7 +3,7 @@ import {test, before, after} from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {pinnedRemote} from './fixtures/git/pinned-remote.mjs';
 import {spawnSync} from 'node:child_process';
 
 import {readSourcePins} from './native-llvm-inputs.mjs';
@@ -48,17 +48,8 @@ before(async () => {
   let prepared;
   if (process.env.G1_LAYOUT_INPUTS) prepared = JSON.parse(fs.readFileSync(process.env.G1_LAYOUT_INPUTS));
   else {
-    for (const file of ['pinned-remote.mjs', 'runtime.pack'])
-      fs.copyFileSync(path.join(root, 'ci/fixtures/git', file), path.join(inputs, file));
-    const fd = fs.openSync(path.join(inputs, 'llvm.pack'), 'wx');
-    try { for (const part of ['00', '01', '02']) fs.writeFileSync(fd,
-      fs.readFileSync(path.join(root, `ci/fixtures/git/llvm.pack.${part}`))); }
-    finally { fs.closeSync(fd); }
-    const {pinnedRemote} = await import(pathToFileURL(path.join(inputs, 'pinned-remote.mjs')));
     prepared = {...expected, runtime: pinnedRemote(inputs, 'runtime', expected.runtimeRef),
       llvm: pinnedRemote(inputs, 'llvm', expected.llvmRef)};
-    fs.unlinkSync(path.join(inputs, 'runtime.pack'));
-    fs.unlinkSync(path.join(inputs, 'llvm.pack'));
   }
   for (const side of ['runtime', 'llvm']) {
     assert.equal(prepared[`${side}Ref`], expected[`${side}Ref`]);
