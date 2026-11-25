@@ -4,14 +4,14 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {spawnSync, spawn} from 'node:child_process';
+import {testEvidenceDirectory} from './test-evidence-directory.mjs';
 import test from 'node:test';
 import {preserveCall, diagnose} from './producer-evidence.mjs';
 import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
 import {zxCommand} from './test-zx.mjs';
 
 const repo = path.resolve(import.meta.dirname, '..');
-const suiteRoot = process.env.PRODUCER_EVIDENCE_TEST_ROOT;
-if (!suiteRoot) throw new Error('PRODUCER_EVIDENCE_TEST_ROOT must be a lane-owned persistent directory');
+const suiteRoot = testEvidenceDirectory('producer-evidence-tests');
 await fs.mkdir(suiteRoot, {recursive: true});
 const fixtureElf = path.join(suiteRoot, 'controlled-producer');
 const compiled = spawnSync('cc', ['-g', '-O0', '-o', fixtureElf, path.join(repo, 'ci/producer-evidence.fixture.c')], {encoding: 'utf8'});

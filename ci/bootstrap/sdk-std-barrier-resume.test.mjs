@@ -2,6 +2,7 @@
 // Public first/resume/dirty/failure/cancellation obligations live in the
 // registered native-wiring matrix. Here keep current linkage and process tests;
 // retired instruction-shape predicates are not a language semantic contract.
+import {testEvidenceDirectory} from '../test-evidence-directory.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -12,8 +13,7 @@ import {assertStdBarriers, streamStdProcess} from '../../build/sdk/producers/src
 import {prepareRuntimeInputs} from './sdk-native-stage.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {copyOutputs, inventory} from './sdk-flow.mjs';
-const base=process.env.STD_BARRIER_TEST_ROOT;
-if(!base)throw new Error('STD_BARRIER_TEST_ROOT required');
+const base=testEvidenceDirectory('std-barrier-tests');
 await fs.mkdir(base,{recursive:true});
 const root=await fs.mkdtemp(path.join(base,'current-'));
 const run=(exe,args)=>{const p=spawnSync(exe,args,{encoding:'utf8'});assert.equal(p.status,0,p.stderr);};

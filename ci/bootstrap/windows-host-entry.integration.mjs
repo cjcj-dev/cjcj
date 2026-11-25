@@ -145,7 +145,7 @@ test('public host preparation consumes collector decoded events and exports the 
  assert.equal(trace.commands.find(x=>x.argv[0]==='/usr/bin/python3'||x.argv[0]==='python').rc,0);
  assert.equal(trace.commands.filter(x=>x.record==='host-llvm.json').length,1);
  assert.deepEqual(trace.execution.loaded,['C:'+f.work+'/inputs/host/third_party/llvm/bin/libLLVM-15.dll']);
- assert.match(await fs.readFile(f.work+'/github.env','utf8'),new RegExp('CJCJ_BOOTSTRAP_BASE=C:'+f.work+'/inputs/host'));
+ assert.match(await fs.readFile(f.work+'/github.env','utf8'),new RegExp('CJCJ_OFFICIAL_SDK_ROOT=C:'+f.work+'/inputs/host'));
  const configured=await f.run('configure');assert.equal(configured.rc,1);assert.match(configured.stderr,/GHA_HLE_ARTIFACT_PATH/);
  console.log('WINDOWS_HOST_CONFIG_BOUNDARY_REACHED missing-real-HLE; synthetic chain only');
 });

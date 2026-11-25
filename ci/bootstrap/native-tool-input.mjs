@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {readJson,atomicJson,relative} from './sdk-flow.mjs';
 import {prepareNativeToolDependencies,readNativeToolDependencies} from '../../build/srcbuild/native-tool-dependencies.mjs';
-export async function configureNativeToolInput({root,workspace,platform,envFile}) {
+export async function configureNativeToolInput({root,workspace,platform}) {
   root=await fs.realpath(root);
   const locations=await readJson(path.join(root,'locations.json'));
   if(locations.platform!==platform)throw Error('GHA_NATIVE_ARTIFACT_PLATFORM');
@@ -35,12 +35,15 @@ export async function configureNativeToolInput({root,workspace,platform,envFile}
   await atomicJson(output,resolved);
   await readNativeToolDependencies(output,['cjlint']);
   if(platform==='windows_x86_64')await prepareNativeToolDependencies({toolsDependencies:output},['cjlint']);
-  if(envFile)await fs.appendFile(envFile,'CJCJ_NATIVE_TOOL_DEPENDENCIES='+output+'\n');
   return output;
 }
-export async function verifyNativeToolHandoff({root,environment}) {
-  const file=environment.CJCJ_NATIVE_TOOL_DEPENDENCIES;
-  if(!file)return;
+export async function verifyNativeToolHandoff(root) {
+  const file=path.join(root,'.srcbuild/workspace/native-tool-dependencies.json');
+  const locations=path.join(root,'.srcbuild/native-inputs/locations.json');
+  // Some bootstrap-only artifacts declare no tools. A declared descriptor
+  // must survive both pack and restore, even if it was subsequently removed.
+  const input=await readJson(locations).catch(error=>{if(error.code!=='ENOENT')throw error;});
+  if(!input?.nativeToolDependencies && !await fs.lstat(file).catch(error=>{if(error.code!=='ENOENT')throw error;}))return;
   const archived=path.join(await fs.realpath(root),'.srcbuild')+path.sep;
   const selection=await readNativeToolDependencies(file,['cjlint']);
   for(const item of [file,...Object.values(selection).map(row=>row.path)]) {

@@ -290,10 +290,18 @@ test('producer evidence qualification and full smoke artifacts are wired without
     assert.ok(install.run.split(/\s+/).includes(dependency), dependency);
   assert.ok(GATING.includes('ci/producer-evidence.test.mjs'));
   const run = contracts.steps.find(s => s.name === 'Test build and release contracts');
-  assert.equal(run.env.PRODUCER_EVIDENCE_TEST_ROOT, '${{ runner.temp }}/producer-evidence-tests');
+  assert.equal(run.env.RELEASE_EVIDENCE_TEST_ROOT, '${{ runner.temp }}/release-evidence-tests');
   const qualification = contracts.steps.find(s => s.name === 'Preserve producer qualification evidence');
   assert.equal(qualification.if, 'always()');
-  assert.equal(qualification.with.path, run.env.PRODUCER_EVIDENCE_TEST_ROOT);
+  const evidencePath = (root, suite) => spawnSync(process.execPath, ['--input-type=module', '-e',
+    "import {testEvidenceDirectory} from './ci/test-evidence-directory.mjs'; console.log(testEvidenceDirectory(process.argv[1]));", suite],
+    {cwd:repoRoot, env:{...process.env,RELEASE_EVIDENCE_TEST_ROOT:root}, encoding:'utf8'});
+  const producer = evidencePath(run.env.RELEASE_EVIDENCE_TEST_ROOT, 'producer-evidence-tests');
+  assert.equal(producer.status, 0, producer.stderr);
+  assert.equal(qualification.with.path, producer.stdout.trim());
+  const missing = evidencePath('', 'producer-evidence-tests');
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /RELEASE_EVIDENCE_TEST_ROOT required/);
   assert.equal(qualification.with['include-hidden-files'], true);
   const smoke = ci.jobs.build.steps.find(s => s.name === 'Run smoke tests');
   assert.match(smoke.run, /"\$RUNNER_TEMP\/smoke-tests"/);

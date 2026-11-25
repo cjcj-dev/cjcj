@@ -4,16 +4,16 @@ import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {testEvidenceDirectory} from '../test-evidence-directory.mjs';
 import test from 'node:test';
 
 const repo = path.resolve(import.meta.dirname, '../..');
 const driver = path.join(repo, 'ci', 'smoke', 'run_smoke.mjs');
 
 function smoke(t, {runtimeLibDir, transcript = ''}) {
-  const evidence = process.env.PRODUCER_EVIDENCE_TEST_ROOT;
-  if (evidence) fs.mkdirSync(evidence, {recursive: true});
-  const root = fs.mkdtempSync(path.join(evidence || os.tmpdir(), 'smoke-isolation-'));
-  if (!evidence) t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const evidence = testEvidenceDirectory('producer-evidence-tests');
+  fs.mkdirSync(evidence, {recursive: true});
+  const root = fs.mkdtempSync(path.join(evidence, 'smoke-isolation-'));
   const argv = path.join(root, 'argv.log');
   const sdk = path.join(root, 'official-sdk');
   for (const directory of ['modules', 'lib', 'runtime/lib', 'third_party/llvm/lib', 'tools/lib']) {

@@ -440,7 +440,9 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   await validateInstalledInputs(inputs);
   const file = path.join(work, 'sdk-inputs.json');
   await atomicJson(file, inputs);
-  if (env.GITHUB_ENV) await fs.appendFile(env.GITHUB_ENV, 'CJCJ_SDK_INPUTS='+file+'\n');
+  // Standalone descriptors may deliberately select a work directory outside the CI workspace.
+  if (env.GITHUB_ENV && (!env.CANGJIE_WORKSPACE || work !== path.resolve(env.CANGJIE_WORKSPACE, 'native-bootstrap')))
+    await fs.appendFile(env.GITHUB_ENV, 'CJCJ_SDK_INPUTS='+file+'\n');
   console.log('NATIVE_INPUTS_CONFIGURED '+JSON.stringify({file,platform,commits:Object.fromEntries(
     Object.entries(rows).map(([name,row])=>[name,row.commit])),host:host.version}));
   return file;

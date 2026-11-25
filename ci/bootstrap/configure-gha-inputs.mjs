@@ -30,7 +30,8 @@ export async function windowsJobSeed(checkout,locations,env) {
   return {repository:await git('remote','get-url','origin'),commit:head};
 }
 export async function configureGhaInputs(env=process.env) {
-  if(!env.CANGJIE_WORKSPACE||!env.GITHUB_WORKSPACE||!env.CJCJ_NATIVE_INPUT_ROOT||!env.CJCJ_BOOTSTRAP_BASE)
+  const hostRoot = env.CJCJ_NATIVE_RUNTIME_INSTALL ? env.CJCJ_OFFICIAL_SDK_ROOT : (env.CJCJ_BOOTSTRAP_BASE || env.CJCJ_OFFICIAL_SDK_ROOT);
+  if(!env.CANGJIE_WORKSPACE||!env.GITHUB_WORKSPACE||!env.CJCJ_NATIVE_INPUT_ROOT||!hostRoot)
     throw new Error('GHA_NATIVE_LOCATIONS_REQUIRED');
   const root=await privateRoot(env.CJCJ_NATIVE_INPUT_ROOT), workspace=await privateRoot(env.CANGJIE_WORKSPACE);
   const locations=await readJson(path.join(root,'locations.json'));
@@ -45,7 +46,7 @@ export async function configureGhaInputs(env=process.env) {
   if (Boolean(env.CJCJ_NATIVE_RUNTIME_INSTALL) !== Boolean(pair)) throw new Error('GHA_NATIVE_RUNTIME_PAIR_INSTALL_REQUIRED');
   if(locations.platform!==platform)throw new Error('GHA_NATIVE_ARTIFACT_PLATFORM');
   await configureHleInput(root,platform,env.GITHUB_ENV);
-  await configureNativeToolInput({root,workspace,platform,envFile:env.GITHUB_ENV});
+  await configureNativeToolInput({root,workspace,platform});
   const sources={compiler:path.resolve(env.GITHUB_WORKSPACE)};
   const stdDependencies=stdDependencySources();
   const windows=platform==='windows_x86_64';
@@ -99,15 +100,14 @@ export async function configureGhaInputs(env=process.env) {
   }));
   if(resolved.shim)installations.shim=resolved.shim;
   const selectedHost = pair && locations.host ? {...locations.host, install:member(locations.host.install),
-    ...(locations.host.archive ? {archive:member(locations.host.archive)} : {})} : {install:env.CJCJ_BOOTSTRAP_BASE,
+    ...(locations.host.archive ? {archive:member(locations.host.archive)} : {})} : {install:hostRoot,
     archive:env.CJCJ_BOOTSTRAP_BASE_ARCHIVE, version:readHostToolchainPin(platform).replace(/^nightly-/,'')};
-  if (pair && (path.resolve(selectedHost.install) !== path.resolve(env.CJCJ_BOOTSTRAP_BASE)
+  if (pair && (path.resolve(selectedHost.install) !== path.resolve(hostRoot)
     || !selectedHost.archive || path.resolve(selectedHost.archive) !== path.resolve(env.CJCJ_BOOTSTRAP_BASE_ARCHIVE || '')))
     throw new Error('GHA_NATIVE_SELECTED_HOST_CHANGED');
   // native-inputs never names a private tools root; a stale one fails closed.
   const tools={...(windows?{}:rejectPrivateTools(locations.tools??{})),
     cc:env.CC||'clang',cxx:env.CXX||'clang++',launcher:env.CMAKE_CXX_COMPILER_LAUNCHER||'sccache',zx:windows?env.CJCJ_ZX_CLI:'zx'};
-  if(env.GITHUB_ENV)await fs.appendFile(env.GITHUB_ENV,'CJCJ_BOOTSTRAP_WORK='+path.join(workspace,'native-bootstrap')+'\n');
   return prepareNativeInputs({platform,sources,installations,tools,sourceSelection:selection,
     stdDependencies:Object.fromEntries(Object.entries(stdDependencies).map(([name,row])=>[name,{...row,root:sources[name]}])),
     ...(explicitAst?{astCommit:selection.ast.commit}:{}),

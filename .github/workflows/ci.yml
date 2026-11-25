@@ -130,9 +130,6 @@ jobs:
         env:
           CONTRACT_GROUP: ${{ matrix.group }}
           RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/release-evidence-tests
-          STD_BARRIER_TEST_ROOT: ${{ runner.temp }}/std-barrier-tests
-          CJCJ_TEST_EVIDENCE: ${{ runner.temp }}/srcbuild-driver-evidence
-          PRODUCER_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/producer-evidence-tests
         run: |
           node ci/contract-shards.mjs run "$RUNNER_TEMP/contract-plan/contract-plan.json" "$CONTRACT_GROUP" "$RUNNER_TEMP/contract-result"
       - name: Preserve contract group evidence
@@ -147,14 +144,14 @@ jobs:
         uses: actions/upload-artifact@v7.0.2
         with:
           name: srcbuild-driver-evidence-${{ matrix.group }}
-          path: ${{ runner.temp }}/srcbuild-driver-evidence
+          path: ${{ runner.temp }}/release-evidence-tests/srcbuild-driver-evidence
           if-no-files-found: warn
       - name: Preserve producer qualification evidence
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
           name: producer-qualification-${{ matrix.group }}
-          path: ${{ runner.temp }}/producer-evidence-tests
+          path: ${{ runner.temp }}/release-evidence-tests/producer-evidence-tests
           if-no-files-found: warn
           include-hidden-files: true
 
@@ -337,7 +334,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           NATIVE_SDK_ARTIFACT_ID: ${{ needs.package-tests.outputs.artifact }}
           NATIVE_SDK_RUN_ID: ${{ needs.package-tests.outputs.run }}
-          NATIVE_SDK_VERSION: ${{ needs.package-tests.outputs.version }}
+          CJCJ_NATIVE_SDK_VERSION: ${{ needs.package-tests.outputs.version }}
           NATIVE_SDK_ACCEPTED_DIGEST: ${{ needs.package-tests.outputs.digest }}
           ACCEPTANCE_JOB: package-tests
         run: |

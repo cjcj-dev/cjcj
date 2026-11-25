@@ -62,7 +62,7 @@ test('canonical compiler pin reaches the native producer and SDK header defaults
  const result=run({});assert.equal(result.status,0,result.stderr);
  const selected=fs.readFileSync(output,'utf8');
  assert.ok(selected.includes(`CANGJIE_COMPILER_SHA=${source.COMPILER_REF}\n`));
- assert.ok(selected.includes(`CANGJIE_COMPILER_URL=${source.COMPILER_SRC_URL}\n`));
+ assert.ok(selected.includes(`COMPILER_SRC_URL=${source.COMPILER_SRC_URL}\n`));
  assert.doesNotMatch(fs.readFileSync('ci/llvm_pin.env','utf8'),/^CANGJIE_COMPILER_(?:SHA|URL)=/m);
  const probe=spawnSync(process.execPath,['--input-type=module','-e',
   "import {FIXED_INPUTS} from './ci/bootstrap/sdk-targets.mjs'; import {SHIM_SOURCE_COMMITS,selectShimSources} from './ci/bootstrap/shim-header-sources.mjs'; console.log(JSON.stringify({sdk:FIXED_INPUTS,shim:SHIM_SOURCE_COMMITS,selected:selectShimSources('/private-fixture',{})}));"],{encoding:'utf8'});

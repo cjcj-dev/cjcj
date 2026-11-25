@@ -75,6 +75,7 @@ function r3Fixture(label) {
  const config=buildConfig({workspace,officialSdkRoot:host});installGcUnitInputs(config,runtime,sdk);
  const seed=root+'/native-input';fs.cpSync(sdk,seed,{recursive:true});write(seed+'/RUNTIME-INPUTS.json','{}');
  write(seed+'/NATIVE-INPUTS.json','{}');
+ write(seed+'/include/fixture.h','/* finite runtime header transport */\n');
  write(host+'/bin/cjc','#!'+process.execPath+'\nconsole.log("Cangjie Compiler: 1.0.0 (cjnative)");\n',0o755);
  // Only build.py is controlled. Actual runBuildPy environment/command facts,
  // overlay, split/cache checks, provenance and language gate remain active.
@@ -86,7 +87,7 @@ if os.environ.get('R3_CHILD_FAIL') and sys.argv[1]=='build': sys.exit(19)
  write(runtime+'/build.py',record+String.raw`
 if sys.argv[1]=='build':
  kind=sys.argv[sys.argv.index('-t')+1];out=r/'output/common'/('linux_'+kind+'_x86_64')
- for name in ['lib','runtime']: shutil.copytree(seed/name,out/name,dirs_exist_ok=True)
+ for name in ['lib','runtime','include']: shutil.copytree(seed/name,out/name,dirs_exist_ok=True)
  p=r/'CMakebuild/gc-unit.status';p.parent.mkdir(parents=True,exist_ok=True)
  p.write_text('GATE=PASS\nGATE_RC=0\nCPP_SUITE=PASS\nLANGUAGE_TESTS=LANGUAGE_DEFERRED\n')
 `);

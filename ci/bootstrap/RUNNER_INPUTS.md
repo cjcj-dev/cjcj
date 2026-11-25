@@ -177,7 +177,7 @@ closed (`HLE_CJBIND_SOURCE_FILE_REQUIRED`, `HLE_CJBIND_SOURCE_FILE`,
 `HLE_CJBIND_SOURCE_COMMIT`, `HLE_CJBIND_SOURCE_UNAPPROVED`).
 `configure-gha-inputs.mjs` checks out the fixed LLVM, runtime, AST compiler and
 H1 repositories, reads the actual candidate checkout, selects execution-host H,
-and writes `CJCJ_SDK_INPUTS` into GITHUB_ENV. The artifact must contain genuine
+and writes `CANGJIE_WORKSPACE/native-bootstrap/sdk-inputs.json`. The artifact must contain genuine
 native outputs; a source workflow cannot create this input by naming empty paths.
 The eight bootstrap phases then use `sdk-targets.mjs`; native production and full
 SDK qualification remain distinct from configuration-only checks.

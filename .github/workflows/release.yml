@@ -126,14 +126,10 @@ jobs:
         with:
           node-version: '24.22.1'
       - name: Require the native inputs that prepare.yml produced
-        env:
-          NATIVE_INPUTS_ARTIFACT: ${{ inputs.native_inputs_artifact }}
-          NATIVE_INPUTS_RUN_ID: ${{ inputs.native_inputs_run_id }}
-          NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
         run: |
-          [ -n "$NATIVE_INPUTS_ARTIFACT" ] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_inputs_artifact"; exit 1; }
-          [[ "$NATIVE_INPUTS_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_inputs_run_id"; exit 1; }
-          [ -n "$NATIVE_RUNTIME_ARTIFACT" ] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_runtime_artifact"; exit 1; }
+          [ -n "$CJCJ_NATIVE_INPUTS_ARTIFACT" ] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_inputs_artifact"; exit 1; }
+          [[ "$CJCJ_NATIVE_INPUTS_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_inputs_run_id"; exit 1; }
+          [ -n "$CJCJ_NATIVE_RUNTIME_ARTIFACT" ] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_runtime_artifact"; exit 1; }
       # A publishing run must name the CI run of this exact commit before any
       # source cell starts; publish verifies it again before the tag is claimed.
       - name: Require and verify the candidate CI run unless dry_run
@@ -189,21 +185,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {release_key: linux-x64, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'}
-          - {release_key: linux-arm64, runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64, sdk_runtime_dir: linux_aarch64_cjnative, std_artifact: final-std-linux-aarch64, cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'}
-          - {release_key: win32-x64, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[]'}
-          - {release_key: darwin-arm64, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[]'}
-          - {release_key: darwin-x64, runner: macos-15-intel, platform: darwin-x64, llvm_platform: darwin_x86_64, sdk_runtime_dir: darwin_x86_64_cjnative, std_artifact: final-std-darwin-x64, cross_std_artifacts: '[]'}
-          - {release_key: linux-x64-android, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"}]'}
-          - {release_key: darwin-arm64-android, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"}]'}
-          - {release_key: win32-x64-android, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"},{"tuple":"linux_x86_64_cjnative","artifact":"final-std-linux-x64"}]'}
-          - {release_key: linux-x64-wasm, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'}
-          - {release_key: darwin-arm64-wasm, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'}
-          - {release_key: win32-x64-wasm, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'}
-          - {release_key: linux-x64-ohos, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"},{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'}
-          - {release_key: darwin-arm64-ohos, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"}]'}
-          - {release_key: darwin-arm64-ios, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"ios_aarch64_cjnative","artifact":"final-std-ios-aarch64-cjnative"},{"tuple":"ios_simulator_aarch64_cjnative","artifact":"final-std-ios-simulator-aarch64-cjnative"},{"tuple":"ios_simulator_x86_64_cjnative","artifact":"final-std-ios-simulator-x86-64-cjnative"}]'}
-          - {release_key: win32-x64-ohos, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"}]'}
+          - {release_key: linux-x64, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'}
+          - {release_key: linux-arm64, runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64, std_artifact: final-std-linux-aarch64, cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'}
+          - {release_key: win32-x64, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[]'}
+          - {release_key: darwin-arm64, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[]'}
+          - {release_key: darwin-x64, runner: macos-15-intel, platform: darwin-x64, llvm_platform: darwin_x86_64, std_artifact: final-std-darwin-x64, cross_std_artifacts: '[]'}
+          - {release_key: linux-x64-android, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"}]'}
+          - {release_key: darwin-arm64-android, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"}]'}
+          - {release_key: win32-x64-android, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"},{"tuple":"linux_x86_64_cjnative","artifact":"final-std-linux-x64"}]'}
+          - {release_key: linux-x64-wasm, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'}
+          - {release_key: darwin-arm64-wasm, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'}
+          - {release_key: win32-x64-wasm, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'}
+          - {release_key: linux-x64-ohos, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"},{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'}
+          - {release_key: darwin-arm64-ohos, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"}]'}
+          - {release_key: darwin-arm64-ios, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"ios_aarch64_cjnative","artifact":"final-std-ios-aarch64-cjnative"},{"tuple":"ios_simulator_aarch64_cjnative","artifact":"final-std-ios-simulator-aarch64-cjnative"},{"tuple":"ios_simulator_x86_64_cjnative","artifact":"final-std-ios-simulator-x86-64-cjnative"}]'}
+          - {release_key: win32-x64-ohos, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"}]'}
     uses: ./.github/workflows/sdk-package.yml
     with:
       native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
@@ -212,8 +208,6 @@ jobs:
       native_host_version: ${{ inputs.native_host_version }}
       runner: ${{ matrix.runner }}
       platform: ${{ matrix.platform }}
-      llvm_platform: ${{ matrix.llvm_platform }}
-      sdk_runtime_dir: ${{ matrix.sdk_runtime_dir }}
       release_key: ${{ matrix.release_key }}
       std_artifact: ${{ matrix.std_artifact }}
       cross_std_artifacts: ${{ matrix.cross_std_artifacts }}

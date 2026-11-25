@@ -10,10 +10,10 @@ export function readSourcePins(repo=root) {
     .filter(line=>/^[A-Z][A-Z0-9_]*=/.test(line)).map(line=>{const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)];}));
   const source=read('source_pin.env');
   return {source,runtime:read('runtime_pin.env'),llvm:{...read('llvm_pin.env'),
-    CANGJIE_COMPILER_URL:source.COMPILER_SRC_URL,CANGJIE_COMPILER_SHA:source.COMPILER_REF}};
+    CANGJIE_COMPILER_SHA:source.COMPILER_REF}};
 }
 export function nativeLlvmInputs(env=process.env) {
-  const {llvm,runtime}=readSourcePins();
+  const {source,llvm,runtime}=readSourcePins();
   const requestedLlvm=env.CJCJ_NATIVE_LLVM_REF || '', requestedRuntime=env.CJCJ_NATIVE_RUNTIME_REF || '';
   if (Boolean(requestedLlvm)!==Boolean(requestedRuntime)) throw new Error('NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED');
   for (const ref of [requestedLlvm || llvm.LLVM_SHA, requestedRuntime || runtime.RUNTIME_REF]) {
@@ -26,7 +26,7 @@ export function nativeLlvmInputs(env=process.env) {
   const pinned = !requestedLlvm || (env.CJCJ_NATIVE_PAIR_SELECTION === 'pinned'
     && requestedLlvm === llvm.LLVM_SHA && requestedRuntime === runtime.RUNTIME_REF);
   // Pin-file keys describe source facts; the process boundary has one pair.
-  return {LLVM_URL:llvm.LLVM_URL, CANGJIE_COMPILER_URL:llvm.CANGJIE_COMPILER_URL,
+  return {LLVM_URL:llvm.LLVM_URL, COMPILER_SRC_URL:source.COMPILER_SRC_URL,
     CANGJIE_COMPILER_SHA:llvm.CANGJIE_COMPILER_SHA, FLATBUFFERS_URL:llvm.FLATBUFFERS_URL,
     FLATBUFFERS_SHA:llvm.FLATBUFFERS_SHA,
     CJCJ_NATIVE_LLVM_REF:requestedLlvm || llvm.LLVM_SHA,

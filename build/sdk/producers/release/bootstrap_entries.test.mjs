@@ -8,7 +8,7 @@ function nativeConfig(root) {
 }
 test('GHA preparation and the native bootstrap entry select the same target configuration',async()=>{
  const root=await fs.mkdtemp(path.join(parent,'target-entry-')),config=path.join(root,'targets.json'),environment=path.join(root,'env');const targets=nativeConfig(root);await fs.writeFile(config,JSON.stringify(targets));
- const prepared=await prepareBootstrapEnvironment({CJCJ_SDK_TARGETS:config,GITHUB_ENV:environment});assert.equal(prepared.config,config);assert.deepEqual(prepared.phases,BOOTSTRAP_PHASES);assert.match(await fs.readFile(environment,'utf8'),/CJCJ_SDK_TARGETS=/);
+ const prepared=await prepareBootstrapEnvironment({CJCJ_SDK_TARGETS:config,GITHUB_ENV:environment});assert.equal(prepared.config,config);assert.deepEqual(prepared.phases,BOOTSTRAP_PHASES);await assert.rejects(fs.stat(environment),{code:'ENOENT'});
  const result=spawnSync(process.execPath,[new URL('../../../../ci/bootstrap/bootstrap.mjs',import.meta.url).pathname,'--config',config,'--stage','all','--dry-run'],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);assert.deepEqual(JSON.parse(result.stdout).map(s=>s.id),targetOrder(targets.stages,'stage3').map(s=>s.id));
 });
 test('missing phase, invalid dependencies and absent configuration refuse before native execution',async()=>{
@@ -16,4 +16,27 @@ test('missing phase, invalid dependencies and absent configuration refuse before
  await assert.rejects(prepareBootstrapEnvironment({}),/CJCJ_SDK_TARGETS/);
  await fs.writeFile(config,JSON.stringify({stages:stages.slice(0,-1),finalStage:'stage3-std'}));await assert.rejects(prepareBootstrapEnvironment({CJCJ_SDK_TARGETS:config}),/BOOTSTRAP_PHASE_MISSING/);
  await fs.writeFile(config,JSON.stringify({stages:[...stages.slice(0,-1),{id:'stage3',depends:['missing']}],finalStage:'stage3'}));await assert.rejects(prepareBootstrapEnvironment({CJCJ_SDK_TARGETS:config}),/TARGET_DEPENDENCY/);
+});
+
+test('workflow preparation derives its plan and verifies the restored workspace inputs', async () => {
+ const workspace = await fs.mkdtemp(path.join(parent,'workspace-entry-'));
+ const descriptor = path.join(workspace,'native-bootstrap','sdk-inputs.json');
+ const config = path.join(workspace,'build-targets.json');
+ const inputs = nativeConfig(workspace).bootstrapInputs;
+ await fs.mkdir(path.dirname(descriptor));
+ await fs.writeFile(descriptor,JSON.stringify(inputs));
+ const prepare = () => spawnSync(process.execPath,[new URL('../../../../ci/bootstrap/prepare-bootstrap-plans.mjs',import.meta.url).pathname],
+   {env:{CANGJIE_WORKSPACE:workspace},encoding:'utf8'});
+ const first = prepare();
+ assert.equal(first.status,0,first.stderr);
+ assert.equal(JSON.parse(first.stdout).config,config);
+ const original = await fs.readFile(config,'utf8');
+ assert.deepEqual(JSON.parse(original).bootstrapInputs,{...inputs,finalStd:path.join(workspace,'software/final-std-stage2')});
+ const resume = prepare();
+ assert.equal(resume.status,0,resume.stderr);
+ assert.equal(await fs.readFile(config,'utf8'),original);
+ await fs.writeFile(descriptor,JSON.stringify({...inputs,work:path.join(workspace,'different-work')}));
+ const refused = prepare();
+ assert.equal(refused.status,1);
+ assert.match(refused.stderr,/BOOTSTRAP_TARGET_INPUT_MISMATCH/);
 });

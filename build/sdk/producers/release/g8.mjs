@@ -121,7 +121,7 @@ export async function main(argv) {
     LD_LIBRARY_PATH: [`${sdk}/third_party/llvm/lib`, `${sdk}/runtime/lib/linux_x86_64_cjnative`,
       `${sdk}/tools/lib`].join(':'),
     DIFFTEST_SELF: compiler, DIFFTEST_SELF_TC: sdk, DIFFTEST_TC: official, DIFFTEST_REF: reference,
-    CJCJ_OFFICIAL_SDK_HOME: official};
+    CJCJ_OFFICIAL_SDK_ROOT: official};
   // These diagnostic escape hatches are not part of a release measurement.
   delete base.CJ_HOST_RTLIB;
   delete base.CJCJ_ALLOW_NIGHTLY_STD;

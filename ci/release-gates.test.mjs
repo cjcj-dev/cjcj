@@ -4,6 +4,7 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {testEvidenceDirectory} from './test-evidence-directory.mjs';
 import test from 'node:test';
 import {load as loadYaml, dump as dumpYaml} from './vendor/js-yaml/js-yaml.mjs';
 
@@ -42,9 +43,7 @@ function commit(root, message) {
   return sha;
 }
 
-const gateEvidence = process.env.CJCJ_TEST_EVIDENCE
-  ? path.join(process.env.CJCJ_TEST_EVIDENCE, 'release-gates')
-  : fsSync.mkdtempSync(path.join(os.tmpdir(), 'release-gates-evidence-'));
+const gateEvidence = testEvidenceDirectory('srcbuild-driver-evidence', 'release-gates');
 fsSync.mkdirSync(gateEvidence, {recursive: true});
 let gateSequence = 0;
 

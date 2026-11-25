@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs/promises';
+import {loadPins} from '../sdk/pins.mjs';
 import {nativeLlvmInputs} from '../../ci/native-llvm-inputs.mjs';
 import {resolveRuntimeSource} from '../../ci/runtime-pin.mjs';
 
@@ -38,9 +39,7 @@ const envPins = text => Object.fromEntries(text.trim().split('\n').map(line => [
 
 test('active runtime pin is the explicit RC native producer runtime', async () => {
   const source = await resolveRuntimeSource({});
-  const producer = envPins(await fs.readFile(new URL('../sdk/source_pin.env', import.meta.url), 'utf8')
-    .then(text => text.split('\n').filter(line => line && !line.startsWith('#')).join('\n')));
-  assert.equal(source.pinRef, producer.RUNTIME_REF, 'RUNTIME_PIN_NOT_RC_PRODUCER');
+  assert.equal(source.pinRef, loadPins().repos.runtime.commit, 'RUNTIME_PIN_NOT_RC_PRODUCER');
   console.log(`ASSERT ACTIVE_RUNTIME_PIN_RC ${source.pinRef}`);
 });
 

@@ -18,13 +18,9 @@ on:
       validation_run_id: {type: string, required: false, default: ''}
       runner: {type: string, required: true}
       platform: {type: string, required: true}
-      llvm_platform: {type: string, required: true}
-      sdk_runtime_dir: {type: string, required: true}
       std_artifact: {type: string, required: true}
       release_key: {type: string, required: false, default: ''}
       cross_std_artifacts: {type: string, required: false, default: '[]'}
-      cross_std_artifact: {type: string, required: false, default: ''}
-      cross_std_tuple: {type: string, required: false, default: ''}
       version: {type: string, required: true}
 
 permissions:
@@ -46,19 +42,14 @@ jobs:
       CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
       CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
       CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
-      RELEASE_LLVM_PLATFORM: ${{ inputs.llvm_platform }}
-      RELEASE_RUNTIME_TUPLE: ${{ inputs.sdk_runtime_dir }}
       RELEASE_PLATFORM: ${{ inputs.platform }}
       RELEASE_KEY: ${{ inputs.release_key }}
       CJCJ_NATIVE_SDK_VERSION: ${{ inputs.version }}
-      CJCJ_RELEASE_SOURCE_SHA: ${{ github.sha }}
       NATIVE_SDK_ARTIFACT_DIR: ${{ github.workspace }}/.release-native/input
       NATIVE_SDK_INSTALL_DIR: ${{ github.workspace }}/.release-native/install-${{ github.run_attempt }}
       FINAL_STD_DIR: ${{ github.workspace }}/.release-final-std/${{ inputs.platform }}
       CROSS_STD_DIR: ${{ github.workspace }}/.release-cross-std/${{ inputs.platform }}
       CROSS_STD_ARTIFACTS: ${{ inputs.cross_std_artifacts }}
-      CROSS_STD_ARTIFACT: ${{ inputs.cross_std_artifact }}
-      CROSS_STD_TUPLE: ${{ inputs.cross_std_tuple }}
       RELEASE_DIST: ${{ github.workspace }}/dist
     steps:
       - name: Require the package inputs
@@ -66,7 +57,7 @@ jobs:
         env:
           PACKAGE_INPUTS: ${{ toJSON(inputs) }}
         run: |
-          node -e 'const i = JSON.parse(process.env.PACKAGE_INPUTS); const miss = ["runner", "platform", "llvm_platform", "sdk_runtime_dir", "std_artifact", "version"].filter((k) => !i[k]); if (miss.length) { console.error("::error::package mode requires " + miss.join(", ")); process.exit(1); }'
+          node -e 'const i = JSON.parse(process.env.PACKAGE_INPUTS); const miss = ["runner", "platform", "std_artifact", "version"].filter((k) => !i[k]); if (miss.length) { console.error("::error::package mode requires " + miss.join(", ")); process.exit(1); }'
           # The macro runtime compares the enumerated environment key verbatim.
           case "$RUNNER_OS:$RELEASE_PLATFORM" in
             Windows:*) echo 'CJHEAPSIZE=12GB' ;;
@@ -144,7 +135,7 @@ jobs:
           run-id: ${{ inputs.validation_run_id || github.run_id }}
 
       - name: Download cross-tuple comparison inputs
-        if: inputs.cross_std_artifacts != '[]' || inputs.cross_std_artifact != ''
+        if: inputs.cross_std_artifacts != '[]'
         uses: actions/download-artifact@v8.0.2
         with:
           pattern: final-std-*

@@ -5,7 +5,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
+import {javaInteropFiles} from '../../../../ci/bootstrap/sdk-java-interop.mjs';
 import {fileDigest} from '../../../../ci/bootstrap/sdk-flow.mjs';
+import {TOOL_NAMES, TOOL_PUBLIC_NAMES, retainedToolPath} from '../../../srcbuild/tool-layout.mjs';
+import {installedInputs} from '../srcbuild/lib/installed-inputs.mjs';
+import {verifyInstalledReleaseManifest} from '../../../lib/release-manifest.mjs';
 import {sourceToolPayloads} from './source-tool-payloads.mjs';
 const base=process.env.RELEASE_EVIDENCE_TEST_ROOT;
 if(!base)throw new Error('RELEASE_EVIDENCE_TEST_ROOT required');
@@ -21,6 +25,12 @@ async function run(label,argv,env=process.env){
  await write(root+'/commands.json',JSON.stringify(records,null,2));return r;
 }
 await write(root+'/native-source/main.c','int main(void){return 0;}\n');
+// Track the finite interface inputs in the fixture repository so the manifest
+// can cite their actual origin. None is a qualified language product.
+for (const member of javaInteropFiles) await write(root+'/native-source/'+member,'finite Java transport member: '+member+'\n');
+await write(root+'/native-source/runtime-marker.c','const char fixture_stamp[]="CJRT-COMMIT:" FIXTURE_COMMIT;\n');
+const stdMember='modules/linux_x86_64_cjnative/std/std.fixture.cjo';
+await write(root+'/native-source/'+stdMember,'finite std transport member\n');
 for(const args of [['init'],['add','.'],['-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','finite native packaging fixture']])
  assert.equal((await run('fixture-source',['git','-C',root+'/native-source',...args])).status,0);
 const commit=(await run('fixture-head',['git','-C',root+'/native-source','rev-parse','HEAD'])).stdout.trim();
@@ -28,12 +38,33 @@ const buildArgv=['cc',root+'/native-source/main.c','-o',root+'/native-product'];
 assert.equal((await run('fixture-native-build',buildArgv)).status,0);
 const bytes=await fs.readFile(root+'/native-product'),digest=await fileDigest(root+'/native-product');
 await write(sdk+'/bin/cjcj-stage1',bytes);await write(sdk+'/bin/cjc',bytes);
-await write(sdk+'/STAGE-INPUTS.json',JSON.stringify({phase:'stage3',platform:'linux_x86_64',compilerFile:'bin/cjcj-stage1',compilerCommit:commit,
+const fixtureSource={status:'resolved',repository:'file://'+root+'/native-source',commit};
+for (const member of [...javaInteropFiles,stdMember]) await write(sdk+'/'+member,await fs.readFile(root+'/native-source/'+member));
+await write(sdk+'/PROVENANCE.txt',['STD_SOURCE_COMMIT = '+commit,'ARTIFACT-SHA256:',
+  await fileDigest(sdk+'/'+stdMember)+'  '+stdMember,''].join('\n'));
+const rtDir='runtime/lib/linux_x86_64_cjnative',libDir='lib/linux_x86_64_cjnative';
+// The metadata gate must inspect real bitcode from the same fixture source.
+for (const member of javaInteropFiles.filter(file=>file.endsWith('.bc'))) {
+ const result=await run('finite-java-bitcode',['clang','-emit-llvm','-c',root+'/native-source/main.c','-o',sdk+'/'+member]);
+ assert.equal(result.status,0,result.stderr);
+}
+const dis=await run('locate-disassembler',['clang','-print-prog-name=llvm-dis']);
+assert.equal(dis.status,0,dis.stderr);
+const runtimePaths=[rtDir+'/libcangjie-runtime.so',libDir+'/libcangjie-runtime.a'];
+const object=root+'/runtime-marker.o';
+for(const argv of [['cc','-fPIC','-DFIXTURE_COMMIT="'+commit+'"','-c',root+'/native-source/runtime-marker.c','-o',object],
+ ['cc','-shared',object,'-o',sdk+'/'+runtimePaths[0]],['ar','rcs',sdk+'/'+runtimePaths[1],object]]){
+ const result=await run('finite-runtime',argv);assert.equal(result.status,0,result.stderr);
+}
+await write(sdk+'/RUNTIME-INPUTS.json',JSON.stringify({source:fixtureSource,embedded_stamp:'CJRT-COMMIT:'+commit,
+ artifacts:await Promise.all(runtimePaths.map(async path=>({path,sha256:await fileDigest(sdk+'/'+path)})))}));
+await write(sdk+'/STAGE-INPUTS.json',JSON.stringify({sources:{std:fixtureSource,runtime:fixtureSource},
+ javaInterop:{...fixtureSource,runtimeCommit:commit,compilerSha256:digest},phase:'stage3',platform:'linux_x86_64',compilerFile:'bin/cjcj-stage1',compilerCommit:commit,
  runtimeCommit:commit,compilerSha256:digest,compilerEntrySha256:digest}));
 await write(sdk+'/compiler-inputs.json',JSON.stringify({commit,compilerSha256:digest}));
 const files={};
-for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat']){
- const rel='tools/bin/'+name,retained='.target-tools/'+rel;
+for(const producer of TOOL_NAMES){
+ const name=TOOL_PUBLIC_NAMES[producer]||producer,rel='tools/bin/'+name,retained=retainedToolPath({producer,name,to:rel});
  await write(sdk+'/'+retained,bytes);await write(sdk+'/'+rel,bytes);
  await write(sdk+'/'+rel+'.entry',['cjcj-sdk-entry-v1','2',retained,'linux','native-target:x64','runtime/lib/linux_x86_64_cjnative',''].join('\n'));
  const source={status:'resolved',repository:'file://'+root+'/native-source',commit};
@@ -41,7 +72,8 @@ for(const name of ['cjpm','cjfmt','hle','LSPServer','cjcov','cjtrace-recover','c
  files[rel]={sha256:digest,source:root+'/native-product',producer:{source,build,artifact:{path:root+'/native-product',sha256:digest}},
  artifact:{path:retained,sha256:digest},entry:{path:rel,sha256:digest,recipe:{path:rel+'.entry',sha256:await fileDigest(sdk+'/'+rel+'.entry')}}};
  for(const payload of name==='cjpm'?['tools/config/cangjie-repo.toml']:sourceToolPayloads(name))
-  await write(sdk+'/'+payload+(payload==='tools/dtsparser'?'/analysis.js':['tools/config','tools/config/static','.target-tools/tools/config/static'].includes(payload)?'/fixture.txt':''),'finite payload boundary');
+  if (payload !== rel && payload !== rel+'.entry' && !retained.startsWith(payload+'/'))
+   await write(sdk+'/'+payload+(payload==='tools/dtsparser'?'/analysis.js':['tools/config','tools/config/static','.target-tools/tools/config/static'].includes(payload)?'/fixture.txt':''),'finite payload boundary');
 }
 if(publicMode){
  await write(sdk+'/tools/dtsparser/DEPENDENCIES.json','{}');
@@ -54,6 +86,19 @@ await write(sdk+'/TOOLS-INPUTS.json',JSON.stringify({files,payloadFiles:{}}));
 // record are copied unchanged from an actual completed native check.
 let pythonRecord;
 const nativeRecord=sdk+'/share/cjcj/build-inputs/native-llvm.json';
+const library='third_party/llvm/lib/libLLVM-15.so';
+await write(sdk+'/'+library,bytes);await write(sdk+'/.native-tools/tools/bin/cjdb',bytes);await write(sdk+'/tools/bin/cjdb',bytes);
+await write(sdk+'/tools/bin/cjdb.entry',['cjcj-sdk-entry-v1','2','.native-tools/tools/bin/cjdb','linux','native-target:x64','third_party/llvm/lib',''].join('\n'));
+for(const tool of ['llc','opt']){
+ const rel='third_party/llvm/bin/'+tool,retained='.native-tools/'+rel;
+ await write(sdk+'/'+retained,bytes);await write(sdk+'/'+rel,bytes);
+ await write(sdk+'/'+rel+'.entry',['cjcj-sdk-entry-v1','2',retained,'linux','native-target:x64','runtime/lib/linux_x86_64_cjnative',''].join('\n'));
+}
+if(!process.env.INSTALLED_PYTHON_RECORD){
+ await write(nativeRecord,JSON.stringify({platform:'linux_x86_64',rc:0,source:fixtureSource,
+  configuration:{fixture:'native C transport, no LLVM or LLDB execution'},
+  artifacts:[{path:library,sha256:digest},{path:'tools/bin/cjdb',sha256:digest}]}));
+}
 if(process.env.INSTALLED_PYTHON_RECORD){
  const original=JSON.parse(await fs.readFile(process.env.INSTALLED_PYTHON_RECORD,'utf8'));
  assert.equal(original.rc,0);assert.equal(original.platform,'linux_x86_64');
@@ -62,14 +107,6 @@ if(process.env.INSTALLED_PYTHON_RECORD){
   const source=path.join(process.env.INSTALLED_PYTHON_ROOT,product.path);
   assert.equal(await fileDigest(source),product.sha256);
   await write(sdk+'/'+product.path,await fs.readFile(source));
- }
- const library='third_party/llvm/lib/libLLVM-15.so';
- await write(sdk+'/'+library,bytes);await write(sdk+'/.native-tools/tools/bin/cjdb',bytes);await write(sdk+'/tools/bin/cjdb',bytes);
- await write(sdk+'/tools/bin/cjdb.entry',['cjcj-sdk-entry-v1','2','.native-tools/tools/bin/cjdb','linux','native-target:x64','third_party/llvm/lib',''].join('\n'));
- for(const tool of ['llc','opt']){
-  const rel='third_party/llvm/bin/'+tool,retained='.native-tools/'+rel;
-  await write(sdk+'/'+retained,bytes);await write(sdk+'/'+rel,bytes);
-  await write(sdk+'/'+rel+'.entry',['cjcj-sdk-entry-v1','2',retained,'linux','native-target:x64','runtime/lib/linux_x86_64_cjnative',''].join('\n'));
  }
  pythonRecord={...original,artifacts:[{path:library,sha256:digest},{path:'tools/bin/cjdb',sha256:digest}],
   pythonInstallation:{...original.pythonInstallation,loaded:Object.fromEntries(Object.entries(original.pythonInstallation.loaded)
@@ -92,12 +129,12 @@ if(process.env.INSTALLED_AST_ROOT){
   await write(sdk+'/'+member,await fs.readFile(input+'/'+member));
  await write(astRecordPath,originalBytes);
  const stage=JSON.parse(await fs.readFile(sdk+'/STAGE-INPUTS.json'));
- stage.sources={ast:{repository:'file://'+ast.source.root,commit:ast.source.commit},llvm:{commit:astRecord.commits.llvm}};
+ stage.sources={...stage.sources,ast:{repository:'file://'+ast.source.root,commit:ast.source.commit},llvm:{commit:astRecord.commits.llvm}};
  await write(sdk+'/STAGE-INPUTS.json',JSON.stringify(stage));
  await write(root+'/ast-boundaries.json',JSON.stringify({input,originalRecordSha256:await fileDigest(input+'/BUILD-INPUTS.json'),
   source:ast.source,artifacts:ast.files,controlled:'real CMake C archive fixture; not full native N/AST or Cangjie SDK'}));
 }
-await write(root+'/targets.json',JSON.stringify({work:root+'/targets',stages:[{id:'stage3-std',output:root+'/std'}]}));
+await write(workspace+'/build-targets.json',JSON.stringify({work:root+'/targets',stages:[{id:'stage3-std',output:root+'/std'}]}));
 await write(root+'/targets/build/stage3/compiler/compiler-inputs.json','{}');
 // Preserve all actual product modules and exports except these explicitly
 // controlled unavailable functional prerequisites. No manifest/transport/
@@ -118,8 +155,8 @@ let source=String(result.source);for(const name of boundaries[url]){const patter
 source=source.replace(pattern,(_,asyncPart='')=>asyncPart+'function CONTROLLED_ORIGINAL_'+name+'(');
 source+='\\nexport async function '+name+'(){console.log("CONTROLLED_UNAVAILABLE_SDK_FUNCTION '+name+'");}\\n';}return {...result,source};}
 `);
-const env={...process.env,NODE_OPTIONS:'--experimental-loader='+root+'/loader.mjs',CANGJIE_WORKSPACE:workspace,
- CJCJ_SRCBUILD_TARGET:'linux-x64',SOURCE_SDK_VERSION:'0.0.0-manifest-fixture',CJCJ_SDK_TARGETS:root+'/targets.json',
+const env={...process.env,CJCJ_VERIFIER_LLVM_DIS:dis.stdout.trim(),NODE_OPTIONS:'--experimental-loader='+root+'/loader.mjs',CANGJIE_WORKSPACE:workspace,
+ CJCJ_SRCBUILD_TARGET:'linux-x64',SOURCE_SDK_VERSION:'0.0.0-manifest-fixture',
  CJCJ_OFFICIAL_SDK_ROOT:process.env.CJCJ_OFFICIAL_SDK_ROOT||root+'/unavailable-host'};
 if(process.env.INSTALLED_PYTHON_RECORD && !publicMode){
  const wrong=await run('formal-package-wrong-source',[process.execPath,repo+'build/sdk/producers/srcbuild/steps/package-install.mjs'],
@@ -155,14 +192,19 @@ if(publicMode){
 const artifactDir=workspace+'/software',archiveName=(await fs.readdir(artifactDir)).find(name=>name.startsWith('cangjie-sdk-')&&name.endsWith('.tar.gz'));
 assert.ok(archiveName);const archive=artifactDir+'/'+archiveName;
 const releaseEnv={...env,NATIVE_SDK_ARTIFACT_DIR:artifactDir,NATIVE_SDK_INSTALL_DIR:root+'/received',RELEASE_PLATFORM:'linux-x64',RELEASE_KEY:'linux-x64',
- CJCJ_NATIVE_SDK_VERSION:env.SOURCE_SDK_VERSION,CJCJ_RELEASE_SOURCE_SHA:commit,CJCJ_NATIVE_RUNTIME_REF:commit,FINAL_STD_DIR:root+'/std',RELEASE_DIST:root+'/dist'};
+ CJCJ_NATIVE_SDK_VERSION:env.SOURCE_SDK_VERSION,GITHUB_SHA:commit,CJCJ_NATIVE_RUNTIME_REF:commit,FINAL_STD_DIR:root+'/std',RELEASE_DIST:root+'/dist'};
 const composed=await run('formal-compose-unresolved',[process.execPath,repo+'build/sdk/producers/release/compose-package.mjs'],releaseEnv);
 // A checksum failure is an independent earlier transport control.
 const archiveBytes=await fs.readFile(archive);await fs.appendFile(archive,'changed');
 const transport=await run('independent-transport-control',[process.execPath,repo+'build/sdk/producers/release/compose-package.mjs'],{...releaseEnv,NATIVE_SDK_INSTALL_DIR:root+'/bad-transport'});
 assert.match(transport.stderr,/NATIVE_SDK_ARCHIVE_DIGEST/);await fs.writeFile(archive,archiveBytes);
 console.log('INSTALLED_MANIFEST_CONSUMER_ASSERT_REACHED '+JSON.stringify({rc:composed.status,stderr:composed.stderr,transport:'rejected'}));
-assert.equal(composed.status,1);assert.match(composed.stderr,/cjcj.source.status is unresolved/);
+// Compose checks tool availability before it can inspect the release manifest.
+assert.equal(composed.status,1);assert.match(composed.stderr,/NATIVE_RELEASE_TOOL_DEPENDENCIES cjpm: target build\/install not recorded/);
+// Exercise the manifest gate itself on the exact SDK the public receiver unpacked.
+const received=root+'/received/cangjie',platform='linux_x86_64';
+await assert.rejects(verifyInstalledReleaseManifest({stage:received,platform,...await installedInputs(received,platform)}),
+ /cjcj.source.status is unresolved/);
 assert.doesNotMatch(composed.stdout,/NATIVE_RELEASE_ARCHIVE/);
 const original=await fs.readFile(sdk+'/RELEASE-MANIFEST.jsonl');
 for(const file of [archive+'.unpacked/cangjie/RELEASE-MANIFEST.jsonl',root+'/received/cangjie/RELEASE-MANIFEST.jsonl'])

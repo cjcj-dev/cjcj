@@ -11,7 +11,7 @@ const evidence = process.env.G2_WORKFLOW_EVIDENCE;
 assert.ok(evidence && path.isAbsolute(evidence), 'private G2_WORKFLOW_EVIDENCE required');
 fs.mkdirSync(evidence);
 const workflow = load(fs.readFileSync(path.join(repo, '.github/workflows/sdk-build-target.yml'), 'utf8'));
-const step = workflow.jobs['build-tools'].steps.find(item => item.name === 'Build Windows LLVM tools');
+const step = workflow.jobs['fixed-llvm'].steps.find(item => item.name === 'Build Windows LLVM tools');
 assert.equal(step.shell, 'msys2 {0}');
 assert.equal(step.if, "runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'");
 const base = {...process.env};
@@ -44,13 +44,13 @@ const sha = git(input, 'rev-parse', 'HEAD');
 const url = 'https://github.com/cjcj-dev/cangjie-runtime.git';
 function invoke(label, changes = {}) {
   const cwd = path.join(evidence, label); fs.mkdirSync(cwd); fs.mkdirSync(path.join(cwd, 'bin'));
-  fs.symlinkSync(path.join(repo, 'ci'), path.join(cwd, 'ci'));
+  for (const tree of ['ci', 'build']) fs.symlinkSync(path.join(repo, tree), path.join(cwd, tree));
   const capture = path.join(cwd, 'cmake.json');
   fs.writeFileSync(path.join(cwd, 'bin/cmake'), `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.G2_CMAKE_CAPTURE, JSON.stringify(process.argv.slice(2))); process.exit(86);\n`, {mode: 0o755});
   const env = {...base, ...step.env, TUPLE_PLATFORM: 'windows_x86_64', LLVM_TARGETS: 'X86',
     CJCJ_NATIVE_RUNTIME_REF: sha,
     CJCJ_SRCBUILD_REQUIRE_MIRRORS: '1', CJCJ_SRCBUILD_SOURCE_MIRRORS: `${url}=file://${input};file://${input}=file://${input}`,
-    LLVM_URL: `file://${input}`, CJCJ_NATIVE_LLVM_REF: sha, CANGJIE_COMPILER_URL: `file://${input}`, CANGJIE_COMPILER_SHA: sha,
+    LLVM_URL: `file://${input}`, CJCJ_NATIVE_LLVM_REF: sha, COMPILER_SRC_URL: `file://${input}`, CANGJIE_COMPILER_SHA: sha,
     FLATBUFFERS_URL: `file://${input}`, FLATBUFFERS_SHA: sha, G2_CMAKE_CAPTURE: capture,
     GIT_TRACE: path.join(cwd, 'fetch.trace'), PATH: `${path.join(cwd, 'bin')}:${base.PATH}`, ...changes};
   fs.writeFileSync(path.join(cwd, 'workflow-command.json'), JSON.stringify({run: step.run, env: Object.fromEntries(Object.entries(env).filter(([key]) => !(key in base)))}, null, 2));

@@ -206,7 +206,8 @@ test('release packages select the installed final compiler in each native phase'
   for (const gate of ['metadata.compilerCommit !== sourceSha', 'metadata.runtimeCommit !== runtimeRef',
     'installedStageOutput(sdk, metadata.phase)', 'compiler.compilerSha256 !== output.lineage.compilerSha256'])
     assert.ok(checks.includes(gate), gate);
-  assert.ok((await workflow('sdk-package.yml')).includes('CJCJ_RELEASE_SOURCE_SHA: ${{ github.sha }}'));
+  const compose = await fs.readFile(path.join(root, 'build/sdk/producers/release/compose-package.mjs'), 'utf8');
+  assert.ok(compose.includes('sourceSha: env.GITHUB_SHA'));
 });
 
 // The release package's tool set is the one the source matrix builds. Three

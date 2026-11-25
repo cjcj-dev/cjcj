@@ -8,6 +8,8 @@ import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {load as loadYaml} from './vendor/js-yaml/js-yaml.mjs';
 
+import {loadPins} from '../build/sdk/pins.mjs';
+
 const root = new URL('../', import.meta.url);
 const read = file => fs.readFileSync(new URL(file, root), 'utf8');
 const pins = file => Object.fromEntries(read(file).trim().split('\n').map(line => {
@@ -86,14 +88,14 @@ test('release runtime loader selects the stack-slot-root runtime paired with LLV
 // Route (b): the ci/llvm-dylib/* pins and ci/llvm-dylib/release.json are an immutable record of
 // the already-published legacy tuple. They are checked against that record, never rewritten to
 // impersonate the current RC; the current RC pair is checked separately against the explicit
-// native producer pins of the unified SDK production line (build/sdk/source_pin.env).
+// native producer pins of the unified SDK production line (build/sdk/pins.mjs).
 const legacyDylib = JSON.parse(read('ci/llvm-dylib/release.json'));
-const rcProducer = pins('build/sdk/source_pin.env');
+const rcProducer = loadPins().repos;
 
 test('active RC pair is the explicit native producer pair, distinct from the legacy dylib archive', () => {
   assert.match(llvm.LLVM_SHA, /^[0-9a-f]{40}$/, 'LLVM source identity comes from ci/llvm_pin.env');
-  assert.equal(llvm.LLVM_SHA, rcProducer.LLVM_REF, 'ci/llvm_pin.env LLVM_SHA must be the RC native producer LLVM');
-  assert.equal(runtime.RUNTIME_REF, rcProducer.RUNTIME_REF, 'ci/runtime_pin.env RUNTIME_REF must be the RC native producer runtime');
+  assert.equal(llvm.LLVM_SHA, rcProducer.llvm.commit, 'ci/llvm_pin.env LLVM_SHA must be the RC native producer LLVM');
+  assert.equal(runtime.RUNTIME_REF, rcProducer.runtime.commit, 'ci/runtime_pin.env RUNTIME_REF must be the RC native producer runtime');
   assert.notEqual(legacyDylib.llvm_sha, llvm.LLVM_SHA,
     'the legacy dylib archive must not be presented as the active RC producer; rotating it needs a real new tuple');
   console.log(`ASSERT active-rc-pair llvm=${llvm.LLVM_SHA} runtime=${runtime.RUNTIME_REF} legacy=${legacyDylib.llvm_sha}`);

@@ -9,7 +9,7 @@ import {zxCommand} from '../../../../../ci/test-zx.mjs';
 
 const entry = fileURLToPath(new URL('../steps/verify-source-pins.mjs', import.meta.url));
 const pins = [
-  ['cangjie_compiler', 'CANGJIE_COMPILER_URL', 'CANGJIE_COMPILER_SHA'],
+  ['cangjie_compiler', 'COMPILER_SRC_URL', 'CANGJIE_COMPILER_SHA'],
   ['cangjie_runtime', 'RUNTIME_SRC_URL', 'CJCJ_NATIVE_RUNTIME_REF'],
   ['cjcj-tools', 'TOOLS_SRC_URL', 'TOOLS_REF'],
   ['cangjie_stdx', 'STDX_SRC_URL', 'STDX_REF'],

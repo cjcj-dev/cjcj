@@ -41,7 +41,7 @@ test('compiler LLVM pin step uses a mirror and keeps the authoritative origin', 
     env: {
       ...process.env,
       CANGJIE_WORKSPACE: workspace,
-      LLVM_REF: sha,
+      CJCJ_NATIVE_LLVM_REF: sha,
       LLVM_URL: authoritative,
       CJCJ_SRCBUILD_SOURCE_MIRRORS: `${authoritative}=file://${mirror}`,
     },
@@ -68,7 +68,7 @@ test('compiler LLVM pin step reuses an empty git directory with an existing orig
     env: {
       ...process.env,
       CANGJIE_WORKSPACE: workspace,
-      LLVM_REF: sha,
+      CJCJ_NATIVE_LLVM_REF: sha,
       LLVM_URL: authoritative,
       CJCJ_SRCBUILD_SOURCE_MIRRORS: `${authoritative}=file://${mirror}`,
     },
@@ -91,7 +91,7 @@ test('compiler LLVM pin step fails closed on a missing selected mirror', t => {
     env: {
       ...process.env,
       CANGJIE_WORKSPACE: workspace,
-      LLVM_REF: sha,
+      CJCJ_NATIVE_LLVM_REF: sha,
       LLVM_URL: authoritative,
       CJCJ_SRCBUILD_SOURCE_MIRRORS: `${authoritative}=${missing}`,
     },
@@ -104,7 +104,7 @@ test('compiler LLVM pin step fails closed on a missing selected mirror', t => {
     env: {
       ...process.env,
       CANGJIE_WORKSPACE: workspace,
-      LLVM_REF: sha,
+      CJCJ_NATIVE_LLVM_REF: sha,
       LLVM_URL: authoritative,
       CJCJ_SRCBUILD_SOURCE_MIRRORS: `${authoritative}=file://${mirror}`,
     },

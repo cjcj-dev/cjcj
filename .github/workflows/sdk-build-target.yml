@@ -153,12 +153,9 @@ jobs:
     if: inputs.llvm_tools_only != true
     steps:
       - name: Require the fixed native input artifact
-        env:
-          NATIVE_INPUTS_ARTIFACT: ${{ inputs.native_inputs_artifact }}
-          NATIVE_INPUTS_RUN_ID: ${{ inputs.native_inputs_run_id }}
         run: |
-          test -n "$NATIVE_INPUTS_ARTIFACT" || { echo '::error::native_inputs_artifact is required'; exit 1; }
-          test -n "$NATIVE_INPUTS_RUN_ID" || { echo '::error::native_inputs_run_id is required'; exit 1; }
+          test -n "$CJCJ_NATIVE_INPUTS_ARTIFACT" || { echo '::error::native_inputs_artifact is required'; exit 1; }
+          test -n "$CJCJ_NATIVE_INPUTS_RUN_ID" || { echo '::error::native_inputs_run_id is required'; exit 1; }
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
@@ -273,7 +270,7 @@ jobs:
           git -C llvm-fork checkout --detach FETCH_HEAD
           test "$(git -C llvm-fork rev-parse HEAD)" = "$CJCJ_NATIVE_LLVM_REF"
 
-          git clone --filter=blob:none --no-checkout "$CANGJIE_COMPILER_URL" cangjie-compiler
+          git clone --filter=blob:none --no-checkout "$COMPILER_SRC_URL" cangjie-compiler
           git -C cangjie-compiler sparse-checkout set schema
           git -C cangjie-compiler fetch --depth=1 origin "$CANGJIE_COMPILER_SHA"
           git -C cangjie-compiler checkout --detach "$CANGJIE_COMPILER_SHA"
@@ -792,12 +789,10 @@ jobs:
       # host linux/x64; current host linux/arm64" (release-matrix run 35717546067).
       - &generate-sdk-version
         name: Generate SDK version
-        id: version
         env:
           REQUESTED_REF: ${{ inputs.cangjie_ref }}
         run: |
           value=$(npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --cangjie-version "$REQUESTED_REF" print-version)
-          echo "value=$value" >> "$GITHUB_OUTPUT"
           echo "SOURCE_SDK_VERSION=$value" >> "$GITHUB_ENV"
 
       - &download-pinned-source
@@ -806,9 +801,9 @@ jobs:
           npx --yes zx@8 build/cli.mjs \
             --target "${{ matrix.target }}" \
             --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" \
-            --cangjie-version "${{ steps.version.outputs.value }}" \
+            --cangjie-version "$SOURCE_SDK_VERSION" \
             fetch \
-            --repo-url "compiler=$CANGJIE_COMPILER_URL" \
+            --repo-url "compiler=$COMPILER_SRC_URL" \
             --repo-tag "compiler=$CANGJIE_COMPILER_SHA" \
             --repo-url "runtime=$RUNTIME_SRC_URL" \
             --repo-tag "runtime=$CJCJ_NATIVE_RUNTIME_REF" \
@@ -1166,10 +1161,6 @@ jobs:
           pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
-      - name: Restore source SDK version output
-        id: version
-        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Add Linux swap for stage2 chir heap
         if: runner.os == 'Linux'
         run: |
@@ -1251,10 +1242,6 @@ jobs:
           platform: ${{ matrix.target }}
           pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
-
-      - name: Restore source SDK version output
-        id: version
-        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Add Linux swap for stage2 chir heap
         if: runner.os == 'Linux'
@@ -1338,10 +1325,6 @@ jobs:
           pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
-      - name: Restore source SDK version output
-        id: version
-        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Add Linux swap for stage2 chir heap
         if: runner.os == 'Linux'
         run: |
@@ -1423,10 +1406,6 @@ jobs:
           platform: ${{ matrix.target }}
           pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
-
-      - name: Restore source SDK version output
-        id: version
-        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Add Linux swap for stage2 chir heap
         if: runner.os == 'Linux'
@@ -1574,10 +1553,6 @@ jobs:
           pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
-      - name: Restore source SDK version output
-        id: version
-        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Add Linux swap for stage2 chir heap
         if: runner.os == 'Linux'
         run: |
@@ -1589,23 +1564,18 @@ jobs:
 
       - &build-stdx-from-source
         name: Build stdx from source
-        env:
-          CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
-        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdx
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "$SOURCE_SDK_VERSION" build stdx
 
       - name: Build SDK tools from source
-        env:
-          CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
         if: runner.os != 'Windows'
-        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "$SOURCE_SDK_VERSION" build tools
 
       - &build-windows-sdk-tools-with-the-installed-stage3-frontend
         name: Build Windows SDK tools with the installed stage3 frontend
         if: runner.os == 'Windows'
         env:
-          CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
           CJCJ_NATIVE_INPUT_ROOT: ${{ github.workspace }}/.srcbuild/native-inputs
-        run: node build/sdk/producers/srcbuild/steps/build-windows-tools.mjs "${{ inputs.build_type || 'relwithdebinfo' }}" "${{ steps.version.outputs.value }}"
+        run: node build/sdk/producers/srcbuild/steps/build-windows-tools.mjs "${{ inputs.build_type || 'relwithdebinfo' }}" "$SOURCE_SDK_VERSION"
 
       - &prepare-source-built-cjpm-artifact
         name: Prepare source-built cjpm artifact
@@ -1833,15 +1803,11 @@ jobs:
 
       - &verify-installed-sdk
         name: Verify installed SDK
-        env:
-          CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
         run: |
-          npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
+          npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "$SOURCE_SDK_VERSION" verify
 
       - &build-compiler-shim
         name: Build compiler shim
-        env:
-          CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
         run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-shim.mjs
 
       - name: Upload stage diagnostics
@@ -1864,7 +1830,6 @@ jobs:
       - name: Test real SDK source-tool installation and packaging
         if: matrix.target == 'linux-x64'
         env:
-          CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
           RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/source-tool-sdk-integration
         run: node build/test/source-tool-install-contract.integration.test.mjs
 
@@ -1874,12 +1839,17 @@ jobs:
         run: |
           node ci/capture-g2-identity.mjs --identity "$G2_IDENTITY" --sdk "$CANGJIE_WORKSPACE/software/cangjie"
 
+      - name: Locate G2 campaign evidence
+        if: always() && matrix.target == 'linux-x64' && env.G2_IDENTITY != ''
+        id: campaign
+        run: echo "directory=$(dirname "$G2_IDENTITY")" >> "$GITHUB_OUTPUT"
+
       - name: Retain G2 campaign identity
         if: always() && matrix.target == 'linux-x64' && env.G2_IDENTITY != ''
         uses: actions/upload-artifact@v7.0.2
         with:
           name: g2-identity-linux-x64-${{ github.run_attempt }}
-          path: ${{ env.G2_CAMPAIGN_DIR }}
+          path: ${{ steps.campaign.outputs.directory }}
           if-no-files-found: error
           retention-days: 90
 
@@ -1904,10 +1874,10 @@ jobs:
       - name: Upload complete source-built SDK
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}
+          name: cjcj-srcbuild-${{ matrix.target }}-${{ env.SOURCE_SDK_VERSION }}
           path: |
-            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ steps.version.outputs.value }}-cjcj.tar.gz
-            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ steps.version.outputs.value }}-cjcj.tar.gz.sha256
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ env.SOURCE_SDK_VERSION }}-cjcj.tar.gz
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ env.SOURCE_SDK_VERSION }}-cjcj.tar.gz.sha256
           if-no-files-found: error
 
       - name: Retain source SDK gate logs
@@ -1984,10 +1954,6 @@ jobs:
           pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
-      - name: Restore source SDK version output
-        id: version
-        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Add Linux swap for stage2 chir heap
         if: runner.os == 'Linux'
         run: |
@@ -2010,7 +1976,6 @@ jobs:
         if: matrix.target == 'linux-x64' && inputs.build_android
         env:
           CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/build/sdk/producers/platform_matrix/native_runtime_toolchain.cmake
-          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
         run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-android-final-std.mjs
 
       - name: Upload Android runtime and final std
@@ -2084,10 +2049,6 @@ jobs:
           pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
-      - name: Restore source SDK version output
-        id: version
-        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Add Linux swap for stage2 chir heap
         if: runner.os == 'Linux'
         run: |
@@ -2105,11 +2066,6 @@ jobs:
 
       - name: Build wasm32-wasi runtime and complete final std with stage2 cjc
         if: matrix.target == 'linux-x64' && inputs.build_wasm
-        env:
-          CJCJ_WASM_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/wasm-sdk
-          CJCJ_WASM_CLANG: ${{ env.CJCJ_FIXED_LLVM_DIR }}/bin/clang
-          CJCJ_WASM_LLVM_AR: ${{ env.CJCJ_FIXED_LLVM_DIR }}/bin/llvm-ar
-          CJCJ_BOUNDSCHECK_SOURCE: ${{ env.CANGJIE_WORKSPACE }}/cangjie_runtime/runtime/third_party/third_party_bounds_checking_function
         run: node build/sdk/producers/srcbuild/steps/build-wasm-final-std.mjs
 
       - name: Upload wasm32-wasi runtime and final std
@@ -2178,10 +2134,6 @@ jobs:
           pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
-      - name: Restore source SDK version output
-        id: version
-        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Add Linux swap for stage2 chir heap
         if: runner.os == 'Linux'
         run: |
@@ -2201,7 +2153,6 @@ jobs:
         if: matrix.target == 'linux-x64' && inputs.build_ohos
         env:
           CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/build/sdk/producers/platform_matrix/native_runtime_toolchain.cmake
-          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
           CROSS_STD_TUPLE: ${{ matrix.tuple }}
         run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-ohos-final-std.mjs
 
@@ -2272,10 +2223,6 @@ jobs:
           pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
-      - name: Restore source SDK version output
-        id: version
-        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Install iOS SDK and probe
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
         uses: ./.github/actions/setup-release-sdk
@@ -2286,9 +2233,7 @@ jobs:
         if: matrix.target == 'darwin-arm64' && inputs.build_ios
         env:
           CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/build/sdk/producers/platform_matrix/native_runtime_toolchain.cmake
-          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
           CROSS_STD_TUPLE: ${{ matrix.tuple }}
-          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
         run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-ios-final-std.mjs
 
       - name: Upload iOS runtime and final std
@@ -2465,10 +2410,6 @@ jobs:
           pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
           cache-size: 2G
 
-      - name: Restore source SDK version output
-        id: version
-        run: echo "value=$SOURCE_SDK_VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Add Linux swap for stage2 chir heap
         if: runner.os == 'Linux'
         run: |
@@ -2480,8 +2421,6 @@ jobs:
 
       - name: Cross-build Windows final std with stage2 host compiler
         if: matrix.target == 'linux-x64'
-        env:
-          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
         run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-windows-final-std.mjs
 
       # Keep these Linux cross-built outputs distinct from the native Windows
@@ -2490,7 +2429,7 @@ jobs:
         if: matrix.target == 'linux-x64'
         env:
           CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-windows
-        run: npx --yes zx@8 build/cli.mjs --target windows-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
+        run: npx --yes zx@8 build/cli.mjs --target windows-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "$SOURCE_SDK_VERSION" build tools
 
       - name: Prepare cross-built Windows cjlint artifact
         if: matrix.target == 'linux-x64'
@@ -2776,12 +2715,12 @@ jobs:
       - name: Upload complete native Windows SDK
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}
+          name: cjcj-srcbuild-${{ matrix.target }}-${{ env.SOURCE_SDK_VERSION }}
           if-no-files-found: error
           include-hidden-files: true
           path: |
-            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-windows-x64-${{ steps.version.outputs.value }}-cjcj.zip
-            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-windows-x64-${{ steps.version.outputs.value }}-cjcj.zip.sha256
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-windows-x64-${{ env.SOURCE_SDK_VERSION }}-cjcj.zip
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-windows-x64-${{ env.SOURCE_SDK_VERSION }}-cjcj.zip.sha256
       - name: Retain Windows source SDK consumer evidence
         if: always()
         uses: actions/upload-artifact@v7.0.2

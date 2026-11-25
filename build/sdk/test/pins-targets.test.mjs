@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {loadPins, parseEnv, validatePins} from '../pins.mjs';
+import {loadPins, parseEnv} from '../pins.mjs';
 import {ASSETS, assetFileName, findAsset, validateReleaseSet} from '../targets.mjs';
 import {plan} from '../cli.mjs';
 
@@ -17,17 +17,21 @@ test('pins: every repository is a full commit and the merged stdx/tools defaults
   assert.match(pins.wasi.sha256, /^[0-9a-f]{64}$/);
 });
 
-test('pins: illegal configuration is rejected with the precise code', () => {
-  const source = parseEnv(fs.readFileSync(new URL('../source_pin.env', import.meta.url), 'utf8'));
-  const wasi = parseEnv(fs.readFileSync(new URL('../wasi_pin.env', import.meta.url), 'utf8'));
-  assert.equal(validatePins(source, wasi), true);
-  assert.throws(() => validatePins({...source, STDX_REF: '76c9da37'}, wasi), /^Error: PIN_REF STDX_REF/);
-  assert.throws(() => validatePins({...source, EXTRA_REF: 'x'}, wasi), /^Error: PIN_UNKNOWN EXTRA_REF/);
-  assert.throws(() => validatePins(source, {...wasi, WASI_SYSROOT_SHA256: 'abc'}), /^Error: PIN_WASI_SHA256/);
-  assert.throws(() => parseEnv('A=1\nA=2'), /^Error: PIN_DUPLICATE/);
+test('pins: illegal configuration is rejected with the precise code', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pins-'));
-  fs.writeFileSync(path.join(dir, 's.env'), 'lowercase=1\n');
-  assert.throws(() => loadPins({sourceFile: path.join(dir, 's.env')}), /^Error: PIN_SYNTAX/);
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const file = path.join(dir, 'pin.env');
+  const change = (group, alter) => {
+    fs.writeFileSync(file, alter(fs.readFileSync(new URL(`../../../ci/${group}_pin.env`, import.meta.url), 'utf8')));
+    return () => loadPins({[group + 'File']: file});
+  };
+  assert.throws(change('source', s => s.replace(/^STDX_REF=.*$/m, 'STDX_REF=short')), /PIN_REF STDX_REF/);
+  assert.throws(change('source', s => s + 'EXTRA_REF=x\n'), /PIN_UNKNOWN EXTRA_REF/);
+  assert.throws(change('source', () => 'lowercase=1\n'), /PIN_SYNTAX/);
+  assert.throws(change('wasi', s => s.replace(/^WASI_SYSROOT_SHA256=.*$/m, 'WASI_SYSROOT_SHA256=abc')), /PIN_WASI_SHA256/);
+  assert.throws(change('llvm', s => s.replace(/^LLVM_URL=.*$/m, 'LLVM_URL=http://wrong')), /PIN_URL LLVM_URL/);
+  assert.throws(change('runtime', s => s.replace(/^RUNTIME_VERSION=.*$/m, 'RUNTIME_VERSION=bad')), /PIN_VERSION/);
+  assert.throws(() => parseEnv('A=1\nA=2'), /PIN_DUPLICATE/);
 });
 
 test('targets: exactly the 15 formal assets with their carriers', () => {

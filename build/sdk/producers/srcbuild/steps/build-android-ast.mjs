@@ -7,8 +7,8 @@ import {probeRequirement} from '../../release/platform-matrix.mjs';
 import {crossBuildJobs} from '../lib/cross-build-jobs.mjs';
 
 $.stdio = 'inherit';
-const {CANGJIE_WORKSPACE:workspace, CJCJ_BOOTSTRAP_WORK:bootstrap} = process.env;
-const stage = JSON.parse(await fs.readFile(path.join(bootstrap, 'sdk-stage2/STAGE-INPUTS.json')));
+const {CANGJIE_WORKSPACE:workspace} = process.env;
+const stage = JSON.parse(await fs.readFile(path.join(workspace, 'native-bootstrap', 'sdk-stage2/STAGE-INPUTS.json')));
 const pins = readSourcePins();
 const root = path.join(workspace, 'android-ast');
 const source = process.env.CJCJ_ANDROID_AST_SOURCE || path.join(root, 'src');

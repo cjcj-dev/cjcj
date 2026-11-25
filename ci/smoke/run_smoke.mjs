@@ -79,7 +79,7 @@ async function runCommand(executable, args, cwd) {
   // Inspect the actual compiler transcript before executing any produced sample.
   // The official SDK supplies both its lib directory and cjstart.o to the linker.
   if (executable === cjcj) {
-    const sdk = process.env.CJCJ_HOST_SDK || process.env.CANGJIE_HOME;
+    const sdk = process.env.CJCJ_TARGET_SDK ? path.join(process.env.CJCJ_TARGET_SDK, '.host') : process.env.CANGJIE_HOME;
     const patched = process.env.CJCJ_PATCHED_RUNTIME_LIB_DIR;
     const lines = `${out.stdout || ''}\n${out.stderr || ''}`.split(/\r?\n/);
     const mixed = lines.find(line => sdk &&
@@ -183,7 +183,7 @@ function resolveWindowsDll(name) {
 }
 
 function resolveOfficialWindowsDll(name) {
-  const root = process.env.CJCJ_OFFICIAL_SDK_HOME;
+  const root = process.env.CJCJ_OFFICIAL_SDK_ROOT;
   if (!root) return '';
   for (const directory of [
     path.join(root, 'runtime', 'lib', 'windows_x86_64_cjnative'),

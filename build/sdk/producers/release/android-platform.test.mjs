@@ -71,10 +71,9 @@ test('plain host packages do not add an Android build dependency', () => {
   assert.deepEqual(JSON.parse(run.stdout).source, [{target: 'linux-x64'}]);
 });
 
- test('legacy single tuple uses the same package argument path', () => {
-  const single = {tuple: 'windows_x86_64_cjnative', artifact: 'final-std-windows-x64'};
-  assert.deepEqual(crossStdArguments('[]', '/artifacts', single),
-    crossStdArguments(JSON.stringify([single]), '/artifacts'));
-  assert.throws(() => crossStdArguments('[]', '/artifacts', {tuple: single.tuple}), /requires both/);
-  assert.throws(() => crossStdArguments(JSON.stringify([single]), '/artifacts', single), /either/);
+test('a single selection still requires a JSON array with a complete row', () => {
+  const row = {tuple: 'windows_x86_64_cjnative', artifact: 'final-std-windows-x64'};
+  assert.ok(crossStdArguments(JSON.stringify([row]), '/artifacts').includes(row.tuple + '=/artifacts/' + row.artifact));
+  assert.throws(() => crossStdArguments(JSON.stringify(row), '/artifacts'), /JSON array/);
+  assert.throws(() => crossStdArguments(JSON.stringify([{tuple: row.tuple}]), '/artifacts'), /invalid/);
 });

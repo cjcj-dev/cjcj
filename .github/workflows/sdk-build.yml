@@ -269,12 +269,9 @@ jobs:
         with:
           node-version: '24.22.1'
       - name: Require the fixed native input artifact
-        env:
-          NATIVE_INPUTS_ARTIFACT: ${{ inputs.native_inputs_artifact }}
-          NATIVE_INPUTS_RUN_ID: ${{ inputs.native_inputs_run_id }}
         run: |
-          test -n "$NATIVE_INPUTS_ARTIFACT" || { echo '::error::native_inputs_artifact is required'; exit 1; }
-          test -n "$NATIVE_INPUTS_RUN_ID" || { echo '::error::native_inputs_run_id is required'; exit 1; }
+          test -n "$CJCJ_NATIVE_INPUTS_ARTIFACT" || { echo '::error::native_inputs_artifact is required'; exit 1; }
+          test -n "$CJCJ_NATIVE_INPUTS_RUN_ID" || { echo '::error::native_inputs_run_id is required'; exit 1; }
       - name: Select the requested targets
         id: select
         env:

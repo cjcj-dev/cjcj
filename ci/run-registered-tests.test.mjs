@@ -3,6 +3,7 @@ import {spawnSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {testEvidenceDirectory} from './test-evidence-directory.mjs';
 import test from 'node:test';
 import {runScripts, cangjieEnvironment} from './run-registered-tests.mjs';
 import {repoRoot} from './test-manifest.mjs';
@@ -300,9 +301,9 @@ test('runCangjie carries directed argv and fixture environment to its actual chi
   // These child stand-ins test transport only; the real compiler/cjpm controls
   // are separate integration evidence, not supplied by this fixture.
   const {runCangjie, digest} = await import('./run-registered-tests.mjs');
-  const evidence = process.env.PRODUCER_EVIDENCE_TEST_ROOT;
-  if (evidence) await fs.mkdir(evidence, {recursive: true});
-  const work = await fs.mkdtemp(path.join(evidence || os.tmpdir(), 'objc-child-'));
+  const evidence = testEvidenceDirectory('producer-evidence-tests');
+  await fs.mkdir(evidence, {recursive: true});
+  const work = await fs.mkdtemp(path.join(evidence, 'objc-child-'));
   const oldHome = process.env.CANGJIE_HOME;
   const oldProducer = process.env.OBJC_PREAMBLE_PRODUCER;
   const oldHeap = process.env.CJ_HEAP;
@@ -392,6 +393,5 @@ p.mkdir(parents=True)
     for (const [key, value] of [['CANGJIE_HOME', oldHome], ['OBJC_PREAMBLE_PRODUCER', oldProducer], ['CJ_HEAP', oldHeap]]) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
-    if (!evidence) await fs.rm(work, {recursive: true, force: true});
   }
 });

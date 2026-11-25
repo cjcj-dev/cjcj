@@ -89,7 +89,6 @@ export function makeRepos({globalTag, overrides = {}, env=process.env, nativeSel
     .map(name=>[name,{repository:overrides[name].url,commit:pair?.[name]}]));
   const native=nativeSelection || nativeSourceSelection(env,pair,pair?selected:{}).selection;
   if(pair&&['llvm','runtime'].some(name=>native[name]?.commit!==pair[name]))throw new ConfigError('NATIVE_COMPONENT_SOURCE_CONFLICT');
-  pins.LLVM_REF=native.llvm.commit;pins.LLVM_SRC_URL=native.llvm.repository;
   if(pair){pins.RUNTIME_REF=native.runtime.commit;pins.RUNTIME_SRC_URL=native.runtime.repository;}
   const repos = {};
   for (const name of REPO_NAMES) {
@@ -97,14 +96,14 @@ export function makeRepos({globalTag, overrides = {}, env=process.env, nativeSel
     const override = overrides[name] ?? {};
     if(pair&&['llvm','runtime'].includes(name)&&((override.tag??globalTag??native[name].commit)!==native[name].commit||(override.url??native[name].repository)!==native[name].repository))throw new ConfigError('NATIVE_COMPONENT_SOURCE_CONFLICT '+name);
     const prefix = name.toUpperCase();
-    const pinnedRef = pins[`${prefix}_REF`];
+    const pinnedRef = name === 'llvm' ? native.llvm.commit : pins[`${prefix}_REF`];
     if (!/^[0-9a-f]{40}$/.test(pinnedRef ?? '')) throw new ConfigError(`invalid ${prefix}_REF`);
     for (const key of ['url', 'tag']) {
       if (override[key] !== undefined && !String(override[key]).trim()) throw new ConfigError(`empty ${name} ${key}`);
     }
     repos[name] = Object.freeze({
       name,
-      url: override.url ?? pins[`${prefix}_SRC_URL`] ?? defaultUrl,
+      url: override.url ?? (name === 'llvm' ? native.llvm.repository : pins[`${prefix}_SRC_URL`]) ?? defaultUrl,
       tag: override.tag ?? globalTag ?? pinnedRef,
       dirName,
     });
@@ -132,7 +131,7 @@ export function buildConfig({
   stdxGccToolchain = process.env.CJCJ_STDX_GCC_TOOLCHAIN,
   toolsBuildMode = 'clean',
   toolsBuildSet = 'all',
-  toolsDependencies = process.env.CJCJ_NATIVE_TOOL_DEPENDENCIES,
+  toolsDependencies,
   toolsMangleSource = process.env.CANGJIE_MANGLE_SOURCE_DIR,
   toolsJniHome = process.env.JAVA_HOME,
   toolsRuntimeHeader,
@@ -222,7 +221,8 @@ export function buildConfig({
     stdxGccToolchain: stdxGccToolchain == null ? null : absolute(stdxGccToolchain),
     toolsBuildMode,
     toolsBuildSet,
-    toolsDependencies: toolsDependencies ? absolute(toolsDependencies) : null,
+    toolsDependencies: toolsDependencies ? absolute(toolsDependencies) :
+      (fs.existsSync(path.join(workspacePath, 'native-tool-dependencies.json')) ? path.join(workspacePath, 'native-tool-dependencies.json') : null),
     toolsMangleSource: toolsMangleSource == null ? null : absolute(toolsMangleSource),
     toolsJniHome: toolsJniHome == null ? null : absolute(toolsJniHome),
     toolsRuntimeHeader: toolsRuntimeHeader == null ? null : absolute(toolsRuntimeHeader),

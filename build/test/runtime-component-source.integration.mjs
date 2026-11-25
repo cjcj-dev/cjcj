@@ -8,7 +8,8 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {hostToolchainFromCjcVersion} from '../../ci/host-toolchain-pin.mjs';
-import {buildConfig} from '../lib/config.mjs';
+import {stdxChirMembers} from '../../ci/bootstrap/sdk-platform.mjs';
+import {buildConfig,REPO_NAMES} from '../lib/config.mjs';
 const repo=new URL('../../',import.meta.url).pathname;
 const base=process.env.RELEASE_EVIDENCE_TEST_ROOT,generator=process.env.CJCJ_TEST_RUNTIME_GENERATOR,host=process.env.CJCJ_OFFICIAL_SDK_ROOT;
 if(!base||!generator||!host)throw Error('runtime component test requires evidence root, original generator and complete private host');
@@ -30,31 +31,51 @@ for(const mode of ['archive','clean','archive-wrapper'])test(`formal native ${mo
  await write(objects+'/runtime/src/mask.c','unsigned long g_cjLoadBadMask = 42;\n');
  await write(objects+'/runtime/src/bounds.c','int fixture_bounds(void) { return 42; }\n');
  await write(objects+'/runtime/build/cmake/GenerateRuntimeProvenance.cmake',await fs.readFile(generator));
- await write(objects+'/runtime/CMakeLists.txt','# finite native pair, not the real runtime CPP suite\n');
+ await write(objects+'/runtime/CMakeLists.txt',`cmake_minimum_required(VERSION 3.16)
+project(finite_pair C CXX)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+add_library(boundscheck SHARED src/bounds.c)
+set_target_properties(boundscheck PROPERTIES LIBRARY_OUTPUT_DIRECTORY "\${CMAKE_BINARY_DIR}/runtime-staging/lib/x86_64_Release")
+foreach(t cangjie-runtime static-runtime)
+ if(t STREQUAL "static-runtime")
+  add_library(\${t} STATIC src/mask.c "\${CMAKE_BINARY_DIR}/RuntimeProvenance.cpp")
+ else()
+  add_library(\${t} SHARED src/mask.c "\${CMAKE_BINARY_DIR}/RuntimeProvenance.cpp")
+  target_link_libraries(\${t} PRIVATE boundscheck)
+ endif()
+endforeach()
+set_target_properties(static-runtime PROPERTIES OUTPUT_NAME cangjie-runtime)
+install(TARGETS cangjie-runtime LIBRARY DESTINATION runtime/lib/linux_x86_64_cjnative)
+install(TARGETS static-runtime ARCHIVE DESTINATION lib/linux_x86_64_cjnative)
+`);
+ await write(objects+'/runtime/src/CJThread/CMakeLists.txt',`cmake_minimum_required(VERSION 3.16)
+project(finite_thread C)
+foreach(name thread aio)
+ add_library(cangjie-\${name} STATIC ../mask.c)
+ install(TARGETS cangjie-\${name} ARCHIVE DESTINATION lib/\${TARGET_ARCH})
+endforeach()
+`);
  await write(objects+'/packages/macro/src/InvokeUtil.cj',await fs.readFile(repo+'packages/macro/src/InvokeUtil.cj'));
- await write(objects+'/runtime/build.py',String.raw`import os,sys,pathlib,subprocess,shutil
+ await write(objects+'/runtime/build.py',String.raw`import os,sys,pathlib,subprocess
 r=pathlib.Path.cwd(); b=r/'CMakebuild'; b.mkdir(exist_ok=True)
 def run(args): subprocess.run([str(x) for x in args],check=True)
+prefix=sys.argv[sys.argv.index('--prefix')+1]
 if sys.argv[1]=='build':
  run(['cmake','-DREPOSITORY_DIR='+str(r.parent),'-DSOURCE_DIR='+str(r),'-DOUTPUT_FILE='+str(b/'RuntimeProvenance.cpp'),'-DCOMMIT_OVERRIDE=','-P',r/'build/cmake/GenerateRuntimeProvenance.cmake'])
- run(['c++','-fPIC','-c',b/'RuntimeProvenance.cpp','-o',b/'provenance.o'])
- run(['cc','-fPIC','-c',r/'src/mask.c','-o',b/'mask.o'])
- run(['c++','-shared',b/'provenance.o',b/'mask.o','-o',b/'libcangjie-runtime.so'])
- run(['ar','rcs',b/'libcangjie-runtime.a',b/'provenance.o',b/'mask.o'])
- d=b/'runtime-staging/lib/x86_64_Release';d.mkdir(parents=True,exist_ok=True)
- run(['cc','-shared','-fPIC',r/'src/bounds.c','-o',d/'libboundscheck.so'])
- cache=['CANGJIE_COMPILER_CACHE:STRING='+os.environ['SCCACHE_PATH']]
+ cache=['-DCANGJIE_COMPILER_CACHE='+os.environ['SCCACHE_PATH']]
  if os.environ.get('FINITE_CACHE_WRAPPER'):
+  cache.append('-DCMAKE_TOOLCHAIN_FILE=')  # Exercise the historical compiler-wrapper configuration.
   for language,name in [('C','clang'),('CXX','clang++')]:
-   wrapper=b/name;wrapper.symlink_to(os.environ['SCCACHE_PATH'])
-   cache.append('CMAKE_'+language+'_COMPILER:FILEPATH='+str(wrapper))
+   wrapper=b/name;wrapper.symlink_to(os.environ['SCCACHE_PATH']);cache.extend(['-DCMAKE_'+language+'_COMPILER='+str(wrapper),'-DCMAKE_'+language+'_COMPILER_LAUNCHER='])
  else:
-  cache += [k+':STRING='+os.environ['SCCACHE_PATH'] for k in ['CMAKE_C_COMPILER_LAUNCHER','CMAKE_CXX_COMPILER_LAUNCHER']]
- (b/'CMakeCache.txt').write_text('\n'.join(cache)+'\n')
+  cache+=['-DCMAKE_'+lang+'_COMPILER_LAUNCHER='+os.environ['SCCACHE_PATH'] for lang in ['C','CXX']]
+ for source,build,options in [(r,b,cache),(r/'src/CJThread',b/'cjthread-build',['-DTARGET_ARCH:STRING=linux_x86_64_cjnative'])]:
+  run(['cmake','-G','Unix Makefiles','-S',source,'-B',build,'-DCMAKE_BUILD_TYPE=Release','-DCMAKE_INSTALL_PREFIX='+prefix,*options])
+  run(['cmake','--build',build,'-j2'])
+ links=[b/'CMakeFiles'/(name+'.dir')/'link.txt' for name in ['boundscheck','cangjie-runtime']]
+ (b/'runtime-link-inputs.txt').write_text('\n'.join(map(str,links))+'\n')
 else:
- p=pathlib.Path(sys.argv[sys.argv.index('--prefix')+1]);t='linux_x86_64_cjnative'
- for src,dst in [(b/'libcangjie-runtime.so',p/'runtime/lib'/t/'libcangjie-runtime.so'),(b/'libcangjie-runtime.a',p/'lib'/t/'libcangjie-runtime.a')]:
-  dst.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(src,dst)
+ for build in [b,b/'cjthread-build']: run(['cmake','--install',build,'--prefix',prefix])
 `);
  // Explicit C consumer for the legacy stdlib invocation; not Cangjie std.
  await write(objects+'/stdlib/build.py',String.raw`import os,sys,pathlib,subprocess
@@ -81,7 +102,7 @@ if sys.argv[1]=='install':
  const source=mode.startsWith('archive')?materialized:objects;
  // Explicit unavailable functionality, never a fabricated CPP PASS file.
  const boundaries={
-  'build/sdk/producers/platform_matrix/native_runtime.mjs':{installNativeRuntimeInputs:'const root=arguments[0].installRoot;controlledDirectSource(path.join(root,"share/runtime-build/runtime"));for(const f of ["share/runtime-build/runtime/CMakebuild/compile_commands.json","share/runtime-build/runtime/CMakebuild/gc-unit.status","runtime/include/schedule.h"]){fs.mkdirSync(path.dirname(path.join(root,f)),{recursive:true});fs.writeFileSync(path.join(root,f),"CONTROLLED_CPP_NOT_RUN");}console.log("CONTROLLED_CPP_DIRECT_INPUT_NOT_RUN");'},
+  'build/sdk/producers/platform_matrix/native_runtime.mjs':{installNativeRuntimeInputs:'const root=arguments[0].installRoot;controlledDirectSource(path.join(root,"share/runtime-build/runtime"));for(const f of ["include/schedule.h","share/runtime-build/runtime/CMakebuild/compile_commands.json","share/runtime-build/runtime/CMakebuild/gc-unit.status","runtime/include/schedule.h","share/runtime-build/runtime/CMakebuild/runtime-staging/include/schedule.h"]){fs.mkdirSync(path.dirname(path.join(root,f)),{recursive:true});fs.writeFileSync(path.join(root,f),"CONTROLLED_CPP_NOT_RUN");}console.log("CONTROLLED_CPP_DIRECT_INPUT_NOT_RUN");'},
   'build/srcbuild/gc-unit-gate.mjs':{
    assertLanguageState:'console.log("CONTROLLED_CPP_GATE_NOT_RUN");return new Map([["CPP_SUITE","PASS"]]);',
   },
@@ -91,11 +112,14 @@ if sys.argv[1]=='install':
 export async function load(url,context,next){const r=await next(url,context);if(!boundaries[url]&&!url.endsWith('/ci/bootstrap/sdk-targets.mjs'))return r;let source=String(r.source);
 if(url.endsWith('/build/sdk/producers/platform_matrix/native_runtime.mjs'))source+='\nimport {directSource as controlledDirectSource} from '+JSON.stringify(${JSON.stringify(new URL('ci/fixtures/runtime-direct-inputs.mjs','file://'+repo).href)})+';\n';
 if(boundaries[url])for(const [name,body]of Object.entries(boundaries[url])){const re=new RegExp('export (async )?function '+name+'\\(');if(!re.test(source))throw Error('BOUNDARY_ANCHOR '+name);source=source.replace(re,(_,a='')=>a+'function CONTROLLED_ORIGINAL_'+name+'(');source+='\nexport function '+name+'(){'+body+'}\n';}
-if(url.endsWith('/ci/bootstrap/sdk-targets.mjs')){const anchor='compiler:pins.source.COMPILER_REF';if(!source.includes(anchor))throw Error('BOUNDARY_COMPILER_PIN_ANCHOR');source=source.replace(anchor,"compiler:'${commit}'").replace(/h1:'[0-9a-f]{40}'/,"h1:'${commit}'");}
+if(url.endsWith('/ci/bootstrap/sdk-targets.mjs')){const anchor='compiler:pins.source.COMPILER_REF';if(!source.includes(anchor))throw Error('BOUNDARY_COMPILER_PIN_ANCHOR');source=source.replace(anchor,"compiler:'${commit}'");}
 return {...r,source};}
 `);
  const bin=root+'/bin';await fs.mkdir(bin);
- for(const name of ['sudo','npx','sccache']){const file=bin+'/'+name;await write(file,`#!${process.execPath}\nconsole.log('CONTROLLED_EXTERNAL_PREPARATION',${JSON.stringify(name)},process.argv.slice(2));\n`);await fs.chmod(file,0o755);}
+ // This fixture checks both launcher interfaces, not cache performance.
+ await write(bin+'/sccache', '#!/bin/sh\ncase "$0" in */clang++) exec /usr/bin/clang++ "$@";; */clang) exec /usr/bin/clang "$@";; esac\nexec "$@"\n');
+ await fs.chmod(bin+'/sccache',0o755);
+ for(const name of ['sudo','npx']){const file=bin+'/'+name;await write(file,`#!${process.execPath}\nconsole.log('CONTROLLED_EXTERNAL_PREPARATION',${JSON.stringify(name)},process.argv.slice(2));\n`);await fs.chmod(file,0o755);}
  const loader='--experimental-loader='+root+'/loader.mjs';
  const env={NODE_OPTIONS:loader,PATH:bin+path.delimiter+process.env.PATH,PLATFORM_CI_ROOT:root+'/producer',
   RUNTIME_SOURCE:source,RUNTIME_TARGET:'native',RUNTIME_TOOLCHAIN:'',RUNTIME_NATIVE_PAIR:'1',
@@ -120,18 +144,17 @@ return {...r,source};}
  await fs.symlink(host,inputs+'/host');await write(inputs+'/host-archive','controlled host archive location; host execute is actual');
  for(const file of ['node','cjbind'])await write(inputs+'/hle/'+file,'unrelated HLE boundary');await fs.mkdir(inputs+'/hle/modules');
  await write(inputs+'/hle/dependencies.json',JSON.stringify({platform,...Object.fromEntries(['node','modules','cjbind'].map(name=>[name,{path:name,source:'finite unrelated input',version:'fixture'}]))}));
- for(const file of ['cjcj-stage1.mjs','stage1-transform.mjs'])await write(inputs+'/private/ts/src/sharedbuild/'+file,'// unavailable stage producer\n');
  const shapes={llvm:['third_party/llvm/bin/llc','third_party/llvm/bin/llvm-as','third_party/llvm/bin/llvm-dis','third_party/llvm/lib/libLLVM-15.so','third_party/llvm/fixed-llc/cjselfhost_llvmshim.o','tools/bin/cjdb'],
- ast:['libcangjie-ast-support.a','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h','third_party/flatbuffers/bin/flatc']};
+ ast:['libcangjie-ast-support.a','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',...stdxChirMembers,'third_party/flatbuffers/bin/flatc']};
  for(const [name,files]of Object.entries(shapes)){for(const file of files)await write(inputs+'/'+name+'/'+file,'unrelated native component shape; NOT_RUN');await write(inputs+'/'+name+'/result.json',JSON.stringify({controlledUnavailableNativeComponent:name}));}
- const locations={platform,hleDependencies:'hle/dependencies.json',host:{install:'host',archive:'host-archive',version},tools:{privateRoot:'private'},
+ const locations={platform,hleDependencies:'hle/dependencies.json',host:{install:'host',archive:'host-archive',version},
  installations:Object.fromEntries(Object.keys(shapes).map(name=>[name,{install:name,buildResult:name+'/result.json',configuration:{finiteBoundary:name}}]))};
  await write(inputs+'/locations.json',JSON.stringify(locations));
  const gitConfig=root+'/gitconfig';
  await write(gitConfig,'[url "file://'+root+'/transport.git"]\n'+['https://github.com/cjcj-dev/cangjie-runtime.git','https://github.com/cjcj-dev/cjcj-llvm.git','https://github.com/cjcj-dev/cjcj.git','https://gitcode.com/Cangjie/cangjie_compiler.git'].map(url=>' insteadOf = '+url).join('\n')+'\n');
  const consumer={NODE_OPTIONS:loader,GIT_CONFIG_GLOBAL:gitConfig,GIT_CONFIG_NOSYSTEM:'1',GIT_ALLOW_PROTOCOL:'file:https',
-  CANGJIE_WORKSPACE:root+'/consumer',GITHUB_WORKSPACE:root+'/transport.git',CJCJ_NATIVE_INPUT_ROOT:inputs,CJCJ_BOOTSTRAP_BASE:inputs+'/host',CJCJ_BOOTSTRAP_BASE_ARCHIVE:inputs+'/host-archive',
-  CJCJ_NATIVE_RUNTIME_INSTALL:carried,CJCJ_NATIVE_RUNTIME_SOURCE:carried+'/share/runtime-build',CJCJ_NATIVE_LLVM_REF:commit,CJCJ_NATIVE_RUNTIME_REF:commit,CJCJ_NATIVE_HOST_VERSION:version,GITHUB_ENV:''};
+  CANGJIE_WORKSPACE:root+'/consumer',GITHUB_WORKSPACE:root+'/transport.git',CJCJ_NATIVE_INPUT_ROOT:inputs,CJCJ_OFFICIAL_SDK_ROOT:inputs+'/host',CJCJ_BOOTSTRAP_BASE_ARCHIVE:inputs+'/host-archive',
+  CJCJ_NATIVE_H1_REF:commit,CJCJ_NATIVE_RUNTIME_INSTALL:carried,CJCJ_NATIVE_RUNTIME_SOURCE:carried+'/share/runtime-build',CJCJ_NATIVE_LLVM_REF:commit,CJCJ_NATIVE_RUNTIME_REF:commit,CJCJ_NATIVE_HOST_VERSION:version,GITHUB_ENV:''};
  const configure=()=>[process.execPath,repo+'ci/bootstrap/configure-gha-inputs.mjs'];
  await run('formal-configure',configure(),consumer);
  const inputFile=consumer.CANGJIE_WORKSPACE+'/native-bootstrap/sdk-inputs.json';
@@ -177,7 +200,7 @@ return {...r,source};}
  // The public CLI resolves every selected source before entering runtime/std.
  // Materialize finite Git inputs for those unchanged boundaries as well.
  const legacyConfig=buildConfig({workspace:legacy,targetKey:'linux-x64'}),choices={};
- for(const name of ['compiler','runtime','tools','stdx','llvm','cjpm']) {
+ for(const name of REPO_NAMES) {
   const url=name==='llvm'?'https://github.com/cjcj-dev/cjcj-llvm.git':origin;
   if(name!=='runtime')await run('legacy-'+name+'-clone',['git','clone',url,legacyConfig.repoPath(name)],consumer);
   choices[name]={url,tag:commit};

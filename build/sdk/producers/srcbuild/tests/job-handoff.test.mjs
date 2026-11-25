@@ -204,30 +204,36 @@ test('native HLE locations and relative component paths survive the public job h
 test('public handoff carries native tool dependency locations and rejects an unarchived source',async t=>{
  const f=await fixture(t),selection={};
  for(const name of ['json']) {
-  const source=path.join(f.root,'.srcbuild','native-tools',name);await fs.mkdir(source,{recursive:true});
+  const source=path.join(f.root,'.srcbuild/native-inputs','native-tools',name);await fs.mkdir(source,{recursive:true});
   await fs.writeFile(path.join(source,'transport.txt'),'finite dependency transport '+name);
   selection[name]={repo:'fixture://'+name,commit:'a'.repeat(40),path:source};
  }
- const descriptor=path.join(f.root,'.srcbuild','native-tool-dependencies.json');
- const inputRoot=path.join(f.root,'.srcbuild'),sourceDescriptor=path.join(inputRoot,'native-source-dependencies.json');
+ const workspace=path.join(f.root,'.srcbuild/workspace'),descriptor=path.join(workspace,'native-tool-dependencies.json');
+ const inputRoot=path.join(f.root,'.srcbuild/native-inputs'),sourceDescriptor=path.join(inputRoot,'native-source-dependencies.json');
  const relativeSelection={json:{...selection.json,path:'native-tools/json'}};
  await fs.writeFile(path.join(inputRoot,'locations.json'),JSON.stringify({platform:'linux_x86_64',nativeToolDependencies:'native-source-dependencies.json'}));
  await fs.writeFile(sourceDescriptor,JSON.stringify(relativeSelection));
  const {configureNativeToolInput}=await import('../../../../../ci/bootstrap/native-tool-input.mjs');
- const configure=()=>configureNativeToolInput({root:inputRoot,workspace:inputRoot,platform:'linux_x86_64',envFile:f.env.GITHUB_ENV});
+ const configure=()=>configureNativeToolInput({root:inputRoot,workspace,platform:'linux_x86_64'});
  assert.equal(await configure(),descriptor,'json-only artifact reaches ordinary input configuration');
  assert.deepEqual(JSON.parse(await fs.readFile(descriptor)),selection);
  await fs.writeFile(sourceDescriptor,JSON.stringify({}));
  await assert.rejects(configure(),/GHA_NATIVE_TOOL_SOURCE json/);
  await fs.writeFile(sourceDescriptor,JSON.stringify(relativeSelection));
- await configure();f.env.CJCJ_NATIVE_TOOL_DEPENDENCIES=descriptor;
+ await configure();
  assert.equal(f.run('pack').rc,0);
  await f.fresh();
  const restored=f.run('restore');assert.equal(restored.rc,0,restored.output);
- assert((await fs.readFile(f.env.GITHUB_ENV,'utf8')).includes('CJCJ_NATIVE_TOOL_DEPENDENCIES='+descriptor));
+ assert(!(await fs.readFile(f.env.GITHUB_ENV,'utf8')).includes('CJCJ_NATIVE_TOOL_DEPENDENCIES='));
  assert.deepEqual(JSON.parse(await fs.readFile(descriptor)),selection);
  for(const [name,row]of Object.entries(selection))assert.equal(await fs.readFile(path.join(row.path,'transport.txt'),'utf8'),'finite dependency transport '+name);
- const outside=path.join(f.dir,'outside');await fs.mkdir(outside);selection.json.path=outside;
+ await fs.unlink(descriptor);
+ const missing=f.run('pack');assert.equal(missing.rc,1);assert.match(missing.output,/native-tool-dependencies.json/);
+ const outside=path.join(f.dir,'outside');await fs.mkdir(outside);
+ const link=path.join(inputRoot,'escaped');await fs.symlink(outside,link,'dir');
+ selection.json.path=link;await fs.writeFile(descriptor,JSON.stringify(selection));
+ const escaped=f.run('pack');assert.equal(escaped.rc,1);assert.match(escaped.output,/handoff native tool dependency outside archived inputs/);
+ selection.json.path=outside;
  await fs.writeFile(descriptor,JSON.stringify(selection));const rejected=f.run('pack');
  assert.equal(rejected.rc,1);assert.match(rejected.output,/handoff native tool dependency outside archived inputs/);
  // These are location/byte transport fixtures, not qualified Git producers.

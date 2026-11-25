@@ -53,8 +53,7 @@ export async function verifyNativeRelease(options, env = process.env) {
   const {sdk, platform, version, sourceSha, runtimeRef, releaseKey = '', std, crossRoot, work} = options;
   // Check the received target payloads before starting any host SDK consumers.
   const {release} = releaseSelection(platform, releaseKey);
-  const args = crossStdArguments(env.CROSS_STD_ARTIFACTS || '[]', crossRoot || '',
-    {artifact: env.CROSS_STD_ARTIFACT, tuple: env.CROSS_STD_TUPLE});
+  const args = crossStdArguments(env.CROSS_STD_ARTIFACTS || '[]', crossRoot || '');
   const rows = args.filter((_, i) => i % 2 === 1).filter((_, i) => args[i * 2] === '--cross-std-dir')
     .map(text => {const at = text.indexOf('='); return {tuple: text.slice(0, at), root: text.slice(at + 1)};});
   for (const {tuple, root} of rows) {
@@ -94,7 +93,7 @@ export async function verifyNativeRelease(options, env = process.env) {
   await command([process.execPath, path.join(root, 'build/sdk/producers/package/verify_packaged_cjdb.mjs'), sdk], {env: installedEnv});
   await command([process.execPath, path.join(root, 'ci/smoke/run_smoke.mjs'),
     path.join(sdk, 'bin/cjc' + target.spec.exeSuffix), path.join(work, 'smoke')],
-  {env: {...installedEnv, CJCJ_OFFICIAL_SDK_HOME: path.join(sdk, '.host')}});
+  {env: {...installedEnv, CJCJ_OFFICIAL_SDK_ROOT: path.join(sdk, '.host')}});
   // The installed compiler passes an oversized final link to ld.lld through a
   // response file on Windows (!2161); this runs again from the relocated archive.
   if (target.spec.os === 'windows')

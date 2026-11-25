@@ -21,7 +21,7 @@ const requiredEnv = name => {
 
 const workspace = path.resolve(requiredEnv('CANGJIE_WORKSPACE'));
 const buildRoot = path.resolve(requiredEnv('CANGJIE_BUILD_ROOT'));
-const version = requiredEnv('CJCJ_STAGE3_CANGJIE_VERSION');
+const version = requiredEnv('SOURCE_SDK_VERSION');
 const expectedRuntimeRef = requiredEnv('CJCJ_NATIVE_RUNTIME_REF');
 for (const directory of [workspace, buildRoot]) {
   if (directory === path.parse(directory).root) throw new Error('source-build paths must not be filesystem roots');
@@ -34,7 +34,7 @@ if (process.platform !== target.spec.nodePlatform || process.arch !== target.spe
 if (!target.spec.crossCompile) throw new Error('windows-x64 must remain a cross target');
 if (!isInstalled(buildRoot)) throw new Error(`official MinGW toolchain is incomplete under ${installPath(buildRoot)}`);
 
-const sdk = path.join(path.resolve(requiredEnv('CJCJ_BOOTSTRAP_WORK')), 'sdk-stage2');
+const sdk = path.join(workspace, 'native-bootstrap', 'sdk-stage2');
 const originalCompiler = await installedStageOutput(sdk, 'stage2');
 const compiler = originalCompiler.product;
 const runtimeRepository = path.join(workspace, 'cangjie_runtime');

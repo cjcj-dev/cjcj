@@ -64,7 +64,7 @@ const baseline={TUPLE_ROOT:'tuple relative',TUPLE_PLATFORM:'linux_x86_64',LLVM_T
  CJCJ_SRCBUILD_REQUIRE_MIRRORS:'1',CJCJ_SRCBUILD_SOURCE_MIRRORS:[`${url}=file://${runtime.dir}`,...['llvm','compiler','flatbuffers'].map(x=>`https://fixture.invalid/${x}=file://${other.dir}`)].join(';')};
 const old=path.join(evidence,'old repo');
 for(const [source,target] of [
- ['ci/fixtures/g2/fetch_sources.bash.txt','build/sdk/producers/platform_tuples/fetch_sources.sh'],['ci/fixtures/g2/build_tuple.bash.txt','build/sdk/producers/platform_tuples/build_tuple.sh'],
+ ['ci/fixtures/g2/fetch_sources.bash.txt','ci/platform_tuples/fetch_sources.sh'],['ci/fixtures/g2/build_tuple.bash.txt','ci/platform_tuples/build_tuple.sh'],
  ['build/lib/srcbuild_git.sh','build/lib/srcbuild_git.sh'],['ci/fetch-llvm-runtime.mjs','ci/fetch-llvm-runtime.mjs'],['ci/runtime_pin.env','ci/runtime_pin.env']]){
  const dest=path.join(old,target);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(repo,source),dest);
 }
@@ -77,7 +77,7 @@ while(pending.length){const member=pending.pop();if(copied.has(member))continue;
  for(const match of body.matchAll(/(?:from\s*|import\s*)['"](\.[^'"]+\.mjs)['"]/g))pending.push(path.normalize(path.join(path.dirname(member),match[1])));
 }
 for(const pin of ['llvm_pin.env','source_pin.env','host_sdk_pin.env'])fs.copyFileSync(path.join(repo,'ci',pin),path.join(old,'ci',pin));
-const commands=(entry,arm)=>arm==='old'?['bash',path.join(old,`build/sdk/producers/platform_tuples/${entry}.sh`)]:['npx','--yes','zx@8',path.join(repo,`build/sdk/producers/platform_tuples/${entry}.mjs`)];
+const commands=(entry,arm)=>arm==='old'?['bash',path.join(old,`ci/platform_tuples/${entry}.sh`)]:['npx','--yes','zx@8',path.join(repo,`build/sdk/producers/platform_tuples/${entry}.mjs`)];
 const allRows=[];
 for(const entry of ['fetch_sources','build_tuple']){
  const parsed=exportBranches(fs.readFileSync(path.join(repo,`ci/fixtures/g2/${entry}.bash.txt`),'utf8'));
@@ -89,7 +89,8 @@ fs.writeFileSync(path.join(evidence,'ast-expanded.json'),JSON.stringify(expanded
 function invoke(entry,arm,label,env){
  const selected={...env};
  if(arm==='old')selected.CJCJ_NATIVE_LLVM_REF=other.sha;
- else {delete selected.LLVM_SHA;if(Object.hasOwn(env,'LLVM_SHA'))selected.CJCJ_NATIVE_LLVM_REF=env.LLVM_SHA;}
+ else {if(Object.hasOwn(selected,'CANGJIE_COMPILER_URL'))selected.COMPILER_SRC_URL=selected.CANGJIE_COMPILER_URL;
+  delete selected.CANGJIE_COMPILER_URL;delete selected.LLVM_SHA;if(Object.hasOwn(env,'LLVM_SHA'))selected.CJCJ_NATIVE_LLVM_REF=env.LLVM_SHA;}
  return run(`${label}-${arm}`,commands(entry,arm),selected);
 }
 function pair(entry,label,env,check){for(const arm of ['old','new']){const r=invoke(entry,arm,label,env);check(r,arm);}}
@@ -105,7 +106,10 @@ test('AST required environment expands into actual CLI rejections',()=>{
   pair(item.entry,`${item.entry}-${item.variable}-${item.outcome}`,env,(r,arm)=>{
    assert.equal(r.status,1,r.stdout+r.stderr);
    if(arm==='new'&&item.variable==='LLVM_SHA')assert.match(r.stdout+r.stderr,/NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED/);
-   else assert.ok((r.stdout+r.stderr).includes(`: line ${item.line}: ${item.variable}:`),r.stdout+r.stderr);
+   else {
+    const key=arm==='new'&&item.variable==='CANGJIE_COMPILER_URL'?'COMPILER_SRC_URL':item.variable;
+    assert.ok((r.stdout+r.stderr).includes(`: line ${item.line}: ${key}:`),r.stdout+r.stderr);
+   }
   });
  }
 });

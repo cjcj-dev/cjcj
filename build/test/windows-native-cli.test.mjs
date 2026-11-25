@@ -22,7 +22,7 @@ function fixture(t) {
   }
   fs.writeFileSync(path.join(tools, 'build.mjs'), '// plan-only public root producer\n');
   for(const name of ['cjpm','cjfmt','hle','lsp','cjcov','cjtrace-recover','cjlint','cjprof','cjcompat','cjhead'])fs.writeFileSync(path.join(tools,'packages',name,'build/build.mjs'),'// plan-only package producer\n');
-  const env = {...process.env, CANGJIE_BUILD_DRY_RUN: '1', CJCJ_NATIVE_TOOL_DEPENDENCIES: path.join(root,'native-dependencies.json'), CJCJ_NATIVE_LLVM_BIN: path.join(root, 'llvm/bin'),
+  const env = {...process.env, CANGJIE_BUILD_DRY_RUN: '1', CJCJ_NATIVE_LLVM_BIN: path.join(root, 'llvm/bin'),
     CJCJ_NATIVE_OPENSSL_LIB: path.join(root, 'openssl/lib')};
   for (const key of ['CJCJ_OFFICIAL_SDK_ROOT', 'CJCJ_SRCBUILD_CONSUMER_SDK']) delete env[key];
   return {root, env, run({native = true, args = ['--tools-phase','build','--tools-build-set','cjpm,cjcov,hle,cjtrace-recover','--tools-mangle-source',path.join(root,'mangle'),'build','tools'], extra = {}, profile = 'generic'} = {}) {

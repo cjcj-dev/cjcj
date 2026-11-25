@@ -97,7 +97,7 @@ process.stdout.write(fs.readFileSync(process.env.FIXTURE_DIR + '/asset-' + match
     const env = {...process.env, FIXTURE_DIR: dir, PATH: `${bin}:${process.env.PATH}`, BOOTSTRAP_ARCHIVES_PIN: registry,
       GITHUB_REPOSITORY: 'cjcj-dev/cjcj', GITHUB_TOKEN: 'fixture-token', GH_TOKEN: 'fixture-token', GITHUB_RUN_ID: '77',
       GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: HEAD, NATIVE_SDK_ARTIFACT_ID: '456', NATIVE_SDK_RUN_ID: '123',
-      NATIVE_SDK_VERSION: VERSION, NATIVE_SDK_ACCEPTED_DIGEST: `sha256:${zipSha}`, ACCEPTANCE_JOB: 'package-tests'};
+      CJCJ_NATIVE_SDK_VERSION: VERSION, NATIVE_SDK_ACCEPTED_DIGEST: `sha256:${zipSha}`, ACCEPTANCE_JOB: 'package-tests'};
     for (const key of ['CANDIDATE_RUN', 'CANDIDATE_VERSION', 'CANDIDATE_ARTIFACT', 'EXPIRED', 'PRODUCER_CONCLUSION', 'CORRUPT_RELEASE', 'TAG_TAKEN',
       'ARTIFACT_SIZE', 'ARTIFACT_CREATED', 'PRODUCER_PATH', 'JOB_ATTEMPT', 'COMPARE_STATUS', 'JOB_NAME']) delete env[key];
     const run = (args, extra = {}) => {

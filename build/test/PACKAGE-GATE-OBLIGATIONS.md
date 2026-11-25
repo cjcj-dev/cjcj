@@ -15,7 +15,7 @@
 | compose-sdk-entry：stage3及local/GHA原始来源/run/parent/std、最终归档bytes | 正式compose配置缺失与实际installed stage缺失分别拒绝，无产物；已存在final-compiler.test/windows-final-compiler.test继续核来源/run/std/bytes | srcbuild-target正式package-install在真实stage3安装上产出final-compiler；真实installed门及release compose复核最终归档；NOT_RUN |
 | Android list/single、OHOS/iOS各tuple component bytes与归档 | 正式compose接现役env接口，精确拒缺完整native SDK archive；真实archiveInstall运输每个component并核解包bytes | release.yml/compose-package→verify_native_release的实际cross集合、runtime来源、std内容→真实SDK归档/解包；按linux-x64-android、linux-x64-ohos、darwin-arm64-ios及targets其它适用平台分别NOT_RUN |
 
-原正向义务未删除。`ci/test-registry.json`保留真实installed门的manual登记。该门要求`SOURCE_PARITY_INSTALLED_CONFIG`指向私有、同目录完整install及真实officialSdkRoot；不能用H、现成N、组件归档或这些有限fixture替代。release原生包必须由唯一srcbuild producer交实际归档，按正式workflow传`NATIVE_SDK_ARTIFACT_DIR/NATIVE_SDK_INSTALL_DIR/RELEASE_PLATFORM/RELEASE_KEY/CJCJ_NATIVE_SDK_VERSION/CJCJ_RELEASE_SOURCE_SHA/RUNTIME_REF/FINAL_STD_DIR/CROSS_STD_DIR/CROSS_STD_ARTIFACTS`执行compose。各平台所需集合由targets与workflow实际声明，单一Linux手动门不授其它平台。
+原正向义务未删除。`ci/test-registry.json`保留真实installed门的manual登记。该门要求`SOURCE_PARITY_INSTALLED_CONFIG`指向私有、同目录完整install及真实officialSdkRoot；不能用H、现成N、组件归档或这些有限fixture替代。release原生包必须由唯一srcbuild producer交实际归档，按正式workflow传`NATIVE_SDK_ARTIFACT_DIR/NATIVE_SDK_INSTALL_DIR/RELEASE_PLATFORM/RELEASE_KEY/CJCJ_NATIVE_SDK_VERSION/GITHUB_SHA/RUNTIME_REF/FINAL_STD_DIR/CROSS_STD_DIR/CROSS_STD_ARTIFACTS`执行compose。各平台所需集合由targets与workflow实际声明，单一Linux手动门不授其它平台。
 
 截至本次变更，主控确认没有合格完整SDK供体；原R081包GC崩溃和完整SDK缺件保持。本清单不新增资格记录或通过章；有限147变绿也不授原正向验收、合并、stage/GHA或发布。
 

@@ -427,11 +427,11 @@ function recordedHost(root, platform, hostVersion) {
 
 // The compiler source of the AST build is the one the consumer job selects:
 // its "Resolve actual source selection" step (workflowSourceSelection over the
-// same CJCJ_SOURCE_SELECTION) exports CANGJIE_COMPILER_URL/SHA, which the
+// same CJCJ_SOURCE_SELECTION) exports the selected compiler URL and SHA, which the
 // consumers' buildConfig then compares the AST facts with.
 export function compilerSource(env = process.env) {
   const selected = workflowSourceSelection(env);
-  const source = {repository: selected.CANGJIE_COMPILER_URL, commit: selected.CANGJIE_COMPILER_SHA};
+  const source = {repository: selected.COMPILER_SRC_URL, commit: selected.CANGJIE_COMPILER_SHA};
   if (!SHA40.test(source.commit || '') || !source.repository) throw new Error('PREPARE_COMPILER_SOURCE');
   return source;
 }

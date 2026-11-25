@@ -95,7 +95,7 @@ test('native configure resolves a pinned runtime install before checking the art
  // The next check after repository selection stops this fixture before any source transport.
  await fs.writeFile(path.join(work,'locations.json'),JSON.stringify({platform:'wrong-platform'}));
  const env={CANGJIE_WORKSPACE:work,GITHUB_WORKSPACE:work,CJCJ_NATIVE_INPUT_ROOT:work,
-  CJCJ_BOOTSTRAP_BASE:path.join(work,'host'),CJCJ_NATIVE_RUNTIME_INSTALL:path.join(work,'runtime')};
+  CJCJ_OFFICIAL_SDK_ROOT:path.join(work,'host'),CJCJ_NATIVE_RUNTIME_INSTALL:path.join(work,'runtime')};
  const artifact={...env,CJCJ_NATIVE_RUNTIME_ARTIFACT:'native-runtime-install'};
  await assert.rejects(configureGhaInputs(env),{message:'NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED'});
  for(const refs of [{CJCJ_NATIVE_RUNTIME_REF:'a'.repeat(40)},
@@ -109,7 +109,7 @@ test('formal native configure rejects invalid source choices before source trans
  await fs.mkdir(root,{recursive:true});const work=await fs.mkdtemp(path.join(root,'native-source-rejection-'));
  await fs.mkdir(work+'/inputs');await fs.writeFile(work+'/inputs/locations.json',JSON.stringify({platform:hostPlatform()}));
  const env={...process.env,CANGJIE_WORKSPACE:work+'/workspace',GITHUB_WORKSPACE:work,
-  CJCJ_NATIVE_INPUT_ROOT:work+'/inputs',CJCJ_BOOTSTRAP_BASE:work+'/unavailable-host'};
+  CJCJ_NATIVE_INPUT_ROOT:work+'/inputs',CJCJ_OFFICIAL_SDK_ROOT:work+'/unavailable-host'};
  for(const key of ['CJCJ_NATIVE_LLVM_REF','CJCJ_NATIVE_RUNTIME_REF','CJCJ_NATIVE_RUNTIME_INSTALL'])delete env[key];
  const records=[];
  for(const choice of [{compiler:null},{compiler:{url:'file:///absent',tag:''}},{unknown:{}}]){
@@ -166,9 +166,9 @@ test('formal host entry freezes the actual complete H and selected target pair, 
  assert.equal(r.status,0,r.stderr);assert.match(r.stdout,/NATIVE_HOST_SELECTED/);
  const exported=Object.fromEntries((await fs.readFile(env.GITHUB_ENV,'utf8')).trim().split('\n').map(line=>{
   const i=line.indexOf('=');return[line.slice(0,i),line.slice(i+1)];}));
- const freeze=JSON.parse(await fs.readFile(exported.G2_CAMPAIGN_DIR+'/FREEZE.json'));
+ const freeze=JSON.parse(await fs.readFile(path.dirname(exported.G2_IDENTITY)+'/FREEZE.json'));
  assert.equal(freeze.pins.RUNTIME_REF,selectedR);assert.equal(freeze.pins.LLVM_SHA,selectedN);
- assert.equal(freeze.selected_host,exported.CJCJ_BOOTSTRAP_BASE);
+ assert.equal(freeze.selected_host,exported.CJCJ_OFFICIAL_SDK_ROOT);
  assert.equal(freeze.host_sdk.version,version);
  assert.equal(freeze.BASE_SDK_SHA256,'fde68a5713968f5f875e013355d73aab8bd95bb1fbfd1f1b6a29b1adcf48943b');
  assert.equal(freeze.host_sdk.archive.path,exported.CJCJ_BOOTSTRAP_BASE_ARCHIVE);
@@ -226,7 +226,7 @@ test('POSIX configured source can be cloned locally at its exact pin', {skip:pro
  const member=name=>({path:name,source:'fixture',version:'1'});
  await fs.writeFile(path.join(inputs,'hle.json'),JSON.stringify({platform,node:member('locations.json'),modules:member('modules'),cjbind:member('locations.json')}));
  const env={...process.env,CANGJIE_WORKSPACE:workspace,GITHUB_WORKSPACE:work,CJCJ_NATIVE_INPUT_ROOT:inputs,
-   CJCJ_BOOTSTRAP_BASE:work,CJCJ_NATIVE_LLVM_REF:pin,CJCJ_NATIVE_RUNTIME_REF:pin,CJCJ_NATIVE_PAIR_SELECTION:'explicit',
+   CJCJ_OFFICIAL_SDK_ROOT:work,CJCJ_NATIVE_LLVM_REF:pin,CJCJ_NATIVE_RUNTIME_REF:pin,CJCJ_NATIVE_PAIR_SELECTION:'explicit',
    GIT_ALLOW_PROTOCOL:'file',GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'url.'+pathToFileURL(upstream).href+'.insteadOf',
    GIT_CONFIG_VALUE_0:readSourcePins().llvm.LLVM_URL,CJCJ_SRCBUILD_SOURCE_MIRRORS:'',CJCJ_SRCBUILD_REQUIRE_MIRRORS:'0'};
  delete env.GITHUB_ENV;delete env.CJCJ_NATIVE_RUNTIME_INSTALL;delete env.CJCJ_PINNED_RUNTIME_GIT_DIR;

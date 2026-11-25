@@ -10,7 +10,7 @@ const pins = [
   // The stage chain builds its C++ shim headers, std and stage compilers from
   // the same source commit the colour LLVM products are built from, so the
   // workspace clone is verified against that one identity, not a second pin.
-  ['compiler', 'cangjie_compiler', 'CANGJIE_COMPILER_URL', 'CANGJIE_COMPILER_SHA'],
+  ['compiler', 'cangjie_compiler', 'COMPILER_SRC_URL', 'CANGJIE_COMPILER_SHA'],
   ['runtime', 'cangjie_runtime', 'RUNTIME_SRC_URL', 'CJCJ_NATIVE_RUNTIME_REF'],
   ['tools', 'cjcj-tools', 'TOOLS_SRC_URL', 'TOOLS_REF'],
   ['stdx', 'cangjie_stdx', 'STDX_SRC_URL', 'STDX_REF'],

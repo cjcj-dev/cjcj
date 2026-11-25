@@ -22,7 +22,8 @@ async function fixture() {
     console.log(`PRODUCT ${file} sha256=${digest(bytes)}`);
   }
   // Dependencies are the real production modules, read-only in this apparatus.
-  for (const name of ['bootstrap', 'srcbuild', 'host-toolchain-pin.mjs'])
+  await fs.symlink(path.join(repo, 'build'), path.join(root, 'build'));
+  for (const name of ['bootstrap', 'host-toolchain-pin.mjs'])
     await fs.symlink(path.join(repo, 'ci', name), path.join(root, 'ci', name));
   const platform = hostPlatform(), tuple = platform + '_cjnative';
   const state = {sdk: path.join(root, 'target'), platform, tuple,
@@ -49,7 +50,7 @@ for (const mode of ['build', 'run']) {
     assert.equal(result.status, 0, result.stderr);
     const child = JSON.parse(result.stdout);
     assert.equal(child.CANGJIE_HOME, state.sdk);
-    assert.equal(child.CJCJ_HOST_SDK, state.host);
+    assert.equal(path.join(child.CJCJ_TARGET_SDK, '.host'), state.host);
     assert.equal(child.CJCJ_TARGET_SDK, state.sdk);
     assert.equal(child.CJCJ_PATCHED_LLVM_BIN, path.join(state.sdk, 'third_party/llvm/bin'));
     assert.equal(child.CJCJ_LLVM_SHIM_O, path.join(state.sdk, 'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o'));

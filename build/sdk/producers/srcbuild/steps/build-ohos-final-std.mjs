@@ -24,14 +24,14 @@ if (process.platform !== 'linux' || process.arch !== 'x64') {
 }
 const workspace = path.resolve(required('CANGJIE_WORKSPACE'));
 if (workspace === path.parse(workspace).root) throw new Error('workspace must not be a filesystem root');
-const version = required('CJCJ_STAGE3_CANGJIE_VERSION');
+const version = required('SOURCE_SDK_VERSION');
 const expectedRef = required('CJCJ_NATIVE_RUNTIME_REF');
 const probe = probeRequirement('ohos-sdk');
 if (!probe.present) throw new Error(probe.detail);
 const ohos = path.resolve(probe.detail.slice(probe.detail.indexOf('=') + 1));
 const native = path.join(ohos, 'native');
 const toolchain = path.join(native, 'llvm');
-const parentSdk = path.join(path.resolve(required('CJCJ_BOOTSTRAP_WORK')), 'sdk-stage2');
+const parentSdk = path.join(workspace, 'native-bootstrap', 'sdk-stage2');
 const originalCompiler = await installedStageOutput(parentSdk, 'stage2');
 const repository = path.join(workspace, 'cangjie_runtime');
 const runtime = path.join(repository, 'runtime');

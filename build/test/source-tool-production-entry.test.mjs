@@ -10,7 +10,7 @@ test('SDK integration has an automatic production consumer while ordinary CI own
  const workflow=await fs.readFile(path.join(root,entry.workflow),'utf8');
  assert.ok(workflow.includes('run: node '+integration));
  const section=workflow.slice(workflow.indexOf('- name: Test real SDK source-tool installation'),workflow.indexOf('- name: Capture G2 SDK identity'));
- assert.match(section,/CJCJ_SRCBUILD_CONSUMER_SDK:/);assert.match(section,/RELEASE_EVIDENCE_TEST_ROOT:/);
+ assert.doesNotMatch(section,/CJCJ_SRCBUILD_CONSUMER_SDK:/);assert.match(section,/RELEASE_EVIDENCE_TEST_ROOT:/);
  const code=await fs.readFile(path.join(root,integration),'utf8');
  assert.match(code,/await packageStage\.run\(config\)/);assert.match(code,/before/);assert.match(code,/tar/);assert.match(code,/cjcov/);
  assert.doesNotMatch(code,/hlePayloadFixture|cjcov:42|skip:/);

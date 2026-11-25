@@ -81,7 +81,7 @@ async function build(config, step) {
       await runBootstrap({config, runner, cli: CLI});
     } else if (name === 'stdx') {
       runner.run('10-stdx', [node, CLI, ...stdxArgs({globals: globals(config)})], {cwd: config.cjcj, environment: {...config.env,
-        CJCJ_SRCBUILD_CONSUMER_SDK: L.sdk, CJCJ_SRCBUILD_BOOTSTRAP_SDK: config.hostSdk, STDX_HOST_CANGJIE_HOME: L.sdk}});
+        CJCJ_SRCBUILD_CONSUMER_SDK: L.sdk, CJCJ_OFFICIAL_SDK_ROOT: config.hostSdk, STDX_HOST_CANGJIE_HOME: L.sdk}});
       const p = JSON.parse(fs.readFileSync(`${L.sdk}/share/cjcj/build-inputs/stdx.json`, 'utf8'));
       if (p.source.commit !== config.commits.stdx || p.build.rc !== 0 || p.install.rc !== 0) throw new Error('STDX_PRODUCER');
     } else if (name === 'tools') {
@@ -90,7 +90,7 @@ async function build(config, step) {
         frontendRef: config.commits.cjcj, product: L.product, llvmLibrary: `${config.nativeInstall}/third_party/llvm/lib/libLLVM-15.so`,
         stdxJsonBuild: `${config.workspace}/cangjie_stdx/build_temp/build`, jdk: config.deps.javaHome,
         runtimeHeader: `${config.runtimeInstall}/include/Cangjie.h`, lombok: config.deps.lombok})], {cwd: config.cjcj, environment: {...config.env,
-        CJCJ_SRCBUILD_CONSUMER_SDK: L.sdk, CJCJ_SRCBUILD_BOOTSTRAP_SDK: config.hostSdk, CANGJIE_STDX_PATH: `${L.sdk}/stdx/${tuple}/static/stdx`,
+        CJCJ_SRCBUILD_CONSUMER_SDK: L.sdk, CJCJ_OFFICIAL_SDK_ROOT: config.hostSdk, CANGJIE_STDX_PATH: `${L.sdk}/stdx/${tuple}/static/stdx`,
         CJFMT_FRONTEND_CJO: `${L.product}/share/cjcj/cjo`, CJFMT_FRONTEND_LIB: `${L.product}/share/cjcj/cjo`,
         CJFMT_FRONTEND_NATIVE: `${L.product}/share/cjcj/runtime_shim/cjc_runtime_config.o`, CJFMT_FRONTEND_REF: config.commits.cjcj}});
       checkTools(JSON.parse(fs.readFileSync(`${L.sdk}/TOOLS-INPUTS.json`, 'utf8')), config.commits.tools);

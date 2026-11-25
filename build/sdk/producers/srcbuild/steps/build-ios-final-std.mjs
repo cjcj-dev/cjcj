@@ -19,12 +19,12 @@ const required = name => {
 };
 const workspace = path.resolve(required('CANGJIE_WORKSPACE'));
 const expectedRef = required('CJCJ_NATIVE_RUNTIME_REF');
-const version = required('CJCJ_STAGE3_CANGJIE_VERSION');
+const version = required('SOURCE_SDK_VERSION');
 if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('iOS source build requires darwin/arm64');
 if (workspace === path.parse(workspace).root) throw new Error('workspace must not be filesystem root');
 const probe = probeRequirement('xcode-ios');
 if (!probe.present) throw new Error(probe.detail);
-const sdk = path.join(path.resolve(required('CJCJ_BOOTSTRAP_WORK')), 'sdk-stage2');
+const sdk = path.join(workspace, 'native-bootstrap', 'sdk-stage2');
 const originalCompiler = await installedStageOutput(sdk, 'stage2');
 if (!/^[a-f0-9]{40}$/.test(expectedRef) || expectedRef !== originalCompiler.lineage.runtimeCommit) throw new Error('runtime source mismatch with stage2 compiler');
 const compiler = originalCompiler.product;

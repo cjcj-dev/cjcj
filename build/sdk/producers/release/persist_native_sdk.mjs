@@ -175,7 +175,7 @@ export async function publish(target, outdir, env = process.env) {
   const repository = env.GITHUB_REPOSITORY;
   const artifactId = env.NATIVE_SDK_ARTIFACT_ID || '';
   const run = env.NATIVE_SDK_RUN_ID || '';
-  const version = env.NATIVE_SDK_VERSION || '';
+  const version = env.CJCJ_NATIVE_SDK_VERSION || '';
   const accepted = env.NATIVE_SDK_ACCEPTED_DIGEST || '';
   if (repository !== 'cjcj-dev/cjcj' || !ID.test(artifactId) || !ID.test(run) || !VERSION.test(version) || !DIGEST.test(accepted)
       || !ID.test(env.GITHUB_RUN_ID || '') || !ID.test(env.GITHUB_RUN_ATTEMPT || '') || !/^[a-f0-9]{40}$/.test(env.GITHUB_SHA || '')) {

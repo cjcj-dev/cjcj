@@ -4,7 +4,7 @@
 
 | module | responsibility |
 |---|---|
-| `source_pin.env`, `wasi_pin.env` | fixed source commits and the WASI sysroot URL + SHA-256 |
+| `../../ci/*_pin.env` | fixed source commits and the WASI sysroot URL + SHA-256 |
 | `pins.mjs` | parse and validate the pins once |
 | `targets.mjs` | host platforms, target tuples, the 15 formal release assets, release-set validation |
 | `bootstrap.mjs` | Stage1 (seed std) -> std-bootstrap in a std-free view -> stage1-initial -> stage1-std -> Stage2 -> final std -> Stage3 -> final install (`chainPlan`, guarded by `assertSameSourceChain`; H1 order of ci/bootstrap/sdk-targets.mjs:325-334) |

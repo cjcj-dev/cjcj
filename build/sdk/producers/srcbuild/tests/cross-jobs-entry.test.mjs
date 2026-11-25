@@ -83,7 +83,7 @@ async function fixture(label,{ios=false}={}){
  }
  const ndk=work+'/ndk',ohos=work+'/ohos';
  await fs.mkdir(ndk+'/toolchains/llvm/prebuilt',{recursive:true});await fs.mkdir(ohos+'/native/llvm/bin',{recursive:true});
- const env={...process.env,CANGJIE_WORKSPACE:work,CJCJ_BOOTSTRAP_WORK:work+'/native-bootstrap',CJCJ_NATIVE_RUNTIME_REF:ref,RUNTIME_SRC_URL:repo,RUNTIME_VERSION:'1.3.0-fixture',CJCJ_STAGE3_CANGJIE_VERSION:'1.3.0-fixture',
+ const env={...process.env,CANGJIE_WORKSPACE:work,CJCJ_NATIVE_RUNTIME_REF:ref,RUNTIME_SRC_URL:repo,RUNTIME_VERSION:'1.3.0-fixture',SOURCE_SDK_VERSION:'1.3.0-fixture',
   ANDROID_NDK_ROOT:ndk,OHOS_SDK_HOME:ohos,CROSS_COMMAND_LOG:work+'/children.jsonl',CANGJIE_BUILD_JOBS:'2',STD_BUILD_JOBS:'1',CMAKE_BUILD_PARALLEL_LEVEL:'4',PYTHONDONTWRITEBYTECODE:'1'};
  if(ios){
   // Explicit platform/command fixture on Linux; no Darwin or iOS execution claim.
@@ -188,7 +188,7 @@ test('source-ios products enter the same SDK that compose receives after relocat
   const location = value => value.replace('${{ runner.temp }}', receive);
   const shared = {RUNNER_TEMP:receive,GITHUB_SHA:sourceSha,GITHUB_RUN_ID:'1001',CJCJ_SRCBUILD_TARGET:recipe.platform};
   const handoff = (label, command, env) => run(label,['bash','-eu','-c',command.run],{env:{...f.env,...shared,...env}});
-  const packed = handoff('stage2-pack', pack, {SOURCE_SDK_VERSION:f.env.CJCJ_STAGE3_CANGJIE_VERSION});
+  const packed = handoff('stage2-pack', pack, {});
   assert.equal(packed.status,0,packed.stderr);
   const received = location(stageDownload.with.path);
   await fs.cp(location(stageUpload.with.path),received,{recursive:true});
@@ -196,7 +196,7 @@ test('source-ios products enter the same SDK that compose receives after relocat
   assert.equal(entries.status,0,entries.stderr);
   assert.ok(entries.stdout.split('\n').filter(Boolean).every(name => name.startsWith('sdk-stage2/')));
   assert.doesNotMatch(entries.stdout,/(^|\/)\.git\//m);
-  await fs.rename(f.env.CJCJ_BOOTSTRAP_WORK,f.env.CJCJ_BOOTSTRAP_WORK+'-unavailable');
+  await fs.rename(path.join(work,'native-bootstrap'),path.join(work,'native-bootstrap')+'-unavailable');
   const moved = path.join(work,'relocated workspace');
   const stageEnv = path.join(receive,'stage-env');
   const restoreEnv = {CANGJIE_WORKSPACE:path.relative(process.cwd(),moved),GITHUB_ENV:stageEnv};
@@ -211,13 +211,13 @@ test('source-ios products enter the same SDK that compose receives after relocat
   const restored = handoff('stage2-restore',restore,restoreEnv);
   assert.equal(restored.status,0,restored.stderr);
   const sdkVersion = (await fs.readFile(stageEnv,'utf8')).trim().split('=')[1];
-  assert.equal(sdkVersion,f.env.CJCJ_STAGE3_CANGJIE_VERSION);
+  assert.equal(sdkVersion,f.env.SOURCE_SDK_VERSION);
   for (const target of CROSS_STD_BUILDS.filter(t => t.family === 'ios')) {
     const original = process.env.IOS_REPLAY_ARTIFACTS;
     const replay = original && path.join(original, target.runtime_target, 'x/ios-source/cangjie_runtime/runtime-install');
     const result = run('produce-'+target.tuple, [process.env.ZX, entry(step(source, 'build-ios-final-std.mjs').run)], {
-      env: {...f.env, CANGJIE_WORKSPACE:moved, CJCJ_BOOTSTRAP_WORK:path.join(moved,'native-bootstrap'),
-        CJCJ_STAGE3_CANGJIE_VERSION:sdkVersion, CROSS_STD_TUPLE:target.tuple, IOS_FINITE_STD:'1',
+      env: {...f.env, CANGJIE_WORKSPACE:moved,
+        SOURCE_SDK_VERSION:sdkVersion, CROSS_STD_TUPLE:target.tuple, IOS_FINITE_STD:'1',
         ...(replay && {IOS_REPLAY_INSTALL:replay})}});
     assert.equal(result.status, 0, result.stderr);
     const name = upload.with.name.replace('${{ matrix.artifact }}', target.artifact);
@@ -250,7 +250,7 @@ test('source-ios products enter the same SDK that compose receives after relocat
   const uploadPaths = sdkUpload.with.path.trim().split('\n').map(line => line
     .replace('${{ env.CANGJIE_WORKSPACE }}',work)
     .replace('*',getTarget(recipe.platform).spec.sdkName)
-    .replace('${{ steps.version.outputs.value }}',version));
+    .replace('${{ env.SOURCE_SDK_VERSION }}',version));
   assert.equal(uploadPaths.length,2);
   assert.equal(uploadPaths[1],uploadPaths[0]+'.sha256');
   assert.equal(path.dirname(uploadPaths[0]),path.dirname(sdk));
@@ -266,7 +266,7 @@ test('source-ios products enter the same SDK that compose receives after relocat
   const compose = entry(step((await workflow(path.basename(caller.uses))).jobs.package, 'compose-package.mjs').run);
   const consume = label => run(label,[process.execPath,compose],{env:{...process.env,
     NATIVE_SDK_ARTIFACT_DIR:archiveDir,NATIVE_SDK_INSTALL_DIR:path.join(work,'received '+label),RELEASE_PLATFORM:recipe.platform,
-    CJCJ_NATIVE_SDK_VERSION:version,CJCJ_RELEASE_SOURCE_SHA:sourceSha,CJCJ_NATIVE_RUNTIME_REF:runtimeRef,
+    CJCJ_NATIVE_SDK_VERSION:version,GITHUB_SHA:sourceSha,CJCJ_NATIVE_RUNTIME_REF:runtimeRef,
     FINAL_STD_DIR:path.relative(process.cwd(),path.join(work,'host std')),RELEASE_DIST:path.join(work,'dist '+label),RELEASE_KEY:recipe.release_key,
     CROSS_STD_ARTIFACTS:recipe.cross_std_artifacts,CROSS_STD_DIR:path.relative(process.cwd(),artifacts)}});
   const checkCross = result => {

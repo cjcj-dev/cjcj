@@ -293,6 +293,8 @@ async function dispatch(config, command, args) {
       if(args[0]==='stdlib'&&process.env.CANGJIE_BUILD_DRY_RUN!=='1')await installProducts(production.installInputs,{packageOutput:false});
       return;
     }
+    if (['stdx','tools'].includes(args[0]) && process.env.CJCJ_SRCBUILD_TARGET && !config.consumerSdk)
+      return BUILD_STAGES[args[0]].run({...config, consumerSdk: path.join(config.softwareDir, 'cangjie')});
     return BUILD_STAGES[args[0]].run(config);
   }
   if (command === 'package') {

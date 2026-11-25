@@ -50,23 +50,27 @@ await entry(async () => {
     direct.result.stdall.includes(`SOURCE-MIRROR none, falling back to file://${inputs.llvm.bare}`) && direct.trace.includes('fetch') && noShellError(direct.result.stdall), direct.result);
   if (process.env.SKIP_FETCH_SOURCES !== '1') {
     const fixture = path.join(work, 'fetch-repo');
-    for (const [from, to] of [
-      [fetch, 'build/sdk/producers/platform_tuples/fetch_sources.mjs'], [helper, 'build/lib/srcbuild_git.sh'],
-      ...['build/sdk/producers/platform_tuples/entry.mjs', 'ci/entry-common.mjs', 'ci/fetch-llvm-runtime.mjs',
-        'ci/native-llvm-inputs.mjs','ci/source_pin.env','ci/llvm_pin.env','ci/host_sdk_pin.env',
-        'ci/host-toolchain-pin.mjs','ci/build-resources.mjs','build/srcbuild/tool-layout.mjs',
-        ...['native-source-selection','sdk-targets','sdk-flow','sdk-io','sdk-platform',
-          'sdk-command-lifetime','sdk-std-resume','sdk-install-entries','sdk-source','compiler-option-visibility'].map(name=>'ci/bootstrap/'+name+'.mjs')]
-        .map(file => [path.join(repo, file), file]),
-    ]) { const dest = path.join(fixture, to); fs.mkdirSync(path.dirname(dest), {recursive: true}); fs.copyFileSync(from, dest); }
+    const copy = (from,to) => {
+      const dest=path.join(fixture,to);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(from,dest);
+    };
+    // Copy the entry's real module graph; the private fixture provides the pin files.
+    const pending=[['build/sdk/producers/platform_tuples/fetch_sources.mjs',fetch],
+      ['ci/fetch-llvm-runtime.mjs',path.join(repo,'ci/fetch-llvm-runtime.mjs')]],seen=new Set();
+    while (pending.length) {
+      const [member,from]=pending.pop();if(seen.has(member))continue;seen.add(member);copy(from,member);
+      for(const match of fs.readFileSync(from,'utf8').matchAll(/(?:from\s*|import\s*)['"](\.[^'"]+\.mjs)['"]/g)){
+        const child=path.join(path.dirname(member),match[1]);pending.push([child,path.join(repo,child)]);
+      }
+    }
+    copy(helper,'build/lib/srcbuild_git.sh');
+    for(const pin of ['source_pin.env','llvm_pin.env','host_sdk_pin.env'])copy(path.join(repo,'ci',pin),'ci/'+pin);
     fs.writeFileSync(path.join(fixture, 'ci/runtime_pin.env'), `RUNTIME_REF=${inputs.runtime.sha}\nRUNTIME_SRC_URL=file://${inputs.runtime.bare}\n`);
     const tuple = path.join(work, 'tuple');
     fs.appendFileSync(path.join(fixture,'ci/llvm_pin.env'),`\nLLVM_URL=file://${inputs.llvm.bare}\n`);
     const env = {...base, TUPLE_ROOT: tuple, GIT_TRACE: path.join(work, 'sources.trace'),
       LLVM_URL:`file://${inputs.llvm.bare}`, CJCJ_NATIVE_LLVM_REF:inputs.llvm.sha,CJCJ_NATIVE_RUNTIME_REF:inputs.runtime.sha};
-    for (const [prefix, name] of [['CANGJIE_COMPILER', 'compiler'], ['FLATBUFFERS', 'flatbuffers']]) {
-      env[`${prefix}_URL`] = `file://${inputs[name].bare}`; env[`${prefix}_SHA`] = inputs[name].sha;
-    }
+    Object.assign(env,{COMPILER_SRC_URL:'file://'+inputs.compiler.bare,CANGJIE_COMPILER_SHA:inputs.compiler.sha,
+      FLATBUFFERS_URL:'file://'+inputs.flatbuffers.bare,FLATBUFFERS_SHA:inputs.flatbuffers.sha});
     const r = await run(['npx', '--yes', 'zx@8', path.join(fixture, 'build/sdk/producers/platform_tuples/fetch_sources.mjs')], {env, log: path.join(work, 'sources.log'), check: false});
     fs.writeFileSync(path.join(work, 'sources.rc'), `${r.exitCode}\n`);
     const heads = {};

@@ -41,7 +41,7 @@ for(const key of ['RUNTIME_REF','RUNTIME_SRC_URL','CJCJ_RUNTIME_REF_OVERRIDE','C
 const prepared=await run('formal-host-freeze',[process.execPath,new URL('./bootstrap/prepare-native-host.mjs',import.meta.url).pathname],env);
 assert.equal(prepared.status,0,prepared.stderr);
 const exported=Object.fromEntries((await fs.readFile(env.GITHUB_ENV,'utf8')).trim().split('\n').map(line=>{const at=line.indexOf('=');return[line.slice(0,at),line.slice(at+1)];}));
-const campaign=exported.G2_CAMPAIGN_DIR,identityFile=exported.G2_IDENTITY;
+const campaign=path.dirname(exported.G2_IDENTITY),identityFile=exported.G2_IDENTITY;
 const compiler='libexec/compiler/cjcj-stage1';
 for(const [name,rel,stamp]of [['compiler',compiler,'CJCJ-COMMIT:'+head],
  ['llc','.native-tools/third_party/llvm/bin/llc','CJLLVM-COMMIT:'+llvm],

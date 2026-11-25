@@ -20,8 +20,9 @@ mapped.rename=(a,b)=>fs.rename(physical(a),physical(b));
 mapped.realpath=async file=>{const result=await fs.realpath(physical(file));return physical(file)!==file?virtual(result):result;};
 mock.module('node:fs/promises',{defaultExport:mapped,namedExports:mapped});
 // buildConfig reads the workspace source selection synchronously.
-const mappedSync={...syncFs,existsSync:file=>syncFs.existsSync(physical(file)),
- readFileSync:(file,...args)=>syncFs.readFileSync(physical(file),...args)};
+const mappedSync={...syncFs};
+for(const name of ['readFileSync','existsSync','statSync','lstatSync'])
+ mappedSync[name]=(file,...args)=>syncFs[name](physical(file),...args);
 mock.module('node:fs',{defaultExport:mappedSync,namedExports:mappedSync});
 const paths={...path,isAbsolute:value=>/^[cC]:[\\/]/.test(value)||path.isAbsolute(value),
  resolve:(...args)=>{if(args.some(a=>typeof a==='string'&&/^[cC]:[\\/]/.test(a)))return virtual(path.resolve(...args.map(physical)));return path.resolve(...args);}};

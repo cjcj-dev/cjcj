@@ -30,7 +30,7 @@ export async function prepareColourSdk(nativeInputs, env = process.env) {
   const selected = {...env};
   if (!selected.CJCJ_SDK_TARGETS && !selected.CJCJ_SDK_INPUTS && !selected.CJCJ_NATIVE_INPUTS) {
     selected.CJCJ_NATIVE_INPUT_ROOT = nativeInputs || selected.CJCJ_NATIVE_INPUT_ROOT;
-    selected.CJCJ_BOOTSTRAP_BASE ||= selected.CANGJIE_HOME;
+    selected.CJCJ_OFFICIAL_SDK_ROOT ||= selected.CANGJIE_HOME;
     selected.CJCJ_SDK_INPUTS = await configureGhaInputs(selected);
   }
   const {config} = await prepareBootstrapEnvironment(selected);
@@ -57,7 +57,7 @@ export async function selectInstalledColourSdk(sdk, env = process.env) {
     stage: metadata.phase, compiler_sha256: output.lineage.compilerSha256};
   await atomicJson(stateFile, state);
   if (env.GITHUB_ENV) await fs.appendFile(env.GITHUB_ENV,
-    `CJCJ_TARGET_SDK=${sdk}\nCJCJ_HOST_SDK=${state.host}\nCJCJ_PATCHED_RUNTIME_LIB_DIR=${state.runtime}\n`);
+    `CJCJ_TARGET_SDK=${sdk}\nCJCJ_PATCHED_RUNTIME_LIB_DIR=${state.runtime}\n`);
   console.log(`COLOUR_SDK ${JSON.stringify(state)}`);
   return state;
 }
@@ -74,7 +74,7 @@ export async function colourEnvironment(mode, env = process.env) {
     CJCJ_PATCHED_LLVM_BIN: path.join(state.sdk, 'third_party/llvm/bin'),
     CJCJ_LLVM_SHIM_O: path.join(state.sdk, 'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o'),
     CJCJ_LLVM_LINK_RSP: '',
-    CJCJ_TARGET_SDK: state.sdk, CJCJ_HOST_SDK: path.join(state.sdk, '.host'),
+    CJCJ_TARGET_SDK: state.sdk,
     CJCJ_PATCHED_RUNTIME_LIB_DIR: runtime};
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

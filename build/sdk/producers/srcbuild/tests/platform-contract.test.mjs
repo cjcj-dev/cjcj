@@ -87,7 +87,7 @@ test('native SDK consumers share the persisted selector and accept candidates by
     .map(([job, name]) => source.jobs[job].steps.find(step => step.name === name));
   for (const producer of producers) {
     assert.ok(producer, 'source SDK producer step');
-    assert.equal(producer.with.name, 'cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}');
+    assert.equal(producer.with.name, 'cjcj-srcbuild-${{ matrix.target }}-${{ env.SOURCE_SDK_VERSION }}');
     assert.match(producer.with.path, /cangjie-sdk-.*-cjcj/);
   }
 });
@@ -470,8 +470,7 @@ function failClosedDownloads(text, inputs) {
     .filter(step => stepRuns(step, context))
     .flatMap(step => {
       if (scalar(step, 'pattern') === 'final-std-*') {
-        return [...JSON.parse(context.inputs.get('cross_std_artifacts')).map(entry => entry.artifact),
-          ...[context.inputs.get('cross_std_artifact')].filter(Boolean)];
+        return JSON.parse(context.inputs.get('cross_std_artifacts')).map(entry => entry.artifact);
       }
       return [substitute(scalar(step, 'name'), inputs)];
     });
@@ -529,7 +528,7 @@ test('source-build workflow connects every native runner to its LLVM and std art
   assert.ok(order.every(index => index >= 0));
   assert.deepEqual([...order].sort((a, b) => a - b), order);
 
-  assert.match(workflow, /CJCJ_SRCBUILD_CONSUMER_SDK:.*software\/cangjie/, 'verify consumes the same native final install');
+  assert.deepEqual([...workflow.matchAll(/CJCJ_SRCBUILD_CONSUMER_SDK: (.*)/g)].map(m => m[1]), ['${{ env.CANGJIE_WORKSPACE }}/software/cangjie-windows']);
   for (const payload of ['llc.gz', 'opt.gz', 'ld.lld', 'ld64.lld', 'llvm-tools.manifest', 'cjselfhost_llvmshim.o']) {
     assert.ok(fixed.includes(payload), payload);
   }
@@ -794,9 +793,7 @@ test('an omitted optional input reads the way Actions reads it, not as undefined
     new Map([...base, ['cross_std_artifacts', JSON.stringify([{tuple: 'windows_x86_64_cjnative', artifact: 'final-std-windows-x64'}])]]));
   assert.ok(withCross.includes(gated), `passing it should demand the artifact: ${withCross}`);
 
-  const legacy = failClosedDownloads(consumer, new Map([...base,
-    ['cross_std_artifact', gated], ['cross_std_tuple', 'windows_x86_64_cjnative']]));
-  assert.ok(legacy.includes(gated), 'legacy single tuple must still download its artifact');
+  assert.doesNotMatch(consumer, /^      cross_std_(artifact|tuple):/m);
 
   const withoutCross = failClosedDownloads(consumer, new Map(base));
   assert.ok(!withoutCross.includes(gated),

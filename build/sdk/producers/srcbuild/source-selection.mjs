@@ -26,8 +26,8 @@ export function workflowSourceSelection(env=process.env) {
   // Ordinary repository options and the canonical pair meet in buildConfig's
   // resolver. Persist only those options; do not create a second native JSON
   // environment selection alongside the workspace's normal source options.
-  if(env.CANGJIE_COMPILER_URL&&env.CANGJIE_COMPILER_SHA&&!overrides.compiler)
-    overrides.compiler={url:env.CANGJIE_COMPILER_URL,tag:env.CANGJIE_COMPILER_SHA};
+  if(env.COMPILER_SRC_URL&&env.CANGJIE_COMPILER_SHA&&!overrides.compiler)
+    overrides.compiler={url:env.COMPILER_SRC_URL,tag:env.CANGJIE_COMPILER_SHA};
   // Only the native Windows SDK selects this paired producer. Propagate it
   // through the ordinary fetch options and their persisted workspace record.
   if(env.CJCJ_SRCBUILD_TARGET==='windows-x64' && env.CJCJ_NATIVE_RUNTIME_ARTIFACT) {
@@ -40,13 +40,11 @@ export function workflowSourceSelection(env=process.env) {
   for(const name of REPO_NAMES) {
     const {url,tag}=repos[name];
     if(!url||/[\r\n]/.test(url)||!/^[a-f0-9]{40}$/.test(tag||''))throw Error('WORKFLOW_FIXED_SOURCE_REQUIRED '+name);
-    const prefix=name==='compiler'?'CANGJIE_COMPILER':name.toUpperCase();
-    result[prefix+(name==='compiler'?'_URL':'_SRC_URL')]=url;
-    result[prefix+(name==='compiler'?'_SHA':'_REF')]=tag;
+    const prefix=name.toUpperCase();
+    result[name==='llvm'?'LLVM_URL':prefix+'_SRC_URL']=url;
+    const ref={compiler:'CANGJIE_COMPILER_SHA',llvm:'CJCJ_NATIVE_LLVM_REF',runtime:'CJCJ_NATIVE_RUNTIME_REF'}[name];
+    result[ref || prefix+'_REF']=tag;
   }
-  result.CJCJ_NATIVE_LLVM_REF=repos.llvm.tag;
-  result.CJCJ_NATIVE_RUNTIME_REF=repos.runtime.tag;
-  delete result.LLVM_REF;delete result.RUNTIME_REF;
   return result;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {

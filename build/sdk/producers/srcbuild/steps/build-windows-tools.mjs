@@ -7,7 +7,7 @@ import {readJson,fileDigest,relative} from '../../../../../ci/bootstrap/sdk-flow
 import {sdkPlatform} from '../../../../../ci/bootstrap/sdk-platform.mjs';
 
 if(process.platform!=='win32'||process.arch!=='x64')throw Error('WINDOWS_TOOLS_NATIVE_HOST_REQUIRED');
-const env=process.env, sdk=await fs.realpath(env.CJCJ_SRCBUILD_CONSUMER_SDK),repo=await fs.realpath(env.GITHUB_WORKSPACE);
+const env=process.env, sdk=await fs.realpath(path.join(env.CANGJIE_WORKSPACE, 'software', 'cangjie')),repo=await fs.realpath(env.GITHUB_WORKSPACE);
 const native=sdkPlatform('windows_x86_64'), stage=await readJson(path.join(sdk,'STAGE-INPUTS.json'));
 if(stage.phase!=='stage3'||stage.platform!=='windows_x86_64'||stage.compilerCommit!==env.GITHUB_SHA)
   throw Error('WINDOWS_TOOLS_STAGE3_SOURCE');

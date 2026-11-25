@@ -13,7 +13,7 @@ import {packageInstall} from '../lib/package-install.mjs';
 const config=buildConfig({workspace:process.env.CANGJIE_WORKSPACE,targetKey:process.env.CJCJ_SRCBUILD_TARGET,
  cangjieVersion:process.env.SOURCE_SDK_VERSION,officialSdkRoot:process.env.CJCJ_OFFICIAL_SDK_ROOT});
 const archive=path.join(config.softwareDir,`cangjie-sdk-${config.target.spec.sdkName}-${config.cangjieVersion}-cjcj.${config.target.spec.archiveFormat}`);
-const targets=await readJson(process.env.CJCJ_SDK_TARGETS||path.join(config.workspace,'build-targets.json'));
+const targets=await readJson(path.join(config.workspace,'build-targets.json'));
 const final=await installedStageOutput(path.join(config.softwareDir,'cangjie'),'stage3');
 const compilerFacts=await readJson(path.join(targets.work,'build/stage3/compiler/compiler-inputs.json'));
 const github=process.env.GITHUB_ACTIONS==='true';

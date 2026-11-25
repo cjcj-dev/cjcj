@@ -109,14 +109,16 @@ test('packaged SDK ABI mismatch is rejected by the current package consumer', as
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const sdk=path.join(root,'sdk'),runtime=path.join(sdk,'runtime/lib/linux_x86_64_cjnative');
   await fs.mkdir(runtime,{recursive:true});await fs.mkdir(path.join(sdk,'bin'));
-  await fs.writeFile(root+'/compiler.c','int main(void){return 0;}\n');
+  await fs.writeFile(root+'/compiler.c','extern int g_cjLoadBadMask; int main(void){return g_cjLoadBadMask;}\n');
   await fs.writeFile(root+'/runtime.c','int g_cjLoadBadMask=0;\n');
-  for(const args of [[root+'/compiler.c','-o',sdk+'/bin/cjc'],
-    ['-shared','-fPIC',root+'/runtime.c','-o',runtime+'/libcangjie-runtime.so']]) {
+  await fs.writeFile(root+'/wrong-runtime.c','int other_symbol;\n');
+  for(const args of [['-shared','-fPIC',root+'/runtime.c','-o',runtime+'/libcangjie-runtime.so'],
+    ['-fPIC',root+'/compiler.c','-L'+runtime,'-lcangjie-runtime','-o',sdk+'/bin/cjc'],
+    ['-shared','-fPIC',root+'/wrong-runtime.c','-o',runtime+'/libcangjie-runtime.so']]) {
     const r=spawnSync('cc',args,{encoding:'utf8'});assert.equal(r.status,0,r.stderr);
   }
   await assert.rejects(packageInstall({sdk,target:getTarget('linux-x64'),version:'finite',
-    archive:root+'/rejected.tar.gz'}),/g_cjLoadBadMask ABI mismatch: compiler=0.*runtime=1/);
+    archive:root+'/rejected.tar.gz'}),/unresolved runtime ABI imports: g_cjLoadBadMask/);
   await assert.rejects(fs.stat(root+'/rejected.tar.gz'),{code:'ENOENT'});
 });
 

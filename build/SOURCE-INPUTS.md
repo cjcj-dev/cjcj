@@ -261,8 +261,8 @@ boundaries; it does not replace six-tool, Python/cjdb, ABI or full-package gates
 
 ### Native tool source dependencies and installed readiness
 
-`--tools-dependencies /absolute/native-dependencies.json` (or
-`CJCJ_NATIVE_TOOL_DEPENDENCIES`) selects the cjlint/cjprof native inputs. The
+`--tools-dependencies /absolute/native-dependencies.json` overrides the default
+`<workspace>/native-tool-dependencies.json` for the native tool inputs. The
 ordinary JSON maps `json`, `httplib`, `runtime`, `bounds` to
 `{repo, commit, path}` with full commits and independent checkout paths. The SDK
 prepares missing checkouts once before parallel producers, preserves mismatched

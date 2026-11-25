@@ -95,9 +95,10 @@ async function main(argv) {
     if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('wasm producer requires the linux-x64 source cell');
     const workspace = path.resolve(env('CANGJIE_WORKSPACE'));
     const repository = path.join(workspace, 'cangjie_runtime');
-    options = {sdk: path.resolve(env('CJCJ_WASM_SDK')), stdlibSource: path.join(repository, 'stdlib'),
-      boundscheckSource: env('CJCJ_BOUNDSCHECK_SOURCE'), pcre2Source: path.join(repository, 'stdlib', 'third_party', 'pcre2'),
-      clang: env('CJCJ_WASM_CLANG'), llvmAr: env('CJCJ_WASM_LLVM_AR'), finalStd: path.join(workspace, 'software', ARTIFACT),
+    const bin = path.join(env('CJCJ_FIXED_LLVM_DIR'), 'bin');
+    options = {sdk: path.join(workspace, 'software', 'wasm-sdk'), stdlibSource: path.join(repository, 'stdlib'),
+      boundscheckSource: path.join(repository, 'runtime', 'third_party', 'third_party_bounds_checking_function'), pcre2Source: path.join(repository, 'stdlib', 'third_party', 'pcre2'),
+      clang: path.join(bin, 'clang'), llvmAr: path.join(bin, 'llvm-ar'), finalStd: path.join(workspace, 'software', ARTIFACT),
       work: path.join(workspace, 'wasm-final-std-work'), runtimeRef: env('CJCJ_NATIVE_RUNTIME_REF')};
   }
   for (const [k, v] of Object.entries(options)) if (v === undefined) throw new Error(`missing ${k}`);

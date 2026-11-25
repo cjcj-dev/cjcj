@@ -31,7 +31,7 @@ await entry(async () => {
     // Original diagnostic pipeline is explicitly best effort (including missing header).
     await run(['bash', '-c', 'set -o pipefail; sed -n \'/enum EnumReflectionType/,/};/p\' "$1" | grep -c \'^  ERT_\' || true',
       'reflection-count', `${root}/llvm-project/llvm/include/llvm/Transforms/Scalar/ReflectionInfo.h`]);
-    await fetchExact(required('CANGJIE_COMPILER_URL', 41), required('CANGJIE_COMPILER_SHA', 41), `${root}/cangjie-compiler`, 'schema');
+    await fetchExact(required('COMPILER_SRC_URL', 41), required('CANGJIE_COMPILER_SHA', 41), `${root}/cangjie-compiler`, 'schema');
     await run(['test', '-f', `${root}/cangjie-compiler/schema/CjoFormat.fbs`]);
     await fetchExact(required('FLATBUFFERS_URL', 44), required('FLATBUFFERS_SHA', 44), `${root}/flatbuffers`, '', true);
     await run(['test', '-f', `${root}/flatbuffers/CMakeLists.txt`]);

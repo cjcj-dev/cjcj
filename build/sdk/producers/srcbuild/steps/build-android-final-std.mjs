@@ -22,14 +22,14 @@ if (process.platform !== 'linux' || process.arch !== 'x64') {
 }
 const workspace = path.resolve(required('CANGJIE_WORKSPACE'));
 if (workspace === path.parse(workspace).root) throw new Error('workspace must not be a filesystem root');
-const version = required('CJCJ_STAGE3_CANGJIE_VERSION');
+const version = required('SOURCE_SDK_VERSION');
 const hostRef = required('CJCJ_NATIVE_RUNTIME_REF');
 const expectedRef = process.env.CJCJ_ANDROID_RUNTIME_REF || hostRef;
 const probe = probeRequirement('android-ndk');
 if (!probe.present) throw new Error(probe.detail);
 const ndk = path.resolve(probe.detail.slice(probe.detail.indexOf('=') + 1));
 const toolchain = path.join(ndk, 'toolchains', 'llvm', 'prebuilt', 'linux-x86_64');
-const parentSdk = path.join(path.resolve(required('CJCJ_BOOTSTRAP_WORK')), 'sdk-stage2');
+const parentSdk = path.join(workspace, 'native-bootstrap', 'sdk-stage2');
 const originalCompiler = await installedStageOutput(parentSdk, 'stage2');
 const repository = path.join(workspace, 'cangjie_runtime');
 const runtime = path.join(repository, 'runtime');

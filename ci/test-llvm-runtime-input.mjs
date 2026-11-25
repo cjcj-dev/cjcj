@@ -30,7 +30,7 @@ const other=git('-C',source,'rev-parse','HEAD'),pins=readSourcePins(),pin=pins.r
 const env={...process.env};
 for(const key of ['CJCJ_NATIVE_LLVM_REF','CJCJ_NATIVE_RUNTIME_REF','NATIVE_LLVM_REF','NATIVE_RUNTIME_REF','LLVM_SHA','RUNTIME_REF','CJCJ_LLVM_RUNTIME_MODE','CJCJ_LLVM_RUNTIME_URL','CJCJ_LLVM_RUNTIME_SHA','CJCJ_NATIVE_SOURCE_SELECTION'])delete env[key];
 Object.assign(env,{CJCJ_NATIVE_LLVM_REF:other,CJCJ_NATIVE_RUNTIME_REF:pin,LLVM_URL:'file://'+source,
- CANGJIE_COMPILER_URL:'file://'+source,CANGJIE_COMPILER_SHA:other,FLATBUFFERS_URL:'file://'+source,FLATBUFFERS_SHA:other,
+ COMPILER_SRC_URL:'file://'+source,CANGJIE_COMPILER_SHA:other,FLATBUFFERS_URL:'file://'+source,FLATBUFFERS_SHA:other,
  CJCJ_SRCBUILD_SOURCE_MIRRORS:`${url}=file://${mirror};file://${source}=file://${source}`,CJCJ_SRCBUILD_REQUIRE_MIRRORS:'1',TUPLE_PLATFORM:'linux_x86_64',LLVM_TARGETS:'X86',LC_ALL:'C'});
 const explicit={CJCJ_NATIVE_RUNTIME_REF:privateRef};
 function run(label,script,extra={},args=[],root=path.join(work,label)){

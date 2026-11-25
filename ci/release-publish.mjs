@@ -157,7 +157,7 @@ export function releaseWorkflowProblems(text) {
   const expected = allReleasePlatforms().filter(key => { const platform = getReleasePlatform(key); return !platform.excluded && !platform.crossCompiledHost; }).sort();
   if (rows.length !== EXPECTED_ARCHIVE_COUNT || JSON.stringify(keys) !== JSON.stringify(expected))
     problems.push(`package matrix must hold the ${EXPECTED_ARCHIVE_COUNT} release keys: ${keys}`);
-  for (const field of ['runner', 'platform', 'llvm_platform', 'sdk_runtime_dir', 'release_key', 'std_artifact', 'cross_std_artifacts'])
+  for (const field of ['runner', 'platform', 'release_key', 'std_artifact', 'cross_std_artifacts'])
     if (pkg?.with?.[field] !== `\${{ matrix.${field} }}`) problems.push(`package does not pass matrix.${field}`);
   const publish = jobs.publish;
   if (!publish) return [...problems, 'publish job missing'];
