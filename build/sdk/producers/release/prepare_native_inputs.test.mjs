@@ -350,6 +350,7 @@ function produced(t, target) {
   // An ELF64 x86-64 header and the source stamp, as the real library carries them.
   const elf = Buffer.alloc(64); elf.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]); elf.writeUInt16LE(62, 18);
   put('llvm-out/' + native.llvmLibrary, Buffer.concat([elf, Buffer.from(`llvm bytes ${target} CJLLVM-COMMIT:${LLVM}\n`)]));
+  if (native.llvmFoundationLibrary) put('llvm-out/' + native.llvmFoundationLibrary, 'LLVM Foundation');
   putPython(path.join(dir, 'llvm-out'), native.platform ?? PREPARE_HOSTS.find(h => h.target === target).llvm_platform);
   for (const tool of PREPARE_LLVM_TOOLS) put(`llvm-out/bin/${tool}${native.exe}`, `${tool} ${target}`);
   putShimCjdb(path.join(dir, 'llvm-out'), native, target, PREPARE_HOSTS.find(h => h.target === target).llvm_platform);
@@ -1322,6 +1323,8 @@ for (const {target,llvm_platform:platform} of PREPARE_HOSTS) test(target + ': co
   fs.rmSync(root,{recursive:true});
   const locations=JSON.parse(fs.readFileSync(path.join(received,'locations.json')));
   const resolved=await nativeInstallationLocations(received,locations,{});
+  if (native.llvmFoundationLibrary)
+    assert.equal(fs.readFileSync(path.join(resolved.llvm.install, 'third_party/llvm/bin', native.llvmFoundationLibrary), 'utf8'), 'LLVM Foundation');
   assert.equal(resolved.ast.install,resolved.llvm.install);
   assert.deepEqual(resolved.llvm.verification.python,{record:path.join(received,'llvm',record),sha256});
   assert.deepEqual(fs.readFileSync(resolved.llvm.verification.python.record),bytes);

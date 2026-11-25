@@ -76,7 +76,7 @@ test('cli: arguments and config are validated against the pins', () => {
   assert.throws(() => parseArgs(['build', '--config']), /^Error: SDK_ARGS --config/);
   const dir = tmp(), file = path.join(dir, 'c.json');
   const base = {work: dir, evidence: dir, cjcj: dir, platform: 'linux_x86_64', asset: 'linux-x64', nativeInstall: dir, runtimeInstall: dir,
-    seedInputs: dir, sources: {}, env: {}, commits: {runtime: '16c006c8d87cf1eeec96c5cbb687b9a6151b4924', llvm: 'eb7ad0120f43f802fbc60615e6c6f068183fffe3',
+    seedInputs: dir, sources: {}, env: {}, commits: {runtime: 'b1589e8b1b155036abc08c71cb2aff3582632228', llvm: 'eb7ad0120f43f802fbc60615e6c6f068183fffe3',
       ast: '2f91adb378873d428827c75321bde24352e05261', tools: '4d14d051c58a5574d6525314b2c695e2e5dd26e6', stdx: 'a124230201e938fb7a6aaecd56d1bd1c3e5243cc'}};
   fs.writeFileSync(file, JSON.stringify(base));
   assert.equal(readConfig(file).asset, 'linux-x64');

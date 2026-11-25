@@ -125,6 +125,10 @@ export function installLlvm({root, target, from, commits, producer, shimCommit})
   const install = freshComponent(root, 'llvm');
   const file = `third_party/llvm/${native.llvmDirectory}/${native.llvmLibrary}`;
   const row = copyMember(from, native.llvmLibrary, install, file);
+  // The standalone build can be monolithic; preserve the companion from a split Windows build.
+  const foundation = native.llvmFoundationLibrary;
+  if (foundation && fs.existsSync(path.join(from, foundation)))
+    copyMember(from, foundation, install, `third_party/llvm/${native.llvmDirectory}/${foundation}`);
   const tools = {};
   for (const tool of PREPARE_LLVM_TOOLS) {
     const rel = `third_party/llvm/bin/${tool}${native.exe}`;

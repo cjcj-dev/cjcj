@@ -3,7 +3,7 @@ trees. They exercise local Git transport without an external mirror.
 
 | Component | Base pack commit | Current fixture commit |
 | --- | --- | --- |
-| runtime | 37e4fe3d14e41103643c5975f21dd75f8201ac04 | 16c006c8d87cf1eeec96c5cbb687b9a6151b4924 |
+| runtime | 37e4fe3d14e41103643c5975f21dd75f8201ac04 | b1589e8b1b155036abc08c71cb2aff3582632228 |
 | tools | 52adc7a2b67f8f1e711b6a50fbd0c83d85558a58 | 4d14d051c58a5574d6525314b2c695e2e5dd26e6 |
 | llvm | ba518962f0cda46ea71cad033214e8fe1ea83249 | eb7ad0120f43f802fbc60615e6c6f068183fffe3 |
 

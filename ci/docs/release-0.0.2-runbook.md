@@ -16,7 +16,7 @@ carries a `phase` input and takes an optional `ci_run_id`.
    prepare run's `native_inputs_artifact`/`native_inputs_run_id`/`native_runtime_artifact`
    (the `plan` job fails closed when any is missing), the explicit pair
    `native_llvm_ref=eb7ad0120f43f802fbc60615e6c6f068183fffe3`,
-   `native_runtime_ref=16c006c8d87cf1eeec96c5cbb687b9a6151b4924`,
+   `native_runtime_ref=b1589e8b1b155036abc08c71cb2aff3582632228`,
    `native_host_version=1.3.0-alpha.20261124001016`, and `ci_run_id` from step 2.
 
 `publish` runs only when `!inputs.dry_run` (no `always()`), and
