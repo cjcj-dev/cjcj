@@ -3,7 +3,6 @@ import {embeddedStamp} from '../../build/lib/toolchain-identity.mjs';
 import {rejectPrivateTools} from './deploy-native-tools.mjs';
 import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
-import {visibleOptionsOnly,requireOptionVisibility} from './compiler-option-visibility.mjs';
 // Turn received native installations and real Git objects into build inputs.
 // The descriptor contains locations, not producer receipts or SDK authorities.
 import fs from 'node:fs/promises';
@@ -194,11 +193,10 @@ async function validateInstalledInputs(input) {
 export function h1ShimInstall(platform,{compilerCommit,h1Commit,shimInstall}) {
   return sdkPlatform(platform).os!=='win32'&&compilerCommit===h1Commit?shimInstall:undefined;
 }
-async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,windowsShimInstall}) {
+async function installedH1(reused,{h1,host,llvm,platform,tools,windowsShimInstall}) {
   if(!reused.product||!reused.buildInputs||!reused.buildResult)throw Error('H1_REUSE_LOCATIONS_REQUIRED');
   const native=sdkPlatform(platform), product=path.resolve(reused.product), buildResult=path.resolve(reused.buildResult);
   const facts=await readJson(reused.buildInputs), commands=await readJson(buildResult);
-  requireOptionVisibility(facts.visibleOptionsOnly,optionVisibility);
   const mismatch=detail=>{throw Error('H1_REUSE_PRODUCER_MISMATCH '+detail);};
   if(facts.source!==h1.commit||facts.host!==host.install||facts.native!==llvm.install
     ||!facts.sourceChanges||facts.sha256!==await fileDigest(product)
@@ -288,7 +286,6 @@ async function installedH1(reused,{h1,host,llvm,platform,optionVisibility,tools,
   return {product,configuration:facts,buildResult,...(chirInterface?{chirInterface}: {})};
 }
 export async function prepareNativeInputs(descriptor, env = process.env) {
-  const optionVisibility=visibleOptionsOnly(descriptor.visibleOptionsOnly);
   const platform = descriptor.platform || hostPlatform(), native = sdkPlatform(platform);
   if (platform !== hostPlatform()) throw new Error('NATIVE_RUNNER_REQUIRED ' + platform);
   const work = await privateRoot(descriptor.work), install = await privateRoot(descriptor.install);
@@ -412,12 +409,12 @@ export async function prepareNativeInputs(descriptor, env = process.env) {
   // fixed H1 input. Never relabel an old flow's COMPLETE as this configuration.
   if (installations.h1) {
     rows.h1={...rows.h1,...await installedH1(installations.h1,{h1:rows.h1,host,llvm:rows.llvm,
-      platform,optionVisibility,tools,windowsShimInstall:rows.compiler.shimInstall})};
+      platform,tools,windowsShimInstall:rows.compiler.shimInstall})};
   }
   // No host consumes private tools: Linux and Darwin build H1 through the
   // public in-repo cjpm path, Windows through its own public producer.
   rejectPrivateTools(tools);
-  const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,visibleOptionsOnly:optionVisibility,
+  const inputs = {work, install, platform, host, runtimeCommit, llvmCommit, astCommit, h1Commit,
     ...(descriptor.stdLocalModeApi!==undefined?{stdLocalModeApi:descriptor.stdLocalModeApi}:{}),
     ...(descriptor.stdDependencies?{stdDependencies:await stdDependencyInputs(descriptor.stdDependencies)}:{}),
     ...(descriptor.stdBuildType === undefined ? {} : {stdBuildType:stdBuildType(descriptor.stdBuildType)}),
@@ -544,8 +541,7 @@ async function prepareH1FrontendInstall(descriptor,platform) {
   const host={...hostInput,platform,install:await installation(hostInput.install,
     ['tools/bin/cjpm','runtime/lib/'+native.tuple+'/libcangjie-runtime'+native.shared])};
   const llvm={install:path.resolve(installations.llvm.install),platform};
-  const product=await installedH1(installations.h1,{h1,host,llvm,platform,tools:{},
-    optionVisibility:visibleOptionsOnly(descriptor.visibleOptionsOnly)});
+  const product=await installedH1(installations.h1,{h1,host,llvm,platform,tools:{}});
   const shim=product.configuration.nativeShim;
   // A partial N prefix must still bind the actual libLLVM to this compiler.
   // The independent shim carries that hash; an ordinary N install carries it

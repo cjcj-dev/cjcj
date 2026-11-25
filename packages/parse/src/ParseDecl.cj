@@ -685,11 +685,7 @@ extend ParserImpl {
                     entry.isFastNative = true
                 }
             }
-            @When[backend == "cjnative"]
-            let isFrozenAnno = anno.kind == AnnotationKind.FROZEN
-            @When[backend != "cjnative"]
-            let isFrozenAnno = false
-            if (isFrozenAnno && (let Some(fd) <- (decl as FuncDecl))) {
+            if (anno.kind == AnnotationKind.FROZEN && (let Some(fd) <- (decl as FuncDecl))) {
                 fd.isFrozen = true
             }
         }

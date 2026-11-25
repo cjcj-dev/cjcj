@@ -1,6 +1,5 @@
 package cjcj::ast
 
-@When[backend == "cjnative"]
 public func IsReferenceType(ty: Ty): Bool {
     var isRefOption = false
     if (ty.IsCoreOptionType()) {

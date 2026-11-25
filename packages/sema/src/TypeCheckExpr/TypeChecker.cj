@@ -1412,15 +1412,9 @@ extend TypeChecker {
         CheckPrimaryCtorBeforeMerge(pkg)
         mpImpl.PrepareTypeCheck4CJMP(pkg)
         // C++ src/Sema/TypeChecker.cpp:2087-2092.
-        @When[backend == "cjnative"]
-        let isCJNATIVEBackend = true
-        @When[backend != "cjnative"]
-        let isCJNATIVEBackend = false
-        if (isCJNATIVEBackend) {
-            try (recorder = ProfileRecorder("PrepareTypeCheck", "InteropPrepare")) {
-                PrepareJavaInteropTypeCheck(pkg, impl.importManager.getOrThrow(), impl.typeManager)
-                PrepareObjCInteropTypeCheck(pkg, impl.importManager.getOrThrow(), impl.typeManager)
-            }
+        try (recorder = ProfileRecorder("PrepareTypeCheck", "InteropPrepare")) {
+            PrepareJavaInteropTypeCheck(pkg, impl.importManager.getOrThrow(), impl.typeManager)
+            PrepareObjCInteropTypeCheck(pkg, impl.importManager.getOrThrow(), impl.typeManager)
         }
         SeedImportedPackageDecls(ctx)
         AddDefaultFunction(pkg)

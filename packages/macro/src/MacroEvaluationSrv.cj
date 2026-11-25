@@ -112,7 +112,6 @@ private func evalServerCalls(evaluation: MacroEvaluation, calls: ArrayList<Macro
 }
 
 extend MacroEvaluation {
-    @When[backend == "cjnative"]
     private func PrepareMacroServerRuntime(): Bool {
         let initArgs = ArrayList<(String, String)>()
         for ((key, value) in ci.GetGlobalOptions().environment.allVariables) {
@@ -120,9 +119,6 @@ extend MacroEvaluation {
         }
         return RuntimeInit.GetInstance().InitRuntime(ci.GetRuntimeLibPath(), initArgs: initArgs)
     }
-
-    @When[backend != "cjnative"]
-    private func PrepareMacroServerRuntime(): Bool { return true }
 
     @When[os == "Linux" || os == "macOS" || os == "iOS"]
     private func ExecuteAndCloseMacroServer(): Unit {

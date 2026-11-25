@@ -17,23 +17,14 @@ table for inspection. It checks `llvm::cl::Option`'s type information as well as
 
 After reading back a successful artifact, pin its `HOST_LLVM_PROVENANCE` JSON
 comment in `stage1_host_identities.txt`. The record carries repository, run,
-attempt, artifact, source SHA and producer SHA. Linux digest rows use
-`<platform> <library> <sha256>` for the full runtime/boundscheck/LLVM triple.
-Both acquisition and the Linux stage1 runner select those rows by platform;
-there is no unscoped fallback. Darwin acquisition continues to use its JSON
-record's library digest. JSON Linux library digests are producer provenance;
-the scoped row is the expected digest used to verify downloaded bytes.
+attempt, artifact, source SHA and producer SHA. On Linux, the expected library
+digest comes from the matching `<platform> libLLVM-15.so <sha256>` row. On Darwin
+it comes from the provenance record. The independent `HOST_SDK_PROVENANCE`
+records identify the official SDK archives, including their runtime libraries.
 
-Runtime and boundscheck pin updates must use the official release named by
-`ci/host_sdk_pin.env`, with archive names and SHA256 receipts alongside the pins.
-Updating the SDK requires reviewing these rows as well. Neither preparation nor
-the runner learns an expected digest from the input it is checking.
-
-`test_host_identities.py` enters the real runner on its native Linux platform,
-checks its installed binding, and exercises per-library rejection before any SDK
-mutation. Supplying `HOST_IDENTITY_SDK` and `HOST_IDENTITY_LLVM` adds a real
-three-library receipt against the checked-in pins. This proves the identity
-apparatus only, not a complete stage1 compilation.
+`sdk-host-inputs.integration.test.mjs` verifies the selected official SDK
+archive and compiler version, then checks the repaired LLVM library and its
+producer manifest against the checked-in identity.
 
 | Source target | Producer platform | Library |
 | --- | --- | --- |

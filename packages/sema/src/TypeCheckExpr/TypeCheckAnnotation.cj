@@ -153,11 +153,7 @@ extend TypeChecker {
             } else if (annotation.kind == AstAnnotationKind.CUSTOM) {
                 if (let Some(callExpr) <- CheckCustomAnnotation(ctx, decl, annotation)) {
                     CJC_ASSERT(Ty.IsTyCorrect(callExpr.GetTy()))
-                    @When[backend == "cjnative"]
-                    let isCJNATIVEBackend = true
-                    @When[backend != "cjnative"]
-                    let isCJNATIVEBackend = false
-                    if (isCJNATIVEBackend && !annotation.isCompileTimeVisible) {
+                    if (!annotation.isCompileTimeVisible) {
                         callExpr.EnableAttr(Attribute.NO_REFLECT_INFO)
                     }
                     annotationsArray.add(callExpr)

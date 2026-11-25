@@ -31,6 +31,18 @@ async function runCompilerStage({produceLink = true, explicitHost = false, decoy
   const packageManagerSdk = explicitHost ? path.join(root, 'package-manager-sdk') : path.join(sdk, '.host');
   const target = explicitHost ? path.join(root, 'workspace-target') : path.join(source, 'target');
 
+  // The compiler install also carries its execution LLVM and public CHIR interface.
+  for (const rel of ['schema/StdxChirFormat.fbs', 'packages/chir/src/Enums.cj']) {
+    await fs.mkdir(path.dirname(path.join(source, rel)), {recursive: true});
+    await fs.copyFile(new URL('../../' + rel, import.meta.url), path.join(source, rel));
+  }
+  await fs.mkdir(path.join(sdk, 'third_party/llvm/lib'), {recursive: true});
+  await fs.writeFile(path.join(sdk, 'third_party/llvm/lib/libLLVM-15.so'), 'fixture LLVM');
+  const flatc = 'third_party/flatbuffers/bin/flatc';
+  await writeExecutable(path.join(sdk, flatc), `#!${process.execPath}
+const fs=require('node:fs'),path=require('node:path');
+fs.writeFileSync(path.join(process.argv[process.argv.indexOf('-o')+1],'StdxChirFormat_generated.h'),'// CJO fixture');
+`);
   await fs.mkdir(path.join(source, 'runtime_shim'), {recursive: true});
   await fs.mkdir(path.join(sdk, 'lib', tuple), {recursive: true});
   await fs.mkdir(path.join(sdk, 'bin'), {recursive: true});
@@ -59,6 +71,9 @@ async function runCompilerStage({produceLink = true, explicitHost = false, decoy
 import fs from 'node:fs/promises';
 import path from 'node:path';
 const args=process.argv.slice(2), target=args.includes('--target-dir')?args[args.indexOf('--target-dir')+1]:'target';
+// Provide the execution runtime for the install after the shim's link decision.
+await fs.mkdir(path.join(process.env.CANGJIE_HOME,'runtime/lib',${JSON.stringify(tuple)}),{recursive:true});
+await fs.writeFile(path.join(process.env.CANGJIE_HOME,'runtime/lib',${JSON.stringify(tuple)},'libcangjie-runtime.so'),'fixture runtime');
 await fs.writeFile('package-manager-observed.json',JSON.stringify({selected:${JSON.stringify(selected)},argv:process.argv.slice(2),sdk:process.env.CANGJIE_HOME,path:process.env.PATH,loader:process.env.LD_LIBRARY_PATH}));
 await fs.mkdir(path.join(target,'release/bin'), {recursive: true});
 await fs.writeFile(path.join(target,'release/bin/cjcj::cjc'), 'fixture compiler product\\n');
@@ -91,6 +106,7 @@ await fs.writeFile(path.join(target,'release/cjcj/parse@cjcj.cjo'), 'fixture cjo
   const bytes=await fs.readFile(path.join(sdk,relative));
   await fs.writeFile(path.join(sdk,'BUILD-INPUTS.json'),JSON.stringify({
     commits:{shim:commit,compiler:commit,llvm:commit},nativeShim:{source:{commit},compiler:{commit},llvm:{commit},
+      flatc:{path:flatc,sha256:createHash('sha256').update(await fs.readFile(path.join(sdk,flatc))).digest('hex')},
       object:{path:relative,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}}}));
 
 

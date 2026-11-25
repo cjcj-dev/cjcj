@@ -25,7 +25,6 @@ import {installCompilerChirInterface} from './compiler-chir-interface.mjs';
 import {readInstalledNativeShim,compilerNativeShim} from './native-shim-inputs.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
 import {materializeNativeSource, nativeSourceOptions} from './sdk-source.mjs';
-import {visibleOptionsOnly,configureOptionVisibility} from './compiler-option-visibility.mjs';
 import {rewriteEffectiveLinkOptions,effectiveLinkOptions,linkOptionLines,HOST_TRIPLES} from './cjc-link-sections.mjs';
 export {acceptInstalledStd} from './sdk-std-resume.mjs';
 // Runtime inputs are a private build input snapshot, not an install overlay.
@@ -137,9 +136,6 @@ export async function nativeStage(options, {signal} = {}) {
   if (options['accept-records'] && !options['resume-installed']) throw new Error('STD_RESUME_ARGUMENTS');
   if (options['resume-installed'] && (options.kind !== 'std' || options['compiler-runtime'] !== 'target')) throw new Error('STD_RESUME_ARGUMENTS');
   const {kind, source, sdk, runtime, output, platform, host} = options;
-  if(kind!=='h1'&&kind!=='compiler'&&options['visible-options-only']!==undefined)
-    throw Error('COMPILER_OPTION_CONFIGURATION_KIND');
-  const optionVisibility=visibleOptionsOnly(options['visible-options-only']);
   const astInclude=options['std-ast-include'], astLibrary=options['std-ast-library'];
   if ((astInclude!==undefined || astLibrary!==undefined) &&
       (kind!=='std' || !path.isAbsolute(astInclude||'') || !path.isAbsolute(astLibrary||'')))
@@ -192,9 +188,6 @@ export async function nativeStage(options, {signal} = {}) {
       link:output+'.runtime-input', platform, compilerRuntime:options['compiler-runtime'], heap:options.heap, previous, expected, buildType, localModeApi, astInclude, astLibrary});
   }
   await fs.mkdir(output,{recursive:true});
-  const restoreOptionVisibility=kind==='h1'||kind==='compiler'
-    ?await configureOptionVisibility(source,optionVisibility):async()=>{};
-  try {
   if(kind==='std') {
     try {
     if(!options['resume-installed']) {
@@ -282,7 +275,7 @@ export async function nativeStage(options, {signal} = {}) {
         await fs.mkdir(path.dirname(product),{recursive:true});
         await fs.copyFile(await resolveProductBinary(path.join(source,'target/release/bin'),'h1',{windows:true}),product);
         await atomicJson(path.join(output,'bin/build-inputs.json'),{producer:'sdk-native-stage:windows-h1',
-          host,native:sdk,nativeShim:shim,source:commit,sourceRoot:source,sourceChanges,visibleOptionsOnly:optionVisibility,sha256:await fileDigest(product)});
+          host,native:sdk,nativeShim:shim,source:commit,sourceRoot:source,sourceChanges,sha256:await fileDigest(product)});
       } finally {await fs.writeFile(manifest,before);await atomicJson(output+'.commands.json',records);}
     } else {
     // Linux and Darwin build H1 from the public CJPM workspace with H's
@@ -370,7 +363,7 @@ export async function nativeStage(options, {signal} = {}) {
     await fs.copyFile(product,path.join(output,'tools/bin/chir-dis'));
     const {sha256}=await import('./sdk-io.mjs');
     await installCompilerChirInterface({source,destination:output,sdk,shim,records,env});
-    await atomicJson(path.join(bin,'build-inputs.json'),{producer:'sdk-native-stage:h1',source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,startupConfiguration,visibleOptionsOnly:optionVisibility,
+    await atomicJson(path.join(bin,'build-inputs.json'),{producer:'sdk-native-stage:h1',source:commit,sourceRoot:source,host,native:sdk,nativeShim:shim,startupConfiguration,
       sourceChanges:{'cjpm.toml':{beforeSha256:sha256(before),buildSha256:sha256(compiled)},
         'packages/cjc/cjpm.toml':{beforeSha256:sha256(packageBefore),buildSha256:sha256(packageCompiled)}},sha256:await fileDigest(product)});
     }
@@ -415,18 +408,17 @@ export async function nativeStage(options, {signal} = {}) {
       {from:path.join(target,'release'),to:'share/cjcj/cjo',exclude:['bin','runtime']},
       ...['cjselfhost_llvmshim.o','cjc_runtime_config.o','cjc_heap_defaults.o'].map(name=>({from:path.join(source,'runtime_shim',name),to:'share/cjcj/runtime_shim/'+name}))]);
     await installCompilerChirInterface({source,destination,sdk,shim,records,env});
-    await atomicJson(path.join(destination,'compiler-inputs.json'),{commit,nativeShim:shim,visibleOptionsOnly:optionVisibility,version:process.env.SOURCE_SDK_VERSION,parentSha256:await fileDigest(await compilerProducer(sdk)),
+    await atomicJson(path.join(destination,'compiler-inputs.json'),{commit,nativeShim:shim,version:process.env.SOURCE_SDK_VERSION,parentSha256:await fileDigest(await compilerProducer(sdk)),
       stdSha256:await stdIdentity(options['std-input']||sdk, options['std-input']||sdk, {sourceSdk:sdk}),
       stdCoreSha256:await fileDigest(path.join(sdk,'lib',native.tuple,'libcangjie-std-core.a')),
       compileConfigurationBeforeSha256:(await import('./sdk-io.mjs')).sha256(before),compilerSha256:await fileDigest(product)});
     }, signal);
   } else throw new Error('NATIVE_TARGET_KIND '+kind);
   await atomicJson(output+'.commands.json',records);
-  } finally {await restoreOptionVisibility();}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies','std-ast-include','std-ast-library','visible-options-only'].map(k=>[k,{type:'string'}]));
+    const spec=Object.fromEntries(['jobs','kind','source','sdk','runtime','output','platform','commit','host','heap','cc','compiler-runtime','zx','phase','std-input','accept-records','resume-state','resume-stage','source-archive','source-archive-sha256','target-dir','shim-install','build-type','std-dependencies','std-ast-include','std-ast-library'].map(k=>[k,{type:'string'}]));
     spec['resume-installed']={type:'boolean'};spec['local-mode-api']={type:'boolean'};
     nativeSourceOptions(process.argv); // Reject duplicate identity flags before parseArgs.
     const {values}=parseArgs({options:spec});

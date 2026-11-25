@@ -554,7 +554,7 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
             'ci/build-resources.mjs', 'ci/bootstrap/native-source-selection.mjs', 'ci/bootstrap/sdk-command-lifetime.mjs',
             'ci/bootstrap/sdk-flow.mjs', 'ci/bootstrap/sdk-install-entries.mjs', 'ci/bootstrap/sdk-io.mjs',
             'ci/bootstrap/sdk-platform.mjs', 'ci/bootstrap/sdk-source.mjs', 'ci/bootstrap/sdk-std-resume.mjs',
-            'ci/bootstrap/sdk-targets.mjs', 'ci/bootstrap/compiler-option-visibility.mjs',
+            'ci/bootstrap/sdk-targets.mjs',
             'build/srcbuild/tool-layout.mjs', 'build/lib/pe-symbols.mjs']) {
             const destination = path.join(work, input);
             await fs.mkdir(path.dirname(destination), {recursive: true});

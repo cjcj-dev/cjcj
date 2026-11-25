@@ -162,8 +162,7 @@ await phase('selfcheck', async () => {
     'modules', 'driver', 'meta_transformation', 'lex', 'ast', 'frontend', 'cjc', 'basic', 'codegen', 'macro',
   ];
   const failedPackages = [];
-  // Each package keeps its own cjpm.toml compile-option (for example the
-  // option package selects CANGJIE_VISIBLE_OPTIONS_ONLY); compile it the same way.
+  // Compile each package with the options declared in its cjpm.toml.
   const packageOptions = async pkg => {
     const manifest = path.join(root, 'packages', pkg, 'cjpm.toml');
     return packageCompileOptions(await fs.readFile(manifest, 'utf8'), manifest);

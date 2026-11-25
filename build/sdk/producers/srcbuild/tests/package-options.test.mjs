@@ -10,8 +10,8 @@ const manifest = (value, extra = '') => `[package]\n  name = "p"\n  compile-opti
 for (const [name, text, expected] of [
   ['missing key', '[package]\n  name = "p"\n', []],
   ['empty string', manifest('""'), []],
-  ['basic string', manifest('"--cfg CANGJIE_VISIBLE_OPTIONS_ONLY=true"'), ['--cfg', 'CANGJIE_VISIBLE_OPTIONS_ONLY=true']],
-  ['literal string', manifest("'--cfg CANGJIE_VISIBLE_OPTIONS_ONLY=true'"), ['--cfg', 'CANGJIE_VISIBLE_OPTIONS_ONLY=true']],
+  ['basic string', manifest('"--cfg feature=on"'), ['--cfg', 'feature=on']],
+  ['literal string', manifest("'--cfg feature=on'"), ['--cfg', 'feature=on']],
   ['TOML-escaped double-quoted argument', manifest('"--trimpath \\"/source space -g\\""'), ['--trimpath', '/source space -g']],
   ['single-quoted argument', manifest('"--trimpath \'/source space\'"'), ['--trimpath', '/source space']],
   ['JSON escape inside a quoted argument', manifest('"--trimpath \\"/a\\\\\\\\b c\\""'), ['--trimpath', '/a\\b c']],
@@ -46,7 +46,7 @@ for (const [name, text, message] of [
   });
 }
 
-test('every package manifest parses, and only option declares options', async () => {
+test('every package manifest parses without package-specific compile options', async () => {
   const packages = (await fs.readdir(path.join(root, 'packages'), {withFileTypes: true}))
     .filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
   const declared = {};
@@ -57,5 +57,5 @@ test('every package manifest parses, and only option declares options', async ()
     const options = packageCompileOptions(text, file);
     if (options.length) declared[pkg] = options;
   }
-  assert.deepEqual(declared, {option: ['--cfg', 'CANGJIE_VISIBLE_OPTIONS_ONLY=true']});
+  assert.deepEqual(declared, {});
 });

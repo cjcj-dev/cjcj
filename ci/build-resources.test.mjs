@@ -46,9 +46,6 @@ test('explicit maximum heap and jobs remain explicit; malformed input fails',asy
 test('public native-stage passes default and explicit resources to its selected source producer',async()=>{
  const source=path.join(root,'source');await fs.mkdir(path.join(source,'runtime_shim'),{recursive:true});
  await fs.writeFile(path.join(source,'cjpm.toml'),'[package]\nname="resource-transport"\n');
- // Compiler-kind native stages select option visibility from the source's packages/option manifest.
- await fs.mkdir(path.join(source,'packages/option'),{recursive:true});
- await fs.writeFile(path.join(source,'packages/option/cjpm.toml'),'[package]\n  name = "option"\n  compile-option = "--cfg CANGJIE_VISIBLE_OPTIONS_ONLY=true"\n');
  await fs.writeFile(path.join(source,'runtime_shim/build_shim.mjs'),"console.log('RESOURCE_PRODUCER '+JSON.stringify({heap:process.env.cjHeapSize,jobs:process.env.CANGJIE_BUILD_JOBS}));process.exit(17);\n");
  for(const [label,args] of [['init',['init']],['add',['add','.']],['commit',['-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','Finite resource entry']]]) {
   const r=await run('git-'+label,['git','-C',source,...args]);assert.equal(r.status,0,r.text);

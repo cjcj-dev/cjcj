@@ -611,7 +611,6 @@ public class StructInheritanceChecker {
         return importManager.IsExtendAccessible(pkg.files[0], extendDecl, None)
     }
 
-    @When[backend == "cjnative"]
     public func Check(): Unit {
         if (pkg.TestAnyAttr(Attribute.IMPORTED, Attribute.TOOL_ADD)) {
             return
@@ -652,42 +651,6 @@ public class StructInheritanceChecker {
         CheckInstDupFuncsInNominalDecls(this)
         GenerateJavaForeignAbstractStub(structInheritedMembers)
         GenerateObjCForeignAbstractStub(structInheritedMembers)
-    }
-
-    @When[backend != "cjnative"]
-    public func Check(): Unit {
-        if (pkg.TestAnyAttr(Attribute.IMPORTED, Attribute.TOOL_ADD)) {
-            return
-        }
-        let nominalDecls = ArrayList<InheritableDecl>()
-        let extendDecls = ArrayList<ExtendDecl>()
-        let walker = Walker(pkg, visitPre: { node: Node =>
-            if (!NeedCheck(node)) {
-                return VisitAction.WALK_CHILDREN
-            }
-            if (node.TestAttr(Attribute.IS_BROKEN) || !Ty.IsTyCorrect(node.GetTy())) {
-                return VisitAction.SKIP_CHILDREN
-            }
-            if (let Some(inheritable) <- (node as InheritableDecl)) {
-                if (let Some(extendDecl) <- (node as ExtendDecl)) {
-                    if (IsExtendVisibleInCurpkg(extendDecl)) {
-                        extendDecls.add(extendDecl)
-                    }
-                } else {
-                    nominalDecls.add(inheritable)
-                }
-            }
-            return VisitAction.SKIP_CHILDREN
-        })
-        walker.Walk()
-        for (decl in nominalDecls) {
-            CheckMembersWithInheritedDecls(decl)
-        }
-        for (decl in extendDecls) {
-            CheckMembersWithInheritedDecls(decl)
-        }
-        CheckAllUpperBoundsConfliction()
-        CheckInstDupFuncsInNominalDecls(this)
     }
 
     public func HasInstantiatedKey(key: DeclTySeqKey): Bool {
@@ -1010,7 +973,6 @@ public class StructInheritanceChecker {
         }
     }
 
-    @When[backend == "cjnative"]
     private func GetAllNeedCheckExtended(): ArrayList<ExtendDecl> {
         let out = ArrayList<ExtendDecl>()
         let extendedDecls = ArrayList<InheritableDecl>()
@@ -1591,7 +1553,6 @@ public class StructInheritanceChecker {
         return false
     }
 
-    @When[backend == "cjnative"]
     private func CheckNativeFFI(parent: MemberSignature, child: MemberSignature): Unit {
         let parentDecl = parent.decl.getOrThrow()
         let childDecl = child.decl.getOrThrow()
@@ -1611,12 +1572,6 @@ public class StructInheritanceChecker {
             CheckForeignName(diag, typeManager, parent, child, checkingDecl)
             CheckForeignAnnotations(diag, typeManager, parent, child, checkingDecl)
         }
-    }
-
-    @When[backend != "cjnative"]
-    private func CheckNativeFFI(parent: MemberSignature, child: MemberSignature): Unit {
-        let _ = parent
-        let _ = child
     }
 
     private func DiagnoseForInheritedMember(parent: MemberSignature, child: MemberSignature): Unit {
@@ -1649,7 +1604,6 @@ public class StructInheritanceChecker {
         }
     }
 
-    @When[backend == "cjnative"]
     private func DiagnoseForInheritedInterfaces(interfaceSig: MemberSignature, implDecls: MemberMap): Unit {
         if (let Some(interfaceDecl) <- interfaceSig.decl) {
             for (child in implDecls.Get(interfaceDecl.identifier.Val())) {
@@ -1664,33 +1618,6 @@ public class StructInheritanceChecker {
                     } else if (interfaceDecl.IsFunc()) {
                         if (CheckImplementationRelation(interfaceSig, child)) {
                             CheckIncompleteOverrideOrImplOfExtend(interfaceSig, child)
-                            CheckInheritanceForInterface(interfaceSig, child)
-                            CheckMutModifierCompatible(interfaceSig, childDecl)
-                        }
-                    }
-                    CheckNativeFFI(interfaceSig, child)
-                }
-            }
-            if (interfaceDecl.TestAttr(Attribute.DEFAULT)) {
-                interfaceDecl.EnableAttr(Attribute.INTERFACE_IMPL)
-            }
-        }
-    }
-
-    @When[backend != "cjnative"]
-    private func DiagnoseForInheritedInterfaces(interfaceSig: MemberSignature, implDecls: MemberMap): Unit {
-        if (let Some(interfaceDecl) <- interfaceSig.decl) {
-            for (child in implDecls.Get(interfaceDecl.identifier.Val())) {
-                if (let Some(childDecl) <- child.decl) {
-                    CheckSameNameInheritanceInfo(interfaceSig, childDecl)
-                    if (childDecl.astKind != interfaceDecl.astKind) {
-                        continue
-                    }
-                    if (interfaceDecl.astKind == ASTKind.PROP_DECL) {
-                        CheckInheritanceForInterface(interfaceSig, child)
-                        CheckPropertyInheritance(interfaceSig, childDecl)
-                    } else if (interfaceDecl.IsFunc()) {
-                        if (CheckImplementationRelation(interfaceSig, child)) {
                             CheckInheritanceForInterface(interfaceSig, child)
                             CheckMutModifierCompatible(interfaceSig, childDecl)
                         }

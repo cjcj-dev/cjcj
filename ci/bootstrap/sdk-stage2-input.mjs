@@ -8,7 +8,6 @@ import {promisify} from 'node:util';
 import {readJson, fileDigest, privateRoot} from './sdk-flow.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {stdIdentity} from '../../build/sdk/producers/srcbuild/lib/final-compiler.mjs';
-import {requireOptionVisibility} from './compiler-option-visibility.mjs';
 const execute = promisify(execFile);
 const sha = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 const sha256 = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -22,7 +21,6 @@ async function ordinaryCjpmInput(supplied, input) {
   if (!required.every(name => supplied?.[name])) throw new Error('C2_ORDINARY_LOCATIONS_REQUIRED');
   const install = await privateRoot(supplied.install), bootstrapStd = await privateRoot(supplied.bootstrapStd);
   const metadata = await readJson(path.join(install, 'STAGE-INPUTS.json'));
-  requireOptionVisibility(metadata.visibleOptionsOnly,input.visibleOptionsOnly);
   const build = await readJson(supplied.buildResult), command = await readJson(supplied.command);
   const native = sdkPlatform(input.platform), tuple = native.tuple;
   const compilerFile = metadata.compilerFile || 'libexec/compiler/cjcj-stage1' + native.exe;
@@ -112,7 +110,6 @@ export async function stage2Input(supplied, input) {
   const native = sdkPlatform(input.platform), tuple = native.tuple;
   const compilerInputs = path.join(install, 'compiler-inputs.json');
   const facts = await readJson(compilerInputs), metadata = await readJson(path.join(install, 'STAGE-INPUTS.json'));
-  requireOptionVisibility(facts.visibleOptionsOnly,input.visibleOptionsOnly);
   const build = await readJson(supplied.buildResult);
   const compilerFile = metadata.compilerFile || 'libexec/compiler/cjcj-stage1' + native.exe;
   if (path.isAbsolute(compilerFile) || compilerFile.split('/').some(part => part === '..'))

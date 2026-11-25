@@ -9,7 +9,6 @@ import cjcj::sema.*
 import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 
 // C++ src/Sema/Desugar/AfterTypeCheck/SemanticUsageCollector.cpp:25-385.
-@When[backend == "cjnative"]
 private class SemanticUsageCollector {
     private let tyMgr: TypeManager
     private let pkgs: ArrayList<Package>
@@ -395,15 +394,7 @@ private class SemanticUsageCollector {
 }
 
 // C++ src/Sema/Desugar/AfterTypeCheck/SemanticUsageCollector.cpp:389-396.
-@When[backend == "cjnative"]
 public func GetSemanticUsage(typeManager: TypeManager, pkgs: ArrayList<Package>): SemanticInfo {
     let collector = SemanticUsageCollector(typeManager, pkgs)
     return collector.CollectInfoUsages()
-}
-
-@When[backend != "cjnative"]
-public func GetSemanticUsage(typeManager: TypeManager, pkgs: ArrayList<Package>): SemanticInfo {
-    let _ = typeManager
-    let _ = pkgs
-    return SemanticInfo()
 }

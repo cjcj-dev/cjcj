@@ -61,17 +61,6 @@ test('std uses the selected native AST archive and headers through build and res
  const ordinary=inputs('linux_x86_64');ordinary.compiler.install=ordinary.ast.install;
  assert.equal(flag(createBootstrapTargets(ordinary).stages.find(s=>s.id==='stage3-std').commands[0].argv,'--std-ast-include'),undefined);
 });
-test('the public bootstrap graph forwards one option policy to H1 and both compiler stages',()=>{
- for(const setting of [undefined,true,false]) {
-  const input=inputs('linux_x86_64');delete input.h1.product;
-  if(setting!==undefined)input.visibleOptionsOnly=setting;
-  const commands=createBootstrapTargets(input).stages.flatMap(stage=>stage.commands??[]).map(row=>row.argv);
-  const producers=commands.filter(argv=>['h1','compiler'].includes(argv[argv.indexOf('--kind')+1]));
-  assert.equal(producers.length,3);
-  for(const argv of producers)assert.equal(argv[argv.indexOf('--visible-options-only')+1],String(setting??true));
-  for(const argv of commands.filter(argv=>argv[argv.indexOf('--kind')+1]==='std'))assert.equal(argv.includes('--visible-options-only'),false);
- }
-});
 test('public native fact copy and C2 reuse retain one input writer',async()=>{
  const fs=await import('node:fs/promises'),path=await import('node:path'),os=await import('node:os'),{spawnSync}=await import('node:child_process');
  const base=process.env.RELEASE_EVIDENCE_TEST_ROOT||os.tmpdir();await fs.mkdir(base,{recursive:true});

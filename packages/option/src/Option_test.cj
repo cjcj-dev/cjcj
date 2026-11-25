@@ -440,6 +440,12 @@ class OptionTableTest {
     }
 
     @TestCase
+    func ParseArgsRejectsInternalFrontendFlag(): Unit {
+        let parsed = parseArgs(["cjc-frontend", "--typecheck", "main.cj"], frontendMode: true)
+        @Expect(parsed[0], false)
+    }
+
+    @TestCase
     func ParseArgsTestFlagCorrect(): Unit {
         let parsed = parseArgs(["cjc", "-v"])
         @Expect(parsed[0], true)

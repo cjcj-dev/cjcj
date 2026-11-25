@@ -50,11 +50,7 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager
         match (node.astKind) {
             case ASTKind.FOR_IN_EXPR =>
                 if (let Some(forInExpr) <- (node as ForInExpr)) {
-                    @When[backend == "cjnative"]
-                    let shouldRearrangeForIn = true
-                    @When[backend != "cjnative"]
-                    let shouldRearrangeForIn = false
-                    if (shouldRearrangeForIn && forInExpr.inExpression.isSome()) {
+                    if (forInExpr.inExpression.isSome()) {
                         ReArrangeForInExpr(typeManager, forInExpr, context: context, synthesizer: synthesizer,
                             diag: diag)
                     }

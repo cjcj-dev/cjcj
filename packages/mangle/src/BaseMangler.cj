@@ -1209,7 +1209,6 @@ public open class BaseMangler {
         return None
     }
 
-    @When[backend == "cjnative"]
     private func GetSpecialFuncName(fd: FuncDecl): Option<String> {
         if (fd.fullPackageName != CORE_PACKAGE_NAME) {
             return None
@@ -1217,33 +1216,6 @@ public open class BaseMangler {
         return match (fd.identifier.Val()) {
             case "throwGlobalOutOfMemoryError" => "rt$ThrowGlobalOutOfMemoryError"
             case "throwStackOverflowError" => "rt$ThrowStackOverflowError"
-            case "throwOutOfMemoryError" => "rt$ThrowOutOfMemoryError"
-            case "throwImplicitException" => "rt$ThrowImplicitException"
-            case "registerReferenceFinalizer" => "rt$RegisterReferenceFinalizer"
-            case "runReferenceHandler" => "rt$RunReferenceHandler"
-            case "runReferenceFinalizers" => "rt$RunReferenceFinalizers"
-            case "throwArithmeticException" => "rt$ThrowArithmeticException"
-            case "throwArithmeticExceptionMsg" => "rt$ThrowArithmeticException_msg"
-            case "createArithmeticExceptionMsg" => "rt$CreateArithmeticException_msg"
-            case "createOverflowExceptionMsg" => "rt$CreateOverflowException_msg"
-            case "throwOverflowException" => "rt$ThrowOverflowException"
-            case "throwIndexOutOfBoundsException" => "rt$ThrowIndexOutOfBoundsException"
-            case "throwNegativeArraySizeException" => "rt$ThrowNegativeArraySizeException"
-            case "callToString" => "rt$CallToString"
-            case "checkIsError" => "rt$CheckIsError"
-            case "throwError" => "rt$ThrowError"
-            case "callPrintStackTrace" => "rt$CallPrintStackTrace"
-            case "callPrintStackTraceError" => "rt$CallPrintStackTraceError"
-            case _ => None
-        }
-    }
-
-    @When[backend != "cjnative"]
-    private func GetSpecialFuncName(fd: FuncDecl): Option<String> {
-        if (fd.fullPackageName != CORE_PACKAGE_NAME) {
-            return None
-        }
-        return match (fd.identifier.Val()) {
             case "throwOutOfMemoryError" => "rt$ThrowOutOfMemoryError"
             case "throwImplicitException" => "rt$ThrowImplicitException"
             case "registerReferenceFinalizer" => "rt$RegisterReferenceFinalizer"

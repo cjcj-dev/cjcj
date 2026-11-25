@@ -1146,11 +1146,6 @@
     "reason": "Input fixture for tests/sema_backports_1105/run.mjs mock case (compiled with --test --mock=on), not a workspace package. Run npx --yes zx@8 tests/sema_backports_1105/run.mjs <compiler> <sdk> <out> mock with a built compiler and matching SDK; no workflow provisions those inputs."
   },
   {
-    "file": "ci/bootstrap/compiler-option-visibility.test.mjs",
-    "executor": "zx",
-    "args": []
-  },
-  {
     "file": "ci/bootstrap/native-cjdb-job-package.test.mjs",
     "executor": "zx",
     "args": []
@@ -1159,11 +1154,6 @@
     "file": "ci/bootstrap/native-windows-llvm-replay.test.mjs",
     "executor": "zx",
     "args": []
-  },
-  {
-    "file": "ci/bootstrap/compiler-option-reentry.test.mjs",
-    "executor": "manual",
-    "reason": "Refuses to start without an owned absolute RELEASE_EVIDENCE_TEST_ROOT. Script-entry regression of compiler option visibility on first build and default reentry through a bounded observer compiler; no CJ/LLVM build or SDK installation."
   },
   {
     "file": "ci/bootstrap/output-debug-policy.integration.mjs",

@@ -22,7 +22,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.
 const stage = path.join(repo, 'ci/bootstrap/sdk-native-stage.mjs');
 const platform = `linux_${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}`;
 const RUNTIME = 'b'.repeat(40);
-const CHECKOUT_FILES = ['.gitignore', 'cjpm.toml', 'cjpm.lock', 'packages/option/cjpm.toml',
+const CHECKOUT_FILES = ['.gitignore', 'cjpm.toml', 'cjpm.lock',
   'runtime_shim/build_shim.mjs', 'runtime_shim/cjc_runtime_config.c', 'runtime_shim/cjc_heap_defaults.c'];
 
 function zxCli() {

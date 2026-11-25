@@ -62,10 +62,15 @@ test('public build-shim reentry reaches real CMake after all source archives are
 test('native stage materializes once, rejects bad first input, and reenters without its archive',()=>{
  const pack=archive('stage',{'cjpm.toml':'[package]\nname="archive-input"\n',
   'runtime_shim/build_shim.mjs':"import os from 'node:os'; console.log('NATIVE_STAGE_PRODUCER_REACHED '+JSON.stringify({jobs:process.env.CANGJIE_BUILD_JOBS,cpus:os.availableParallelism()})); process.exit(17);\n"}),target=path.join(root,'stage-source');
+ const sdk=path.join(root,'sdk'),commit='a'.repeat(40);
+ const object='third_party/llvm/fixed-llc/cjselfhost_llvmshim.o',file=path.join(sdk,object);
+ fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'fixture');
+ fs.writeFileSync(path.join(sdk,'BUILD-INPUTS.json'),JSON.stringify({commits:{shim:commit,compiler:commit,llvm:commit},
+  nativeShim:{source:{commit},compiler:{commit},llvm:{commit},object:{path:object,bytes:fs.statSync(file).size,sha256:digest(file)}}}));
  const entry=[process.execPath,path.join(source,'ci/bootstrap/sdk-native-stage.mjs'),'--kind','compiler','--zx',process.execPath,'--jobs','2','--source',target,
-  '--sdk',path.join(root,'no-sdk'),'--output',path.join(root,'no-stage'),
+  '--sdk',sdk,'--output',path.join(root,'no-stage'),
   '--platform',({linux:'linux',darwin:'darwin',win32:'windows'}[process.platform])+'_'+(process.arch==='arm64'?'aarch64':'x86_64'),
-  '--commit','a'.repeat(40),'--source-archive',pack.file,'--source-archive-sha256',pack.sha256];
+  '--commit',commit,'--source-archive',pack.file,'--source-archive-sha256',pack.sha256];
  const stageEnv={...process.env};delete stageEnv.GITHUB_ACTIONS;
  const stageRun=(name,argv)=>run(name,argv,root,stageEnv);
  const invalid=[...entry];invalid[invalid.indexOf('--jobs')+1]='0';

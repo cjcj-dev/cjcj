@@ -799,13 +799,6 @@ public class Translator {
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
-    @When[backend != "cjnative"]
-    private func TranslateAnnotationsArrayBody(decl: AstDecl, funcDef: Function): Unit {
-        let _ = decl
-        let _ = funcDef
-    }
-
-    @When[backend == "cjnative"]
     private func TranslateAnnotationsArrayBody(decl: AstDecl, funcDef: Function): Unit {
         let annoInsts = funcDef.Get<AnnoFactoryInfo, ArrayList<GlobalVar>>()
         let createdConstant799 = builder.CreateConstant(builder.context.GetInt64Ty(),
