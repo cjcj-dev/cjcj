@@ -11,6 +11,7 @@ import {getBuildTarget} from '../lib/build-target.mjs';
 import {applyCompilerBoundscheckDependencies, applyCompilerCjdbPatches, applyCompilerLlvmVersion, applyCompilerSchemaInstall,
   applyCompilerWindowsPatches, applyCompilerXml2Install, applyNativeCjdbConfigure, prepareLldbSwigPython3Source, prepareWindowsLlvmSource, run as fetchRun, verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
 import {assertCjnativeHostArgs} from './fixtures/windows-cjnative-args.mjs';
+import {assertMinGWRuntimeFallback} from './fixtures/windows-mingw-fallback.mjs';
 import {assertCompilerLibcxxEdits, libcxxEdits} from './fixtures/windows-compiler-libcxx.mjs';
 import {BuildError} from '../lib/errors.mjs';
 import {applyTextPatch} from '../srcbuild/stages/common.mjs';
@@ -263,6 +264,7 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
     assert.deepEqual(script('selected-reentry', `set(CMAKE_C_COMPILER "${cc}")\nset(CMAKE_CXX_COMPILER "${cxx}")`), selected);
     for (const {file, expected} of fixes) assert.equal(fs.readFileSync(file, 'utf8'), expected, file);
     assertCjnativeHostArgs(compiler, workspace);
+    assertMinGWRuntimeFallback(compiler, workspace, '-DCANGJIE_TOOLCHAIN_RUNTIME_FILES=' + dll);
   } finally { fs.rmSync(workspace, {recursive: true, force: true}); }
 });
 
@@ -634,6 +636,26 @@ test('Windows cjnative patch rejects missing, changed, partial and ambiguous arg
   assert.throws(apply, err => err instanceof BuildError && err.message.includes('third_party/CMakeLists.txt'));
 });
 
+test('Windows MinGW runtime fallback rejects drifted, duplicate, mixed and missing inputs', t => {
+  const root = tempTree(t), file = path.join(root, 'third_party/CMakeLists.txt');
+  fs.cpSync(WINDOWS_PIN_FIXTURE, root, {recursive: true});
+  const apply = () => applyCompilerWindowsPatches(root);
+  apply();
+  const condition = 'if(MINGW AND NOT CANGJIE_TOOLCHAIN_RUNTIME_FILES)';
+  const old = fs.readFileSync(file, 'utf8').replace(condition, 'if(MINGW)');
+  const oldInclude = 'if(MINGW)\n        include(AddMinGWLibs)';
+  const patched = old.replace(oldInclude, condition + '\n        include(AddMinGWLibs)');
+  const extra = guard => '\n    ' + guard + '\n        include(AddMinGWLibs)\n    endif()\n';
+  for (const drift of [patched.replace(condition, 'if(WIN32)'), old.replace('include(AddMinGWLibs)', ''),
+    old + extra('if(MINGW)'), patched + extra(condition), old + extra(condition), patched + '\ninclude("AddMinGWLibs")\n']) {
+    fs.writeFileSync(file, drift);
+    assert.throws(apply, err => err instanceof BuildError && err.message.includes('AddMinGWLibs') && err.message.includes(file));
+    assert.equal(fs.readFileSync(file, 'utf8'), drift);
+  }
+  fs.unlinkSync(file);
+  assert.throws(apply, err => err instanceof BuildError && err.message.includes('third_party/CMakeLists.txt'));
+});
+
 for (const nested of [false, true]) {
   test('Windows Git patch: ' + (nested ? 'nested plain copy' : 'standalone copy') + ' with per-file EOL', t => {
     const parent = tempTree(t), root = path.join(parent, 'compiler');
@@ -754,5 +776,20 @@ for (const [style, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
     assert.notEqual(after, before, 'cached base patch still needs the Clang change');
     assert.equal(after, withEol(after, eol));
     assertNoRewrite(file, () => applyCompilerWindowsPatches(root));
+
+    const thirdParty = path.join(root, 'third_party/CMakeLists.txt');
+    const legacy = '    if(MINGW)' + eol + '        include(AddMinGWLibs)' + eol + '    endif()';
+    const fallback = legacy.replace('if(MINGW)', 'if(MINGW AND NOT CANGJIE_TOOLCHAIN_RUNTIME_FILES)');
+    const upgraded = fs.readFileSync(thirdParty, 'utf8');
+    assert.ok(upgraded.includes(fallback), 'expected the runtime fallback with the original line endings');
+    // A cached compiler with all earlier fixes needs only this one change.
+    const cached = upgraded.replace(fallback, legacy);
+    fs.writeFileSync(thirdParty, cached);
+    applyCompilerWindowsPatches(root);
+    assert.deepEqual(fs.readFileSync(thirdParty), Buffer.from(cached.replace(legacy, fallback)));
+    assertNoRewrite(thirdParty, () => applyCompilerWindowsPatches(root));
+    const reverse = spawnSync('git', ['-c', 'core.autocrlf=false', 'apply', '--reverse', '--check', '-'],
+      {cwd: root, input, encoding: 'utf8', env: {...process.env, GIT_CEILING_DIRECTORIES: path.dirname(root)}});
+    assert.equal(reverse.status, 0, reverse.stderr);
   });
 }

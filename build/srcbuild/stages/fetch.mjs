@@ -349,7 +349,15 @@ export function applyCompilerWindowsPatches(repoDir, patch = new URL('../patches
   if ((!source.includes(before) && !source.includes(after)) ||
       [system, triple, native, flags].some(line => source.split(line).length !== 2))
     throw new BuildError(stage, `patch shape drift: expected one MinGW cjnative argument block in ${thirdParty}`);
+
+  // The selected toolchain installs its own runtime DLLs. Keep the legacy
+  // external project only for MinGW configurations without those files.
+  const legacyMingw = '\n    if(MINGW)\n        include(AddMinGWLibs)\n    endif()\n    if(OHOS)\n';
+  const fallbackMingw = legacyMingw.replace('if(MINGW)', 'if(MINGW AND NOT CANGJIE_TOOLCHAIN_RUNTIME_FILES)');
+  if (source.split(/AddMinGWLibs/i).length !== 2 || (!source.includes(legacyMingw) && !source.includes(fallbackMingw)))
+    throw new BuildError(stage, `patch shape drift: expected one AddMinGWLibs fallback in ${thirdParty}`);
   applyTextPatch(thirdParty, [[before, after]], {stage, marker: after});
+  applyTextPatch(thirdParty, [[legacyMingw, fallbackMingw]], {stage, marker: fallbackMingw});
 
   // Both demangler targets use std::vector with BUILD_LIB_CANGJIE_DEMANGLE set.
   const guard = '#ifndef BUILD_LIB_CANGJIE_DEMANGLE';
