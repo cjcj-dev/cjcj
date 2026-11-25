@@ -42,6 +42,17 @@ test('formal native planner rejects missing producer event and incomplete pair; 
  const blank=Object.fromEntries(Object.keys(selectedEnv(workflow('sdk-build-target.yml'))).map(k=>[k,'']));
  const r=plan(t,'linux-aarch64',blank);assert.equal(r.status,1);assert.match(r.stderr,/issues\/763/);
 });
+test('native configure inherits the validated LLVM, runtime and host in both jobs',()=>{
+ const {jobs}=workflow('sdk-build-target.yml');
+ for(const job of ['source-stage0','native-windows-sdk']){
+  const {steps}=jobs[job];
+  const loader=steps.findIndex(step=>step.run?.includes('ci/load_runtime_pin.mjs'));
+  const configure=steps.findIndex(step=>step.run?.includes('ci/bootstrap/configure-gha-inputs.mjs'));
+  assert.ok(loader>=0&&configure>loader,job+' must load the pair before configure');
+  for(const key of ['CJCJ_NATIVE_LLVM_REF','CJCJ_NATIVE_RUNTIME_REF','CJCJ_NATIVE_HOST_VERSION'])
+   assert.ok(!Object.hasOwn(steps[configure].env??{},key),job+' configure overrides '+key);
+ }
+});
 test('native workflow builds N via the existing producer and transports installation before host/configure',()=>{
  const wf=workflow('sdk-build-target.yml'),producer=wf.jobs['native-cjdb'],consumer=wf.jobs['source-stage0'];
  assert.ok(consumer.needs.includes('native-cjdb'));

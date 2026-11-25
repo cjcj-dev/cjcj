@@ -36,7 +36,9 @@ export async function configureGhaInputs(env=process.env) {
   const locations=await readJson(path.join(root,'locations.json'));
   const platform=hostPlatform(), sourcePair=nativePair(env,{requireHost:Boolean(env.CJCJ_NATIVE_RUNTIME_INSTALL)}),
     pair=env.CJCJ_NATIVE_RUNTIME_INSTALL?sourcePair:null;
-  const config=buildConfig({workspace:env.CANGJIE_WORKSPACE || env.GITHUB_WORKSPACE,env});
+  const config=buildConfig({workspace:env.CANGJIE_WORKSPACE,env:pair ? {...env,
+    CJCJ_NATIVE_LLVM_REF:pair.llvm, CJCJ_NATIVE_RUNTIME_REF:pair.runtime,
+    CJCJ_NATIVE_HOST_VERSION:pair.hostVersion} : env});
   const compiler=config.repos.compiler;
   const {selection,explicitAst}=nativeSourceSelection(env,sourcePair,
     config.sourceSelection.compiler?{ast:{repository:compiler.url,commit:compiler.tag}}:{});

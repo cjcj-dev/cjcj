@@ -1104,9 +1104,6 @@ jobs:
         env:
           CJCJ_NATIVE_INPUT_ROOT: ${{ github.workspace }}/.srcbuild/native-inputs
           CJCJ_NATIVE_RUNTIME_INSTALL: ${{ inputs.native_runtime_artifact != '' && format('{0}/.srcbuild/native-runtime-install', github.workspace) || '' }}
-          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
-          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
-          CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
         run: |
           ulimit -c 0
           node ci/bootstrap/configure-gha-inputs.mjs

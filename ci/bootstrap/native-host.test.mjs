@@ -57,8 +57,9 @@ test('explicit native host is selected before freeze and old host steps retain t
  for(const name of ['Provision uncoloured host SDK','Freeze G2 identity inputs','Copy host inputs for source handoffs',
    'Resolve bootstrap inputs on this runner','Verify complete official H and repaired host LLVM identities','Record host repair and nightly control symbols'])
    assert.match(steps[at(name)].if,/inputs.native_runtime_artifact == ''/);
- assert.equal(workflow.jobs['fixed-llvm'].with.llvm_ref,'${{ inputs.native_llvm_ref }}');
- assert.equal(workflow.jobs['fixed-llvm'].with.runtime_ref,'${{ inputs.native_runtime_ref }}');
+ const llvmPin=workflow.jobs['fixed-llvm'].steps.find(step=>step.run==='node ci/native-llvm-inputs.mjs');
+ assert.equal(llvmPin.env.CJCJ_NATIVE_LLVM_REF,'${{ inputs.native_llvm_ref }}');
+ assert.equal(llvmPin.env.CJCJ_NATIVE_RUNTIME_REF,'${{ inputs.native_runtime_ref }}');
  assert.equal(steps[select].env?.CJCJ_NATIVE_SOURCE_SELECTION,undefined);
  const configure=steps.find(step=>step.name==='Configure native bootstrap from actual repositories and target installations');
  assert.equal(configure.env?.CJCJ_NATIVE_SOURCE_SELECTION,undefined);
@@ -85,6 +86,22 @@ test('H1 selection changes the source checkout without changing the native pair 
  assert.deepEqual(selection,{...base,h1:{...base.h1,commit:chosen}});
  assert.throws(()=>nativeSourceSelection({CJCJ_NATIVE_H1_REF:'HEAD'}),/NATIVE_H1_SOURCE_REF/);
  assert.throws(()=>nativeSourceSelection(env,undefined,{h1:base.h1}),/NATIVE_H1_SOURCE_CONFLICT/);
+});
+test('native configure resolves a pinned runtime install before checking the artifact platform',async()=>{
+ const {configureGhaInputs}=await import('./configure-gha-inputs.mjs');
+ await fs.mkdir(root,{recursive:true});const work=await fs.mkdtemp(path.join(root,'native-configure-pair-'));
+ // The next check after repository selection stops this fixture before any source transport.
+ await fs.writeFile(path.join(work,'locations.json'),JSON.stringify({platform:'wrong-platform'}));
+ const env={CANGJIE_WORKSPACE:work,GITHUB_WORKSPACE:work,CJCJ_NATIVE_INPUT_ROOT:work,
+  CJCJ_BOOTSTRAP_BASE:path.join(work,'host'),CJCJ_NATIVE_RUNTIME_INSTALL:path.join(work,'runtime')};
+ const artifact={...env,CJCJ_NATIVE_RUNTIME_ARTIFACT:'native-runtime-install'};
+ await assert.rejects(configureGhaInputs(env),{message:'NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED'});
+ for(const refs of [{CJCJ_NATIVE_RUNTIME_REF:'a'.repeat(40)},
+  {CJCJ_NATIVE_LLVM_REF:'invalid',CJCJ_NATIVE_RUNTIME_REF:'a'.repeat(40)}])
+  await assert.rejects(configureGhaInputs({...artifact,...refs}),{message:'NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED'});
+ await assert.rejects(configureGhaInputs({...artifact,CJCJ_NATIVE_LLVM_REF:'a'.repeat(40),
+  CJCJ_NATIVE_RUNTIME_REF:'b'.repeat(40)}),{message:'NATIVE_RUNTIME_EXPLICIT_HOST_REQUIRED'});
+ await assert.rejects(configureGhaInputs(artifact),{message:'GHA_NATIVE_ARTIFACT_PLATFORM'});
 });
 test('formal native configure rejects invalid source choices before source transport or SDK preparation',async()=>{
  await fs.mkdir(root,{recursive:true});const work=await fs.mkdtemp(path.join(root,'native-source-rejection-'));

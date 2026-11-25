@@ -1,6 +1,8 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import path from 'node:path';
 import {resolveRuntimeSource,writeRuntimeSelection} from '../../ci/runtime-pin.mjs';
 import {spawnSync} from 'node:child_process';
+import {readSourcePins} from '../../ci/native-llvm-inputs.mjs';
+import {readHostToolchainPin} from '../../ci/host-toolchain-pin.mjs';
 const pins=Object.fromEntries((await fs.readFile(new URL('../../ci/runtime_pin.env',import.meta.url),'utf8')).trim().split('\n').map(s=>s.split('=')));
 const root=process.env.RELEASE_EVIDENCE_TEST_ROOT;if(!root)throw new Error('RELEASE_EVIDENCE_TEST_ROOT required');
 await fs.mkdir(root,{recursive:true});
@@ -31,7 +33,13 @@ test('formal loader carries the explicit component pair through handoff and reje
  const normal=await run('normal');assert.equal(normal.status,0,normal.stderr);
  // A source pair also drives the runtime-only producer, without an SDK artifact.
  assert.equal((await resolveRuntimeSource({...env,CJCJ_NATIVE_RUNTIME_ARTIFACT:''})).runtimeRef,env.CJCJ_NATIVE_RUNTIME_REF);
- await assert.rejects(resolveRuntimeSource({CJCJ_NATIVE_RUNTIME_ARTIFACT:'frozen-runtime'}),/COMPONENT_SELECTION_REQUIRED/);
+ const artifact={CJCJ_NATIVE_RUNTIME_ARTIFACT:'frozen-runtime'};
+ const pinned=await resolveRuntimeSource(artifact);
+ assert.deepEqual(pinned.nativePair,{llvm:readSourcePins().llvm.LLVM_SHA,runtime:pins.RUNTIME_REF,
+  hostVersion:readHostToolchainPin().replace(/^nightly-/,'')});
+ assert.equal(pinned.runtimeRef,pins.RUNTIME_REF);
+ await assert.rejects(resolveRuntimeSource({...artifact,CJCJ_NATIVE_LLVM_REF:env.CJCJ_NATIVE_LLVM_REF}),
+  /NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED/);
  assert.equal((await resolveRuntimeSource({...env,CJCJ_NATIVE_RUNTIME_ARTIFACT:'frozen-runtime'})).runtimeRef,env.CJCJ_NATIVE_RUNTIME_REF);
  const handed=Object.fromEntries((await fs.readFile(env.GITHUB_ENV,'utf8')).trim().split('\n').map(s=>s.split('=')));
  assert.equal(handed.CJCJ_NATIVE_RUNTIME_REF,env.CJCJ_NATIVE_RUNTIME_REF);
