@@ -1,6 +1,7 @@
 #!/usr/bin/env zx
 
-$.stdio = 'inherit';
+import {execFileSync} from 'node:child_process';
+import path from 'node:path';
 
 const workspace = process.env.CANGJIE_WORKSPACE;
 if (!workspace) throw new Error('CANGJIE_WORKSPACE is required');
@@ -25,12 +26,12 @@ for (const [component, directory, urlVariable, refVariable] of pins) {
     throw new Error(`${refVariable} must be a lowercase 40-character commit SHA`);
   }
 
-  const source = `${workspace}/${directory}`;
-  const actualUrl = (await $({stdio: 'pipe'})`git -C ${source} config --get remote.origin.url`).stdout.trim();
+  const source = path.join(workspace, directory);
+  const actualUrl = execFileSync('git', ['-C', source, 'config', '--get', 'remote.origin.url'], {encoding: 'utf8'}).trim();
   if (actualUrl !== expectedUrl) {
     throw new Error(`${component} URL mismatch: expected ${expectedUrl}, got ${actualUrl}`);
   }
-  const actualRef = (await $({stdio: 'pipe'})`git -C ${source} rev-parse HEAD`).stdout.trim();
+  const actualRef = execFileSync('git', ['-C', source, 'rev-parse', 'HEAD'], {encoding: 'utf8'}).trim();
   if (actualRef !== expectedRef) {
     throw new Error(`${component} ref mismatch: expected ${expectedRef}, got ${actualRef}`);
   }

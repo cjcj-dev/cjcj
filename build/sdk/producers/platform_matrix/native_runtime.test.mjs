@@ -211,6 +211,11 @@ for(const [name,extra] of [
 // Same normal install/dependency/input/record/receive API sequence handed to the
 // SDK private driver. Only build.py's native payload is the bounded C fixture.
 for(const scenario of ['reentry','bad-inputs'])test('normal existing native install and direct receive '+scenario,{skip:process.platform!=='linux'},()=>fixture(({run,runtime,install,source,root,env})=>{
+ const origin=scenario==='reentry'?'https://github.com/cjcj-dev/cangjie-runtime':source;
+ if(scenario==='reentry'){
+   const git=spawnSync('git',['-C',source,'remote','add','origin',origin],{encoding:'utf8'});
+   assert.equal(git.status,0,git.stderr);
+ }
  const first=run({FIXTURE_ELF:'1'});assert.equal(first.status,0,first.stdout+first.stderr);
  const original=path.join(source,'runtime/CMakebuild/gc-unit.status');
  const current=path.join(root,'actual-producer.status');fs.renameSync(original,current);
@@ -230,7 +235,7 @@ const result=await receiveNativeRuntime(i);console.log('DIRECT_RECEIVE_REACHED '
  let serial=0;
  const invoke=(changes={},expected=0,reason)=>{
    const input={root:install,source,sourceRoot:path.join(source,'runtime'),gateStatus:current,
-     sourceRepository:source,platform,llvmCommit:llvm,runtimeCommit:runtime,hostVersion:'1.3.0-fixture',work:path.join(root,'receive'),...changes};
+     sourceRepository:origin,platform,llvmCommit:llvm,runtimeCommit:runtime,hostVersion:'1.3.0-fixture',work:path.join(root,'receive'),...changes};
    const name=String(++serial),file=path.join(root,'receive-'+name+'.json');fs.writeFileSync(file,JSON.stringify(input));
    const r=spawnSync(process.execPath,[driver,file],{encoding:'utf8',env:{...env,FIXTURE_ELF:'1'}});
    fs.writeFileSync(path.join(root,'receive-'+name+'-result.json'),JSON.stringify({argv:[process.execPath,driver,file],rc:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr}));
@@ -243,7 +248,7 @@ const result=await receiveNativeRuntime(i);console.log('DIRECT_RECEIVE_REACHED '
    const relocated=path.join(root,'unpacked'),archive=path.join(root,'direct.tar');fs.mkdirSync(relocated);
    for(const args of [['-cf',archive,'-C',install,'.'],['-xf',archive,'-C',relocated]])assert.equal(spawnSync('tar',args).status,0);
    fs.renameSync(source,source+'.unavailable');fs.renameSync(current,current+'.unavailable');
-   invoke({root:relocated,sourceRoot:undefined,gateStatus:undefined,receiveOnly:true});
+   invoke({root:relocated,sourceRoot:undefined,gateStatus:undefined,receiveOnly:true,sourceRepository:origin+'.git'});
    console.log('DIRECT_RECORD_RECEIVE_REENTRY_TARGET');
  } else {
    const text=fs.readFileSync(current,'utf8');

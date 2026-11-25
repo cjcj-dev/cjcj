@@ -1,5 +1,6 @@
 #!/usr/bin/env zx
 
+import {execFileSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {assertBootstrapCompiler} from '../lib/bootstrap-handoff.mjs';
@@ -46,7 +47,7 @@ const mingwRoot = installPath(buildRoot);
 const mingwBin = path.join(mingwRoot, 'bin');
 const mingwLib = path.join(mingwRoot, TARGET_TRIPLE, 'lib');
 
-const runtimeRef = (await $({stdio: 'pipe'})`git -C ${runtimeRepository} rev-parse HEAD`).stdout.trim();
+const runtimeRef = execFileSync('git', ['-C', runtimeRepository, 'rev-parse', 'HEAD'], {encoding: 'utf8'}).trim();
 if (runtimeRef !== expectedRuntimeRef || runtimeRef !== originalCompiler.lineage.runtimeCommit) {
   throw new Error(`runtime source mismatch: expected ${expectedRuntimeRef}, got ${runtimeRef}`);
 }

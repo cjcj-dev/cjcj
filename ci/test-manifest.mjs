@@ -151,6 +151,7 @@ export const GATING = Object.freeze([
   'build/sdk/producers/srcbuild/tests/product-binary.test.mjs',
   'build/sdk/producers/srcbuild/tests/sccache-contract.test.mjs',
   'build/sdk/producers/srcbuild/tests/package-options.test.mjs',
+  'build/sdk/producers/srcbuild/tests/verify-source-pins.test.mjs',
   'build/sdk/producers/srcbuild/tests/verify-sdk.test.mjs',
   'build/sdk/producers/srcbuild/tests/build-shim-output.test.mjs',
   'build/sdk/producers/srcbuild/tests/workflow-inputs.test.mjs',

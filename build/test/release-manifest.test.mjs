@@ -188,6 +188,46 @@ test('clean Git runtime manifest preserves its actual stamp',async()=>{
   }finally{await fs.rm(work,{recursive:true,force:true});}
 });
 
+test('archive runtime manifest binds the HTTP repository path from the producer record', async t => {
+  const {work, stage, pythonArgs} = await fixture();
+  t.after(() => fs.rm(work, {recursive: true, force: true}));
+  const stamp = 'CJRT-COMMIT:src-' + 'a'.repeat(64);
+  const artifacts = [];
+  for (const file of [pythonArgs.runtimeArtifact, path.join(stage, 'lib/linux_x86_64_cjnative/libcangjie-runtime.a')]) {
+    const bytes = Buffer.from(path.basename(file) + '\0' + stamp + '\0');
+    await fs.writeFile(file, bytes);
+    artifacts.push({path: path.relative(stage, file).split(path.sep).join('/'), sha256: createHash('sha256').update(bytes).digest('hex')});
+  }
+  const bind = async (recorded, expected) => {
+    await fs.writeFile(path.join(stage, 'RUNTIME-INPUTS.json'), JSON.stringify({
+      source: {status: 'resolved', repository: recorded, commit: RUNTIME_SHA},
+      embedded_stamp: stamp, build: {configuration: {buildType: 'release'}}, artifacts,
+    }));
+    return writeReleaseManifest({stage, platform: platforms[0], ...pythonArgs, runtimeRepository: expected});
+  };
+  const url = 'https://github.com/cjcj-dev/cangjie-runtime';
+  for (const bare of [url, url.replace('https:', 'http:')]) {
+    for (const [recorded, expected] of [[bare, bare + '.git'], [bare + '.git', bare]]) {
+      await t.test(recorded + ' binds ' + expected, async () => {
+        const {rows} = await bind(recorded, expected);
+        assert.equal(rows.find(row => row.component === 'runtime').source.repository, expected);
+      });
+    }
+  }
+  for (const [recorded, expected] of [
+    [url, 'https://github.com/cjcj-dev/other.git'], [url, 'https://invalid.example/runtime'],
+    [url, url.replace('https:', 'http:')], [url + '.git.git', url + '.git'],
+    ['/checkout/runtime', '/checkout/runtime.git'], ['file:///runtime', 'file:///runtime.git'],
+    ['git@example:runtime', 'git@example:runtime.git'], ['', ''],
+    ['https://host', 'https://host.git'], [url + '?ref=main', url + '?ref=main.git'],
+    [url + '#main', url + '#main.git'],
+  ]) {
+    await t.test(JSON.stringify([recorded, expected]) + ' rejects at source binding', async () => {
+      await assert.rejects(bind(recorded, expected), {message: 'RUNTIME_SOURCE_INPUT_BINDING'});
+    });
+  }
+});
+
 test('archive runtime source object is distinct from its materialized product stamp',
   {skip:!process.env.CJCJ_TEST_ARCHIVE_RUNTIME}, async () => {
   // Supplied by runtime-archive-source.integration.mjs: actual generated native

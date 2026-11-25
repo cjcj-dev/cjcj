@@ -46,10 +46,19 @@ export async function recordRuntimeInputs({repository,sourceRepository,commit,in
   await atomicJson(path.join(work,RUNTIME_INPUTS),facts);
   return facts;
 }
+// Preserve the spelling of the origin in the record. Only the .git suffix
+// of an HTTP(S) repository path is optional when another checkout consumes it.
+function repositoryKey(value) {
+  if (typeof value !== 'string' || !value.endsWith('.git')) return value;
+  const bare = value.slice(0, -4);
+  return /^https?:\/\/[^/]+\/.+/.test(bare) && !/[?#\\\s]/.test(bare)
+    && !bare.endsWith('/') && URL.canParse(bare) ? bare : value;
+}
 export async function runtimeInputsForArtifact(stage,artifact,{repository,commit,stamp,configuration}) {
   const facts=await readJson(path.join(stage,RUNTIME_INPUTS));
   const rel=relative(artifact.path);
-  if(facts.source?.status!=='resolved'||facts.source.repository!==repository||facts.source.commit!==commit
+  if(facts.source?.status!=='resolved'||typeof repository!=='string'||!repository.trim()
+    ||repositoryKey(facts.source.repository)!==repositoryKey(repository)||facts.source.commit!==commit
     ||facts.embedded_stamp!==stamp||!facts.build?.configuration
     ||(configuration!==undefined&&!isDeepStrictEqual(facts.build.configuration,configuration)))
     throw new Error('RUNTIME_SOURCE_INPUT_BINDING');
