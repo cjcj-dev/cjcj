@@ -86,11 +86,44 @@ function putLlvmFolders(root, eol = '\n') {
   });
 }
 
+// Minimal excerpts of the three Clang 23/libc++ failures from llvm@eb7ad012.
+// They keep the production path tests small while preserving each exact edit
+// anchor and the source tree's selected line ending.
+function putLlvmWindowsFixes(root, eol = '\n') {
+  const files = [
+    ['llvm/include/llvm/Demangle/ItaniumDemangle.h',
+      '#include "Utility.h"\n#include <limits>\n#include <utility>\n',
+      '#include "Utility.h"\n#include <limits>\n#include <type_traits>\n#include <utility>\n'],
+    ['llvm/tools/sancov/sancov.cpp',
+      'return SpecialCaseList::createOrDie({{ClBlacklist}},\n'
+      + '                                          *vfs::getRealFileSystem());\n'
+      + 'return SpecialCaseList::createOrDie({{ClIgnorelist}},\n'
+      + '                                        *vfs::getRealFileSystem());\n',
+      'return SpecialCaseList::createOrDie({ClBlacklist.getValue()},\n'
+      + '                                          *vfs::getRealFileSystem());\n'
+      + 'return SpecialCaseList::createOrDie({ClIgnorelist.getValue()},\n'
+      + '                                        *vfs::getRealFileSystem());\n'],
+    ['lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationServerLLGS.cpp',
+      "#include <limits>\n\nvoid f() { std::basic_string<uint8_t> zeros(reg_info.byte_size, '\\0'); }\n",
+      "#include <limits>\n\nvoid f() { std::vector<uint8_t> zeros(reg_info.byte_size, '\\0'); }\n"],
+  ];
+  return files.map(([relative, original, expected]) => {
+    const file = path.join(root, relative);
+    fs.mkdirSync(path.dirname(file), {recursive: true});
+    fs.writeFileSync(file, withEol(original, eol));
+    return {file, original: withEol(original, eol), expected: withEol(expected, eol)};
+  });
+}
+
 for (const [label, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
   test('Windows LLVM folder declarations preserve the anchor and ' + label, t => {
-    const root = tempTree(t), folders = putLlvmFolders(root, eol);
+    const root = tempTree(t), folders = putLlvmFolders(root, eol), fixes = putLlvmWindowsFixes(root, eol);
     prepareWindowsLlvmSource(root);
     for (const {file, expected} of folders) {
+      assert.deepEqual(fs.readFileSync(file), Buffer.from(expected), file);
+      assertNoRewrite(file, () => prepareWindowsLlvmSource(root));
+    }
+    for (const {file, expected} of fixes) {
       assert.deepEqual(fs.readFileSync(file), Buffer.from(expected), file);
       assertNoRewrite(file, () => prepareWindowsLlvmSource(root));
     }
@@ -99,6 +132,7 @@ for (const [label, eol] of [['LF', '\n'], ['CRLF', '\r\n']]) {
 
 test('Windows LLVM preparation rejects a changed, ambiguous or missing folder declaration', t => {
   const root = tempTree(t);
+  putLlvmWindowsFixes(root);
   for (const {file, original, expected} of putLlvmFolders(root)) {
     for (const drift of [original.replace('virtual void', 'void'), expected.replace('anchor()', 'anchor(int)'),
       original + expected]) {
@@ -114,6 +148,48 @@ test('Windows LLVM preparation rejects a changed, ambiguous or missing folder de
   }
 });
 
+test('Windows LLVM preparation rejects each new edit when its shape drifts, including mixed forms', t => {
+  const root = tempTree(t);
+  const folders = putLlvmFolders(root), fixes = putLlvmWindowsFixes(root);
+  for (const {file, original} of fixes) {
+    fs.unlinkSync(file);
+    assert.throws(() => prepareWindowsLlvmSource(root),
+      error => error instanceof BuildError && error.message.includes('required file missing') && error.message.includes(file));
+    console.log(`WINDOWS_LLVM_NEW_MISSING_RED file=${file}`);
+    fs.writeFileSync(file, original);
+  }
+  const drifted = [
+    fixes[0].original.replace('#include <utility>', '#include <string>'),
+    fixes[1].original.replace('{{ClBlacklist}}', '{ClBlacklist.getValue()}'),
+    fixes[2].original.replace('basic_string<uint8_t>', 'string<uint8_t>'),
+  ];
+  for (let i = 0; i < fixes.length; i++) {
+    fs.writeFileSync(fixes[i].file, drifted[i]);
+    assert.throws(() => prepareWindowsLlvmSource(root),
+      error => error instanceof BuildError && error.message.includes('patch shape drift') && error.message.includes(fixes[i].file));
+    for (const {file, expected} of folders) assert.equal(fs.readFileSync(file, 'utf8'), expected);
+    console.log(`WINDOWS_LLVM_NEW_CUT_RED file=${fixes[i].file} folders=green`);
+    assert.equal(fs.readFileSync(fixes[i].file, 'utf8'), drifted[i]);
+    fs.writeFileSync(fixes[i].file, fixes[i].original);
+  }
+  // A partially applied sancov pair is specifically rejected as mixed old/new.
+  fs.writeFileSync(fixes[1].file, fixes[1].expected.replace('ClIgnorelist.getValue()', 'ClIgnorelist'));
+  assert.throws(() => prepareWindowsLlvmSource(root),
+    error => error instanceof BuildError && error.message.includes('patch shape drift') && error.message.includes(fixes[1].file));
+  for (const {file, expected} of folders) assert.equal(fs.readFileSync(file, 'utf8'), expected);
+  console.log(`WINDOWS_LLVM_NEW_MIXED_CUT_RED file=${fixes[1].file} folders=green`);
+  for (const {file, expected} of folders) {
+    // Folder edits are independent and still remain a valid control once the
+    // new-file cut is restored.
+    fs.writeFileSync(file, expected);
+  }
+  for (const {file, original} of fixes) fs.writeFileSync(file, original);
+  prepareWindowsLlvmSource(root);
+  for (const {file, expected} of folders) assert.equal(fs.readFileSync(file, 'utf8'), expected);
+  for (const {file, expected} of fixes) assert.equal(fs.readFileSync(file, 'utf8'), expected);
+  console.log('WINDOWS_LLVM_NEW_CUT_RECOVERED all=green');
+});
+
 test('Windows fetch preserves selected native compilers and normal runtime installation on canonical source', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'windows-canonical-fetch-'));
   const compiler = path.join(workspace, 'cangjie_compiler');
@@ -125,7 +201,9 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
     const xml2 = path.join(compiler, 'third_party/cmake/Xml2.cmake');
     fs.writeFileSync(xml2, withEol(fs.readFileSync(xml2, 'utf8'), '\r\n'));
     fs.writeFileSync(path.join(compiler, '.gitattributes'), 'third_party/CMakeLists.txt text eol=lf\nthird_party/cmake/Xml2.cmake text eol=crlf\n');
-    const folders = putLlvmFolders(path.join(compiler, 'third_party/llvm-project'));
+    const llvmRoot = path.join(compiler, 'third_party/llvm-project');
+    const folders = putLlvmFolders(llvmRoot);
+    const fixes = putLlvmWindowsFixes(llvmRoot);
     const repoOverrides = {};
     for (const name of ['compiler', 'runtime', 'tools', 'stdx', 'llvm']) {
       const root = path.join(workspace, name === 'llvm' ? 'cangjie_compiler/third_party/llvm-project'
@@ -147,6 +225,7 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
     assert.deepEqual(fs.readFileSync(boundsFile), canonicalBounds, 'canonical 41b already has both static bounds dependencies');
     await fetchRun(config);
     for (const {file, expected} of folders) assert.equal(fs.readFileSync(file, 'utf8'), expected, file);
+    for (const {file, expected} of fixes) assert.equal(fs.readFileSync(file, 'utf8'), expected, file);
     assertCompilerLibcxxEdits(compiler);
     assert.match(fs.readFileSync(path.join(compiler, 'demangler/Demangler.h'), 'utf8'),
       /#include <vector>\r?\n#ifndef BUILD_LIB_CANGJIE_DEMANGLE/, 'Windows fetch must expose vector in the library build');
@@ -181,6 +260,7 @@ test('Windows fetch preserves selected native compilers and normal runtime insta
     }
     await fetchRun(config);
     assert.deepEqual(script('selected-reentry', `set(CMAKE_C_COMPILER "${cc}")\nset(CMAKE_CXX_COMPILER "${cxx}")`), selected);
+    for (const {file, expected} of fixes) assert.equal(fs.readFileSync(file, 'utf8'), expected, file);
   } finally { fs.rmSync(workspace, {recursive: true, force: true}); }
 });
 

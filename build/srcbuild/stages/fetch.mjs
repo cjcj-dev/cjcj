@@ -170,6 +170,49 @@ export function prepareWindowsLlvmSource(llvm) {
       throw new BuildError(stage, `patch shape drift: expected one ${name} declaration with its anchor in ${file}`);
     applyTextPatch(file, [[before, after]], {stage, marker: after});
   }
+
+  // Clang 23 + libc++ also exposes three source-shape failures in the pinned
+  // LLVM/LLDB tree.  Check the complete old/new shape before calling
+  // applyTextPatch: its marker fast-path is intentionally idempotent, but a
+  // mixed tree (one edit applied and another missing) must fail closed.
+  const patchWindowsFile = (relative, edits, stage, description) => {
+    const file = path.join(llvm, relative);
+    requireFile(file, {stage});
+    const source = fs.readFileSync(file, 'latin1').replaceAll('\r\n', '\n');
+    const count = text => source.split(text).length - 1;
+    const states = edits.map(([oldText, newText]) => [count(oldText), count(newText)]);
+    const unpatched = states.every(([oldCount, newCount]) => oldCount === 1 && newCount === 0);
+    const patched = states.every(([oldCount, newCount]) => oldCount === 0 && newCount === 1);
+    if (patched) return;
+    if (!unpatched) {
+      throw new BuildError(stage,
+        `patch shape drift: expected one complete unpatched or patched ${description} form in ${file}`);
+    }
+    applyTextPatch(file, edits, {stage, marker: edits.map(([, newText]) => newText).join('\n')});
+  };
+
+  patchWindowsFile(
+    'llvm/include/llvm/Demangle/ItaniumDemangle.h',
+    [['#include <limits>\n#include <utility>', '#include <limits>\n#include <type_traits>\n#include <utility>']],
+    'prepare.windows.llvm-demangle',
+    'ItaniumDemangle include block',
+  );
+  patchWindowsFile(
+    'llvm/tools/sancov/sancov.cpp',
+    [
+      ['SpecialCaseList::createOrDie({{ClBlacklist}},', 'SpecialCaseList::createOrDie({ClBlacklist.getValue()},'],
+      ['SpecialCaseList::createOrDie({{ClIgnorelist}},', 'SpecialCaseList::createOrDie({ClIgnorelist.getValue()},'],
+    ],
+    'prepare.windows.llvm-sancov',
+    'sancov blacklist call',
+  );
+  patchWindowsFile(
+    'lldb/source/Plugins/Process/gdb-remote/GDBRemoteCommunicationServerLLGS.cpp',
+    [["std::basic_string<uint8_t> zeros(reg_info.byte_size, '\\0');",
+      "std::vector<uint8_t> zeros(reg_info.byte_size, '\\0');"]],
+    'prepare.windows.lldb-gdb-remote',
+    'LLGS zero buffer declaration',
+  );
 }
 
 // Applied to prepare-native's private LLVM checkout. The parent toolchain
