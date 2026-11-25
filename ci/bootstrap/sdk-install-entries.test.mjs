@@ -1,5 +1,27 @@
 import test from'node:test';import assert from'node:assert/strict';import fs from'node:fs/promises';import path from'node:path';import {spawnSync}from'node:child_process';import {installEntries,assertLauncherFormat}from'./sdk-install-entries.mjs';import {fileDigest}from'./sdk-flow.mjs';
 const parent=process.env.RELEASE_EVIDENCE_TEST_ROOT;if(!parent)throw new Error('RELEASE_EVIDENCE_TEST_ROOT required');await fs.mkdir(parent,{recursive:true});
+test('installEntries replaces a read-only llc and preserves the original tool',
+ {skip:process.platform!=='linux'},async t=>{
+ const work=await fs.mkdtemp(path.join(parent,'readonly-llc-'));
+ t.after(()=>fs.rm(work,{recursive:true,force:true}));
+ const root=path.join(work,'sdk'),build=path.join(work,'build');
+ const directory='third_party/llvm/bin',retain='.native-tools/third_party/llvm/bin';
+ const entry=path.join(root,directory,'llc'),alias=path.join(work,'llc-link');
+ const original=Buffer.from('#!/bin/sh\nexit 42\n');
+ await fs.mkdir(path.dirname(entry),{recursive:true});
+ await fs.writeFile(entry,original);await fs.chmod(entry,0o555);await fs.link(entry,alias);
+
+ await installEntries({root,build,platform:process.arch==='arm64'?'linux_aarch64':'linux_x86_64',records:[],
+  groups:[{directory,retain,libraries:['third_party/llvm/lib']}]});
+
+ assert.deepEqual(await fs.readFile(entry),await fs.readFile(path.join(build,'cjcj-sdk-entry')));
+ assert.equal((await fs.stat(entry)).mode&0o777,0o755);
+ assert.deepEqual(await fs.readFile(path.join(root,retain,'llc')),original);
+ assert.deepEqual(await fs.readFile(alias),original);
+ assert.equal((await fs.stat(alias)).mode&0o777,0o555);
+ assert.equal(await fs.readFile(entry+'.entry','utf8'),
+  `cjcj-sdk-entry-v1\n3\n.native-tools/third_party/llvm/bin/llc\nlinux\nnative-target:${process.arch}\nthird_party/llvm/lib\n`);
+});
 test('bundled Python passes caller helper libraries to subprocesses while compiler entries remain isolated',
  {skip:process.platform!=='linux'},async()=>{
  const work=await fs.mkdtemp(path.join(parent,'python-loader-'));let sdk=path.join(work,'SDK with spaces');

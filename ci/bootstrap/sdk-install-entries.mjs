@@ -99,7 +99,9 @@ export async function installEntries({root, build, groups, tools = {}, records, 
       const realRel=path.posix.join(group.retain,name),real=path.join(root,realRel);
       await privateRoot(path.dirname(real));await fs.mkdir(path.dirname(real),{recursive:true});
       await fs.copyFile(entry,real,fs.constants.COPYFILE_EXCL); // Original tool bytes remain ordinary files.
-      await fs.copyFile(binary,entry);await fs.chmod(entry,0o755);
+      // Drop the old name so read-only tools and their hard links stay intact.
+      await fs.rm(entry);
+      await fs.copyFile(binary,entry,fs.constants.COPYFILE_EXCL);await fs.chmod(entry,0o755);
       const ascent=group.directory.split('/').length;
       const libraries=group.libraries.map(relative);
       await fs.writeFile(entry+'.entry',['cjcj-sdk-entry-v1',ascent,realRel,system,'native-target:'+native.arch,...libraries].join('\n')+'\n');
