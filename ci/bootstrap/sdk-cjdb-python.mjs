@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {fileDigest, reject, readJson} from './sdk-io.mjs';
+import {belowRoot, foldAscii, pathKey} from './sdk-path.mjs';
 import {relative} from './sdk-flow.mjs';
 import {readWindowsPythonInstallation} from './native-python-install.mjs';
 
@@ -79,8 +80,9 @@ export async function verifyCjdbPythonConfiguration(pythonRoot, lldbBuild, execu
     suffix:value('LLDB_PYTHON_EXT_SUFFIX')};
   // Print before rejecting, so a cut cannot hide the reached target invariant.
   console.log(JSON.stringify({assertion:'CJDB_PYTHON_IDENTITY', selected, actual}));
+  const {os} = sdkPlatform(platform);
   for (const name of ['executable','include','library']) {
-    if (!actual[name] || await fs.realpath(actual[name]) !== await fs.realpath(selected[name]))
+    if (!actual[name] || pathKey(await fs.realpath(actual[name]), os) !== pathKey(await fs.realpath(selected[name]), os))
       reject('CJDB_PYTHON_IDENTITY','llvm-cjdb',`${name}: ${actual[name]} != ${selected[name]}`);
   }
   if (actual.suffix !== selected.suffix) reject('CJDB_PYTHON_IDENTITY','llvm-cjdb',`suffix: ${actual.suffix} != ${selected.suffix}`);
@@ -112,7 +114,7 @@ export async function verifyCjdbPythonInstallation(pythonRoot, nativeRoot, execu
   pythonRoot=await fs.realpath(pythonRoot);nativeRoot=await fs.realpath(nativeRoot);
   const native=sdkPlatform(platform),delimiter=native.os==='win32'?';':':';
   const relativeInterpreter=path.relative(pythonRoot,executable || path.join(pythonRoot,native.os==='win32'?'python.exe':'bin/python3.11'));
-  if(relativeInterpreter.startsWith('..'+path.sep)||path.isAbsolute(relativeInterpreter))reject('CJDB_PYTHON_IDENTITY','llvm-cjdb','interpreter escaped original Python prefix');
+  if(relativeInterpreter==='..'||relativeInterpreter.startsWith('..'+path.sep)||path.isAbsolute(relativeInterpreter))reject('CJDB_PYTHON_IDENTITY','llvm-cjdb','interpreter escaped original Python prefix');
   const interpreter=path.join(nativeRoot,relativeInterpreter);
   if (nativeRoot!==pythonRoot && await fileDigest(interpreter) !== await fileDigest(path.join(pythonRoot,relativeInterpreter)))
     reject('CJDB_PYTHON_IDENTITY','llvm-cjdb','exported interpreter bytes differ');
@@ -164,21 +166,26 @@ lldb.SBDebugger.Terminate()
   const {stdout,stderr} = await execute(interpreter,['-B','-c',script],{env});
   const observed = JSON.parse(stdout.trim());
   console.log(JSON.stringify({assertion:'CJDB_PYTHON_IMPORT',observed,stderr}));
-  for (const name of ['lldb','binding']) if (!path.resolve(observed[name]).startsWith(nativeRoot+path.sep))
+  const installed = async file => belowRoot(file, nativeRoot, native.os)
+    && belowRoot(await fs.realpath(file), nativeRoot, native.os);
+  for (const name of ['lldb','binding']) if (!await installed(observed[name]))
     reject('CJDB_PYTHON_IMPORT','llvm-cjdb',`${name} escaped exported install`);
-  if (!observed.binding.endsWith(observed.suffix)) reject('CJDB_PYTHON_IMPORT','llvm-cjdb','binding ABI differs');
+  const bindingName = native.os==='win32' ? foldAscii(observed.binding) : observed.binding;
+  const suffix = native.os==='win32' ? foldAscii(observed.suffix) : observed.suffix;
+  if (!bindingName.endsWith(suffix)) reject('CJDB_PYTHON_IMPORT','llvm-cjdb','binding ABI differs');
   const pythonPattern=native.os==='win32'?/^python311\.dll$/i:native.os==='darwin'?/^libpython3\.11.*\.dylib$/:/^libpython3\.11\.so/;
   // Windows LLDB's _lldb*.pyd is a copy of liblldb.dll (lldb/bindings/python/CMakeLists.txt
   // create_relative_symlink copies there), so importing lldb maps LLDB under the binding's name.
   const lldbPattern=native.os==='win32'?/^(?:(?:lib)?lldb\.dll|_lldb(?:\.[^.]+)?\.pyd)$/i:native.os==='darwin'?/^liblldb.*\.dylib$/:/^liblldb\.so/;
-  const libraries=observed.maps.filter(file=>pythonPattern.test(path.basename(file))||lldbPattern.test(path.basename(file)));
+  const basename = native.os==='win32' ? path.win32.basename : path.posix.basename;
+  const libraries=observed.maps.filter(file=>pythonPattern.test(basename(file))||lldbPattern.test(basename(file)));
   for(const pattern of [pythonPattern,lldbPattern]) {
-    const files=libraries.filter(file=>pattern.test(path.basename(file)));
-    if(!files.length||files.some(file=>!path.resolve(file).startsWith(nativeRoot+path.sep)))
+    const files=libraries.filter(file=>pattern.test(basename(file)));
+    if(!files.length||!(await Promise.all(files.map(installed))).every(Boolean))
       reject('CJDB_PYTHON_IMPORT','llvm-cjdb',`loaded library identity ${pattern}`);
   }
   const loaded={};for(const file of libraries)loaded[file]=await fileDigest(file);
-  const lldbLibrary=libraries.find(file=>lldbPattern.test(path.basename(file)));
+  const lldbLibrary=libraries.find(file=>lldbPattern.test(basename(file)));
   const tool=native.os==='linux'?'/usr/bin/readelf':native.os==='darwin'?'/usr/bin/otool':'dumpbin';
   const args=native.os==='linux'?['-d',lldbLibrary]:native.os==='darwin'?['-L',lldbLibrary]:['/dependents',lldbLibrary];
   const needed=(await execute(tool,args)).stdout;

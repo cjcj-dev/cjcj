@@ -3,6 +3,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {copyOutputs,fileDigest,readJson,relative} from './sdk-flow.mjs';
+import {belowRoot} from './sdk-path.mjs';
 export const PYTHON_BUILD_INPUTS='PYTHON-BUILD-INPUTS.json';
 const sha=value=>/^[a-f0-9]{64}$/.test(value||'');
 export async function readWindowsPythonInstallation(root,{record=path.join(root,PYTHON_BUILD_INPUTS),sha256}={}) {
@@ -25,7 +26,7 @@ export async function readWindowsPythonInstallation(root,{record=path.join(root,
   relative(rel);
   if(!sha(row?.sha256))throw Error('PYTHON_INSTALL_ARTIFACT '+rel);
   const file=path.join(root,rel),real=await fs.realpath(file);
-  if(!real.startsWith(realRoot+path.sep)||await fileDigest(file)!==row.sha256)throw Error('PYTHON_INSTALL_BYTES '+rel);
+  if(!belowRoot(real,realRoot,process.platform)||await fileDigest(file)!==row.sha256)throw Error('PYTHON_INSTALL_BYTES '+rel);
   products.push({path:rel,sha256:row.sha256});
  }
  for(const [rel,row]of Object.entries(facts.files??{})){

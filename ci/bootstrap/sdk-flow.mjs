@@ -6,6 +6,7 @@ import {zipCommand,checkArchiveFormat} from './sdk-archive.mjs';
 import {fstatSync} from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {foldAscii} from './sdk-path.mjs';
 import {spawn, execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {parseArgs} from 'node:util';
@@ -48,7 +49,7 @@ export function relative(value) {
     throw new Error(`INSTALL_PATH ${value}`);
   return value;
 }
-export async function privateRoot(root) {
+export async function privateRoot(root, platform = process.platform) {
   root = path.resolve(root);
   if (root === path.parse(root).root || ['/root/sdks', '/root/.cjv'].some(p => root === p || root.startsWith(p+'/')))
     throw new Error(`SHARED_INSTALL ${root}`);
@@ -56,9 +57,23 @@ export async function privateRoot(root) {
   let parent = root;
   while (true) {
     try {
-      if (await fs.realpath(parent) !== parent) throw new Error(`INSTALL_LINK ${parent}`);
+      // lstat also sees dangling links, which realpath reports as ENOENT.
+      if ((await fs.lstat(parent)).isSymbolicLink()) throw new Error(`INSTALL_LINK ${parent}`);
+      const real = await fs.realpath(parent);
+      if (real !== parent) {
+        if (platform !== 'win32' || foldAscii(real) !== foldAscii(parent))
+          throw new Error(`INSTALL_LINK ${parent}`);
+        // A case-only difference is harmless only when no ancestor is a junction/link.
+        for (let dir = path.dirname(parent); ; dir = path.dirname(dir)) {
+          if ((await fs.lstat(dir)).isSymbolicLink()) throw new Error(`INSTALL_LINK ${dir}`);
+          if (dir === path.dirname(dir)) break;
+        }
+      }
       break;
-    } catch (e) { if (e.code !== 'ENOENT') throw e; parent = path.dirname(parent); }
+    } catch (e) {
+      if (e.code !== 'ENOENT' || parent === path.dirname(parent)) throw e;
+      parent = path.dirname(parent);
+    }
   }
   return root;
 }
@@ -135,13 +150,18 @@ export async function copyOutputs(root, copies, owners = {}) {
       relative(rel);
       if (excluded.some(p => inputRel === p || inputRel.startsWith(p+'/'))) return;
       const dest = path.join(root, rel), stat = await fs.lstat(source);
-      await privateRoot(path.dirname(dest));
       if (stat.isDirectory()) {
-        await fs.mkdir(dest, {recursive: true});
+        await privateRoot(dest);
+        try { await fs.mkdir(dest, {recursive: true}); }
+        catch (e) {
+          if (e.code === 'EEXIST') throw new Error(`INSTALL_CONFLICT ${rel} ${owners[rel]} ${spec.owner}`);
+          throw e;
+        }
         for (const name of (await fs.readdir(source)).sort())
           await copy(path.join(source, name), rel ? rel+'/'+name : name, inputRel ? inputRel+'/'+name : name);
         return;
       }
+      await privateRoot(path.dirname(dest));
       let previous;
       try { previous = await fs.lstat(dest); } catch (e) { if (e.code !== 'ENOENT') throw e; }
       if (previous) throw new Error(`INSTALL_CONFLICT ${rel} ${owners[rel]} ${spec.owner}`);

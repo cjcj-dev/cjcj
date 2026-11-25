@@ -43,6 +43,7 @@ export const DRIVERS = Object.freeze(JSON.parse(fs.readFileSync(new URL('./test-
 export const GATING = Object.freeze([
   'build/sdk/producers/platform_matrix/windows_runtime_capture.test.mjs',
   'ci/bootstrap/sdk-python-source.test.mjs',
+  'ci/bootstrap/sdk-cjdb-python.test.mjs',
   'ci/colour-sdk.test.mjs',
   'build/sdk/producers/release/receive_native_sdk.test.mjs',
   'build/sdk/producers/release/native-release.test.mjs',

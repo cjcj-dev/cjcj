@@ -112,5 +112,86 @@ test('public installer verifies actual fixed archive then calls system ZIP tool 
  const attempt=(await fs.readdir(work)).find(n=>n.startsWith('install-'));assert.ok(attempt);
  const commands=JSON.parse(await fs.readFile(work+'/'+attempt+'/commands.json'));assert.equal(commands.length,1);
  assert.deepEqual(commands[0].argv,[tar,'-xf',archive,'-C',work+'/'+attempt]);assert.equal(commands[0].rc,31);
- assert.equal(await fs.stat(root+'/zip-env').then(()=>true,()=>false),false);
+ for(const file of ['zip-env','zip-path','installer-call/'+(await import('./install-windows-toolchain.mjs')).WINDOWS_TOOLCHAIN.directory])
+  await assert.rejects(fs.lstat(path.join(root,file)),{code:'ENOENT'});
+});
+
+// Limit writes on the two real runner files in the installer child. The
+// second write to ENV fails only after the first chunk has reached disk.
+const exportIoFixture=`
+import fs from 'node:fs/promises';
+import {constants} from 'node:fs';
+import assert from 'node:assert/strict';
+const {GITHUB_PATH,GITHUB_ENV,EXPORT_IO}=process.env,open=fs.open;
+fs.open=async(file,flags,...args)=>{
+ const handle=await open(file,flags,...args);
+ if(file!==GITHUB_PATH&&file!==GITHUB_ENV)return handle;
+ assert.equal(flags,constants.O_WRONLY,'runner files need truncatable write handles');
+ const write=handle.write.bind(handle);
+ let written=0;
+ handle.write=async(buffer,offset,length,position)=>{
+  if(file===GITHUB_ENV&&written&&EXPORT_IO!=='short-write')
+   throw Object.assign(Error('SECOND_EXPORT_WRITE_FAILED'),{rc:73});
+  const result=await write(buffer,offset,Math.min(7,length),position);
+  written+=result.bytesWritten;
+  return result;
+ };
+ if(file===GITHUB_PATH&&EXPORT_IO==='truncate-error')
+  handle.truncate=async()=>{throw Error('FIRST_EXPORT_TRUNCATE_FAILED');};
+ return handle;
+};`;
+
+for(const mode of ['success','short-write','write-error','truncate-error','layout','missing-env','missing-path','missing-command-file','existing'])
+ test('public installer deterministic publication: '+mode,async()=>{
+ const {WINDOWS_TOOLCHAIN:p}=await import('./install-windows-toolchain.mjs');
+ const archive=process.env.WINDOWS_TOOLCHAIN_ARCHIVE_INPUT;assert.ok(archive,'read-only fixed platform archive required');
+ const system=root+'/extract-system-'+mode,tar=system+'/System32/tar.exe';
+ // The public Linux transport fixture substitutes only tar.exe. Extract the
+ // five checked members from the pinned archive with the host ZIP reader.
+ await put(tar,`#!/usr/bin/python3
+import os, sys, zipfile
+with zipfile.ZipFile(sys.argv[2]) as z:
+ for rel in ['bin/clang.exe','bin/clang++.exe','bin/llvm-readobj.exe','x86_64-w64-mingw32/bin/libc++.dll','x86_64-w64-mingw32/bin/libunwind.dll']:
+  if os.environ.get('OMIT_MEMBER') != rel: z.extract('${p.directory}/'+rel, sys.argv[4])
+`);await fs.chmod(tar,0o755);
+  const work=path.join(root,'publish-'+mode),fixed=path.join(work,p.directory),jobEnv=work+'/env',jobPath=work+'/path';
+  const envBefore='BEFORE=一\r\n',pathBefore='précédent\r\n',bin=path.join(fixed,'bin');
+  await put(jobEnv,envBefore);await put(jobPath,pathBefore);
+  if(mode==='existing')await fs.mkdir(fixed); // even an empty directory is owned
+  const env={...process.env,SystemRoot:system,GITHUB_ENV:jobEnv,GITHUB_PATH:jobPath};
+  if(mode==='layout')env.OMIT_MEMBER='bin/clang++.exe';
+  if(mode==='missing-env')delete env.GITHUB_ENV;
+  if(mode==='missing-path')delete env.GITHUB_PATH;
+  if(mode==='missing-command-file')env.GITHUB_ENV=work+'/absent';
+  const nodeArgs=[];
+  if(['short-write','write-error','truncate-error'].includes(mode)){
+   const preload=path.join(work,'export-io.mjs');
+   await put(preload,exportIoFixture);nodeArgs.push('--import',preload);env.EXPORT_IO=mode;
+  }
+  const r=await run('publish-'+mode,[process.execPath,...nodeArgs,child,'installer',work,archive],env);
+  const attempts=(await fs.readdir(work)).filter(name=>name.startsWith('install-'));
+  assert.equal(attempts.length,1);
+  const commands=JSON.parse(await fs.readFile(path.join(work,attempts[0],'commands.json')));
+  assert.equal(commands.length,1);assert.equal(commands[0].rc,0);
+  if(mode==='success'||mode==='short-write'){
+   assert.equal(r.rc,0,r.stderr);
+   assert.deepEqual(await fs.readFile(jobEnv),Buffer.from(envBefore+'CJCJ_WINDOWS_TOOLCHAIN='+fixed+'\n'),'stable toolchain export');
+   assert.deepEqual(await fs.readFile(jobPath),Buffer.from(pathBefore+bin+'\n'));
+   assert.ok((await fs.stat(path.join(fixed,'bin/clang.exe'))).size>0);
+   assert.deepEqual(await fs.readdir(path.join(work,attempts[0])),['commands.json']);
+  }else if(mode==='write-error'||mode==='truncate-error'){
+   assert.equal(r.rc,73,r.stderr);assert.match(r.stderr,/SECOND_EXPORT_WRITE_FAILED/);
+   if(mode==='truncate-error')assert.match(r.stderr,/FIRST_EXPORT_TRUNCATE_FAILED/);
+   assert.deepEqual(await fs.readFile(jobPath),Buffer.from(mode==='write-error'?pathBefore:pathBefore+bin+'\n'));
+   assert.deepEqual(await fs.readFile(jobEnv),Buffer.from(envBefore));
+   await assert.rejects(fs.lstat(fixed),{code:'ENOENT'});
+   assert.ok((await fs.stat(path.join(work,attempts[0],p.directory,'bin/clang.exe'))).size>0);
+  }else{
+   assert.equal(r.rc,1,r.stderr);
+   assert.match(r.stderr,{layout:/clang\+\+\.exe/,existing:/WINDOWS_TOOLCHAIN_EXISTS/,'missing-env':/WINDOWS_TOOLCHAIN_JOB_ENV_REQUIRED/,
+    'missing-path':/WINDOWS_TOOLCHAIN_JOB_ENV_REQUIRED/,'missing-command-file':/ENOENT/}[mode]);
+   assert.deepEqual(await fs.readFile(jobEnv),Buffer.from(envBefore));assert.deepEqual(await fs.readFile(jobPath),Buffer.from(pathBefore));
+   if(mode==='existing')assert.deepEqual(await fs.readdir(fixed),[]);
+   else await assert.rejects(fs.lstat(fixed),{code:'ENOENT'});
+  }
 });
