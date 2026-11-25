@@ -347,7 +347,10 @@ foreach(name libclang_rt-builtins.a libclang_rt-profile.a libclang_rt.fuzzer_no_
  install(FILES "$<TARGET_FILE:finite-native>" DESTINATION lib/${TUPLE} RENAME \${name})
 endforeach()
 `);
-  await command(['cmake','-G','Ninja','-S',nSource,'-B',nBuild,'-DCMAKE_BUILD_TYPE=Release','-DCMAKE_INSTALL_PREFIX='+N],{records});
+  // Install-only reuses the original N tool selection from BUILD-INPUTS.json.
+  const launcher=process.env.GITHUB_ACTIONS==='true'?'sccache':'';
+  await command(['cmake','-G','Ninja','-S',nSource,'-B',nBuild,'-DCMAKE_BUILD_TYPE=Release','-DCMAKE_INSTALL_PREFIX='+N,
+    '-DCMAKE_C_COMPILER_LAUNCHER='+launcher,'-DCMAKE_CXX_COMPILER_LAUNCHER='+launcher],{records});
   await command(['cmake','--build',nBuild,'--target','cangjie-ast-support','finite-native','--parallel','4'],{records});
   await command(['cmake','--install',nBuild],{records});
   native.compilerSource={root:nSource,commit:STD};native.commits.shim=STD;
@@ -356,7 +359,7 @@ endforeach()
   const pythonRoot=root+'/python';for(const rel of ['bin','lib','include','share'])await fs.mkdir(pythonRoot+'/'+rel,{recursive:true});
   await fs.mkdir(root+'/libedit',{recursive:true});
   native.configuration={platform,compiler:nSource,build:nBuild,install:N,commits:native.commits,jobs:4,linkJobs:1,
-    tools:{cmake:'cmake',cc:'/usr/bin/cc',cxx:'/usr/bin/c++',launcher:''},python:pythonRoot,libeditLibraryDirectory:root+'/libedit',llvm:root+'/finite-llvm',runtime:R};
+    tools:{cmake:'cmake',cc:'/usr/bin/cc',cxx:'/usr/bin/c++',launcher},python:pythonRoot,libeditLibraryDirectory:root+'/libedit',llvm:root+'/finite-llvm',runtime:R};
   native.commands=records;
   const prior=JSON.stringify(native);await write(N,'BUILD-INPUTS.json',prior);
   const moduleSource=`export async function pythonConfiguration(){return {executable:'/usr/bin/python3',include:'finite',library:'finite'};}
