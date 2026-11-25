@@ -80,9 +80,8 @@ export async function configureGhaInputs(env=process.env) {
         existing.set(url,source);
       }
     } else {
-      await command(['git','clone','--no-checkout','--filter=blob:none',url,source]);
-      await command(['git','-C',source,'fetch','--depth=1','origin',commit]);
-      await command(['git','-C',source,'checkout','--detach',commit]);
+      // prepareSources clones this checkout locally; it must own every object it advertises.
+      await checkoutExactSource(url,source,commit);
     }
     sources[name]=source;
   }

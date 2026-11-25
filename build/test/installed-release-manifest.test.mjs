@@ -69,3 +69,25 @@ test('native tool release rows preserve original source and actual no-stamp byte
  }
  await verifyInstalledReleaseManifest(f.options);
 });
+
+test('native-output inventory verifies and records both Windows LLVM DLLs', async t=>{
+ const {installedInputs}=await import('../sdk/producers/srcbuild/lib/installed-inputs.mjs');
+ const {sdkPlatform,stdxChirMembers}=await import('../../ci/bootstrap/sdk-platform.mjs');
+ const {stage,write}=await fixture();
+ t.after(()=>fs.rm(stage,{recursive:true,force:true}));
+ const platform='windows_x86_64',native=sdkPlatform(platform),source={repository:'file:///fixture',commit:'b'.repeat(40)};
+ const sources={ast:source,compiler:source,llvm:source,runtime:source};
+ const commands=['compiler','runtime','stdlib'].flatMap(name=>['build','install'].map(step=>({stage:name+'.'+step,exitCode:0})));
+ await write('STAGE-INPUTS.json',JSON.stringify({sources,configuration:{layout:'native-output'},production:{sources,commands}}));
+ const bin='third_party/llvm/bin/',main=bin+native.llvmLibrary,foundation=bin+native.llvmFoundationLibrary;
+ for(const rel of ['lib/'+native.tuple+'/libcangjie-ast-support.a','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',
+   ...stdxChirMembers,'third_party/flatbuffers/bin/flatc.exe',...['llc','llvm-as','llvm-dis','opt'].map(n=>bin+n+'.exe')])await write(rel,rel);
+ for(const rel of ['runtime/lib/'+native.tuple+'/libcangjie-runtime.dll','lib/'+native.tuple+'/libcangjie-runtime.a'])
+   await write(rel,'CJRT-COMMIT:'+source.commit);
+ const targets=await write(main,'targets only'),core=await write(foundation,'CJLLVM-COMMIT:'+source.commit);
+ const {components}=await installedInputs(stage,platform);
+ const artifacts=components.find(row=>row.component==='llvm-cjdb').artifacts;
+ assert.deepEqual(artifacts.filter(row=>row.path.endsWith('.dll')),[targets,core]);
+ await write(main,'CJLLVM-COMMIT:'+'c'.repeat(40));
+ await assert.rejects(installedInputs(stage,platform),/INSTALLED_SOURCE_STAMP/);
+});

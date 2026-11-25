@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {execute, readJson, fileDigest, atomicJson} from './sdk-io.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {nativeSymbolRows} from './std-runtime-colour.mjs';
+import {llvmLibraryNames, inspectLlvmSource} from './llvm-library-source.mjs';
 import {verifyLlvmDylib} from './sdk-native-capi.mjs';
 import {verifyCjdbPythonConfiguration, verifyCjdbPythonInstallation, pythonSourceInputs, verifyRelocatedCjdbPython} from './sdk-cjdb-python.mjs';
 import {runtimeInputsForArtifact,RUNTIME_INPUTS} from '../../build/lib/runtime-source-inputs.mjs';
@@ -17,10 +18,10 @@ export async function verifyInstalledBitcodeReaders({install,platform,work,commi
     const native=sdkPlatform(platform),root=path.join(install,'third_party/llvm');
     const env={...process.env,[native.loader]:[path.join(root,native.llvmDirectory),path.join(install,'tools/lib'),
       process.env[native.loader]].filter(Boolean).join(path.delimiter)};
-    const library=path.join(root,native.llvmDirectory,native.llvmLibrary);
-    const stamps=[...new Set([...((await fs.readFile(library)).toString('latin1')).matchAll(/CJLLVM-COMMIT:([0-9a-z_-]+)/g)].map(m=>m[1]))];
+    const libraries=llvmLibraryNames(native).map(name=>path.join(root,native.llvmDirectory,name));
+    const {stamps,matches}=await inspectLlvmSource(libraries,commit);
     console.log('LLVM_READER_SOURCE_ASSERTION_REACHED '+JSON.stringify(stamps));
-    if(stamps.length!==1||stamps[0]!==commit)throw new Error('LLVM_READER_SOURCE');
+    if(!matches)throw new Error('LLVM_READER_SOURCE');
     // Round-trip actual bitcode through the installed readers, rather than
     // treating --version or a historical reader certificate as qualification.
     const ir=path.join(work,'reader.ll'),bc=path.join(work,'reader.bc'),decoded=path.join(work,'reader-decoded.ll');
@@ -107,7 +108,7 @@ export async function checkNativeInput(request) {
       facts.pythonInstallation=await verifyCjdbPythonInstallation(request.python.root,root,execute,platform,request.python.executable);
       facts.pythonSource=await pythonSourceInputs({...request.python,nativeRoot:root,platform,selected:facts.pythonConfiguration.selected});
     }
-    facts.artifacts=await Promise.all(['third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,'tools/bin/cjdb'+native.exe,'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o']
+    facts.artifacts=await Promise.all([...llvmLibraryNames(native).map(name=>'third_party/llvm/'+native.llvmDirectory+'/'+name),'tools/bin/cjdb'+native.exe,'third_party/llvm/fixed-llc/cjselfhost_llvmshim.o']
       .map(async relative=>({path:relative,sha256:await fileDigest(path.join(install,relative))})));
   } else if(kind==='ast') {
     facts.astInstallation=await readInstalledNativeAst({install,buildResult:request.buildResult,platform,commit,llvmCommit:request.llvmCommit});

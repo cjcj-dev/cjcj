@@ -11,6 +11,7 @@ export function sdkPlatform(platform) {
     shared: os === 'darwin' ? '.dylib' : os === 'win32' ? '.dll' : '.so',
     loader: os === 'darwin' ? 'DYLD_LIBRARY_PATH' : os === 'win32' ? 'PATH' : 'LD_LIBRARY_PATH',
     llvmLibrary: os === 'darwin' ? 'libLLVM.dylib' : os === 'win32' ? 'libLLVM-15.dll' : 'libLLVM-15.so',
+    llvmFoundationLibrary: os === 'win32' ? 'libLLVM-Foundation-15.dll' : null,
     llvmDirectory: os === 'win32' ? 'bin' : 'lib',
     nativeTargets: os === 'win32' ? ['lldb', 'all', 'install'] : ['lldb', 'cjdb', 'lldb-boundscheck', 'lldb-cangjie-lsp', 'lldb-cangjie-frontend', 'all', 'install'],
     linker: os === 'darwin' ? 'ld64.lld' : 'ld.lld'};

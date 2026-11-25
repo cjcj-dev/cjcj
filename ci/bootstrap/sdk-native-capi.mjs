@@ -8,6 +8,7 @@ import {execute, fileDigest, readJson, atomicJson, canonical, objectId, reject} 
 import {privateRoot} from './sdk-flow.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 import {verifyEntryFormat} from './sdk-entry-producer.mjs';
+import {llvmLibraryNames, inspectLlvmSource} from './llvm-library-source.mjs';
 const source = fileURLToPath(new URL('./native-qualification/', import.meta.url));
 
 export async function nativeCapiProbe({platform, tools, directory, jobs, env=process.env}) {
@@ -40,22 +41,30 @@ export async function nativeCapiProbe({platform, tools, directory, jobs, env=pro
   await atomicJson(path.join(root,'probe-inputs.json'),{identity,sha256});
   return {binary,identity,sha256};
 }
-export async function verifyLlvmDylib({directory, llvmSha, sha256, platform, tools, probeDirectory, env, buildEnv=env, jobs}) {
-  const library = path.join(directory, sdkPlatform(platform).llvmLibrary);
+export async function verifyLlvmLibraryInputs({directory, llvmSha, sha256, platform}) {
+  const libraries = llvmLibraryNames(sdkPlatform(platform)).map(name => path.join(directory, name));
+  const [library] = libraries;
   // Native CMake installs the library directly. Source and bytes are checked
   // against the caller's fixed input; target registration is observed below.
   if (!/^[a-f0-9]{40}$/.test(llvmSha || '')) reject('LLVM_DYLIB_SOURCE',platform,'full LLVM source commit required');
   if (!/^[a-f0-9]{64}$/.test(sha256 || '') || await fileDigest(library) !== sha256)
     reject('LLVM_DYLIB_SHA256',platform,'LLVM_DYLIB_SHA256_MISMATCH');
-  const stamps = new Set([...((await fs.readFile(library)).toString('latin1')).matchAll(/CJLLVM-COMMIT:([0-9a-z-]+)/g)].map(match => match[1]));
-  if (stamps.size !== 1 || !stamps.has(llvmSha)) reject('LLVM_DYLIB_STAMP', platform, 'LLVM_DYLIB_SOURCE_STAMP_MISMATCH');
-  await verifyEntryFormat(library,platform);
+  const {matches} = await inspectLlvmSource(libraries, llvmSha);
+  if (!matches) reject('LLVM_DYLIB_STAMP', platform, 'LLVM_DYLIB_SOURCE_STAMP_MISMATCH');
+  for (const file of libraries) await verifyEntryFormat(file,platform);
+  return libraries;
+}
+export async function verifyLlvmDylib({directory, llvmSha, sha256, platform, tools, probeDirectory, env, buildEnv=env, jobs}) {
+  const libraries = await verifyLlvmLibraryInputs({directory, llvmSha, sha256, platform});
+  const [library, foundation] = libraries;
   const probe = await nativeCapiProbe({platform,tools,directory:probeDirectory,jobs,env:buildEnv});
   console.log(`LLVM_NATIVE_CAPI_PROBE_READY ${canonical({binary:probe.binary,sha256:probe.sha256}).trim()}`);
-  const result = await execute(probe.binary,[library],{env});
+  const result = await execute(probe.binary,libraries,{env});
   const observed = JSON.parse(result.stdout);
   console.log(`LLVM_NATIVE_CAPI_OBSERVED ${canonical(observed).trim()}`);
-  if (await fs.realpath(observed.loaded) !== await fs.realpath(library) || observed.targets !== 15
+  if (await fs.realpath(observed.loaded) !== await fs.realpath(library)
+    || (foundation && (!observed.foundation || await fs.realpath(observed.foundation) !== await fs.realpath(foundation)))
+    || observed.targets !== 15
     || observed.context_call !== 'ok' || await fileDigest(observed.loaded) !== sha256)
     reject('LLVM_DYLIB_LOADED_ORIGIN', platform, 'actual C API result differs from the original library');
   if (canonical(observed.lookups?.map(row => [row.rc, row.name])) !== canonical([[0,'x86-64'],[0,'arm'],[0,'aarch64']]))

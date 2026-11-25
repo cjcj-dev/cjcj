@@ -5,6 +5,7 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <optional>
 #else
 #include <dlfcn.h>
 #endif
@@ -18,30 +19,54 @@ static std::string json(const std::string& value) {
     }
     return result + "\"";
 }
+#ifdef _WIN32
+class Module {
+    HMODULE handle;
+public:
+    explicit Module(const fs::path& file) : handle(LoadLibraryExW(file.c_str(), nullptr,
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32)) {
+        if (!handle) throw std::runtime_error("LLVM_DYLIB_LOAD_FAILED error=" + std::to_string(GetLastError()));
+    }
+    Module(const Module&) = delete;
+    Module& operator=(const Module&) = delete;
+    ~Module() { FreeLibrary(handle); }
+    void* symbol(const std::string& name) const {
+        auto address = GetProcAddress(handle, name.c_str());
+        if (!address) throw std::runtime_error("LLVM_DYLIB_TARGETS_MISSING " + name);
+        return reinterpret_cast<void*>(address);
+    }
+};
+
+static fs::path symbolOrigin(void* address) {
+    HMODULE origin = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(address), &origin)) throw std::runtime_error("LLVM_DYLIB_ORIGIN_UNRESOLVED");
+    std::wstring filename(32768, L'\0');
+    auto size = GetModuleFileNameW(origin, filename.data(), static_cast<DWORD>(filename.size()));
+    if (!size || size == filename.size()) throw std::runtime_error("LLVM_DYLIB_ORIGIN_UNRESOLVED");
+    filename.resize(size);
+    return fs::canonical(filename);
+}
+#endif
 int main(int argc, char** argv) {
     try {
+#ifdef _WIN32
+        if (argc != 2 && argc != 3) throw std::runtime_error("usage: cjcj-llvm-capi LIBRARY [FOUNDATION]");
+#else
         if (argc != 2) throw std::runtime_error("usage: cjcj-llvm-capi LIBRARY");
+#endif
         const auto library = fs::canonical(fs::u8path(argv[1]));
 #ifdef _WIN32
-        // Load dependent DLLs from this authenticated library's directory and
-        // the system directory, rather than the caller's working directory.
-        auto handle = LoadLibraryExW(library.c_str(), nullptr,
-            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
-        if (!handle) throw std::runtime_error("LLVM_DYLIB_LOAD_FAILED error=" + std::to_string(GetLastError()));
-        auto symbol = [&](const std::string& name) -> void* {
-            auto address = GetProcAddress(handle, name.c_str());
-            if (!address) throw std::runtime_error("LLVM_DYLIB_TARGETS_MISSING " + name);
-            return reinterpret_cast<void*>(address);
-        };
-        HMODULE origin = nullptr;
-        auto address = symbol("LLVMContextCreate");
-        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                reinterpret_cast<LPCWSTR>(address), &origin)) throw std::runtime_error("LLVM_DYLIB_ORIGIN_UNRESOLVED");
-        std::wstring filename(32768, L'\0');
-        auto size = GetModuleFileNameW(origin, filename.data(), static_cast<DWORD>(filename.size()));
-        if (!size || size == filename.size()) throw std::runtime_error("LLVM_DYLIB_ORIGIN_UNRESOLVED");
-        filename.resize(size);
-        const auto loaded = fs::canonical(filename);
+        Module targetsModule(library);
+        std::optional<Module> foundationModule;
+        const auto foundation = argc == 3 ? fs::canonical(fs::u8path(argv[2])) : library;
+        if (argc == 3) foundationModule.emplace(foundation);
+        const auto& core = foundationModule ? *foundationModule : targetsModule;
+        auto symbol = [&](const std::string& name) { return targetsModule.symbol(name); };
+        auto coreSymbol = [&](const std::string& name) { return core.symbol(name); };
+        const auto loaded = symbolOrigin(symbol("LLVMInitializeX86TargetInfo"));
+        const auto loadedCore = symbolOrigin(coreSymbol("LLVMContextCreate"));
+        if (loadedCore != foundation) throw std::runtime_error("LLVM_DYLIB_LOADED_PATH_MISMATCH " + loadedCore.u8string());
 #else
         auto handle = dlopen(library.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!handle) throw std::runtime_error(std::string("LLVM_DYLIB_LOAD_FAILED ") + dlerror());
@@ -51,6 +76,7 @@ int main(int argc, char** argv) {
             if (!address) throw std::runtime_error("LLVM_DYLIB_TARGETS_MISSING " + name);
             return address;
         };
+        const auto& coreSymbol = symbol;
         Dl_info info{};
         if (!dladdr(symbol("LLVMContextCreate"), &info) || !info.dli_fname)
             throw std::runtime_error("LLVM_DYLIB_ORIGIN_UNRESOLVED");
@@ -64,9 +90,15 @@ int main(int argc, char** argv) {
                 ++targets;
             }
         }
-        auto context = reinterpret_cast<void* (*)()>(symbol("LLVMContextCreate"))();
+        auto context = reinterpret_cast<void* (*)()>(coreSymbol("LLVMContextCreate"))();
         if (!context) throw std::runtime_error("LLVM_DYLIB_CONTEXT_FAILED");
-        reinterpret_cast<void (*)(void*)>(symbol("LLVMContextDispose"))(context);
+        reinterpret_cast<void (*)(void*)>(coreSymbol("LLVMContextDispose"))(context);
+#ifdef _WIN32
+        // A successful lookup never returns an error message; check this export too.
+        const auto disposeMessage = reinterpret_cast<void (*)(char*)>(coreSymbol("LLVMDisposeMessage"));
+#else
+        auto disposeMessage = [&](char* message) { reinterpret_cast<void (*)(char*)>(coreSymbol("LLVMDisposeMessage"))(message); };
+#endif
         std::string lookups = "[";
         for (const auto* triple : {"x86_64-unknown-linux-gnu", "arm-unknown-linux-gnueabi", "aarch64-unknown-linux-gnu"}) {
             void* target = nullptr;
@@ -76,14 +108,15 @@ int main(int argc, char** argv) {
             if (lookups.size() > 1) lookups += ',';
             lookups += "{\"triple\":" + json(triple) + ",\"rc\":" + std::to_string(rc)
                 + ",\"name\":" + json(name) + ",\"error\":" + json(error ? error : "") + "}";
-            if (error) reinterpret_cast<void (*)(char*)>(symbol("LLVMDisposeMessage"))(error);
+            if (error) disposeMessage(error);
         }
         lookups += ']';
-        std::cout << "{\"loaded\":" << json(loaded.u8string())
-                  << ",\"targets\":" << targets << ",\"context_call\":\"ok\",\"lookups\":" << lookups << "}\n";
+        std::cout << "{\"loaded\":" << json(loaded.u8string());
 #ifdef _WIN32
-        FreeLibrary(handle);
-#else
+        if (foundationModule) std::cout << ",\"foundation\":" << json(loadedCore.u8string());
+#endif
+        std::cout << ",\"targets\":" << targets << ",\"context_call\":\"ok\",\"lookups\":" << lookups << "}\n";
+#ifndef _WIN32
         dlclose(handle);
 #endif
         return 0;

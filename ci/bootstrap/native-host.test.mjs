@@ -194,3 +194,49 @@ test('selected host rejects a different real compiler version before consumption
   platform:targetForHost().spec.key,selectedHost:true}),/compiler mismatch: requested=.* actual=/);
  console.log('ACTUAL_HOST_VERSION_REJECTION_REACHED');
 });
+
+test('POSIX configured source can be cloned locally at its exact pin', {skip:process.platform==='win32'}, async t=>{
+ const {pathToFileURL}=await import('node:url');
+ const {prepareSources}=await import('./sdk-flow.mjs');
+ const {readSourcePins}=await import('../native-llvm-inputs.mjs');
+ await fs.mkdir(root,{recursive:true});
+ const work=await fs.mkdtemp(path.join(await fs.realpath(root),'stage0-handoff-'));
+ t.after(()=>fs.rm(work,{force:true,recursive:true}));
+ const inputs=path.join(work,'inputs'),workspace=path.join(work,'workspace');
+ // The next source is deliberately non-reusable, stopping configure after LLVM
+ // without needing an SDK. Its repo also serves as our local upstream.
+ const upstream=path.join(workspace,'native-sources/runtime');
+ await fs.mkdir(upstream,{recursive:true});
+ const git=(cwd,...args)=>{
+   const r=spawnSync('git',['-C',cwd,...args],{encoding:'utf8'});
+   assert.equal(r.status,0,r.stderr);return r.stdout.trim();
+ };
+ git(upstream,'init','-q');git(upstream,'config','uploadpack.allowFilter','true');
+ git(upstream,'remote','add','origin','file:///unused-runtime');
+ const commit=async value=>{
+   await fs.writeFile(path.join(upstream,'file'),value);
+   git(upstream,'add','file');git(upstream,'-c','user.name=Fixture','-c','user.email=fixture@localhost','commit','-qm',value);
+   return git(upstream,'rev-parse','HEAD');
+ };
+ await commit('parent');const pin=await commit('selected');
+ await commit('unselected blob'); // advertised branch tip, absent in the old partial clone
+ await fs.mkdir(path.join(inputs,'modules'),{recursive:true});
+ const platform=hostPlatform();
+ await fs.writeFile(path.join(inputs,'locations.json'),JSON.stringify({platform,hleDependencies:'hle.json'}));
+ const member=name=>({path:name,source:'fixture',version:'1'});
+ await fs.writeFile(path.join(inputs,'hle.json'),JSON.stringify({platform,node:member('locations.json'),modules:member('modules'),cjbind:member('locations.json')}));
+ const env={...process.env,CANGJIE_WORKSPACE:workspace,GITHUB_WORKSPACE:work,CJCJ_NATIVE_INPUT_ROOT:inputs,
+   CJCJ_BOOTSTRAP_BASE:work,CJCJ_NATIVE_LLVM_REF:pin,CJCJ_NATIVE_RUNTIME_REF:pin,CJCJ_NATIVE_PAIR_SELECTION:'explicit',
+   GIT_ALLOW_PROTOCOL:'file',GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'url.'+pathToFileURL(upstream).href+'.insteadOf',
+   GIT_CONFIG_VALUE_0:readSourcePins().llvm.LLVM_URL,CJCJ_SRCBUILD_SOURCE_MIRRORS:'',CJCJ_SRCBUILD_REQUIRE_MIRRORS:'0'};
+ delete env.GITHUB_ENV;delete env.CJCJ_NATIVE_RUNTIME_INSTALL;delete env.CJCJ_PINNED_RUNTIME_GIT_DIR;
+ const configured=spawnSync(process.execPath,[new URL('./configure-gha-inputs.mjs',import.meta.url).pathname],{env,encoding:'utf8'});
+ assert.equal(configured.status,1);assert.match(configured.stderr,/GHA_NATIVE_SOURCE_REUSE_CHANGED runtime/);
+ const source=path.join(workspace,'native-sources/llvm'),checkout=path.join(work,'private');
+ const repo={root:source,checkout,commit:pin,tree:git(source,'rev-parse','HEAD^{tree}')};
+ await prepareSources({llvm:repo},[]);
+ assert.equal(git(checkout,'rev-parse','HEAD'),pin);
+ assert.equal(await fs.readFile(path.join(checkout,'file'),'utf8'),'selected');
+ assert.equal(git(source,'rev-parse','--is-shallow-repository'),'true');
+ assert.equal(spawnSync('git',['-C',source,'config','--get','remote.origin.promisor']).status,1);
+});

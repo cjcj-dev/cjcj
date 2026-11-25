@@ -1,4 +1,5 @@
 #!/usr/bin/env zx
+import {llvmLibraryNames, inspectLlvmSource} from '../../../../../ci/bootstrap/llvm-library-source.mjs';
 import {stdxChirMembers} from '../../../../../ci/bootstrap/sdk-platform.mjs';
 // The package describes the directory it archives, never the current checkout
 // or a CI-provided expected tuple. Existing producer fields stay intact.
@@ -148,12 +149,14 @@ export async function installedInputs(sdk,platform,{checkArtifact}={}){
     const selected=production.sources;
     if(selected?.compiler?.commit!==stage.sources.ast.commit || selected?.llvm?.commit!==stage.sources.llvm?.commit)
       throw Error('INSTALLED_NATIVE_SOURCE');
-    await stamped('third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,'CJLLVM-COMMIT',selected.llvm.commit);
+    const libraries=llvmLibraryNames(native).map(name=>'third_party/llvm/'+native.llvmDirectory+'/'+name);
+    const {matches}=await inspectLlvmSource(libraries.map(rel=>path.join(sdk,rel)),selected.llvm.commit);
+    if(!matches)throw Error('INSTALLED_SOURCE_STAMP '+libraries.join(', '));
     rows.push({component:'ast-support',source:source(stage.sources.ast),build:{commands:build},
       artifacts:await Promise.all(['lib/'+native.tuple+'/libcangjie-ast-support.a','schema/StdAstFormat.fbs',
         'include/flatbuffers/StdAstFormat_generated.h',...stdxChirMembers,'third_party/flatbuffers/bin/flatc'+native.exe].map(rel=>artifact(sdk,rel,undefined,checkArtifact)))});
     rows.push({component:'llvm-cjdb',source:source(selected.llvm),build:{commands:build},
-      artifacts:await Promise.all(['third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,
+      artifacts:await Promise.all([...libraries,
         ...['llc','llvm-as','llvm-dis','opt'].map(name=>'third_party/llvm/bin/'+name+native.exe)].map(rel=>nativeProduct(sdk,rel,undefined,checkArtifact)))});
   }
   if(stage?.compilerFile){
