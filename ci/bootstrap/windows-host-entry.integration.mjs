@@ -40,14 +40,15 @@ elif name=='llc.exe':
   time.sleep(60)
  time.sleep(.01);first=stamp();time.sleep(.01);last=stamp()
  (root/'llc-process.json').write_text(json.dumps(dict(pid=os.getpid(),parent=os.getppid(),start=first,end=last)))
- print('synthetic llc command output')
+ print('synthetic llc command output',os.getpid())
  if case=='llc':sys.exit(17)
 elif name=='tracerpt.exe':
  if case=='convert':sys.exit(19)
  p=json.loads((root/'llc-process.json').read_text());pid=p['pid'];lib='C:'+str(root/'inputs/host/third_party/llvm/bin/libLLVM-15.dll');exe='C:'+str(root/'inputs/host/third_party/llvm/bin/llc.exe')
  def row(provider,opcode,when,data):return (provider,opcode,when,data)
  h='68fdd900-4a3e-11d1-84f4-0000f80464e3';pr='3d6fa8d0-fe05-11d0-9dda-00c04fd7ba7c';im='2cb15d1d-5fc1-11d2-abe1-00a0c911f518'
- rows=[row(h,0,p['start'],dict(EventsLost=1 if case=='loss' else 0,BuffersLost=0,EndTime=1)),
+ lost=case=='loss' or (case=='recover' and pathlib.Path.cwd().name!='windows-llvm-trace-attempt-3')
+ rows=[row(h,0,p['start'],dict(EventsLost=int(lost),BuffersLost=0,EndTime=1)),
  row(pr,1,p['start'],dict(ProcessId=pid,ParentId=p['parent'],UniqueProcessKey=123,ImageFileName='llc.exe')),
  row(im,10,p['start'],dict(ProcessId=pid,FileName=exe)),
  row(im,3 if case=='rundown' else 10,p['start'],dict(ProcessId=pid+1 if case=='pid' else pid,FileName='C:/other/libLLVM-15.dll' if case=='dll' else lib)),
@@ -57,10 +58,10 @@ elif name=='tracerpt.exe':
  if case=='noexe':del rows[2]
  if case=='device':rows[3][3]['FileName']=r'\Device\UnknownVolume\libLLVM-15.dll'
  text='<Events xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
- for provider,op,when,data in rows:
-  text+='<Event><System><Provider Guid="{'+provider+'}"/><Opcode>'+str(op)+'</Opcode><TimeCreated SystemTime="'+when+'"/><Execution ProcessID="999"/></System><EventData>'
+ for guid,op,when,data in rows:
+  text+='<Event><System><Provider Guid="{9e814aad-3204-11d2-9a82-006008a86939}"/><Opcode>'+str(op)+'</Opcode><TimeCreated SystemTime="'+when+'"/><Execution ProcessID="999"/></System><EventData>'
   for k,v in data.items():text+='<Data Name="'+k+'">'+html.escape(str(v))+'</Data>'
-  text+='</EventData></Event>'
+  text+='</EventData><ExtendedTracingInfo xmlns="http://schemas.microsoft.com/win/2004/08/events/trace"><EventGuid>{'+guid+'}</EventGuid></ExtendedTracingInfo></Event>'
  text+='</Events>'
  pathlib.Path(sys.argv[sys.argv.index('-o')+1]).write_text('<malformed' if case=='xml' else text)
  pathlib.Path(sys.argv[sys.argv.index('-summary')+1]).write_text('synthetic summary; decoder must use event payload')
@@ -88,9 +89,10 @@ async function fixture(arm){
  if(arm==='ast'){
   await fs.mkdir(work+'/workspace',{recursive:true});
   await fs.writeFile(work+'/workspace/.source-selection.json',JSON.stringify({compiler:{url:'file:///fixture-ast',tag:'a'.repeat(40)}}));
-  locations.installations={llvm:{install:'host',buildResult:'llvm.json'},ast:{install:'host',buildResult:'ast.json'}};
-  await fs.writeFile(work+'/inputs/llvm.json',JSON.stringify({commits:{compiler:'b'.repeat(40),llvm:env.CJCJ_NATIVE_LLVM_REF}}));
-  await fs.writeFile(work+'/inputs/ast.json','{}');
+  const component={install:'host',buildResult:'host/BUILD-INPUTS.json'};
+  locations.installations={llvm:component,ast:component};
+  await fs.writeFile(host+'/BUILD-INPUTS.json',JSON.stringify({platform:locations.platform,configuration:'Release',
+   commits:{compiler:'b'.repeat(40),llvm:env.CJCJ_NATIVE_LLVM_REF}}));
  }
  await fs.writeFile(work+'/inputs/locations.json',JSON.stringify(locations));
  const cfg={env,nativePath:process.env.PATH,python:'/usr/bin/python3',download:{version,archive:'host.tar.gz',
@@ -135,6 +137,10 @@ test('public host preparation consumes collector decoded events and exports the 
  assert.match(r.stdout,/NATIVE_HOST_SELECTED/);
  assert.match(await fs.readFile(f.work+'/.srcbuild/host-execution/windows-llvm-trace/parse-events.stdout','utf8'),/TRACE_XML_EVENTS 5/);
  const trace=JSON.parse(await fs.readFile(f.work+'/.srcbuild/host-execution/windows-llvm-trace/capture.json'));
+ const tools=(await fs.readFile(f.work+'/tool-events.jsonl','utf8')).trim().split('\n').map(JSON.parse);
+ const start=tools.find(e=>e.name==='logman.exe'&&e.argv[1]==='start');
+ assert.deepEqual(start.argv.slice(2),['NT Kernel Logger','-p','Windows Kernel Trace','(process,img)','-bs','1024',
+  '-nb','16','64','-o',f.work+'/.srcbuild/host-execution/windows-llvm-trace/host-llvm.etl','-ets']);
  assert.equal(trace.observation.status,'DECODED');assert.equal(trace.observation.pid,trace.execution.pid);
  assert.equal(trace.commands.find(x=>x.argv[0]==='/usr/bin/python3'||x.argv[0]==='python').rc,0);
  assert.equal(trace.commands.filter(x=>x.record==='host-llvm.json').length,1);
@@ -142,6 +148,22 @@ test('public host preparation consumes collector decoded events and exports the 
  assert.match(await fs.readFile(f.work+'/github.env','utf8'),new RegExp('CJCJ_BOOTSTRAP_BASE=C:'+f.work+'/inputs/host'));
  const configured=await f.run('configure');assert.equal(configured.rc,1);assert.match(configured.stderr,/GHA_HLE_ARTIFACT_PATH/);
  console.log('WINDOWS_HOST_CONFIG_BOUNDARY_REACHED missing-real-HLE; synthetic chain only');
+});
+test('selector preserves lossy captures and consumes stdout and stderr from the successful attempt',async()=>{
+ const f=await fixture('recover'),r=await f.run('select');
+ assert.equal(r.rc,0,r.stderr);
+ const row=JSON.parse(r.stdout.split('SELECTED_EXECUTION ')[1]);
+ const base=f.work+'/.srcbuild/host-execution/windows-llvm-trace';
+ for(const dir of [base,base+'-attempt-2']){
+  const capture=JSON.parse(await fs.readFile(dir+'/capture.json'));
+  assert.equal(capture.error,'TRACE_EVENTS_LOST');
+  assert.ok((await fs.stat(dir+'/host-llvm.etl')).size>0);
+ }
+ const winner=base+'-attempt-3';
+ assert.equal(row.trace.record,'C:'+winner+'/capture.json');
+ assert.deepEqual(row.trace.observation.loss,{events:0,buffers:0});
+ assert.equal(row.stdout,'synthetic llc command output '+row.pid+'\n');
+ assert.equal(row.stderr,'C:'+winner+'/host-llvm.stderr');
 });
 for(const [arm,expected]of [['dll','TRACE_LLVM_LOAD_MISMATCH'],['pid','TRACE_LLVM_LOAD_MISMATCH'],
  ['loss','TRACE_EVENTS_LOST'],['reuse','TRACE_PROCESS_LIFETIME'],['rundown','TRACE_LLVM_LOAD_MISMATCH'],

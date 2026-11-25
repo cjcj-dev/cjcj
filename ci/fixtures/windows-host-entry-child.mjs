@@ -4,6 +4,7 @@
 // compiler-version check and public callers are the actual product modules.
 import {mock} from 'node:test';
 import fs from 'node:fs/promises';
+import syncFs from 'node:fs';
 import path from 'node:path';
 import * as child from 'node:child_process';
 import {promisify} from 'node:util';
@@ -18,6 +19,10 @@ for(const name of ['readFile','writeFile','appendFile','mkdir','stat','lstat','o
 mapped.rename=(a,b)=>fs.rename(physical(a),physical(b));
 mapped.realpath=async file=>{const result=await fs.realpath(physical(file));return physical(file)!==file?virtual(result):result;};
 mock.module('node:fs/promises',{defaultExport:mapped,namedExports:mapped});
+// buildConfig reads the workspace source selection synchronously.
+const mappedSync={...syncFs,existsSync:file=>syncFs.existsSync(physical(file)),
+ readFileSync:(file,...args)=>syncFs.readFileSync(physical(file),...args)};
+mock.module('node:fs',{defaultExport:mappedSync,namedExports:mappedSync});
 const paths={...path,isAbsolute:value=>/^[cC]:[\\/]/.test(value)||path.isAbsolute(value),
  resolve:(...args)=>{if(args.some(a=>typeof a==='string'&&/^[cC]:[\\/]/.test(a)))return virtual(path.resolve(...args.map(physical)));return path.resolve(...args);}};
 mock.module('node:path',{defaultExport:paths,namedExports:paths});
@@ -40,7 +45,13 @@ if(mode==='configure'){
   const at=line.indexOf('=');return[line.slice(0,at),line.slice(at+1)];}));
  Object.assign(process.env,exported);
 }
-const entry=new URL(mode==='configure'?'../bootstrap/configure-gha-inputs.mjs':'../bootstrap/prepare-native-host.mjs',import.meta.url);
-process.argv[1]=entry.pathname;
-console.log('SYNTHETIC_WINDOWS_APPARATUS actualPublicEntry='+entry.pathname);
-await import(pathToFileURL(entry.pathname));
+if(mode==='select'){
+ const {selectNativeHost}=await import('../bootstrap/select-native-host.mjs');
+ const selected=await selectNativeHost(config.env.CJCJ_NATIVE_INPUT_ROOT,config.env.GITHUB_WORKSPACE+'/.srcbuild/host-execution');
+ console.log('SELECTED_EXECUTION '+JSON.stringify(selected.hostLlvm.execution));
+}else{
+ const entry=new URL(mode==='configure'?'../bootstrap/configure-gha-inputs.mjs':'../bootstrap/prepare-native-host.mjs',import.meta.url);
+ process.argv[1]=entry.pathname;
+ console.log('SYNTHETIC_WINDOWS_APPARATUS actualPublicEntry='+entry.pathname);
+ await import(pathToFileURL(entry.pathname));
+}

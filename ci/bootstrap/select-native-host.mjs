@@ -15,6 +15,19 @@ import {nativeInstallationLocations} from './native-installation-locations.mjs';
 import {readInstalledNativeAst} from './installed-native-ast.mjs';
 import {captureWindowsHostLlvm} from './native-windows-llvm-trace.mjs';
 const execute=promisify(execFile);
+export async function captureWindowsHostLlvmWithRetry({work,...options},signal,capture=captureWindowsHostLlvm) {
+  for(let attempt=1;;attempt++) {
+    signal?.throwIfAborted();
+    const traceWork=path.join(work,attempt===1?'windows-llvm-trace':'windows-llvm-trace-attempt-'+attempt);
+    try {
+      const trace=await capture({...options,work:traceWork},signal);
+      return {trace,traceWork};
+    } catch(error) {
+      if(error?.message!=='TRACE_EVENTS_LOST'||attempt===3)throw error;
+    }
+  }
+}
+
 export async function selectNativeHost(inputRoot, work, env=process.env, signal) {
   signal?.throwIfAborted();
   const pair=nativePair(env);if(!pair)throw new Error('NATIVE_HOST_EXPLICIT_PAIR_REQUIRED');
@@ -77,8 +90,7 @@ export async function selectNativeHost(inputRoot, work, env=process.env, signal)
   if(native.os==='win32') {
     const system=env.SystemRoot||env.SYSTEMROOT;
     if(!system)throw Error('WINDOWS_TRACE_SYSTEM_ROOT_REQUIRED');
-    const traceWork=path.join(work,'windows-llvm-trace');
-    const trace=await captureWindowsHostLlvm({host:host.install,work:traceWork,env:probeEnv,
+    const {trace,traceWork}=await captureWindowsHostLlvmWithRetry({host:host.install,work,env:probeEnv,
       tools:{logman:path.join(system,'System32/logman.exe'),tracerpt:path.join(system,'System32/tracerpt.exe')}},signal);
     const observed=trace.observation,row=trace.execution;
     // Consume the collector's same-spawn decoded observation. Unknown/raw-only

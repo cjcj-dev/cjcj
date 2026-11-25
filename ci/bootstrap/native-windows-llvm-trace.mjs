@@ -26,7 +26,7 @@ export function windowsTraceCommands(work,tools) {
   const etl=path.join(work,'host-llvm.etl');
   return {
     provider:[tools.logman,'query','providers','Windows Kernel Trace'],
-    start:[tools.logman,'start','NT Kernel Logger','-p','Windows Kernel Trace','(process,img)','-o',etl,'-ets'],
+    start:[tools.logman,'start','NT Kernel Logger','-p','Windows Kernel Trace','(process,img)','-bs','1024','-nb','16','64','-o',etl,'-ets'],
     stop:[tools.logman,'stop','NT Kernel Logger','-ets'],
     decode:[tools.tracerpt,etl,'-o',path.join(work,'host-llvm.xml'),'-of','XML',
       '-summary',path.join(work,'host-llvm-summary.txt')],
