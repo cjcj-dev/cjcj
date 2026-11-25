@@ -7,6 +7,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {prepareStdDependencies, stdDependencySources} from '../../../../../ci/bootstrap/stdlib-build.mjs';
 import {prepareWindowsLlvmSource} from '../../../../srcbuild/stages/fetch.mjs';
 import {putLlvmFolders, putLlvmWindowsFixes} from '../../../../test/fixtures/windows-llvm-source.mjs';
 
@@ -104,6 +105,148 @@ test('fresh runner restores outputs over a pinned Git checkout of the recorded c
   assert.equal(await fs.readFile(path.join(f.root, nested, 'src/compiler.cj'), 'utf8'), 'pinned compiler source\n');
   assert.equal(await fs.readFile(path.join(f.root, nested, 'target/release/bin/cjc'), 'utf8'), '#!/bin/sh\necho built\n');
   assert.equal(await fs.readFile(path.join(f.root, 'cjpm.toml'), 'utf8'), 'version = "0.0.2"\n');
+});
+
+async function stdFixture(t) {
+  const f = await fixture(t);
+  git(f.root, 'restore', 'cjpm.toml');
+  const work = path.join(f.root, '.srcbuild/workspace');
+  const runtime = path.join(work, 'native-sources/runtime');
+  const upstream = path.join(f.dir, 'runtime-origin');
+  const commit = await repository(upstream, {'stdlib/build.py': '# tracked runtime file\n'});
+  git(f.root, 'clone', '-q', upstream, runtime);
+  const deps = stdDependencySources();
+  for (const [name, files] of Object.entries({
+    bounds: {'include/securec.h': 'bounds header', 'src/securecutil.c': 'bounds source'},
+    pcre2: {'pcre2/CMakeLists.txt': 'pcre2 build', 'pcre2/src/pcre2.c': 'pcre2 source'},
+  })) {
+    const origin = path.join(f.dir, name);
+    await repository(origin, files);
+    deps[name].root = path.join(work, 'native-sources', name);
+    git(f.root, 'clone', '-q', origin, deps[name].root);
+  }
+  const addStd = async (id, origin = runtime) => {
+    const source = path.join(work, 'native-bootstrap/sources', id);
+    git(f.root, 'clone', '-q', origin, source);
+    await prepareStdDependencies({source, dependencies: deps});
+    await write(path.join(source, 'stdlib/build/build/std.o'), id);
+    return source;
+  };
+  return {...f, runtime, runtimeOrigin: upstream, commit, addStd};
+}
+
+test('stage handoffs restore the pinned runtime before its bootstrap std clones', async t => {
+  const f = await stdFixture(t), clones = [];
+  for (const [phase, id] of [['stage1-initial-std', 'std0'], ['stage1-std', 'stdBootstrap'],
+    ['stage1-compiler', null], ['stage3', 'std1']]) {
+    if (id) clones.push(await f.addStd(id));
+    // aarch64 has the same checkout graph without the separate x64 stage3 SDK.
+    const run = mode => f.run(mode, phase, {CJCJ_SRCBUILD_TARGET: 'linux-aarch64'});
+    const packed = run('pack');
+    assert.equal(packed.rc, 0, packed.output);
+    const file = path.join(f.archive, 'manifest.json'), record = JSON.parse(await fs.readFile(file));
+    const published = record.checkouts.map(row => path.join(f.root, row.path));
+    if (phase === 'stage1-std') {
+      // Simulate a pre-fix manifest: consumers cannot trust the producer order.
+      record.checkouts.sort((a, b) => a.path < b.path ? -1 : 1);
+      await fs.writeFile(file, JSON.stringify(record));
+    }
+    await fs.rm(path.join(f.root, '.srcbuild'), {recursive: true});
+    const restored = run('restore');
+    assert.equal(restored.rc, 0, restored.output);
+    assert.equal(git(f.runtime, 'rev-parse', 'HEAD'), f.commit);
+    for (const source of clones) {
+      assert.ok(published.indexOf(f.runtime) < published.indexOf(source));
+      assert.equal(git(source, 'rev-parse', 'HEAD'), f.commit);
+      assert.equal(git(source, 'remote', 'get-url', 'origin'), f.runtime);
+      assert.equal(await fs.readFile(path.join(source, 'stdlib/third_party/boundscheck-v1.1.16/include/securec.h'), 'utf8'), 'bounds header');
+      assert.equal(await fs.readFile(path.join(source, 'stdlib/third_party/pcre2/pcre2/src/pcre2.c'), 'utf8'), 'pcre2 source');
+      assert.equal(await fs.readFile(path.join(source, 'stdlib/build/build/std.o'), 'utf8'), path.basename(source));
+    }
+  }
+});
+
+test('std vendor files come from pinned inputs while generated siblings stay in the payload', async t => {
+  const f = await stdFixture(t), std = await f.addStd('std0', f.runtimeOrigin);
+  const deps = path.join(std, 'stdlib/third_party');
+  const header = path.join(deps, 'boundscheck-v1.1.16/include/securec.h');
+  const generated = path.join(deps, 'pcre2/pcre2/src/generated.h');
+  const rel = file => path.relative(f.root, file).split(path.sep).join('/');
+  await write(generated, 'configured header');
+  await fs.appendFile(header, 'unexpected edit');
+  const dirty = f.run('pack');
+  assert.equal(dirty.rc, 1, dirty.output);
+  assert.ok(dirty.output.includes('handoff std dependency copy differs from pinned input: ' + rel(header)), dirty.output);
+  await write(header, 'bounds header');
+  const packed = f.run('pack');
+  assert.equal(packed.rc, 0, packed.output);
+  const archive = path.join(f.archive, 'payload.tar'), names = members(archive);
+  assert.ok(names.includes(rel(generated)));
+  const copies = ['boundscheck-v1.1.16/include/securec.h', 'boundscheck-v1.1.16/src/securecutil.c',
+    'pcre2/pcre2/CMakeLists.txt', 'pcre2/pcre2/src/pcre2.c'].map(file => rel(path.join(deps, file)));
+  for (const copy of copies) assert.ok(!names.includes(copy), 'copied source in tar: ' + copy);
+  // A pre-fix artifact contains these untracked files and has no copy rows.
+  const file = path.join(f.archive, 'manifest.json');
+  const record = JSON.parse(await fs.readFile(file));
+  const appended = spawnSync('tar', ['-rf', archive, '-C', f.root, ...copies], {encoding: 'utf8'});
+  assert.equal(appended.status, 0, appended.stderr);
+  record.sha256 = crypto.createHash('sha256').update(await fs.readFile(archive)).digest('hex');
+  await fs.writeFile(file, JSON.stringify(record));
+  await f.checkout();
+  const conflict = f.run('restore');
+  assert.equal(conflict.rc, 1, conflict.output);
+  assert.ok(conflict.output.includes('handoff payload carries source: ' + copies[0]), conflict.output);
+  delete record.stdCopies;
+  await fs.writeFile(file, JSON.stringify(record));
+  await f.checkout();
+  const legacy = f.run('restore');
+  assert.equal(legacy.rc, 0, legacy.output);
+  assert.equal(await fs.readFile(header, 'utf8'), 'bounds header');
+  assert.equal(await fs.readFile(generated, 'utf8'), 'configured header');
+});
+
+test('checkout origin cycles fail before restoring even an independent checkout', async t => {
+  const f = await fixture(t);
+  const packed = f.run('pack');
+  assert.equal(packed.rc, 0, packed.output);
+  const file = path.join(f.archive, 'manifest.json');
+  const record = JSON.parse(await fs.readFile(file));
+  const a = '.srcbuild/a', b = '.srcbuild/b';
+  record.checkouts.push({path: a, commit: f.pinned, url: path.join(f.root, b)},
+    {path: b, commit: f.pinned, url: '../a'});
+  await fs.writeFile(file, JSON.stringify(record));
+  await f.checkout();
+  const rejected = f.run('restore');
+  assert.equal(rejected.rc, 1, rejected.output);
+  assert.match(rejected.output, /handoff checkout dependency cycle: .srcbuild\/a/);
+  await assert.rejects(fs.stat(path.join(f.root, '.srcbuild')), {code: 'ENOENT'});
+});
+
+test('a bootstrap std linked worktree restores without its producer .git pointer', async t => {
+  const f = await fixture(t), source = path.join(f.root, '.srcbuild/workspace/native-bootstrap/sources/std0');
+  git(path.join(f.root, nested), 'worktree', 'add', '-q', '--detach', source, f.pinned);
+  assert.ok((await fs.stat(path.join(source, '.git'))).isFile());
+  const packed = f.run('pack', 'stage1-initial-std');
+  assert.equal(packed.rc, 0, packed.output);
+  assert.ok(!members(path.join(f.archive, 'payload.tar')).some(rel => rel.split('/').includes('.git')));
+  await f.checkout();
+  const restored = f.run('restore', 'stage1-initial-std');
+  assert.equal(restored.rc, 0, restored.output);
+  assert.equal(git(source, 'rev-parse', 'HEAD'), f.pinned);
+});
+
+test('a different workspace root is refused before resolving producer-local paths', async t => {
+  const f = await fixture(t);
+  git(f.root, 'clone', '-q', path.join(f.root, nested), '.srcbuild/clone');
+  const packed = f.run('pack');
+  assert.equal(packed.rc, 0, packed.output);
+  const receiver = path.join(f.dir, 'receiver');
+  git(f.dir, 'clone', '-q', f.root, receiver);
+  await fs.rm(f.root, {recursive: true});
+  const rejected = f.run('restore', 'stage0', {GITHUB_WORKSPACE: receiver});
+  assert.equal(rejected.rc, 1, rejected.output);
+  assert.match(rejected.output, /handoff identity mismatch: workspace/);
+  await assert.rejects(fs.stat(path.join(receiver, '.srcbuild')), {code: 'ENOENT'});
 });
 
 test('consumer rejects a workflow checkout at a different commit', async t => {

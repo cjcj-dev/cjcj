@@ -108,7 +108,7 @@ jobs:
           path: ${{ runner.temp }}/contract-plan
       - name: Install release contract dependencies
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld clang-15 lld-15 libssl-dev python3 build-essential git gdb jq cmake ninja-build sccache
+          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld llvm clang-15 lld-15 libssl-dev python3 build-essential git gdb jq cmake ninja-build sccache
           npm exec --yes --package=zx@8 -- node ci/test-zx.mjs prepare "$RUNNER_TEMP/test-zx.json"
           npm ci --prefix ci/g1-parser --ignore-scripts --no-audit --no-fund
       # package-lineage compares package bytes with the official host SDK. Load
@@ -355,9 +355,35 @@ jobs:
     with:
       llvm_tools_only: true
 
+  native-inputs:
+    runs-on: ubuntu-24.04
+    outputs:
+      artifact: ${{ steps.select.outputs.artifact }}
+      run-id: ${{ steps.select.outputs.run-id }}
+    steps:
+      - name: Select native SDK producer inputs
+        id: select
+        env:
+          ARTIFACT: ${{ inputs.native_inputs_artifact || vars.CJCJ_NATIVE_INPUTS_ARTIFACT }}
+          RUN_ID: ${{ inputs.native_inputs_run_id || vars.CJCJ_NATIVE_INPUTS_RUN_ID }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if [[ -z "$ARTIFACT" && -z "$RUN_ID" && "$GITHUB_EVENT_NAME" == push ]]; then
+            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow prepare.yml --branch "$GITHUB_REF_NAME" \
+              --event workflow_dispatch --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+            ARTIFACT=native-inputs
+            [[ -n "$RUN_ID" ]] || { echo "::error::No successful Prepare run on $GITHUB_REF_NAME"; exit 1; }
+          fi
+          if [[ -z "$ARTIFACT" || "$ARTIFACT" == *$'\n'* || "$ARTIFACT" == *$'\r'* || ! "$RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Set both native_inputs_artifact and a positive native_inputs_run_id, or their CJCJ_NATIVE_INPUTS repository variables"
+            exit 1
+          fi
+          printf 'artifact=%s\nrun-id=%s\n' "$ARTIFACT" "$RUN_ID" >> "$GITHUB_OUTPUT"
+
   build:
     name: ${{ matrix.runner }} / Build
-    needs: [fixed-llvm-tools, matrix-plan]
+    needs: [fixed-llvm-tools, matrix-plan, native-inputs]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     continue-on-error: ${{ matrix.experimental }}
@@ -471,8 +497,8 @@ jobs:
       - name: Receive native SDK producer inputs
         uses: actions/download-artifact@v8.0.2
         with:
-          name: ${{ inputs.native_inputs_artifact || vars.CJCJ_NATIVE_INPUTS_ARTIFACT }}-${{ matrix.target }}
-          run-id: ${{ inputs.native_inputs_run_id || vars.CJCJ_NATIVE_INPUTS_RUN_ID }}
+          name: ${{ needs.native-inputs.outputs.artifact }}-${{ matrix.target }}
+          run-id: ${{ needs.native-inputs.outputs.run-id }}
           github-token: ${{ github.token }}
           path: ${{ github.workspace }}/.srcbuild/native-inputs
       # The native-inputs producer (release phase=prepare) ships one mode-preserving tar.

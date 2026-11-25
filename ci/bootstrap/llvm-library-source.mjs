@@ -1,8 +1,21 @@
+import path from 'node:path';
 import fs from 'node:fs/promises';
 import {embeddedStamp} from '../../build/lib/toolchain-identity.mjs';
 
 export function llvmLibraryNames(native) {
   return native.llvmFoundationLibrary ? [native.llvmLibrary, native.llvmFoundationLibrary] : [native.llvmLibrary];
+}
+
+// Native compiler links may also consume a monolithic SDK. Keep both the
+// linker's resolved file and the installed DLL name for its execution prefix.
+export async function compilerLlvmLibraries(sdk,native) {
+  const libraries=[];
+  for(const name of llvmLibraryNames(native)) {
+    const relative=path.posix.join('third_party/llvm',native.llvmDirectory,name);
+    try { libraries.push({relative,file:await fs.realpath(path.join(sdk,relative))}); }
+    catch(error) { if(name!==native.llvmFoundationLibrary || error.code!=='ENOENT')throw error; }
+  }
+  return libraries;
 }
 
 // LLVMSupport owns the stamp: in a split install it lives in Foundation.

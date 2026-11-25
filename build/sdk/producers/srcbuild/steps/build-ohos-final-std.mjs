@@ -10,6 +10,7 @@ import {installedStageOutput} from '../lib/installed-stage-output.mjs';
 import {verifyStdBuildInputs} from '../../../../../ci/bootstrap/stdlib-build.mjs';
 import {writeStdProvenance} from '../../../../lib/provenance.mjs';
 import {probeRequirement} from '../../release/platform-matrix.mjs';
+import {resolveHostPython} from '../../../../../ci/bootstrap/host-python.mjs';
 import {cleanSdkEnvironment} from '../../../../../ci/bootstrap/sdk-platform.mjs';
 import {checkPair, checkAst, copyHost, astFile, installOhosStage3} from '../lib/ohos-split-sdk.mjs';
 import {buildOhosRuntime} from '../lib/ohos-runtime.mjs';
@@ -58,6 +59,7 @@ if (split) {
 const sdk = split ? await fs.mkdtemp(path.join(workspace, '.ohos-stage2-')) : parentSdk;
 try {
   if (split) await copyHost(parentSdk, sdk);
+  const python = await resolveHostPython(sdk);
   const env = split ? cleanSdkEnvironment(sdk, 'linux_x86_64') : process.env;
   const stageEnv = {...env, CANGJIE_HOME: sdk, CANGJIE_VERSION: version,
     PATH: [path.join(sdk, 'bin'), path.join(sdk, 'tools', 'bin'), path.join(toolchain, 'bin'), env.PATH].join(path.delimiter)};
@@ -66,7 +68,7 @@ try {
     await assertBootstrapCompiler({sdk, command, producer: originalCompiler.product, producerSha256: originalCompiler.lineage.compilerSha256});
   };
   await assertCompiler();
-  const {root: runtimeInstall, globalExportFlag} = await buildOhosRuntime({workspace, native, arch, version, runtimeRef, localExport:split, env: stageEnv});
+  const {root: runtimeInstall, globalExportFlag} = await buildOhosRuntime({workspace, native, arch, version, runtimeRef, localExport:split, python, env: stageEnv});
   await assertCompiler();
   await verifyStdBuildInputs(sdk);
   const extraLibs = [];
@@ -80,13 +82,13 @@ try {
       extraLibs.push('--target-lib=' + lib);
   }
   await fs.rm(finalStd, {recursive: true, force: true});
-  await $({cwd: stdlib, env: stageEnv})`python3 build.py clean`;
+  await $({cwd: stdlib, env: stageEnv})`${python} build.py clean`;
   if (split) {
     await fs.mkdir(path.join(sdk, 'modules'), {recursive:true});
     await fs.symlink(path.join(stdlib, 'build/build-libs-aarch64-linux-ohos/modules', tuple), path.join(sdk, 'modules', tuple), 'dir');
   }
-  await $({cwd: stdlib, env: stageEnv})`python3 build.py build -t release -j ${crossBuildJobs(stageEnv, 'std')} --target ${`ohos-${arch}`} --target-lib=${path.join(runtime, 'output')} --target-lib=${path.join(runtimeInstall, 'runtime', 'lib', tuple)} --target-lib=${path.join(runtimeInstall, 'lib', tuple)} ${extraLibs} --target-toolchain ${path.join(toolchain, 'bin')} --target-sysroot ${path.join(native, 'sysroot')}`;
-  await $({cwd: stdlib, env: stageEnv})`python3 build.py install --prefix ${finalStd}`;
+  await $({cwd: stdlib, env: stageEnv})`${python} build.py build -t release -j ${crossBuildJobs(stageEnv, 'std')} --target ${`ohos-${arch}`} --target-lib=${path.join(runtime, 'output')} --target-lib=${path.join(runtimeInstall, 'runtime', 'lib', tuple)} --target-lib=${path.join(runtimeInstall, 'lib', tuple)} ${extraLibs} --target-toolchain ${path.join(toolchain, 'bin')} --target-sysroot ${path.join(native, 'sysroot')}`;
+  await $({cwd: stdlib, env: stageEnv})`${python} build.py install --prefix ${finalStd}`;
   await assertCompiler();
   if (split) await fs.copyFile(path.join(sdk, astFile), path.join(finalStd, astFile));
   await writeStdProvenance({sourceDir: stdlib, ...(split && {sourceRoot:repository, sourceRevision:runtimeRef}), installPrefix: finalStd,

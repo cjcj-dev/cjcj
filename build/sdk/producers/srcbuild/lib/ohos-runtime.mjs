@@ -18,7 +18,7 @@ export async function readLocalExportFlag(cacheFile) {
 
 // runtime/build.py --ohos-public-sdk feeds the same native root to runtime
 // and cjthread; never construct a private OHOS_ROOT or rename libc++.so.
-export async function buildOhosRuntime({workspace, native, arch, version, runtimeRef, localExport = false, env = process.env}) {
+export async function buildOhosRuntime({workspace, native, arch, version, runtimeRef, localExport = false, python, env = process.env}) {
   env = {...env, CANGJIE_BUILD_JOBS: String(crossBuildJobs(env))};
   if (!['aarch64', 'x86_64'].includes(arch)) throw new Error(`unsupported OHOS architecture: ${arch}`);
   const repository = path.join(workspace, 'cangjie_runtime');
@@ -30,11 +30,11 @@ export async function buildOhosRuntime({workspace, native, arch, version, runtim
     env = {...env, CJCJ_PARENT_RUNTIME_TOOLCHAIN:env.CMAKE_TOOLCHAIN_FILE || '',
       CMAKE_TOOLCHAIN_FILE:fileURLToPath(new URL('./ohos-local-export.cmake', import.meta.url))};
   }
-  await $({cwd: runtime, env})`python3 build.py clean`;
-  await $({cwd: runtime, env})`python3 build.py build -t release --target ${`ohos-${arch}`} --prefix ${path.join(runtime, 'output', 'common')} --ohos-public-sdk ${native} -v ${version}`;
+  await $({cwd: runtime, env})`${python} build.py clean`;
+  await $({cwd: runtime, env})`${python} build.py build -t release --target ${`ohos-${arch}`} --prefix ${path.join(runtime, 'output', 'common')} --ohos-public-sdk ${native} -v ${version}`;
   const globalExportFlag = localExport
     ? await readLocalExportFlag(path.join(runtime, 'CMakebuild', 'CMakeCache.txt')) : undefined;
-  await $({cwd: runtime, env})`python3 build.py install`;
+  await $({cwd: runtime, env})`${python} build.py install`;
   const root = path.join(runtime, 'output', 'common', `linux_ohos_release_${arch}`);
   const tuple = `linux_ohos_${arch}_cjnative`;
   // Same dependency staging as the Android producer: the Linux-host install

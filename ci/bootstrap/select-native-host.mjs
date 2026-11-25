@@ -4,6 +4,7 @@ import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {privateRoot, readJson, fileDigest} from './sdk-flow.mjs';
+import {resolveHostPython} from './host-python.mjs';
 import {sdkPlatform, cleanSdkEnvironment} from './sdk-platform.mjs';
 import {nativePair} from '../runtime-pin.mjs';
 import {hostPlatform} from '../host-toolchain-pin.mjs';
@@ -91,7 +92,7 @@ export async function selectNativeHost(inputRoot, work, env=process.env, signal)
     const system=env.SystemRoot||env.SYSTEMROOT;
     if(!system)throw Error('WINDOWS_TRACE_SYSTEM_ROOT_REQUIRED');
     const {trace,traceWork}=await captureWindowsHostLlvmWithRetry({host:host.install,work,env:probeEnv,
-      tools:{logman:path.join(system,'System32/logman.exe'),tracerpt:path.join(system,'System32/tracerpt.exe')}},signal);
+      tools:{python:await resolveHostPython(host.install,env),logman:path.join(system,'System32/logman.exe'),tracerpt:path.join(system,'System32/tracerpt.exe')}},signal);
     const observed=trace.observation,row=trace.execution;
     // Consume the collector's same-spawn decoded observation. Unknown/raw-only
     // capture remains a rejection; neither a requested path nor a PE import is

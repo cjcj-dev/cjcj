@@ -4,6 +4,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {compilerLlvmLibraries} from './llvm-library-source.mjs';
+import {sdkPlatform} from './sdk-platform.mjs';
 import {linkOptionLines} from './cjc-link-sections.mjs';
 // The ELF link inputs now live in [target.x86_64-unknown-linux-gnu]; the
 // Windows link of a member is its [package] value plus those ELF inputs
@@ -22,7 +24,7 @@ function windowsValue(text,old) {
 const digest=value=>createHash('sha256').update(value).digest('hex');
 export async function withWindowsCompilerLinks(source,sdk,mingw,build) {
   const packages=path.join(source,'packages'), saved=[], changes={};
-  const llvm=await fs.realpath(path.join(sdk,'third_party/llvm/bin/libLLVM-15.dll'));
+  const libraries=(await compilerLlvmLibraries(sdk,sdkPlatform('windows_x86_64'))).map(row=>row.file);
   const cxx=await fs.realpath(path.join(mingw,'x86_64-w64-mingw32/lib'));
   const old='${CANGJIE_HOME}/third_party/llvm/lib/libLLVM-15.so';
   const temp=await fs.mkdtemp(path.join(source,'native-link-'));
@@ -37,7 +39,7 @@ export async function withWindowsCompilerLinks(source,sdk,mingw,build) {
       if(!selected)throw Error('WINDOWS_LINK_INPUT '+rel);
       const after=before.slice(0,selected.row.start)+(()=>{
         const {prefix}=selected.row, value=selected.value;
-        const args=value.split(/\s+/).flatMap(arg=>arg===old?[llvm]:arg==='-lstdc++'?['-L'+cxx,'-lc++','-lunwind']:
+        const args=value.split(/\s+/).flatMap(arg=>arg===old?libraries:arg==='-lstdc++'?['-L'+cxx,'-lc++','-lunwind']:
           arg==='--export-dynamic'?['--stack=0x4000000']:arg.startsWith('runtime_shim/')?[path.join(source,arg)]:[arg]);
         if(args.some(a=>/["\r\n]/.test(a)))throw Error('WINDOWS_LINK_ARGUMENT '+rel);
         changes[rel]={args,rsp:path.relative(source,rsp).split(path.sep).join('/')};

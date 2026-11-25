@@ -8,8 +8,10 @@ import {resolveRuntimeSource} from '../../../../ci/runtime-pin.mjs';
 import {createReadStream} from 'node:fs';
 import crypto from 'node:crypto';
 import {deriveFetchPatches, fetchPatchRecipe, restoreFetchPatches} from './fetch-patch-handoff.mjs';
+import {planStdCopies, restoreStdCopies, stdCopySources} from './std-copy-handoff.mjs';
 import {stageSdkHandoff} from './stage-sdk-handoff.mjs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {checkoutExactSource} from '../../../lib/git.mjs';
 import {VERSION_SOURCE, applyCangjieVersion, injectedCangjieVersion, injectCangjieVersion} from './steps/inject-version-lib.mjs';
@@ -163,7 +165,8 @@ async function payloadPlan(root, entries, excluded) {
     && repo.tracked.has(repo.prefix === '' ? rel : rel.slice(repo.prefix.length + 1)));
   const skip = rel => excluded.some(pattern => pattern.test(rel));
   async function walk(rel) {
-    if (skip(rel)) return;
+    // A linked worktree has a .git pointer file instead of a directory.
+    if (skip(rel) || path.basename(rel) === '.git') return;
     const file = path.join(root, rel);
     const stat = await fs.lstat(file);
     if (!stat.isDirectory()) {
@@ -176,7 +179,6 @@ async function payloadPlan(root, entries, excluded) {
       files.push(rel);
       return;
     }
-    if (path.basename(rel) === '.git') return;
     if (rel !== '' && await exists(path.join(file, '.git'))) {
       const commit = checkoutHead(file);
       const url = git(file, ['remote', 'get-url', 'origin']);
@@ -192,9 +194,9 @@ async function payloadPlan(root, entries, excluded) {
     for (const name of (await fs.readdir(file)).sort()) await walk(posix(path.join(rel, name)));
   }
   for (const entry of entries) await walk(entry);
-  const kept = files.filter(rel => !tracked(rel));
+  const {kept, stdCopies} = await planStdCopies(root, files.filter(rel => !tracked(rel)), repos);
   const included = new Set(kept);
-  return {commit: head, checkouts, files: kept, derivations,
+  return {commit: head, checkouts: checkoutOrder(root, checkouts), files: kept, derivations, stdCopies,
     overlay: [...overlay].filter(([rel]) => included.has(rel)).map(([rel, sha256]) => ({path: rel, sha256}))};
 }
 // After extraction the checkout must differ from its pinned commits in
@@ -247,7 +249,7 @@ async function restoreEdits(root, record) {
   const differs = [...new Set([...expected, ...actual])].filter(rel => expected.has(rel) !== actual.has(rel)).sort();
   if (differs.length) throw new Error(`handoff restored checkout differs from its manifest: ${differs.join(',')}`);
 }
-async function assertNoSourcePayload(members, root, checkouts, overlay) {
+async function assertNoSourcePayload(members, root, checkouts, overlay, stdCopies) {
   if (!Array.isArray(overlay)) throw new Error('handoff manifest lacks overlay rows');
   const edited = new Map(overlay.map(row => [String(row?.path || ''), row?.sha256]));
   for (const [rel, sha256] of edited) {
@@ -257,25 +259,65 @@ async function assertNoSourcePayload(members, root, checkouts, overlay) {
   }
   const repos = [{prefix: '', tracked: trackedPaths(root)},
     ...checkouts.map(row => ({prefix: row.path, tracked: trackedPaths(path.join(root, row.path))}))];
+  // Earlier manifests carried these untracked private copies as payload.
+  const copies = stdCopies === undefined ? new Map() : stdCopySources(repos);
   for (const raw of members) {
     const rel = raw.replace(/^\.\//, '').replace(/\/$/, '');
     if (!rel) continue;
-    if (rel.split('/').includes('.git')) throw new Error(`handoff payload carries source: ${rel}`);
+    if (rel.split('/').includes('.git') || copies.has(rel)) throw new Error(`handoff payload carries source: ${rel}`);
     for (const repo of repos) {
       const inside = repo.prefix === '' ? rel : rel.startsWith(repo.prefix + '/') ? rel.slice(repo.prefix.length + 1) : null;
       if (inside !== null && repo.tracked.has(inside) && !edited.has(rel)) throw new Error(`handoff payload carries source: ${rel}`);
     }
   }
+  return copies;
+}
+// Pack walks the filesystem, so e.g. sources/std0 precedes its local Git
+// origin native-sources/runtime. Order new manifests and also plan older,
+// unordered manifests before creating any checkout. Keep the Git URLs intact.
+function checkoutOrder(root, checkouts) {
+  if (!Array.isArray(checkouts)) throw new Error('handoff manifest lacks pinned checkouts');
+  const byPath = new Map();
+  for (const row of checkouts) {
+    const rel = row?.path;
+    if (typeof rel !== 'string' || !rel.startsWith('.srcbuild/') || rel.split(/[\\/]/).includes('..') || path.isAbsolute(rel)
+      || !SHA40.test(row.commit || '') || typeof row.url !== 'string' || !row.url)
+      throw new Error(`handoff checkout row invalid: ${rel}`);
+    const dest = path.resolve(root, rel);
+    if (byPath.has(dest)) throw new Error(`handoff duplicate checkout: ${rel}`);
+    byPath.set(dest, row);
+  }
+  const ordered = [], active = new Set(), done = new Set();
+  function visit(dest) {
+    if (done.has(dest)) return;
+    const row = byPath.get(dest);
+    if (active.has(dest)) throw new Error(`handoff checkout dependency cycle: ${row.path}`);
+    active.add(dest);
+    // A nested checkout also needs its containing checkout in place first.
+    for (let dir = path.dirname(dest); dir !== root; dir = path.dirname(dir)) {
+      if (byPath.has(dir)) { visit(dir); break; }
+    }
+    // Git resolves a relative fetch URL from the receiving checkout.
+    let origin;
+    if (/^file:\/\/(?:localhost)?\//i.test(row.url)) origin = fileURLToPath(row.url);
+    else if (path.isAbsolute(row.url) || !/^[^/\\]+:/.test(row.url)) origin = row.url;
+    if (origin) {
+      let source = path.resolve(dest, origin);
+      if (path.basename(source) === '.git') source = path.dirname(source);
+      if (byPath.has(source)) visit(source);
+    }
+    active.delete(dest);
+    done.add(dest);
+    ordered.push(row);
+  }
+  for (const dest of byPath.keys()) visit(dest);
+  return ordered;
 }
 async function restoreCheckouts(root, record) {
   if (!SHA40.test(record.commit || '') || checkoutHead(root) !== record.commit)
     throw new Error('handoff checkout SHA mismatch: workspace');
-  if (!Array.isArray(record.checkouts)) throw new Error('handoff manifest lacks pinned checkouts');
-  for (const row of record.checkouts) {
-    const rel = String(row?.path || '');
-    if (!rel.startsWith('.srcbuild/') || rel.split('/').includes('..') || path.isAbsolute(rel)
-      || !SHA40.test(row.commit || '') || typeof row.url !== 'string' || !row.url)
-      throw new Error(`handoff checkout row invalid: ${rel}`);
+  for (const row of checkoutOrder(root, record.checkouts)) {
+    const rel = row.path;
     const dest = path.join(root, rel);
     if (!await exists(path.join(dest, '.git'))) await checkoutExactSource(row.url, dest, row.commit);
     if (checkoutHead(dest) !== row.commit) throw new Error(`handoff checkout SHA mismatch: ${rel}`);
@@ -318,7 +360,7 @@ if (mode === 'pack') {
   try { tar(['-cf', archive, '--null', '--no-recursion', '-C', root, '-T', list]); }
   finally { await fs.rm(list, {force: true}); }
   const record = {...identity, environment, entries, sourcePolicy: 'pinned-git-checkout', checkouts: plan.checkouts, overlay: plan.overlay,
-    derivations: plan.derivations, sdkSha256, sha256: await hash(archive)};
+    derivations: plan.derivations, stdCopies: plan.stdCopies, sdkSha256, sha256: await hash(archive)};
   await fs.writeFile(manifest, `${JSON.stringify(record, null, 2)}\n`);
   console.log(`BOOTSTRAP_HANDOFF phase=${phase} sha256=${record.sha256}`);
 } else {
@@ -341,9 +383,10 @@ if (mode === 'pack') {
   await restoreCheckouts(root, record);
   const listed = spawnSync('tar', ['-tf', archive], {encoding: 'utf8', maxBuffer: 1 << 30});
   if (listed.error || listed.status !== 0) throw new Error('handoff payload listing failed');
-  await assertNoSourcePayload(listed.stdout.split('\n').filter(Boolean), root, record.checkouts, record.overlay);
+  const copySources = await assertNoSourcePayload(listed.stdout.split('\n').filter(Boolean), root, record.checkouts, record.overlay, record.stdCopies);
   tar(['-xf', archive, '-C', root]);
   await restoreEdits(root, record);
+  await restoreStdCopies(root, record.stdCopies ?? [], copySources);
   // The restored workspace obeys the pack rule too: an untracked source file the
   // consumer already held beside or below tracked sources (not in the archive,
   // which pack and assertNoSourcePayload already police) is source the pinned

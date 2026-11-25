@@ -330,6 +330,8 @@ test('ci.yml provides the publisher archive tools before running contracts', asy
   // Android package fixtures compile AArch64 objects and link shared libraries.
   assert.match(install, /apt-get install[^\n]*\bclang\b/);
   assert.match(install, /apt-get install[^\n]*\blld\b/);
+  // Both Wasm packaging fixtures execute the unversioned llvm-ar from llvm.
+  assert.match(install, /apt-get install[^\n]*\sllvm(?=\s|$)/m);
   assert.match(install, /npm exec --yes --package=zx@8 -- node ci\/test-zx\.mjs prepare "\$RUNNER_TEMP\/test-zx\.json"/);
   assert.ok(ci.indexOf('- name: Install release contract dependencies')
     < ci.indexOf('- name: Test build and release contracts'));
@@ -480,4 +482,48 @@ test('mainline archive, initialization and ArrayClone plus parser/frontend keep 
     assert.equal(entries[0].executor, 'cjpm', `MAINLINE_EXECUTOR ${file}`);
     assert.equal(entries[0].member, member, `MAINLINE_MEMBER ${file}`);
   }
+});
+
+test('CI resolves one Prepare run for a push and passes the selected pair to every Build cell', async t => {
+  const {jobs} = loadYaml(await fs.readFile(path.join(workflowDir, 'ci.yml'), 'utf8'));
+  const job = jobs['native-inputs'], select = job.steps.find(s => s.id === 'select');
+  assert.ok(jobs.build.needs.includes('native-inputs'));
+  assert.equal(select.env.ARTIFACT, '${{ inputs.native_inputs_artifact || vars.CJCJ_NATIVE_INPUTS_ARTIFACT }}');
+  assert.equal(select.env.RUN_ID, '${{ inputs.native_inputs_run_id || vars.CJCJ_NATIVE_INPUTS_RUN_ID }}');
+  assert.equal(select.env.GH_TOKEN, '${{ github.token }}');
+  const receive = jobs.build.steps.find(s => s.name === 'Receive native SDK producer inputs');
+  for (const key of ['artifact','run-id']) assert.equal(job.outputs[key], '${{ steps.select.outputs.'+key+' }}');
+  assert.equal(receive.with.name, '${{ needs.native-inputs.outputs.artifact }}-${{ matrix.target }}');
+  assert.equal(receive.with['run-id'], '${{ needs.native-inputs.outputs.run-id }}');
+  const dir = await fs.mkdtemp(path.join((await import('node:os')).tmpdir(), 'ci-prepare-'));
+  t.after(() => fs.rm(dir, {force:true, recursive:true}));
+  await fs.writeFile(path.join(dir, 'gh'), '#!/bin/bash\nprintf "%s\\n" "$@" > "$LOG"\necho "$FOUND"\n', {mode:0o755});
+  async function run(event, artifact, runId, found = '123') {
+    const LOG = path.join(dir,'query'), GITHUB_OUTPUT = path.join(dir,'output');
+    await fs.rm(LOG, {force:true});
+    await fs.writeFile(GITHUB_OUTPUT, '');
+    const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', select.run], {encoding:'utf8', env:{
+      PATH:dir+path.delimiter+process.env.PATH, ARTIFACT:artifact, RUN_ID:runId, FOUND:found,
+      LOG, GITHUB_OUTPUT, GITHUB_EVENT_NAME:event, GITHUB_REPOSITORY:'owner/repo', GITHUB_REF_NAME:'master'}});
+    return {rc:result.status, message:result.stdout+result.stderr, query:fsSync.existsSync(LOG)
+      ? (await fs.readFile(LOG, 'utf8')).trimEnd().split('\n') : null, output:await fs.readFile(GITHUB_OUTPUT, 'utf8')};
+  }
+  const push = await run('push', '', '');
+  assert.equal(push.rc, 0, push.message);
+  assert.equal(push.output, 'artifact=native-inputs\nrun-id=123\n');
+  assert.deepEqual(push.query, ['run','list','--repo','owner/repo','--workflow','prepare.yml','--branch','master',
+    '--event','workflow_dispatch','--status','success','--limit','1','--json','databaseId','--jq','.[0].databaseId // empty']);
+  for (const event of ['push','pull_request','workflow_dispatch']) {
+    const explicit = await run(event,'selected','456');
+    assert.equal(explicit.rc, 0, explicit.message);
+    assert.equal(explicit.output, 'artifact=selected\nrun-id=456\n');
+    assert.equal(explicit.query, null);
+  }
+  for (const [event, prefix, id] of [['push','','123'],['push','custom',''],['push','custom','NaN'],
+    ['pull_request','',''],['workflow_dispatch','','']]) {
+    const invalid = await run(event,prefix,id);
+    assert.equal(invalid.rc, 1); assert.equal(invalid.query, null); assert.equal(invalid.output, '');
+  }
+  const missing = await run('push','','','');
+  assert.equal(missing.rc, 1); assert.match(missing.message, /No successful Prepare run/); assert.equal(missing.output, '');
 });

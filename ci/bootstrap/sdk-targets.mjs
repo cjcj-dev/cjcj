@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import {relative} from './sdk-flow.mjs';
 import {isDeepStrictEqual} from 'node:util';
 import {fileURLToPath} from 'node:url';
+import {llvmLibraryNames} from './llvm-library-source.mjs';
 import {sdkPlatform,stdxChirMembers} from './sdk-platform.mjs';
 import {readHostToolchainPin} from '../host-toolchain-pin.mjs';
 import {stdBuildType,selectedStdAst} from './sdk-std-resume.mjs';
@@ -115,6 +116,12 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
   const compilerName='bin/cjcj-stage1'+exe;
   const prefix=path.relative('.',compilerExecutionRoot('.',selection));
   const executionNative=sdkPlatform(execution.platform??platform),execTuple=executionNative.tuple;
+  // Native N is a split DLL install on Windows. A separate compiler loads
+  // from its own directory; carry the same libraries it linked there.
+  const executionLlvmCopies = () => (execution.role==='separate'?llvmLibraryNames(executionNative):[executionNative.llvmLibrary]).map(name=>{
+    const rel='third_party/llvm/'+executionNative.llvmDirectory+'/'+name;
+    return {from:execution.llvm.install+'/'+rel,to:prefix+'/'+rel,owner:'compiler execution LLVM'};
+  });
   const executionLibraries=[prefix?prefix+'/runtime/lib/'+execTuple:'runtime/lib/'+execTuple,
     prefix?prefix+'/lib/'+execTuple:'lib/'+execTuple,
     prefix?prefix+'/third_party/llvm/'+executionNative.llvmDirectory:'third_party/llvm/'+executionNative.llvmDirectory,'tools/lib'];
@@ -153,12 +160,12 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
     ...(!bootstrap&&prefix?[
       {from:execution.runtime.install+'/runtime/lib/'+execTuple,to:prefix+'/runtime/lib/'+execTuple,owner:'compiler execution runtime'},
       {from:execution.std.install+'/lib/'+execTuple,to:prefix+'/lib/'+execTuple,owner:'compiler execution std'},
-      {from:execution.llvm.install+'/third_party/llvm/'+executionNative.llvmDirectory+'/'+executionNative.llvmLibrary,to:prefix+'/third_party/llvm/'+executionNative.llvmDirectory+'/'+executionNative.llvmLibrary,owner:'compiler execution LLVM'},
+      ...executionLlvmCopies(),
     ]:[]),
     ...(bootstrap&&execution.role==='separate'?[
       {from:execution.runtime.install+'/runtime',to:prefix+'/runtime',owner:'compiler execution runtime'},
       {from:execution.std.install+'/lib',to:prefix+'/lib',owner:'compiler execution std'},
-      {from:execution.llvm.install+'/third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,to:prefix+'/third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary,owner:'compiler execution LLVM'},
+      ...executionLlvmCopies(),
     ]:[]),
     {from:product,to:compilerName,owner:'compiler'},
     ...(!bootstrap&&layout!=='native-output'?[
@@ -178,7 +185,7 @@ export function installationRecipe(selection,{compiler:product,std,bootstrap=fal
       ...(!prefix?[]:[
         {from:execution.runtime.install+'/runtime/lib/'+execTuple,to:prefix+'/runtime/lib/'+execTuple,owner:'compiler execution runtime'},
         {from:execution.std.install+'/lib/'+execTuple,to:prefix+'/lib/'+execTuple,owner:'compiler execution std'},
-        {from:execution.llvm.install+'/third_party/llvm/'+executionNative.llvmDirectory+'/'+executionNative.llvmLibrary,to:prefix+'/third_party/llvm/'+executionNative.llvmDirectory+'/'+executionNative.llvmLibrary,owner:'compiler execution LLVM'}]),
+        ...executionLlvmCopies()]),
       hostComparisonRuntime(),
       {from:product,to:compilerName,owner:'compiler'});
   }

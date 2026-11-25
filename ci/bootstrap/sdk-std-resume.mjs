@@ -1,6 +1,7 @@
 // Validate existing flow and command records; these are provenance, not authority.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {resolveHostPython} from './host-python.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 export function flag(argv, name) {
   const i = argv.indexOf(name);
@@ -71,7 +72,10 @@ export async function acceptInstalledStd({file, source, output, commit, sdk, run
   const stdlib = path.join(source, 'stdlib');
   const actions = after.slice(0, end).filter(row => row.cwd === stdlib && Array.isArray(row.argv)
     && row.argv.includes('build.py'));
-  const buildArgv = ['python3','-I','build.py','build','-t',selectedType,'--jobs'];
+  // Older records used a bare python3. New records must name the selected host
+  // interpreter, and build and install must agree on which one ran.
+  const python = actions[0]?.argv[0] === 'python3' ? 'python3' : await resolveHostPython(sdk);
+  const buildArgv = [python,'-I','build.py','build','-t',selectedType,'--jobs'];
   const buildCommand = actions[0], build = actions[1], installCommand = actions[2], install = actions[3];
   const successful = (command, result) => command?.event === 'target-command'
     && result?.event === 'target-result' && sameCommand(command, result)
@@ -82,7 +86,7 @@ export async function acceptInstalledStd({file, source, output, commit, sdk, run
       || JSON.stringify(build.argv)!==JSON.stringify([...buildArgv,build.argv[7],...tail]))
     throw new Error('STD_RESUME_RECORD build');
   if (!successful(installCommand, install) || JSON.stringify(install.argv) !== JSON.stringify(
-    ['python3','-I','build.py','install','--prefix',output])) throw new Error('STD_RESUME_RECORD install');
+    [python,'-I','build.py','install','--prefix',output])) throw new Error('STD_RESUME_RECORD install');
   if (actions.length !== 4 || after.slice(end + 1).some(row => row.cwd === stdlib
       && Array.isArray(row.argv) && row.argv.includes('build.py')))
     throw new Error('STD_RESUME_RECORD sequence');

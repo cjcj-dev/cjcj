@@ -1,5 +1,9 @@
 [
   {
+    "file": "ci/bootstrap/native-stage-python.test.mjs",
+    "executor": "node-test"
+  },
+  {
     "file": "ci/bootstrap/sdk-platform.test.mjs",
     "executor": "node-test"
   },

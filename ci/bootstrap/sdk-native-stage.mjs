@@ -3,6 +3,7 @@
 import fs from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {shimCommand} from './zx-cli.mjs';
+import {compilerLlvmLibraries} from './llvm-library-source.mjs';
 import {withWindowsCompilerLinks} from './windows-compiler-links.mjs';
 import {withSeedOptimization} from '../../build/sdk/producers/release/trimpath.mjs';
 import path from 'node:path';
@@ -10,6 +11,7 @@ import {selectBuildResources} from '../build-resources.mjs';
 import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {command, copyOutputs, atomicJson, fileDigest, inventory, privateRoot, assembleDirectory, withProcessCancellation} from './sdk-flow.mjs';
+import {resolveHostPython} from './host-python.mjs';
 import {sdkPlatform, stdInstallFiles, cleanSdkEnvironment} from './sdk-platform.mjs';
 import {compilerProducer} from './compiler_identity.mjs';
 import {verifyStdBuildInputs, prepareStdDependencies} from './stdlib-build.mjs';
@@ -170,6 +172,7 @@ export async function nativeStage(options, {signal} = {}) {
     }
   }
   const hostRuntime=officialStdCompiler||kind==='compiler'||options['compiler-runtime']==='target'?sdk:path.join(sdk,'.host');
+  const python=kind==='std' && !options['resume-installed'] ? await resolveHostPython(sdk) : undefined;
   const env={...cleanSdkEnvironment(sdk,platform,process.env,hostRuntime),cjHeapSize:resources.heap,
     CMAKE_BUILD_PARALLEL_LEVEL:jobs,CANGJIE_BUILD_JOBS:jobs,CJCJ_COMMIT:commit,
     CJCJ_SUPERVISOR_WORK:process.env.CJCJ_SUPERVISOR_WORK||output+'.supervision'};
@@ -243,9 +246,9 @@ export async function nativeStage(options, {signal} = {}) {
       // ast_api.o, but its Ninja edge only orders the object target. Regenerate
       // this derived archive on paired builds and when leaving a paired cache.
       if(astInclude || includeChanged)await fs.rm(path.join(build,'libcangjie-std-astFFI.a'),{force:true});
-      await command(['python3','-I','build.py','build','-t',buildType,'--jobs',jobs,
+      await command([python,'-I','build.py','build','-t',buildType,'--jobs',jobs,
         ...targetLibraries.map(directory=>'--target-lib='+directory),...(astInclude?['--include='+astInclude]:[]),...(localModeApi?['--local_mode_api']:[])],{cwd:stdlib,env,records});
-      await command(['python3','-I','build.py','install','--prefix',output],{cwd:stdlib,env,records});
+      await command([python,'-I','build.py','install','--prefix',output],{cwd:stdlib,env,records});
     }
     for(const rel of stdInstallFiles(platform))
       if(!(await fs.stat(path.join(output,rel))).isFile())throw new Error('STD_INSTALL_SHAPE '+rel);
@@ -400,7 +403,7 @@ export async function nativeStage(options, {signal} = {}) {
       // independent installer need not select them again.
       {from:path.join(sdk,'runtime/lib',native.tuple),to:'.compiler-exec/runtime/lib/'+native.tuple},
       {from:path.join(sdk,'lib',native.tuple),to:'.compiler-exec/lib/'+native.tuple},
-      {from:await fs.realpath(path.join(sdk,'third_party/llvm',native.llvmDirectory,native.llvmLibrary)),to:'.compiler-exec/third_party/llvm/'+native.llvmDirectory+'/'+native.llvmLibrary},
+      ...(await compilerLlvmLibraries(sdk,native)).map(({file,relative})=>({from:file,to:'.compiler-exec/'+relative})),
       // runtime_shim/build_shim.mjs links the host runtime into the source tree as
       // ${repo}/target/release/runtime for the compiler's relative lookup. That is
       // a build-tree facility, not a package member: copying it would carry an

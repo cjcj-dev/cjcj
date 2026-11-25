@@ -18,6 +18,16 @@ test('the H1 install CLI rejects a conflicting cross setting before opening prod
  }
 });
 function inputs(platform){const row=(commit,name)=>({commit,tree:'a'.repeat(40),repository:'/fixture/'+name+'.git',install:'/fixture/'+name,configuration:{fixture:true},buildResult:'/fixture/'+name+'/result.json',sourceRoot:'/fixture/'+name+'-producer'});const runtime=row(FIXED_INPUTS.runtime,'R');return{platform,work:'/fixture/work',install:'/fixture/install',host:{version:readHostToolchainPin(platform).replace(/^nightly-/, ''),install:'/fixture/H'},llvm:row(FIXED_INPUTS.llvm,'N'),runtime,ast:row(FIXED_INPUTS.compiler,'AST'),h1:{...row(FIXED_INPUTS.h1,'H1'),product:'/fixture/H1/compiler'},compiler:row('b'.repeat(40),'C'),stdlib:{...runtime,install:'/fixture/std',buildResult:'/fixture/std/result.json',sourceRoot:'/fixture/std-producer'},tools:{privateRoot:'/fixture/tools'}};}
+test('separate Windows compiler execution installs both N DLLs in its loader directory',()=>{
+ const input=inputs('windows_x86_64'),graph=createBootstrapTargets(input);
+ for(const stage of graph.stages.filter(s=>s.metadata?.selection.compilerExecution.role==='separate')){
+  const prefix='.compiler-exec/third_party/llvm/bin',src=stage.metadata.selection.compilerExecution.llvm.install;
+  assert.ok(stage.entries[0].libraries.includes(prefix));
+  assert.deepEqual(stage.copies.filter(row=>row.to.startsWith(prefix+'/')).map(({from,to})=>[from,to]),
+   ['libLLVM-15.dll','libLLVM-Foundation-15.dll'].map(name=>[src+'/third_party/llvm/bin/'+name,prefix+'/'+name]));
+ }
+ assert.ok(graph.stages.some(s=>s.id==='stage0-run'&&s.metadata.selection.compilerExecution.role==='separate'));
+});
 test('std uses the selected native AST archive and headers through build and resume',async t=>{
  const {flag,acceptInstalledStd}=await import('./sdk-std-resume.mjs');
  const fs=await import('node:fs/promises'), os=await import('node:os'), path=await import('node:path');
@@ -44,9 +54,9 @@ test('std uses the selected native AST archive and headers through build and res
  const previous={commands:[terminal]},file=path.join(root,'events');
  const build=['python3','-I','build.py','build','-t','relwithdebinfo','--jobs','2',
   '--target-lib='+path.join(source,'stdlib/build/build/lib'),'--target-lib='+link,'--include='+include,'--local_mode_api'];
- async function accept(inner){
+ async function accept(inner,installPython=inner[0]){
   const rows=[{event:'target-command',...expected}];
-  for(const args of [inner,['python3','-I','build.py','install','--prefix',output]]){
+  for(const args of [inner,[installPython,'-I','build.py','install','--prefix',output]]){
    for(const event of ['target-command','target-result'])rows.push({event,argv:args,cwd:path.join(source,'stdlib'),rc:0});
   }
   await fs.writeFile(file,[...rows,terminal].map(row=>JSON.stringify(row)).join('\n'));
@@ -54,6 +64,11 @@ test('std uses the selected native AST archive and headers through build and res
    runtime:flag(argv,'--runtime'),platform:input.platform,compilerRuntime:'target'});
  }
  assert.deepEqual((await accept(build)).build.argv,build);
+ const {resolveHostPython}=await import('./host-python.mjs');
+ const absolute=[await resolveHostPython(flag(argv,'--sdk')),...build.slice(1)];
+ assert.deepEqual((await accept(absolute)).build.argv,absolute);
+ await assert.rejects(()=>accept([path.join(root,'sdk/python3'),...build.slice(1)]),/STD_RESUME_RECORD build/);
+ await assert.rejects(()=>accept(absolute,'python3'),/STD_RESUME_RECORD install/);
  await assert.rejects(()=>accept(build.map(a=>a.startsWith('--include=')?'--include=/mixed/wire':a)),/STD_RESUME_RECORD build/);
  await assert.rejects(()=>accept(build.filter(a=>!a.startsWith('--include='))),/STD_RESUME_RECORD build/);
  await put(ffi,'older FFI');
