@@ -57,9 +57,11 @@ test('explicit native host is selected before freeze and old host steps retain t
  for(const name of ['Provision uncoloured host SDK','Freeze G2 identity inputs','Copy host inputs for source handoffs',
    'Resolve bootstrap inputs on this runner','Verify complete official H and repaired host LLVM identities','Record host repair and nightly control symbols'])
    assert.match(steps[at(name)].if,/inputs.native_runtime_artifact == ''/);
- const llvmPin=workflow.jobs['fixed-llvm'].steps.find(step=>step.run==='node ci/native-llvm-inputs.mjs');
- assert.equal(llvmPin.env.CJCJ_NATIVE_LLVM_REF,'${{ inputs.native_llvm_ref }}');
- assert.equal(llvmPin.env.CJCJ_NATIVE_RUNTIME_REF,'${{ inputs.native_runtime_ref }}');
+ const llvmJob=workflow.jobs['fixed-llvm'];
+ const llvmPin=llvmJob.steps.find(step=>step.run==='node ci/native-llvm-inputs.mjs');
+ const inherited={...workflow.env,...llvmJob.env,...llvmPin.env};
+ assert.equal(inherited.CJCJ_NATIVE_LLVM_REF,'${{ inputs.native_llvm_ref }}');
+ assert.equal(inherited.CJCJ_NATIVE_RUNTIME_REF,'${{ inputs.native_runtime_ref }}');
  assert.equal(steps[select].env?.CJCJ_NATIVE_SOURCE_SELECTION,undefined);
  const configure=steps.find(step=>step.name==='Configure native bootstrap from actual repositories and target installations');
  assert.equal(configure.env?.CJCJ_NATIVE_SOURCE_SELECTION,undefined);

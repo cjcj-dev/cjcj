@@ -17,7 +17,8 @@ if(args.length && env.CJCJ_SRCBUILD_TARGET==='linux-x64' && hostPlatform()==='li
   && !env.CJCJ_RUNTIME_REF_OVERRIDE && !env.CJCJ_BOOTSTRAP_RUNTIME_PIN) {
   const pair=developmentSdkPair(env.CJCJ_SRCBUILD_TARGET);
   if(env.CJCJ_NATIVE_HOST_VERSION && env.CJCJ_NATIVE_HOST_VERSION!==pair.hostVersion)throw Error('LINUX_X64_SDK_HOST_VERSION');
-  Object.assign(env,{CJCJ_NATIVE_RUNTIME_REF:pair.runtime,CJCJ_NATIVE_LLVM_REF:pair.llvm,CJCJ_NATIVE_HOST_VERSION:pair.hostVersion});
+  Object.assign(env,{CJCJ_NATIVE_RUNTIME_REF:pair.runtime,CJCJ_NATIVE_LLVM_REF:pair.llvm,
+    CJCJ_NATIVE_HOST_VERSION:pair.hostVersion,CJCJ_NATIVE_PAIR_SELECTION:'explicit'});
 }
 const pins = await resolveRuntimeSource(env);
 const environment = [
@@ -30,6 +31,12 @@ if (pins.overrideRef) {
   environment.push(`CJCJ_RUNTIME_REF_OVERRIDE=${pins.overrideRef}`);
   environment.push('CJCJ_ALLOW_RUNTIME_OVERRIDE=true');
 }
+// A later step also inherits the source loader's marker. Replace it when
+// this step deliberately selects commits other than those source defaults.
+const replacedDefaults = env.CJCJ_NATIVE_PAIR_SELECTION === 'explicit'
+  || (pins.overrideRef && pins.overrideRef !== pins.pinRef);
+if (process.env.CJCJ_NATIVE_PAIR_SELECTION === 'pinned' && replacedDefaults)
+  environment.push('CJCJ_NATIVE_PAIR_SELECTION=explicit');
 if (pins.nativePair) {
   if(pins.nativePair.hostVersion) environment.push(`CJCJ_NATIVE_HOST_VERSION=${pins.nativePair.hostVersion}`);
 }

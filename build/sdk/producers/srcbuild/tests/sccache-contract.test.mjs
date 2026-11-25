@@ -39,6 +39,7 @@ const CXX_JOBS = new Map([
   ['sdk-build-target.yml/source-wasm', {component: 'srcbuild-wasm', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['sdk-build-target.yml/source-mingw', {component: 'srcbuild-mingw', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['sdk-build-target.yml/source-windows', {component: 'srcbuild-windows', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
+  ['prepare.yml/prepare-native', {component: 'native-runtime', pin: /steps\.pin\.outputs\.runtime_sha/}],
   ['ci.yml/build', {component: 'runtime', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
   ['ci.yml/package-tests', {component: 'runtime-shim', pin: /env\.CJCJ_NATIVE_RUNTIME_REF/}],
 ]);
@@ -53,7 +54,7 @@ const CXX_JOBS = new Map([
 // or configures one is excluded below rather than left out here.
 // `cc` needs the extra guard: a bare word boundary also matches the end of a
 // filename like src/foo.cc, and a file being copied is not a compile.
-const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|test_windows_runtime_link\.mjs|build_tuple\.mjs|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build-android-final-std\.mjs|build-ohos-final-std\.mjs|build-ios-final-std\.mjs|build-ios-runtime\.mjs|build-android-runtime\.mjs|run-native-package-tests\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs|build_ast_support\.sh|build-shim\.mjs|install-mingw)/;
+const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|test_windows_runtime_link\.mjs|build_tuple\.mjs|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build-android-final-std\.mjs|build-wasm-final-std\.mjs|build-ohos-final-std\.mjs|build-ios-final-std\.mjs|build-ios-runtime\.mjs|build-android-runtime\.mjs|run-native-package-tests\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs|build_ast_support\.sh|build-shim\.mjs|install-mingw)/;
 // Only the package managers. Every other exclusion tried here -- the MSYS2
 // package list, --gcc-toolchain, CMAKE_C*_COMPILER=, shellcheck/actionlint --
 // was measured and carried nothing: dropping all six leaves the suite at the

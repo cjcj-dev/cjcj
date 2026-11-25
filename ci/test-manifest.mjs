@@ -70,6 +70,7 @@ export const GATING = Object.freeze([
   'ci/llvm-tuple-layout.test.mjs',
   'ci/llvm-tuple-platform.test.mjs',
   'ci/native-llvm-inputs.test.mjs',
+  'ci/runtime-pin.test.mjs',
   'build/sdk/producers/platform_matrix/native_runtime.test.mjs',
   'build/sdk/producers/srcbuild/tests/cross-runtime-cache.test.mjs',
   'ci/colour-runtime/platform.test.mjs',

@@ -42,7 +42,6 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 180
     env:
-      WINDOWS_TOOLS_REPOSITORY: ${{ vars.WINDOWS_TOOLS_REPOSITORY }}
       CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
       CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
       CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
@@ -61,7 +60,6 @@ jobs:
       CROSS_STD_ARTIFACT: ${{ inputs.cross_std_artifact }}
       CROSS_STD_TUPLE: ${{ inputs.cross_std_tuple }}
       RELEASE_DIST: ${{ github.workspace }}/dist
-      CJ_HEAP_SIZE: ${{ inputs.platform == 'darwin-arm64' && '6GB' || '12GB' }}
     steps:
       - name: Require the package inputs
         shell: bash
@@ -69,6 +67,12 @@ jobs:
           PACKAGE_INPUTS: ${{ toJSON(inputs) }}
         run: |
           node -e 'const i = JSON.parse(process.env.PACKAGE_INPUTS); const miss = ["runner", "platform", "llvm_platform", "sdk_runtime_dir", "std_artifact", "version"].filter((k) => !i[k]); if (miss.length) { console.error("::error::package mode requires " + miss.join(", ")); process.exit(1); }'
+          # The macro runtime compares the enumerated environment key verbatim.
+          case "$RUNNER_OS:$RELEASE_PLATFORM" in
+            Windows:*) echo 'CJHEAPSIZE=12GB' ;;
+            macOS:darwin-arm64) echo 'cjHeapSize=6GB' ;;
+            *) echo 'cjHeapSize=12GB' ;;
+          esac >> "$GITHUB_ENV"
       - name: Checkout cjcj
         uses: actions/checkout@v7.0.1
 
@@ -100,9 +104,6 @@ jobs:
       - name: Load and validate runtime pin
         env:
           CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
-          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
-          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
-          CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
           CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
         run: npx --yes zx@8 ci/load_runtime_pin.mjs
 

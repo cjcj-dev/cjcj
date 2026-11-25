@@ -162,7 +162,6 @@ def install_wasi_sysroot(root):
     if not (sysroot / 'lib' / 'wasm32-wasi' / 'libc.a').is_file():
         raise ValueError(f'{archive} did not unpack a wasi-sysroot with lib/wasm32-wasi/libc.a')
     export('CJCJ_WASI_SYSROOT', str(sysroot))
-    export('CJCJ_WASI_SYSROOT_TARBALL', str(archive))
 
 
 def main():

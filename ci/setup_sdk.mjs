@@ -146,12 +146,8 @@ if (actualHostToolchain !== toolchain) {
 // 2.5 Verify and publish the fixed LLVM tuple outside the official SDK.
 // Official frontend IR and host code retain the official optimizer/backend/linker.
 // Rebuilt target consumers select the fixed tuple explicitly.
-// Jobs that only consume the toolchain's archives and headers as link inputs
-// (no Cangjie compilation, e.g. the Windows std-ast relink) opt out of the llc
-// requirement with CJCJ_SDK_LINK_INPUTS_ONLY=1. Jobs that never feed cjcj-generated
-// IR to llc at all (the non-gating SDK provisioning check, which exercises only the
-// official toolchain) keep the stock llc with CJCJ_SDK_STOCK_LLC=1.
-const keepStockLlc = process.env.CJCJ_SDK_LINK_INPUTS_ONLY || process.env.CJCJ_SDK_STOCK_LLC;
+// The SDK provisioning check exercises only the official toolchain.
+const keepStockLlc = process.env.CJCJ_SDK_STOCK_LLC;
 const llcPlatform = keepStockLlc ? '' : targetForHost()?.spec.llvmPlatform || '';
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
 const fixedOptGz = process.env.FIXED_OPT_GZ || '';
@@ -331,7 +327,6 @@ if (process.env.GITHUB_ENV) {
   if (!process.env.GITHUB_PATH) throw new Error('GITHUB_PATH is required when GITHUB_ENV is set');
   await fs.appendFile(process.env.GITHUB_ENV, [
     `CANGJIE_HOME=${cangjieHome}`,
-    `CJCJ_ACTUAL_HOST_TOOLCHAIN=${actualHostToolchain}`,
     `CANGJIE_STDX_PATH=${stdxPath}`,
     `${ldVar}=${ldPath}`,
     `cjHeapSize=${heapSize}`,

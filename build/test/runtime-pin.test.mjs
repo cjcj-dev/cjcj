@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs/promises';
+import {nativeLlvmInputs} from '../../ci/native-llvm-inputs.mjs';
 import {resolveRuntimeSource} from '../../ci/runtime-pin.mjs';
 
 const overrideRef = '1111111111111111111111111111111111111111';
@@ -103,4 +104,20 @@ test('runtime source rejects a 41-character commit SHA', async () => {
 
 test('runtime source rejects a non-hexadecimal 40-character commit SHA', async () => {
   await assertAuthorizedRefRejected(`${lowercaseRef.slice(0, 39)}g`);
+});
+
+test('explicit pair needs a host even when both refs match the pins', async () => {
+  const pair = {...nativeLlvmInputs({}), CJCJ_NATIVE_RUNTIME_ARTIFACT: 'selected-runtime',
+    CJCJ_NATIVE_PAIR_SELECTION: 'explicit', CJCJ_NATIVE_HOST_VERSION: ''};
+  await assert.rejects(resolveRuntimeSource(pair), /NATIVE_RUNTIME_EXPLICIT_HOST_REQUIRED/);
+});
+
+test('a pinned marker cannot authorize a different LLVM or runtime commit', async () => {
+  const pair = {...nativeLlvmInputs({}), CJCJ_NATIVE_RUNTIME_ARTIFACT: 'selected-runtime'};
+  for (const key of ['CJCJ_NATIVE_LLVM_REF', 'CJCJ_NATIVE_RUNTIME_REF']) {
+    for (const hostVersion of ['', '1.3.0-alpha.1']) {
+      await assert.rejects(resolveRuntimeSource({...pair, [key]: overrideRef, CJCJ_NATIVE_HOST_VERSION: hostVersion}),
+        /NATIVE_PAIR_SELECTION_NOT_PINNED/);
+    }
+  }
 });

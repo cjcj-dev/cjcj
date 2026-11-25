@@ -107,7 +107,20 @@ test('public Android runtime CLI passes the admitted jobs to the real child proc
 });
 test('public Android and both OHOS std entries keep independent runtime and std jobs',async()=>{
  for(const [family,arch]of [['android','aarch64'],['ohos','aarch64'],['ohos','x86_64']]){
-  const f=await fixture(family+'-'+arch),r=f.invoke(family+'-final-std',{CROSS_STD_TUPLE:'linux_'+family+'_'+arch+'_cjnative'});
+  const f=await fixture(family+'-'+arch);
+  if (family === 'android') {
+   // The std entry inspects the preceding Android AST archive with the NDK reader.
+   const work=f.env.CANGJIE_WORKSPACE, bin=path.join(f.env.ANDROID_NDK_ROOT,'toolchains/llvm/prebuilt/linux-x86_64/bin');
+   const lib=path.join(work,'software/android-ast-support/lib/linux_android_aarch64_cjnative');
+   await fs.mkdir(bin,{recursive:true});await fs.mkdir(lib,{recursive:true});
+   const reader=run('android-ast-reader',['which','llvm-readelf']);assert.equal(reader.status,0,reader.stderr);
+   await fs.symlink(reader.stdout.trim(),path.join(bin,'llvm-readelf'));
+   const object=path.join(work,'fixture.o');
+   const cc=run('android-ast-object',['clang','--target=aarch64-linux-android23','-x','c','-c','-','-o',object],{input:'int fixture;'});
+   assert.equal(cc.status,0,cc.stderr);
+   const ar=run('android-ast-archive',['ar','rcs',path.join(lib,'libcangjie-ast-support.a'),object]);assert.equal(ar.status,0,ar.stderr);
+  }
+  const r=f.invoke(family+'-final-std',{CROSS_STD_TUPLE:'linux_'+family+'_'+arch+'_cjnative'});
   assert.equal(r.status,1,r.stderr);assert.match(r.stderr,/exit code: 37/);assert.match(r.stdout,/CROSS_STD_CHILD_REACHED/);
   const rows=await f.records();console.log('CROSS_STD_JOBS_ASSERTION_REACHED '+family+' '+arch);
   for(const [kind,jobs]of [['runtime','2'],['stdlib','1']]){
@@ -157,7 +170,8 @@ test('source-ios products enter the same SDK that compose receives after relocat
   assert.equal(download.with.path, installation.env.IOS_ARTIFACT_DIR);
   assert.ok(packaging.steps.indexOf(download) < packaging.steps.indexOf(installation));
   assert.ok(packaging.steps.indexOf(installation) < packaging.steps.indexOf(step(packaging, 'steps/package-install.mjs')));
-  const recipe = (await workflow('release.yml')).jobs['package-darwin-arm64-ios'].with;
+  const caller = (await workflow('release.yml')).jobs.package;
+  const recipe = caller.strategy.matrix.include.find(row => row.release_key === 'darwin-arm64-ios');
   const selected = JSON.parse(recipe.cross_std_artifacts);
   const entry = command => path.resolve(command.split(' ').at(-1));
   const f = await fixture('ios product transport', {ios: true});
@@ -249,7 +263,7 @@ test('source-ios products enter the same SDK that compose receives after relocat
   await fs.rename(sdk,sdk+'-unavailable');
   await fs.mkdir(archiveDir);
   for (const file of uploadPaths) await fs.copyFile(file,path.join(archiveDir,path.basename(file)));
-  const compose = entry(step((await workflow('sdk-build.yml')).jobs.package, 'compose-package.mjs').run);
+  const compose = entry(step((await workflow(path.basename(caller.uses))).jobs.package, 'compose-package.mjs').run);
   const consume = label => run(label,[process.execPath,compose],{env:{...process.env,
     NATIVE_SDK_ARTIFACT_DIR:archiveDir,NATIVE_SDK_INSTALL_DIR:path.join(work,'received '+label),RELEASE_PLATFORM:recipe.platform,
     CJCJ_NATIVE_SDK_VERSION:version,CJCJ_RELEASE_SOURCE_SHA:sourceSha,CJCJ_NATIVE_RUNTIME_REF:runtimeRef,

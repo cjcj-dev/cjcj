@@ -21,7 +21,7 @@ const h48LanguagePinPath = path.join(root, 'ci', 'h48_language_tuple_pin.json');
 const nightlyLiteral = /nightly-\d+\.\d+\.\d+-alpha\.\d+/;
 // Built in pieces so this test source is not itself an undeclared nightly literal.
 const h48HostSdk = 'nightly-' + '1.3.0-alpha.' + '20260904010027';
-const loadCommand = 'cat ci/source_pin.env >> "$GITHUB_ENV"';
+const loadCommand = 'node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"';
 const srcbuildLoadCommand = 'cat ci/host_sdk_pin.env >> "$GITHUB_ENV"';
 
 async function filesBelow(directory) {
@@ -156,7 +156,7 @@ for (const [name, changedFile, mutate] of scanControls) {
         'ci/host_sdk_pin.env', 'build/sdk/producers/release/base-sdk-identities.json',
         'build/lib/release-component-provenance.mjs', 'build/sdk/producers/release/source-tool-payloads.mjs',
         'ci/bootstrap/sdk-platform.mjs', 'ci/bootstrap/sdk-io.mjs', 'ci/bootstrap/sdk-flow.mjs',
-        'ci/bootstrap/sdk-command-lifetime.mjs', 'ci/bootstrap/sdk-std-resume.mjs',
+        'ci/bootstrap/sdk-command-lifetime.mjs', 'ci/bootstrap/sdk-path.mjs', 'ci/bootstrap/sdk-std-resume.mjs',
         'ci/bootstrap/sdk-source.mjs', 'ci/bootstrap/sdk-install-entries.mjs', 'ci/build-resources.mjs',
         'build/lib/targets.mjs', 'build/lib/errors.mjs', 'build/srcbuild/tool-layout.mjs', 'build/lib/pe-symbols.mjs', 'ci/bootstrap/sdk-archive.mjs',
         '.github/workflows/sdk-build.yml', '.github/workflows/sdk-package.yml',
@@ -317,14 +317,16 @@ test('srcbuild pin reader executes through an aliased entry directory', async t 
   });
 });
 
-test('every workflow host consumer loads ci/source_pin.env after checkout', async () => {
-  const expectedLoads = new Map([
-    ['ci.yml', 2],
-  ]);
+test('CI build and provision resolve the host pin after checkout without broadcasting source pins', async () => {
   const workflows = path.join(root, '.github', 'workflows');
-  for (const [name, count] of expectedLoads) {
-    const text = await fs.readFile(path.join(workflows, name), 'utf8');
-    assert.equal(text.split(loadCommand).length - 1, count, name);
+  const ci = loadYaml(await fs.readFile(path.join(workflows, 'ci.yml'), 'utf8'));
+  for (const name of ['build', 'provision']) {
+    const {steps} = ci.jobs[name];
+    const checkout = steps.findIndex(step => step.uses?.startsWith('actions/checkout@'));
+    const loaders = steps.filter(step => step.run?.includes(loadCommand));
+    assert.equal(loaders.length, 1, name);
+    assert.ok(checkout >= 0 && steps.indexOf(loaders[0]) > checkout, name);
+    for (const step of steps) assert.doesNotMatch(step.run ?? '', /cat ci\/source_pin\.env/, name);
   }
   const srcbuild = await fs.readFile(path.join(workflows, 'sdk-build-target.yml'), 'utf8');
   assert.equal(srcbuild.split(srcbuildLoadCommand).length - 1, 1, 'sdk-build-target.yml');
@@ -387,14 +389,11 @@ test('ordinary CI and source-build hosts use the sole nightly pin', async () => 
   const ordinary = await fs.readFile(cjpmPinPath, 'utf8');
   assert.doesNotMatch(ordinary, /^CJCJ_TOOLCHAIN(?:_[A-Z0-9_]+)?=/m,
     'cjpm source selection must not duplicate the host nightly');
-  for (const name of ['ci.yml']) {
-    const workflow = loadYaml(await fs.readFile(path.join(root, '.github/workflows', name), 'utf8'));
-    for (const job of Object.values(workflow.jobs)) for (const step of job.steps || []) {
-      if (!step.run?.includes(loadCommand)) continue;
-      assert.match(step.run, /node ci\/host-toolchain-pin\.mjs/, name+' must resolve its host in the cjpm load step');
-      assert.match(step.run, /(?:--github-env|echo "CJCJ_TOOLCHAIN=\$CJCJ_TOOLCHAIN")/, name+' must export the resolved host');
-    }
-  }
+  const {jobs} = loadYaml(await fs.readFile(path.join(root, '.github/workflows/ci.yml'), 'utf8'));
+  const loaders = Object.entries(jobs).flatMap(([name, job]) => (job.steps ?? [])
+    .filter(step => step.name === 'Load host toolchain pin').map(step => [name, step]));
+  assert.deepEqual(loaders.map(([name]) => name).sort(), ['build', 'provision']);
+  for (const [name, step] of loaders) assert.ok(step.run.includes(loadCommand), name);
 });
 
 test('every CJCJ_TOOLCHAIN definition names a host and has measured consumers', async () => {

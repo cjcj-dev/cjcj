@@ -16,17 +16,22 @@ function parsePins(text) {
 }
 
 export function nativePair(env = process.env, {requireHost=true} = {}) {
-  const llvm = env.CJCJ_NATIVE_LLVM_REF, runtime = env.CJCJ_NATIVE_RUNTIME_REF;
-  if (!llvm && !runtime) {
-    if (!env.CJCJ_NATIVE_RUNTIME_ARTIFACT) return null;
-    // A named native runtime still has to match the selected pair at receipt.
+  let llvm = env.CJCJ_NATIVE_LLVM_REF, runtime = env.CJCJ_NATIVE_RUNTIME_REF;
+  let hostVersion = env.CJCJ_NATIVE_HOST_VERSION;
+  if (!llvm && !runtime && !env.CJCJ_NATIVE_RUNTIME_ARTIFACT) return null;
+  if ((!llvm && !runtime) || env.CJCJ_NATIVE_PAIR_SELECTION === 'pinned') {
+    // The pin loader may already have exported the pair through GITHUB_ENV.
+    // Only its exact checked-in pair can inherit the default host.
     const pins = nativeLlvmInputs(env);
-    return nativePair({...env, ...pins, CJCJ_NATIVE_HOST_VERSION:
-      env.CJCJ_NATIVE_HOST_VERSION || readHostToolchainPin().replace(/^nightly-/, '')}, {requireHost});
+    if (pins.CJCJ_NATIVE_PAIR_SELECTION !== 'pinned') throw new Error('NATIVE_PAIR_SELECTION_NOT_PINNED');
+    // Inherited source defaults only select a native pair for an artifact.
+    if (!env.CJCJ_NATIVE_RUNTIME_ARTIFACT) return null;
+    llvm = pins.CJCJ_NATIVE_LLVM_REF;
+    runtime = pins.CJCJ_NATIVE_RUNTIME_REF;
+    hostVersion ||= readHostToolchainPin().replace(/^nightly-/, '');
   }
   if (![llvm, runtime].every(value => /^[0-9a-f]{40}$/.test(value || '')))
     throw new Error('NATIVE_RUNTIME_EXPLICIT_PAIR_REQUIRED');
-  const hostVersion = env.CJCJ_NATIVE_HOST_VERSION;
   if (requireHost && !/^\d+\.\d+\.\d+-alpha\.\d+$/.test(hostVersion || ''))
     throw new Error('NATIVE_RUNTIME_EXPLICIT_HOST_REQUIRED');
   return {llvm, runtime, hostVersion};

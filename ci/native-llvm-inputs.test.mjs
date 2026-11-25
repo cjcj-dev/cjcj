@@ -1,3 +1,4 @@
+import {readHostToolchainPin} from './host-toolchain-pin.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import {spawnSync} from 'node:child_process'; import assert from 'node:assert/strict'; import {test} from 'node:test';
 import yaml from './vendor/js-yaml/js-yaml.mjs';
@@ -18,6 +19,19 @@ test('native LLVM default preserves the repository source pair',()=>fixture(({ru
   assert.ok(fs.readFileSync(output,'utf8').includes(`${outKey}=${ref}\n`));
  }
  assert.doesNotMatch(result.stdout,/CJCJ_LLVM_RUNTIME_MODE/);
+}));
+test('runtime loader inherits the exact pinned pair and exports its default host',()=>fixture(({run,output})=>{
+ const selected=run();assert.equal(selected.status,0,selected.stderr);
+ const pair=Object.fromEntries(fs.readFileSync(output,'utf8').trim().split('\n').map(line=>line.split('=')));
+ assert.equal(pair.CJCJ_NATIVE_PAIR_SELECTION,'pinned');
+ const loaded=output+'.runtime';
+ const r=spawnSync(process.execPath,['ci/load_runtime_pin.mjs'],{encoding:'utf8',env:{...pair,
+  GITHUB_ENV:loaded,CJCJ_NATIVE_RUNTIME_ARTIFACT:'selected-runtime',CJCJ_NATIVE_HOST_VERSION:''}});
+ assert.equal(r.status,0,r.stderr);
+ const env=Object.fromEntries(fs.readFileSync(loaded,'utf8').trim().split('\n').map(line=>line.split('=')));
+ assert.equal(env.CJCJ_NATIVE_RUNTIME_REF,pair.CJCJ_NATIVE_RUNTIME_REF);
+ assert.equal(env.CJCJ_NATIVE_LLVM_REF,pair.CJCJ_NATIVE_LLVM_REF);
+ assert.equal(env.CJCJ_NATIVE_HOST_VERSION,readHostToolchainPin().replace(/^nightly-/, ''));
 }));
 test('native LLVM explicit complete pair reaches producer environment',()=>fixture(({run,output})=>{
  const result=run({CJCJ_NATIVE_LLVM_REF:llvm,CJCJ_NATIVE_RUNTIME_REF:runtime});assert.equal(result.status,0,result.stderr);

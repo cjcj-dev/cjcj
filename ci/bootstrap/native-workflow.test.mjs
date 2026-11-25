@@ -42,6 +42,35 @@ test('formal native planner rejects missing producer event and incomplete pair; 
  const blank=Object.fromEntries(Object.keys(selectedEnv(workflow('sdk-build-target.yml'))).map(k=>[k,'']));
  const r=plan(t,'linux-aarch64',blank);assert.equal(r.status,1);assert.match(r.stderr,/issues\/763/);
 });
+test('source jobs inherit the resolved native pair without masking GITHUB_ENV',()=>{
+ const name='sdk-build-target.yml', text=fs.readFileSync(path.join(repo,'.github/workflows',name),'utf8');
+ assert.doesNotMatch(text,/\bCJCJ_STAGE3_STDLIB_BUILD_TYPE\b/);
+ const {jobs}=load(text);
+ for(const job of ['source-stage0','source-ios','native-windows-sdk']){
+  const {steps}=jobs[job];
+  const source=steps.findIndex(s=>s.run?.includes('node ci/native-llvm-inputs.mjs'));
+  const loader=steps.findIndex(s=>s.run?.includes('ci/load_runtime_pin.mjs'));
+  assert.ok(source>=0 && loader>source,job);
+  assert.deepEqual(Object.keys(steps[loader].env??{}).filter(key=>key.startsWith('CJCJ_NATIVE_')),[],job);
+ }
+});
+test('release package sets the runtime heap size for each platform',t=>{
+ const job=workflow('sdk-package.yml').jobs.package,root=fixture(t);
+ assert.equal(job.env.CJ_HEAP_SIZE,undefined);
+ assert.equal(job.env.RELEASE_PLATFORM,'${{ inputs.platform }}');
+ const step=job.steps.find(s=>s.name==='Require the package inputs');
+ assert.equal(step.env.PACKAGE_INPUTS,'${{ toJSON(inputs) }}');
+ for(const [runner,platform,expected] of [['macOS','darwin-arm64','cjHeapSize=6GB'],
+  ['Linux','linux-x64','cjHeapSize=12GB'],['Windows','windows-x64','CJHEAPSIZE=12GB']]){
+  const file=path.join(root,platform+'.env');
+  const fields={platform,runner,llvm_platform:'llvm',sdk_runtime_dir:'runtime',std_artifact:'std',version:'fixture'};
+  const result=spawnSync('bash',['-eu','-c',step.run],{encoding:'utf8',env:{...process.env,
+   RELEASE_PLATFORM:platform,RUNNER_OS:runner,PACKAGE_INPUTS:JSON.stringify(fields),GITHUB_ENV:file}});
+  assert.equal(result.status,0,result.stderr);
+  const heap=fs.readFileSync(file,'utf8').trim().split(/\r?\n/).filter(line=>/^cj_?heap_?size=/i.test(line));
+  assert.deepEqual(heap,[expected],platform);
+ }
+});
 test('native configure inherits the validated LLVM, runtime and host in both jobs',()=>{
  const {jobs}=workflow('sdk-build-target.yml');
  for(const job of ['source-stage0','native-windows-sdk']){

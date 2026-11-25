@@ -187,16 +187,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Validate native source pair before starting producers
-        env:
-          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
-          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
         run: node ci/native-llvm-inputs.mjs
       - name: Select the requested tuples
         id: select
         env:
           REQUESTED: ${{ needs.plan.outputs.llvm_platforms || 'all' }}
-          PUBLISH_TUPLE: 'false'
-          PLATFORM_SET: ''
         run: node ci/llvm-tools-matrix.mjs
 
   fixed-llvm:
@@ -234,9 +229,6 @@ jobs:
           NODE
       - name: Load native LLVM source pair
         id: llvm-pin
-        env:
-          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
-          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
         run: node ci/native-llvm-inputs.mjs
 
       # `rebuild` salts the key with the run id so the restore misses and the
@@ -620,7 +612,6 @@ jobs:
       # backend is a tarball and not SCCACHE_GHA_ENABLED.
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - &checkout-cjcj
         name: Checkout cjcj
@@ -670,18 +661,12 @@ jobs:
 
       - &load-source-pins
         name: Load source pins
-        run: |
-          cat ci/source_pin.env >> "$GITHUB_ENV"
-          node ci/native-llvm-inputs.mjs
+        run: node ci/native-llvm-inputs.mjs
 
       - &load-and-validate-runtime-pin
         name: Load and validate runtime pin
         env:
           CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
-          CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
-          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
-          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
-          CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
           CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
         run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
@@ -1149,7 +1134,6 @@ jobs:
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7.0.1
@@ -1236,7 +1220,6 @@ jobs:
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7.0.1
@@ -1323,7 +1306,6 @@ jobs:
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7.0.1
@@ -1410,7 +1392,6 @@ jobs:
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7.0.1
@@ -1458,8 +1439,6 @@ jobs:
 
       - &inject-selfhost-compiler-version
         name: Inject selfhost compiler version
-        env:
-          SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
         run: |
           npx --yes zx@8 build/sdk/producers/srcbuild/tests/inject-version.test.mjs
           npx --yes zx@8 build/sdk/producers/srcbuild/steps/inject-version.mjs
@@ -1484,7 +1463,6 @@ jobs:
         name: Build stage 3 compiler and final std
         env:
           CJCJ_JAVA_INTEROP_WORK: ${{ runner.temp }}/java-interop
-          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
         run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-stage3.mjs
 
       - &upload-final-source-built-std-install-root
@@ -1557,7 +1535,6 @@ jobs:
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7.0.1
@@ -1882,14 +1859,11 @@ jobs:
         name: Test and archive installed SDK
         env:
           CJCJ_PACKAGE_ANDROID: ${{ matrix.target == 'linux-x64' && inputs.build_android && '1' || '' }}
-          SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
         run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/package-install.mjs
 
       - name: Test real SDK source-tool installation and packaging
         if: matrix.target == 'linux-x64'
         env:
-          SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
-          CJCJ_SRCBUILD_TARGET: linux-x64
           CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
           RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/source-tool-sdk-integration
         run: node build/test/source-tool-install-contract.integration.test.mjs
@@ -1978,7 +1952,6 @@ jobs:
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7.0.1
@@ -2031,8 +2004,6 @@ jobs:
           requirement: android-ndk
 
       - name: Build and install Android AST support
-        env:
-          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
         run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-android-ast.mjs
 
       - name: Build Android runtime and final std with stage2 cjc
@@ -2040,7 +2011,6 @@ jobs:
         env:
           CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/build/sdk/producers/platform_matrix/native_runtime_toolchain.cmake
           CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
-          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
         run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-android-final-std.mjs
 
       - name: Upload Android runtime and final std
@@ -2082,7 +2052,6 @@ jobs:
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7.0.1
@@ -2137,9 +2106,6 @@ jobs:
       - name: Build wasm32-wasi runtime and complete final std with stage2 cjc
         if: matrix.target == 'linux-x64' && inputs.build_wasm
         env:
-          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/build/sdk/producers/platform_matrix/native_runtime_toolchain.cmake
-          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
-          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
           CJCJ_WASM_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/wasm-sdk
           CJCJ_WASM_CLANG: ${{ env.CJCJ_FIXED_LLVM_DIR }}/bin/clang
           CJCJ_WASM_LLVM_AR: ${{ env.CJCJ_FIXED_LLVM_DIR }}/bin/llvm-ar
@@ -2180,7 +2146,6 @@ jobs:
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7.0.1
@@ -2238,7 +2203,6 @@ jobs:
           CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/build/sdk/producers/platform_matrix/native_runtime_toolchain.cmake
           CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
           CROSS_STD_TUPLE: ${{ matrix.tuple }}
-          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
         run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-ohos-final-std.mjs
 
       - name: Upload OHOS runtime and final std
@@ -2275,7 +2239,6 @@ jobs:
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7.0.1
@@ -2367,7 +2330,6 @@ jobs:
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7.0.1
@@ -2383,10 +2345,6 @@ jobs:
       - name: Load and validate runtime pin
         env:
           CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
-          CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
-          CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
-          CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
-          CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
           CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
         run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
@@ -2466,7 +2424,6 @@ jobs:
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       cjHeapSize: 12GB
       cjHeapSwap: "on"
-      CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7.0.1
@@ -2525,7 +2482,6 @@ jobs:
         if: matrix.target == 'linux-x64'
         env:
           CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
-          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/native-bootstrap
         run: npx --yes zx@8 build/sdk/producers/srcbuild/steps/build-windows-final-std.mjs
 
       # Keep these Linux cross-built outputs distinct from the native Windows

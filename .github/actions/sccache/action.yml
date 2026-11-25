@@ -102,8 +102,6 @@ runs:
           echo "SCCACHE_PATH=$SCCACHE_PATH"
           echo "CMAKE_C_COMPILER_LAUNCHER=$SCCACHE_PATH"
           echo "CMAKE_CXX_COMPILER_LAUNCHER=$SCCACHE_PATH"
-          echo "CJCJ_SCCACHE_COMPONENT=$COMPONENT"
-          echo "CJCJ_SCCACHE_PLATFORM=$PLATFORM"
         } >> "$GITHUB_ENV"
 
     - name: Restore sccache disk cache
@@ -123,12 +121,6 @@ runs:
       env:
         RESTORED_KEY: ${{ steps.restore.outputs.cache-matched-key }}
         PRIMARY_KEY: ${{ steps.restore.outputs.cache-primary-key }}
-        SCCACHE_DIR: ${{ runner.temp }}/sccache-${{ inputs.component }}
-        SCCACHE_CACHE_SIZE: ${{ inputs.cache-size }}
-        SCCACHE_IDLE_TIMEOUT: '0'
-        SCCACHE_GHA_ENABLED: 'false'
-        SCCACHE_LOG: warn
-        SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache-${{ inputs.component }}-error.log
       run: |
         set -euo pipefail
         {
