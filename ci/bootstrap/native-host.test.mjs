@@ -89,6 +89,70 @@ test('H1 selection changes the source checkout without changing the native pair 
  assert.throws(()=>nativeSourceSelection({CJCJ_NATIVE_H1_REF:'HEAD'}),/NATIVE_H1_SOURCE_REF/);
  assert.throws(()=>nativeSourceSelection(env,undefined,{h1:base.h1}),/NATIVE_H1_SOURCE_CONFLICT/);
 });
+test('POSIX GHA H1 uses the verified job checkout unless a different ref was requested', {skip:process.platform==='win32'}, async t=>{
+ const {selectGhaH1}=await import('./configure-gha-inputs.mjs');
+ const {pathToFileURL}=await import('node:url');
+ await fs.mkdir(root,{recursive:true});
+ const work=await fs.mkdtemp(path.join(await fs.realpath(root),'gha-h1-'));
+ t.after(()=>fs.rm(work,{recursive:true,force:true}));
+ const checkout=path.join(work,'checkout'),workspace=path.join(work,'workspace'),inputs=path.join(work,'inputs');
+ const git=(cwd,...args)=>{
+   const r=spawnSync('git',['-C',cwd,...args],{encoding:'utf8'});
+   assert.equal(r.status,0,r.stderr);return r.stdout.trim();
+ };
+ await fs.mkdir(checkout);git(checkout,'init','-q');
+ const repository='https://fixture.invalid/job-fork.git';
+ git(checkout,'remote','add','origin',repository);
+ const commit=label=>{
+   git(checkout,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-qm',label);
+   return git(checkout,'rev-parse','HEAD');
+ };
+ const older=commit('bisect'),head=commit('job');
+ const env={GITHUB_SHA:head};
+ const select=(overrides={},locations={})=>{
+   const job={...env,...overrides};
+   return selectGhaH1(checkout,locations,job,false,nativeSourceSelection(job).selection.h1);
+ };
+ for(const overrides of [{},{CJCJ_NATIVE_H1_REF:head}]){
+   const h1=await select(overrides);
+   assert.equal(h1.selection.commit,head,'POSIX H1 must equal GITHUB_SHA');
+   assert.equal(h1.selection.repository,repository);
+   assert.equal(h1.checkout,checkout);
+ }
+ await assert.rejects(select({GITHUB_SHA:older}),/GHA_BOOTSTRAP_JOB_CHECKOUT/);
+ await assert.rejects(select({GITHUB_SHA:undefined}),/GHA_BOOTSTRAP_JOB_CHECKOUT/);
+ await assert.rejects(select({},{tools:{privateRoot:'artifact'}}),/NATIVE_TOOLS_PRIVATE_ROOT_RETIRED/);
+
+ // Exercise configure's checkout loop, stopping at bounds, the source after H1.
+ const {selection}=nativeSourceSelection({},{llvm:head,runtime:head});
+ const sources=path.join(workspace,'native-sources');
+ await fs.mkdir(sources,{recursive:true});
+ for(const [name,url] of Object.entries({llvm:selection.llvm.repository,runtime:selection.runtime.repository,ast:repository,bounds:repository})){
+   git(sources,'clone','-q',checkout,name);
+   git(path.join(sources,name),'remote','set-url','origin',url);
+ }
+ await fs.writeFile(path.join(workspace,'.source-selection.json'),JSON.stringify({compiler:{url:repository,tag:head}}));
+ await fs.mkdir(inputs);const platform=hostPlatform(),file='locations.json';
+ await fs.writeFile(path.join(inputs,file),JSON.stringify({platform,hleDependencies:'hle.json'}));
+ const member=name=>({path:name,source:'fixture',version:'1'});
+ await fs.mkdir(path.join(inputs,'modules'));
+ await fs.writeFile(path.join(inputs,'hle.json'),JSON.stringify({platform,node:member(file),modules:member('modules'),cjbind:member(file)}));
+ const job={...process.env,...env,CANGJIE_WORKSPACE:workspace,GITHUB_WORKSPACE:checkout,CJCJ_NATIVE_INPUT_ROOT:inputs,
+   CJCJ_OFFICIAL_SDK_ROOT:work,CJCJ_NATIVE_LLVM_REF:head,CJCJ_NATIVE_RUNTIME_REF:head,CJCJ_NATIVE_PAIR_SELECTION:'explicit',
+   GIT_ALLOW_PROTOCOL:'file',GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'url.'+pathToFileURL(checkout).href+'.insteadOf',
+   GIT_CONFIG_VALUE_0:NATIVE_REPOSITORIES.h1,CJCJ_SRCBUILD_SOURCE_MIRRORS:'',CJCJ_SRCBUILD_REQUIRE_MIRRORS:'0'};
+ for(const key of ['CJCJ_NATIVE_H1_REF','CJCJ_NATIVE_RUNTIME_INSTALL','CJCJ_PINNED_RUNTIME_GIT_DIR','GITHUB_ENV'])delete job[key];
+ const configure=overrides=>{
+   const r=spawnSync(process.execPath,[new URL('./configure-gha-inputs.mjs',import.meta.url).pathname],{env:{...job,...overrides},encoding:'utf8'});
+   assert.equal(r.status,1);assert.match(r.stderr,/GHA_NATIVE_SOURCE_REUSE_CHANGED bounds/);
+ };
+ const h1=path.join(sources,'h1');
+ configure({});
+ await assert.rejects(fs.stat(h1),{code:'ENOENT'});
+ configure({CJCJ_NATIVE_H1_REF:older});
+ assert.equal(git(h1,'rev-parse','HEAD'),older);
+ assert.equal(git(checkout,'rev-parse','HEAD'),head);
+});
 test('native configure resolves a pinned runtime install before checking the artifact platform',async()=>{
  const {configureGhaInputs}=await import('./configure-gha-inputs.mjs');
  await fs.mkdir(root,{recursive:true});const work=await fs.mkdtemp(path.join(root,'native-configure-pair-'));
@@ -225,7 +289,7 @@ test('POSIX configured source can be cloned locally at its exact pin', {skip:pro
  await fs.writeFile(path.join(inputs,'locations.json'),JSON.stringify({platform,hleDependencies:'hle.json'}));
  const member=name=>({path:name,source:'fixture',version:'1'});
  await fs.writeFile(path.join(inputs,'hle.json'),JSON.stringify({platform,node:member('locations.json'),modules:member('modules'),cjbind:member('locations.json')}));
- const env={...process.env,CANGJIE_WORKSPACE:workspace,GITHUB_WORKSPACE:work,CJCJ_NATIVE_INPUT_ROOT:inputs,
+ const env={...process.env,CANGJIE_WORKSPACE:workspace,GITHUB_WORKSPACE:upstream,GITHUB_SHA:git(upstream,'rev-parse','HEAD'),CJCJ_NATIVE_INPUT_ROOT:inputs,
    CJCJ_OFFICIAL_SDK_ROOT:work,CJCJ_NATIVE_LLVM_REF:pin,CJCJ_NATIVE_RUNTIME_REF:pin,CJCJ_NATIVE_PAIR_SELECTION:'explicit',
    GIT_ALLOW_PROTOCOL:'file',GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'url.'+pathToFileURL(upstream).href+'.insteadOf',
    GIT_CONFIG_VALUE_0:readSourcePins().llvm.LLVM_URL,CJCJ_SRCBUILD_SOURCE_MIRRORS:'',CJCJ_SRCBUILD_REQUIRE_MIRRORS:'0'};

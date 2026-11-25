@@ -106,7 +106,7 @@ public class StringRef <: ArrayRef<UTF8> {
     }
 }
 
-public struct UnicodeCharRange <: Comparable<UnicodeCharRange> & Equatable<UnicodeCharRange> {
+public struct UnicodeCharRange <: Comparable<UnicodeCharRange> {
     public let lower: UTF32
     public let upper: UTF32
 

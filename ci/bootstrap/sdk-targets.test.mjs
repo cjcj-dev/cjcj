@@ -574,6 +574,21 @@ test('Linux fresh H1 command needs no retired private tools',()=>{
  assert.doesNotThrow(()=>validateBootstrapTargets(graph));
 });
 
+test('current POSIX H1 passes the compiler commit and matching shim to stage0',()=>{
+ for(const platform of ['linux_x86_64','linux_aarch64','darwin_x86_64','darwin_aarch64']){
+  const input=inputs(platform);
+  input.h1Commit=input.compiler.commit;
+  input.h1={...input.compiler,shimInstall:'/fixture/compiler-shim'};
+  input.compiler.shimInstall=input.h1.shimInstall;
+  delete input.tools.privateRoot;
+  const graph=createBootstrapTargets(input),argv=graph.stages.find(s=>s.id==='stage0').commands[0].argv;
+  assert.equal(graph.repos.h1.commit,input.compiler.commit);
+  assert.equal(argv[argv.indexOf('--commit')+1],input.compiler.commit);
+  assert.equal(argv[argv.indexOf('--shim-install')+1],input.compiler.shimInstall);
+  assert.doesNotThrow(()=>validateBootstrapTargets(graph));
+ }
+});
+
 test('Darwin fresh H1 uses the public producer with the selected N shim and executes with N LLVM',()=>{
  for(const platform of ['darwin_x86_64','darwin_aarch64']){
   const input=inputs(platform);delete input.h1.product;delete input.tools.privateRoot;input.h1.shimInstall='/fixture/h1-shim';

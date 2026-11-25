@@ -2,7 +2,7 @@ package cjcj::ast
 
 import cjcj::utils.Identifiable
 
-public struct Ptr<T> <: Comparable<Ptr<T>> & Equatable<Ptr<T>> & Hashable where T <: Object & Identifiable {
+public struct Ptr<T> <: Comparable<Ptr<T>> & Hashable where T <: Object & Identifiable {
     public let value: T
     // C++ SafePointer.h:317-319 compares stored T* bits; cache identity so TreeSet
     // compare does not virtual-dispatch objectId (GetMTable) on the hot path.

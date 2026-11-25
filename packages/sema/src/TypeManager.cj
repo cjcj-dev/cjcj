@@ -183,7 +183,7 @@ public class InstCtxScope {
 }
 
 // C++ TypeManager.h:510-537 OverrideOrShadowKey and its pointer-tuple equality.
-private struct OverrideOrShadowKey <: Comparable<OverrideOrShadowKey> & Equatable<OverrideOrShadowKey> {
+private struct OverrideOrShadowKey <: Comparable<OverrideOrShadowKey> {
     private let src: Int64
     private let target: Int64
     private let baseTy: Int64

@@ -23,7 +23,7 @@ private func MetaTransformKindIndex(kind: MetaTransformKind): Int64 {
     }
 }
 
-extend MetaTransformKind <: Equatable<MetaTransformKind> & Comparable<MetaTransformKind> {
+extend MetaTransformKind <: Comparable<MetaTransformKind> {
     public operator func ==(right: MetaTransformKind): Bool {
         return MetaTransformKindIndex(this) == MetaTransformKindIndex(right)
     }

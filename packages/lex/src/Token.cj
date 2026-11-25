@@ -4,7 +4,7 @@ import cjcj::basic.*
 import cjcj::utils.CJC_ASSERT
 import std.collection.*
 
-public struct Token <: Comparable<Token> & Hashable & Equatable<Token> {
+public struct Token <: Comparable<Token> & Hashable {
     public var kind: TokenKind = TokenKind.ILLEGAL
     public var delimiterNum: UInt32 = 1u32
     public var isSingleQuote: Bool = false

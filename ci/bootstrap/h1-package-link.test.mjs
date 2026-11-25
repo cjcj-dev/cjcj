@@ -16,7 +16,7 @@ import {effectiveLinkOptions, linkOptionLines, effectiveSections, DARWIN_CJC_LIN
 const manifest = await fs.readFile(new URL('../../packages/cjc/cjpm.toml', import.meta.url), 'utf8');
 const source = '/work/h1-source', nativeLlvm = '/work/N/third_party/llvm/lib';
 const sorted = list => [...list].sort();
-// The managed Unix H1 is built from FIXED_INPUTS.h1. Its packages/cjc
+// Explicit historical H1 builds still support FIXED_INPUTS.h1. Its packages/cjc
 // manifest is kept here byte for byte (sha256 bound) so the producer is
 // tested on the source it actually reads, not only on candidate HEAD: it has
 // the ELF link in [package] alone and no [target.<triple>] section.
