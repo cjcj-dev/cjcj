@@ -20,32 +20,23 @@ export const EXPECTED_GATE_HOST_MASK_SYMBOL_COUNT = 0;
 
 export const KNOWN_GATE_APPARATUS_LIMITATIONS = Object.freeze({
   text: [
-    'Historical observations below concern the 2026-07-21 nightly host runtime only.',
-    'That runtime predates the survivor gate and GCLOG, and its PostTraceBarrier::ReadReference',
-    'checks IsCurrentPointer(tmpField); current cangjie-runtime main uses !IsOldPointer instead',
-    '(zc9fix, ASSERT_TOO_NARROW). Parallel bcgate and codegen smoke failures were captured in',
-    'that host runtime. Replacing it with the current-generation uncoloured host changed smoke',
-    'from 13/15 to 0/15 in those historical runs. The release host now follows ci/host_sdk_pin.env.',
-    'These observations do not establish results for the current host. This record is',
-    'apparatus provenance only: it does not classify future failures or relax difftest or VERIFY.',
-    'reviewed_against and coverage record host identity alignment only; matching the current',
-    'pin does not establish load acceptance or renew the historical findings.',
+    'These observations apply only to the historical 1.2.0-alpha.20260721165458 host runtime.',
+    'Its PostTraceBarrier::ReadReference checked IsCurrentPointer(tmpField).',
+    'The release host follows ci/host_sdk_pin.env. Matching the reviewed host identity',
+    'does not establish load acceptance, classify future failures, or relax difftest or VERIFY.',
   ].join(' '),
   evidence: [
     {
-      report: 'REPORT-gateconc.md',
-      core: '/root/nilclass-run/cores/core.3293700',
-      fact: 'pc_mod=libcangjie-runtime.so@0721; PostTraceBarrier::ReadReference; IsCurrentPointer(tmpField)',
+      probe: 'parallel-bcgate',
+      fact: 'The failing frame was in the host runtime at PostTraceBarrier::ReadReference, checking IsCurrentPointer(tmpField).',
     },
     {
-      report: 'REPORT-codegensmoke.md',
-      gdb_evidence: '/root/codegensmoke-run/crashes/cand_r2_gdb.txt',
-      fact: 'candidate 5/5 failed; four core/gdb captures ended in 0721 StackOverflow, RegionManager, or FormatLog; none entered pinbuild ff2339b5 mask1',
+      probe: 'codegen-smoke',
+      fact: 'All five runs failed; four captures ended in host StackOverflow, RegionManager, or FormatLog.',
     },
     {
-      report: 'REPORT-gatehost.md',
-      evidence_path: '/root/gatehost-run/evidence/smoke_newhost/',
-      fact: 'current-generation uncoloured host changed smoke from 13/15 to 0/15',
+      probe: 'host-runtime-substitution',
+      fact: 'With the uncoloured replacement host, the number of passing smoke cases fell from 13/15 to 0/15.',
     },
   ],
   unchanged_absolute_gates: 'difftest TOTAL==PASS and MISMATCH=0 and FAIL=0; VERIFY-EXIT=0',

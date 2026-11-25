@@ -97,7 +97,7 @@ export async function verifyNativeRelease(options, env = process.env) {
   // The installed compiler passes an oversized final link to ld.lld through a
   // response file on Windows (!2161); this runs again from the relocated archive.
   if (target.spec.os === 'windows')
-    await command([process.execPath, path.join(root, 'tests/upstream_compiler_1120/linker-response.mjs'),
+    await command([process.execPath, path.join(root, 'tests/windows_linker_response/linker-response.mjs'),
       path.join(sdk, 'bin/cjc' + target.spec.exeSuffix), path.join(work, 'linker-response')], {env: installedEnv});
   if(target.spec.os==='windows'){
     await consumeInstalledLspMacro({sdk,work,platform:target.spec.llvmPlatform,env:installedEnv});

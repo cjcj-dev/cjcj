@@ -1,6 +1,6 @@
 {
-  "source": "2026-10-16 installed C2 macro gate first failure; retained macro-result.json",
-  "sourceWork": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+  "source": "Installed C2 macro gate command recording through explicit-testmacro-run.",
+  "sourceWork": "/work/macros/public cjc",
   "sourceCompilerSha256": "a02adafbdcc4dd68fa4601d7e5e81aac18e8008ccec85c3d5da89859f54b4376",
   "scope": "Recorded command output through explicit-testmacro-run; later commands were NOT_RUN. Replay files are placeholders, never compiler execution.",
   "commands": [
@@ -12,11 +12,11 @@
       "name": "ordinary-compile",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/ordinary control.cj",
+        "/work/macros/public cjc/ordinary control.cj",
         "-o",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/ordinary control"
+        "/work/macros/public cjc/ordinary control"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 14.440943323000003
     },
     {
@@ -26,9 +26,9 @@
       "stderr": "",
       "name": "ordinary-run",
       "argv": [
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/ordinary control"
+        "/work/macros/public cjc/ordinary control"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 0.03386078099999577
     },
     {
@@ -40,9 +40,9 @@
       "argv": [
         "cjc",
         "--compile-macro",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/def.cj"
+        "/work/macros/public cjc/def.cj"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 33.356870476999994
     },
     {
@@ -53,13 +53,13 @@
       "name": "macro-expansion",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/use.cj",
+        "/work/macros/public cjc/use.cj",
         "--import-path",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+        "/work/macros/public cjc",
         "-o",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/macro use"
+        "/work/macros/public cjc/macro use"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 14.124067449000009
     },
     {
@@ -69,9 +69,9 @@
       "stderr": "",
       "name": "macro-run",
       "argv": [
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/macro use"
+        "/work/macros/public cjc/macro use"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 0.03619310200000473
     },
     {
@@ -82,12 +82,12 @@
       "name": "leaf-compile",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/leaf.cj",
+        "/work/macros/public cjc/leaf.cj",
         "--output-type=staticlib",
         "-o",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/libsdkleaf.a"
+        "/work/macros/public cjc/libsdkleaf.a"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 8.808177115999992
     },
     {
@@ -98,17 +98,17 @@
       "name": "helper-compile",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/helper.cj",
+        "/work/macros/public cjc/helper.cj",
         "--output-type=staticlib",
         "--import-path",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+        "/work/macros/public cjc",
         "-L",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+        "/work/macros/public cjc",
         "-lsdkleaf",
         "-o",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/libsdkhelper.a"
+        "/work/macros/public cjc/libsdkhelper.a"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 12.87621063799999
     },
     {
@@ -120,15 +120,15 @@
       "argv": [
         "cjc",
         "--compile-macro",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/chain.cj",
+        "/work/macros/public cjc/chain.cj",
         "--import-path",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+        "/work/macros/public cjc",
         "-L",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+        "/work/macros/public cjc",
         "-lsdkhelper",
         "-lsdkleaf"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 36.618482814000004
     },
     {
@@ -139,13 +139,13 @@
       "name": "chain-expansion",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/chain use.cj",
+        "/work/macros/public cjc/chain use.cj",
         "--import-path",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+        "/work/macros/public cjc",
         "-o",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/chain use"
+        "/work/macros/public cjc/chain use"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 13.678852618000004
     },
     {
@@ -155,9 +155,9 @@
       "stderr": "",
       "name": "chain-run",
       "argv": [
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/chain use"
+        "/work/macros/public cjc/chain use"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 0.02691766199999256
     },
     {
@@ -168,11 +168,11 @@
       "name": "deriving-compile",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/deriving.cj",
+        "/work/macros/public cjc/deriving.cj",
         "-o",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/deriving"
+        "/work/macros/public cjc/deriving"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 16.21302661
     },
     {
@@ -182,9 +182,9 @@
       "stderr": "",
       "name": "deriving-run",
       "argv": [
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/deriving"
+        "/work/macros/public cjc/deriving"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 0.028708534000004875
     },
     {
@@ -195,12 +195,12 @@
       "name": "explicit-testmacro-compile",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/explicit-testmacro_test.cj",
+        "/work/macros/public cjc/explicit-testmacro_test.cj",
         "--test",
         "-o",
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/explicit-testmacro"
+        "/work/macros/public cjc/explicit-testmacro"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 31.448344174
     },
     {
@@ -210,21 +210,21 @@
       "stderr": "",
       "name": "explicit-testmacro-run",
       "argv": [
-        "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/explicit-testmacro"
+        "/work/macros/public cjc/explicit-testmacro"
       ],
-      "cwd": "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1",
+      "cwd": "/work/macros/public cjc",
       "wall": 0.4016916950000159
     }
   ],
   "artifactPaths": [
-    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/ordinary control",
-    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/lib-macro_f1def.so",
-    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/macro use",
-    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/libsdkleaf.a",
-    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/libsdkhelper.a",
-    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/lib-macro_sdkchain.so",
-    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/chain use",
-    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/deriving",
-    "/mnt/cjcj-nvme/exp_stage2_invocation_1015/install-rhost-stage2-work/consumers/macros/public cjc TwuaZ1/explicit-testmacro"
+    "/work/macros/public cjc/ordinary control",
+    "/work/macros/public cjc/lib-macro_f1def.so",
+    "/work/macros/public cjc/macro use",
+    "/work/macros/public cjc/libsdkleaf.a",
+    "/work/macros/public cjc/libsdkhelper.a",
+    "/work/macros/public cjc/lib-macro_sdkchain.so",
+    "/work/macros/public cjc/chain use",
+    "/work/macros/public cjc/deriving",
+    "/work/macros/public cjc/explicit-testmacro"
   ]
 }

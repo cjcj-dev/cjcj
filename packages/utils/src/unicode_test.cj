@@ -6,7 +6,7 @@ import std.unittest.testmacro.*
 
 @Test
 class UnicodeTest {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeTest.cpp:16 TEST(UnicodeTest, NfcQuickCheck)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeTest.cpp:16 TEST(UnicodeTest, NfcQuickCheck)
     @TestCase
     func nfcQuickCheck(): Unit {
         let okay = "okà̛̖̗̘̙̜̝́̂̃̄̅̆̇̈̉̊̋̌̍̎̏̐̑̒̓̔̕̚y"
@@ -15,7 +15,7 @@ class UnicodeTest {
         @Expect(NfcQuickCheck(tooMuch), NfcQcResult.MAYBE)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeTest.cpp:30 TEST(UnicodeTest, ComposeHangul)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeTest.cpp:30 TEST(UnicodeTest, ComposeHangul)
     @TestCase
     func composeHangul(): Unit {
         if (let Some(_) <- ComposeHangul(0xcea0u32, 0x11a7u32)) {
@@ -25,7 +25,7 @@ class UnicodeTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeTest.cpp:35 TEST(UnicodeTest, XID)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeTest.cpp:35 TEST(UnicodeTest, XID)
     @TestCase
     func xid(): Unit {
         @Expect(IsXIDStart(UInt32(b'_')), false)
@@ -42,7 +42,7 @@ class UnicodeTest {
         @Expect(IsXIDStart(0x037au32), false)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeTest.cpp:62 TEST(UnicodeTest, NFD)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeTest.cpp:62 TEST(UnicodeTest, NFD)
     @TestCase
     func nfd(): Unit {
         @Expect(CanonicalDecompose("abc"), "abc")
@@ -57,7 +57,7 @@ class UnicodeTest {
         @Expect(CanonicalDecompose("개"), "개")
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeTest.cpp:76 TEST(UnicodeTest, NFC)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeTest.cpp:76 TEST(UnicodeTest, NFC)
     @TestCase
     func nfc(): Unit {
         @Expect(NFC("abc"), "abc")
@@ -73,18 +73,18 @@ class UnicodeTest {
         @Expect(NFC("à֮̅̕b"), "à֮̅̕b")
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeTest.cpp:91 TEST(UnicodeTest, InfiniteLoop)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeTest.cpp:91 TEST(UnicodeTest, InfiniteLoop)
     @TestCase
     func infiniteLoop(): Unit {
         @Expect(NFC("à̅̕婫"), "à̅̕婫")
     }
 
-    // PORT-DEFERRED: GeneratedNFCTests uses NORMALISATION_TEST_DATA from /root/cj_build/cangjie_compiler/src/Utils/UnicodeTables/NormalisationTestData.generated.inc:22, which is not present as selfhost Cangjie test data.
+    // PORT-DEFERRED: GeneratedNFCTests uses NORMALISATION_TEST_DATA from cangjie_compiler/src/Utils/UnicodeTables/NormalisationTestData.generated.inc:22, which is not present as selfhost Cangjie test data.
 }
 
 @Test
 class UnicodeWidthTests {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:13 TEST(UnicodeWidthTests, Str)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:13 TEST(UnicodeWidthTests, Str)
     @TestCase
     func str(): Unit {
         @Expect(StrWidth(StringRef("ｈｅｌｌｏ")), 10)
@@ -99,7 +99,7 @@ class UnicodeWidthTests {
         @Expect(StrWidth(StringRef("👩‍🔬")), 4)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:27 TEST(UnicodeWidthTests, SingleChar)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:27 TEST(UnicodeWidthTests, SingleChar)
     @TestCase
     func singleChar(): Unit {
         @Expect(SingleCharWidth(0xff48u32), 2)
@@ -125,7 +125,7 @@ class UnicodeWidthTests {
         @Expect(SingleCharWidth(0x1f971u32), 2)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:53 TEST(UnicodeWidthTests, DefaultIgnorable)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:53 TEST(UnicodeWidthTests, DefaultIgnorable)
     @TestCase
     func defaultIgnorable(): Unit {
         @Expect(SingleCharWidth(0xe0000u32), 0)
@@ -134,7 +134,7 @@ class UnicodeWidthTests {
         @Expect(SingleCharWidth(0xffa0u32), 0)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:61 TEST(UnicodeWidthTests, Jamo)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:61 TEST(UnicodeWidthTests, Jamo)
     @TestCase
     func jamo(): Unit {
         @Expect(SingleCharWidth(0x1100u32), 2)
@@ -146,7 +146,7 @@ class UnicodeWidthTests {
         @Expect(SingleCharWidth(0xd7fbu32), 0)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:73 TEST(UnicodeWidthTests, PrependedConcatenationMarks)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:73 TEST(UnicodeWidthTests, PrependedConcatenationMarks)
     @TestCase
     func prependedConcatenationMarks(): Unit {
         for (ch in [0x600u32, 0x601u32, 0x602u32, 0x603u32, 0x604u32, 0x60du32, 0x110bdu32, 0x110cdu32]) {
@@ -157,7 +157,7 @@ class UnicodeWidthTests {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:86 TEST(UnicodeWidthTests, InterlinearAnnotationChars)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:86 TEST(UnicodeWidthTests, InterlinearAnnotationChars)
     @TestCase
     func interlinearAnnotationChars(): Unit {
         @Expect(SingleCharWidth(0xfff9u32), 1)
@@ -165,7 +165,7 @@ class UnicodeWidthTests {
         @Expect(SingleCharWidth(0xfffbu32), 1)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:93 TEST(UnicodeWidthTests, HieroglyphFormatControls)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:93 TEST(UnicodeWidthTests, HieroglyphFormatControls)
     @TestCase
     func hieroglyphFormatControls(): Unit {
         @Expect(SingleCharWidth(0x13430u32), 1)
@@ -173,7 +173,7 @@ class UnicodeWidthTests {
         @Expect(SingleCharWidth(0x1343cu32), 1)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:100 TEST(UnicodeWidthTests, Marks)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:100 TEST(UnicodeWidthTests, Marks)
     @TestCase
     func marks(): Unit {
         @Expect(SingleCharWidth(0x0301u32), 0)
@@ -182,13 +182,13 @@ class UnicodeWidthTests {
         @Expect(SingleCharWidth(0x9beu32), 0)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:108 TEST(UnicodeWidthTests, DevanagariCaret)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:108 TEST(UnicodeWidthTests, DevanagariCaret)
     @TestCase
     func devanagariCaret(): Unit {
         @Expect(SingleCharWidth(0xa8fau32), 0)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:113 TEST(UnicodeWidthTests, EmojiPresentation)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:113 TEST(UnicodeWidthTests, EmojiPresentation)
     @TestCase
     func emojiPresentation(): Unit {
         @Expect(SingleCharWidth(0x23u32), 1)
@@ -205,7 +205,7 @@ class UnicodeWidthTests {
         @Expect(StrWidth(StringRef("🜀\u{FE0F}")), 1)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:129 TEST(UnicodeWidthTests, TextPresentation)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:129 TEST(UnicodeWidthTests, TextPresentation)
     @TestCase
     func textPresentation(): Unit {
         @Expect(SingleCharWidth(0xfe0eu32), 0)
@@ -222,7 +222,7 @@ class UnicodeWidthTests {
         @Expect(StrWidth(StringRef("𘀀\u{FE0E}"), isCJK: true), 2)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:150 TEST(UnicodeWidthTests, ControlLineBreak)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:150 TEST(UnicodeWidthTests, ControlLineBreak)
     @TestCase
     func controlLineBreak(): Unit {
         @Expect(SingleCharWidth(0x2028u32), 1)
@@ -234,7 +234,7 @@ class UnicodeWidthTests {
         @Expect(StrWidth(StringRef("1\t2\r\n3\u{0085}4")), 7)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:161 TEST(UnicodeWidthTests, CharStringConsistent)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:161 TEST(UnicodeWidthTests, CharStringConsistent)
     @TestCase
     func charStringConsistent(): Unit {
         var codepoint: UTF32 = 0u32
@@ -252,7 +252,7 @@ class UnicodeWidthTests {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:177 TEST(UnicodeWidthTests, LisuTones)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UnicodeTest/UnicodeWidthTest.cpp:177 TEST(UnicodeWidthTests, LisuTones)
     @TestCase
     func lisuTones(): Unit {
         var c1: UTF32 = 0xa4f8u32

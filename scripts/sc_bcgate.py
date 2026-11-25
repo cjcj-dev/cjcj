@@ -5,6 +5,7 @@ signal than the 113 single-file difftest corpus (packages exercise generics/cast
 
 Usage: python3 scripts/sc_bcgate.py <pkg> [<pkg2> ...] [--self PATH] [--timeout N] [--jobs K] [--no-cache]
   default --self = ./target/release/bin/<module>::cjc (auto-detected) ; baseline = $CANGJIE_HOME/bin/cjc
+Set SC_BCGATE_CACHE_DIR to override the workspace cache under target/.
 Reuses bcgate.py's IR normalization (function-by-function, module-layout independent).
 """
 import os, sys, subprocess, hashlib, tempfile, pathlib, importlib.util, json, re, shutil
@@ -13,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CANGJIE_HOME = os.environ.get("CANGJIE_HOME", "/root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029")
 DIS = f"{CANGJIE_HOME}/third_party/llvm/bin/llvm-dis"
-CACHE_DIR = pathlib.Path("/root/cj_build/audit_persist/scb_cache")
+CACHE_DIR = pathlib.Path(os.environ.get("SC_BCGATE_CACHE_DIR", ROOT / "target" / "sc_bcgate-cache"))
 
 # reuse bcgate.py's normalization + function extraction
 spec = importlib.util.spec_from_file_location("bcgate", str(ROOT / "scripts" / "bcgate.py"))
@@ -69,9 +70,7 @@ def reference_cache_context(base_cc, e):
     version = subprocess.run(
         [base_cc, "--version"], env=e, capture_output=True, check=True
     ).stdout
-    # 0713: 缓存的是【归一化之后】的函数体，所以缓存键必须包含归一化代码的指纹。
-    # 此前只认编译器版本 —— 改了 cmpir.py 的归一化规则后，缓存里的 ref 仍是旧口径，
-    # 与新口径现算的 self 对撞，量出鬼数字（差异从 994 虚增到 1251，方向完全相反）。
+    # Cached functions are normalized; a change to the normalizer invalidates the cache.
     norm_src = b""
     for f in ("cmpir.py", "bcgate.py"):
         try:
@@ -148,8 +147,6 @@ def main():
     try:
         return _run(base_cc, self_cc, pkgs, wd, e, timeout, jobs, use_cache)
     finally:
-        # 0713: 此前从不清理，169 个残留目录堆积 47G 撑爆根分区（lane 门跑到一半报 No space left on device）。
-        # 需要保留失败现场时设 SC_BCGATE_KEEP_TMP=1。
         if os.environ.get("SC_BCGATE_KEEP_TMP") == "1":
             print(f"[sc_bcgate] kept temp dir: {wd}", file=sys.stderr)
         else:

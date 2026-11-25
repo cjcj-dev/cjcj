@@ -269,7 +269,7 @@ def main():
     if args.scratch:
         scratch = args.scratch.resolve()
         scratch.mkdir(parents=True, exist_ok=False)
-    # Admission preflight (0927 14:3x ruling): refuse to start under heavy load or low disk.
+    # Admission preflight: refuse to start under heavy load or low disk.
     load1 = float(Path('/proc/loadavg').read_text().split()[0])
     free_gib = shutil.disk_usage(output).free / 2**30
     if load1 > 200:

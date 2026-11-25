@@ -70,7 +70,7 @@ function gate(root, name, extra = [], {expectScope = platformGates.includes(name
   return {result, value};
 }
 
-test('registry keeps all 17 gates, exactly six explicit runs, and the four 0811 updates', () => {
+test('registry keeps all 17 gates, exactly six explicit runs, and the four updated criteria', () => {
   assert.deepEqual(Object.keys(GATES), Array.from({length: 17}, (_, index) => `G${index + 1}`));
   assert.deepEqual(Object.entries(GATES).filter(([, value]) => value.needsRun).map(([name]) => name),
     ['G3', 'G6', 'G7', 'G9', 'G10', 'G11']);

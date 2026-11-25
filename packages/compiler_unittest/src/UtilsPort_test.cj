@@ -7,7 +7,7 @@ import std.unittest.testmacro.*
 
 @Test
 class UtilsTest {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:584 TEST(UtilsTest, GCCVersionCompare)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:584 TEST(UtilsTest, GCCVersionCompare)
     @TestCase
     func GCCVersionCompare(): Unit {
         var a = GCCVersion(major: 7u8, minor: 5u8, build: 5u8)
@@ -29,7 +29,7 @@ class UtilsTest {
         @Expect(a < b, true)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:729 TEST(UtilsTest, GetSizeDecl)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:729 TEST(UtilsTest, GetSizeDecl)
     @TestCase
     func GetSizeDecl(): Unit {
         let ty = InvalidTy()

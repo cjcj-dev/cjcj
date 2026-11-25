@@ -1,11 +1,7 @@
 # Windows native host LLVM execution evidence
 
-TASK19:06 interface investigation, following the Python19:00 experiment.
-No Windows trace has run. No `loaded` field or platform PASS is produced by
-this document. CI owns `select-native-host.mjs` and its shared caller; the
-platform producer owns the native observation implementation and dependencies.
-Its current unsupported-platform rejection remains until that implementation
-has actual native evidence.
+The caller selects the native host. The platform producer must provide actual
+Windows trace evidence before it can report a loaded module.
 
 ## Existing caller and concrete native entry
 

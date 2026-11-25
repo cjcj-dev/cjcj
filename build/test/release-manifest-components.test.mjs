@@ -311,7 +311,7 @@ test('release manifest keeps every component and requires frozen clean stamps', 
   assert.equal(apparatus.gate_host_toolchain, REVIEWED_GATE_HOST_TOOLCHAIN);
   assert.match(apparatus.host_runtime.sha256, /^[0-9a-f]{64}$/);
   assert.equal(apparatus.host_runtime.g_cjLoadBadMask_count, 0);
-  assert.equal(apparatus.known_apparatus_limitations.evidence[0].report, 'REPORT-gateconc.md');
+  assert.equal(apparatus.known_apparatus_limitations.evidence[0].probe, 'parallel-bcgate');
   assert.equal(positive.rows.find(row => row.component === 'llvm-opt').embedded_stamp,
     `CJLLVM-COMMIT:${LLVM_SHA}`);
   assert.equal(positive.rows.find(row => row.component === 'std').embedded_stamp, 'no-stamp');

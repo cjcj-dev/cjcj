@@ -8,7 +8,7 @@ import cjcj::frontend.CompileStage
 
 @Test
 public class SemaTypeCheckerPortTest {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:145 CheckInvalidVariadicOverload
+    // C++ anchor: cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:145 CheckInvalidVariadicOverload
     private func CheckInvalidVariadicOverload(code: String, expectResolvedFunction: Bool): Unit {
         let result = CompileSource(code, stage: CompileStage.SEMA)
         let memberCalls = ArrayList<CallExpr>()
@@ -41,7 +41,7 @@ public class SemaTypeCheckerPortTest {
         @Expect(memberAccess.target.getOrThrow() == resolvedFunction)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:173 CheckInvalidVariadicFunctionReference
+    // C++ anchor: cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:173 CheckInvalidVariadicFunctionReference
     private func CheckInvalidVariadicFunctionReference(code: String): Unit {
         let result = CompileSource(code, stage: CompileStage.SEMA)
         let functionReferences = ArrayList<MemberAccess>()
@@ -66,7 +66,7 @@ public class SemaTypeCheckerPortTest {
         @Expect(functionReference.targets[0].getOrThrow() == target)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:52 TEST_F(TypeCheckerTest, DISABLED_TypecheckTest)
+    // C++ anchor: cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:52 TEST_F(TypeCheckerTest, DISABLED_TypecheckTest)
     @TestCase
     public func typecheckTest(): Unit {
         let result = CompileSource("""
@@ -102,7 +102,7 @@ public class SemaTypeCheckerPortTest {
         @Expect(localKinds[0], TypeKind.TYPE_INT32)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:228 InvalidVariadicFunctionIsNotCallTarget
+    // C++ anchor: cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:228 InvalidVariadicFunctionIsNotCallTarget
     @TestCase
     public func InvalidVariadicFunctionIsNotCallTarget(): Unit {
         CheckInvalidVariadicOverload("""
@@ -113,7 +113,7 @@ public class SemaTypeCheckerPortTest {
             """, false)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:239 InvalidVariadicAfterValidOverloadDoesNotAffectCallTarget
+    // C++ anchor: cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:239 InvalidVariadicAfterValidOverloadDoesNotAffectCallTarget
     @TestCase
     public func InvalidVariadicAfterValidOverloadDoesNotAffectCallTarget(): Unit {
         CheckInvalidVariadicOverload("""
@@ -125,7 +125,7 @@ public class SemaTypeCheckerPortTest {
             """, true)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:251 InvalidVariadicBeforeValidOverloadDoesNotAffectCallTarget
+    // C++ anchor: cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:251 InvalidVariadicBeforeValidOverloadDoesNotAffectCallTarget
     @TestCase
     public func InvalidVariadicBeforeValidOverloadDoesNotAffectCallTarget(): Unit {
         CheckInvalidVariadicOverload("""
@@ -137,7 +137,7 @@ public class SemaTypeCheckerPortTest {
             """, true)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:263 InvalidVariadicAfterValidOverloadDoesNotAffectFunctionReference
+    // C++ anchor: cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:263 InvalidVariadicAfterValidOverloadDoesNotAffectFunctionReference
     @TestCase
     public func InvalidVariadicAfterValidOverloadDoesNotAffectFunctionReference(): Unit {
         CheckInvalidVariadicFunctionReference("""
@@ -149,7 +149,7 @@ public class SemaTypeCheckerPortTest {
             """)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:275 InvalidVariadicBeforeValidOverloadDoesNotAffectFunctionReference
+    // C++ anchor: cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:275 InvalidVariadicBeforeValidOverloadDoesNotAffectFunctionReference
     @TestCase
     public func InvalidVariadicBeforeValidOverloadDoesNotAffectFunctionReference(): Unit {
         CheckInvalidVariadicFunctionReference("""
@@ -161,7 +161,7 @@ public class SemaTypeCheckerPortTest {
             """)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:287 InvalidVariadicAfterValidImplementationDoesNotAffectInterfaceConformance
+    // C++ anchor: cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:287 InvalidVariadicAfterValidImplementationDoesNotAffectInterfaceConformance
     @TestCase
     public func InvalidVariadicAfterValidImplementationDoesNotAffectInterfaceConformance(): Unit {
         CheckInvalidVariadicOverload("""
@@ -176,7 +176,7 @@ public class SemaTypeCheckerPortTest {
             """, true)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:303 InvalidVariadicBeforeValidImplementationDoesNotAffectInterfaceConformance
+    // C++ anchor: cangjie_compiler/unittests/Sema/TypeCheckerTest.cpp:303 InvalidVariadicBeforeValidImplementationDoesNotAffectInterfaceConformance
     @TestCase
     public func InvalidVariadicBeforeValidImplementationDoesNotAffectInterfaceConformance(): Unit {
         CheckInvalidVariadicOverload("""

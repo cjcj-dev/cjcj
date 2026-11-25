@@ -1,9 +1,9 @@
 {
-  "source": "2026-10-16 Grok sole formal 26e+c934 installed C2 gate; retained failed macro-result.json",
-  "sourcePath": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/macro-result.json",
+  "source": "Installed C2 macro gate command recording through mockmacro-run.",
+  "sourcePath": "/work/macros/public cjc/macro-result.json",
   "sourceStatus": "FAILED",
   "sourceError": "INSTALLED_MACRO_ASSERT mockmacro-run missing MOCKMACRO_BODY_EXECUTED value=42",
-  "sourceWork": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+  "sourceWork": "/work/macros/public cjc",
   "sourceCompilerSha256": "a02adafbdcc4dd68fa4601d7e5e81aac18e8008ccec85c3d5da89859f54b4376",
   "sourceRuntimeSha256": "1b7fc75e1fd4d0d99f0a4ebaf8aae830322fddc2248be419c273b15bcec0daa9",
   "scope": "Actual recorded commands through mockmacro-run. Original gate FAILED; replay does not rerun or qualify an SDK. Placeholder artifacts are never executed.",
@@ -16,11 +16,11 @@
       "name": "ordinary-compile",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/ordinary control.cj",
+        "/work/macros/public cjc/ordinary control.cj",
         "-o",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/ordinary control"
+        "/work/macros/public cjc/ordinary control"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 12.987098107000001
     },
     {
@@ -30,9 +30,9 @@
       "stderr": "",
       "name": "ordinary-run",
       "argv": [
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/ordinary control"
+        "/work/macros/public cjc/ordinary control"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 0.03357580600000074
     },
     {
@@ -44,9 +44,9 @@
       "argv": [
         "cjc",
         "--compile-macro",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/def.cj"
+        "/work/macros/public cjc/def.cj"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 33.490214864
     },
     {
@@ -57,13 +57,13 @@
       "name": "macro-expansion",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/use.cj",
+        "/work/macros/public cjc/use.cj",
         "--import-path",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+        "/work/macros/public cjc",
         "-o",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/macro use"
+        "/work/macros/public cjc/macro use"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 13.834470661999992
     },
     {
@@ -73,9 +73,9 @@
       "stderr": "",
       "name": "macro-run",
       "argv": [
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/macro use"
+        "/work/macros/public cjc/macro use"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 0.03405964100001438
     },
     {
@@ -86,12 +86,12 @@
       "name": "leaf-compile",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/leaf.cj",
+        "/work/macros/public cjc/leaf.cj",
         "--output-type=staticlib",
         "-o",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/libsdkleaf.a"
+        "/work/macros/public cjc/libsdkleaf.a"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 9.344568780999994
     },
     {
@@ -102,17 +102,17 @@
       "name": "helper-compile",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/helper.cj",
+        "/work/macros/public cjc/helper.cj",
         "--output-type=staticlib",
         "--import-path",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+        "/work/macros/public cjc",
         "-L",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+        "/work/macros/public cjc",
         "-lsdkleaf",
         "-o",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/libsdkhelper.a"
+        "/work/macros/public cjc/libsdkhelper.a"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 10.019780258999992
     },
     {
@@ -124,15 +124,15 @@
       "argv": [
         "cjc",
         "--compile-macro",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/chain.cj",
+        "/work/macros/public cjc/chain.cj",
         "--import-path",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+        "/work/macros/public cjc",
         "-L",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+        "/work/macros/public cjc",
         "-lsdkhelper",
         "-lsdkleaf"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 34.92085125799999
     },
     {
@@ -143,13 +143,13 @@
       "name": "chain-expansion",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/chain use.cj",
+        "/work/macros/public cjc/chain use.cj",
         "--import-path",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+        "/work/macros/public cjc",
         "-o",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/chain use"
+        "/work/macros/public cjc/chain use"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 13.961064372000022
     },
     {
@@ -159,9 +159,9 @@
       "stderr": "",
       "name": "chain-run",
       "argv": [
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/chain use"
+        "/work/macros/public cjc/chain use"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 0.027698459000006552
     },
     {
@@ -172,11 +172,11 @@
       "name": "deriving-compile",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/deriving.cj",
+        "/work/macros/public cjc/deriving.cj",
         "-o",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/deriving"
+        "/work/macros/public cjc/deriving"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 17.432948820999997
     },
     {
@@ -186,9 +186,9 @@
       "stderr": "",
       "name": "deriving-run",
       "argv": [
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/deriving"
+        "/work/macros/public cjc/deriving"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 0.027865225000015925
     },
     {
@@ -199,12 +199,12 @@
       "name": "explicit-testmacro-compile",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/explicit-testmacro_test.cj",
+        "/work/macros/public cjc/explicit-testmacro_test.cj",
         "--test",
         "-o",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/explicit-testmacro"
+        "/work/macros/public cjc/explicit-testmacro"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 34.515750784000005
     },
     {
@@ -214,9 +214,9 @@
       "stderr": "",
       "name": "explicit-testmacro-run",
       "argv": [
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/explicit-testmacro"
+        "/work/macros/public cjc/explicit-testmacro"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 0.40405771299998744
     },
     {
@@ -227,12 +227,12 @@
       "name": "implicit-testmacro-compile",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/implicit-testmacro_test.cj",
+        "/work/macros/public cjc/implicit-testmacro_test.cj",
         "--test",
         "-o",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/implicit-testmacro"
+        "/work/macros/public cjc/implicit-testmacro"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 32.17406238800002
     },
     {
@@ -242,9 +242,9 @@
       "stderr": "",
       "name": "implicit-testmacro-run",
       "argv": [
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/implicit-testmacro"
+        "/work/macros/public cjc/implicit-testmacro"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 0.4017784260000044
     },
     {
@@ -255,12 +255,12 @@
       "name": "mockmacro-compile",
       "argv": [
         "cjc",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/mock_test.cj",
+        "/work/macros/public cjc/mock_test.cj",
         "--test",
         "-o",
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/mock"
+        "/work/macros/public cjc/mock"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 92.92855464500002
     },
     {
@@ -270,23 +270,23 @@
       "stderr": "",
       "name": "mockmacro-run",
       "argv": [
-        "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/mock"
+        "/work/macros/public cjc/mock"
       ],
-      "cwd": "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX",
+      "cwd": "/work/macros/public cjc",
       "wall": 0.40330023600003917
     }
   ],
   "artifactPaths": [
-    "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/ordinary control",
-    "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/lib-macro_f1def.so",
-    "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/macro use",
-    "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/libsdkleaf.a",
-    "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/libsdkhelper.a",
-    "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/lib-macro_sdkchain.so",
-    "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/chain use",
-    "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/deriving",
-    "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/explicit-testmacro",
-    "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/implicit-testmacro",
-    "/mnt/cjcj-nvme/sdk_c2_c934_grok_1016/work/stage2-consumers/macros/public cjc MPYsVX/mock"
+    "/work/macros/public cjc/ordinary control",
+    "/work/macros/public cjc/lib-macro_f1def.so",
+    "/work/macros/public cjc/macro use",
+    "/work/macros/public cjc/libsdkleaf.a",
+    "/work/macros/public cjc/libsdkhelper.a",
+    "/work/macros/public cjc/lib-macro_sdkchain.so",
+    "/work/macros/public cjc/chain use",
+    "/work/macros/public cjc/deriving",
+    "/work/macros/public cjc/explicit-testmacro",
+    "/work/macros/public cjc/implicit-testmacro",
+    "/work/macros/public cjc/mock"
   ]
 }

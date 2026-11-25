@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Consumers for the 1112 upstream compiler backports. Usage: run.mjs <cjcj-compiler> <sdk> <out-dir>
+// CHIR and CJMP regression cases. Usage: run.mjs <cjcj-compiler> <sdk> <out-dir>
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';

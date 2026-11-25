@@ -29,7 +29,7 @@ The campaign owner writes `ARCHIVE/G11.json`:
     "finished_at": "2026-09-29T13:00:00Z"
   },
   "allowances": [
-    {"suite": "LLT", "name": "<exact official failing case name>", "reason": "<individual Q54-C reason>"}
+    {"suite": "LLT", "name": "<exact official failing case name>", "reason": "<reason for allowing this official failure>"}
   ]
 }
 ```

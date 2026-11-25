@@ -237,32 +237,32 @@ export const DEFERRED = Object.freeze([
     needs: 'Native Linux or Darwin x64/arm64, Node, CXX (default clang++) with shared-library support, which and tar; '
       + 'NATIVE_PACKAGE_EVIDENCE must name an absolute private directory retaining real compiled libraries, loader and package evidence. '
       + 'Run node --test build/sdk/producers/platform_matrix/native-runtime-package.integration.test.mjs after preparing these inputs; generic GATING does not provision that evidence directory.',
-    verified: 'Fixed c7f447 finite-v2 on kkk2: 4 tests pass, rc0; real Linux ELF load/origin/memcpy and same-package unpack, '
+    verified: 'Linux fixture: 4 tests pass, rc0; real Linux ELF load/origin/memcpy and same-package unpack, '
       + 'missing library and wrong-origin rejection/recovery. Fixtures do not qualify a native runtime, Darwin execution or SDK.',
   }),
   Object.freeze({file: "ci/bootstrap/sdk-command-lifetime.test.mjs",
     needs: "Dedicated Linux worker with Python3 pidfd/subreaper support and Node; owned absolute RELEASE_EVIDENCE_TEST_ROOT and TMPDIR; node --test ci/bootstrap/sdk-command-lifetime.test.mjs. Retains small CLI logs and symlinks only; no SDK or repository copy",
-    verified: "TASK02:10 public supervisor CLI regression for absolute/relative/symlink paths, body and exit propagation, import isolation and cancellation; actual results belong to the fixed candidate report, not SDK production qualification"}),
+    verified: "Public supervisor CLI regression for absolute/relative/symlink paths, body and exit propagation, import isolation and cancellation; does not qualify SDK production"}),
   Object.freeze({file: 'build/test/hle-version-install.test.mjs',
     needs: 'Dedicated Linux x64 worker with Node (verified 22.20.0), cc, C++ compiler, CMake and Ninja; '
       + 'pre-create an owned absolute RELEASE_EVIDENCE_TEST_ROOT and TMPDIR, then node --test build/test/hle-version-install.test.mjs. '
-      + 'Budget for two retained nine-launcher installation fixtures (r55 observed 52.7 MB); keep shared SDKs and active producer domains outside this root. '
+      + 'Budget for two retained nine-launcher installation fixtures (about 53 MB); keep shared SDKs and active producer domains outside this root. '
       + 'Uses controlled native Node/cjbind relays and npm metadata, not real HLE/cjbind production inputs; generic CI has not provisioned this isolated retained-fixture contract',
-    verified: 'r55 fixed 7a049c8831e2302c8dbd7d962fde90774fed5155: 3 tests passed, child rc0 on kkk2 under 2 CPUs/2GiB/core0; '
+    verified: '3 tests passed, child rc0 under 2 CPUs/2GiB/core0; '
       + 'old label and 0.3.6 install/default-explicit entry/reentry/relocation, bad source/version/payload rejection; '
       + 'actual version cut new rc1, old control rc0, restored both rc0. HLE/cjbind business and full SDK remain NOT_RUN; registration is not production qualification'}),
   Object.freeze({file: 'ci/bootstrap/archive-reentry.test.mjs',
     needs: 'CMake/tar and an isolated worker; public shim CMake boundary and native-stage controlled producer entry; CPU count is not admission',
-    verified: '1019 CPU correction: 47 affected tests passed; public stage reached configured producer with explicit/default jobs, 2-core product cut rejected old CPU minimum and restoration passed; full stage/SDK separate'}),
+    verified: '47 affected tests passed; public stage reached configured producer with explicit/default jobs, 2-core product cut rejected old CPU minimum and restoration passed; full stage/SDK separate'}),
   Object.freeze({file: 'build/sdk/producers/srcbuild/shim-reentry.integration.test.mjs',
     needs: 'SHIM_REENTRY_INPUT: fixed complete Reference TU, two real prepared Cjo/LLVM header outputs and actual previously compiled installed shim component; isolated 8-core worker',
-    verified: '1019 subtraction: public real-TU regression passed, including explicit/installed bad-object source fallback and actual inc/config failure/control/recovery; full N/SDK NOT_RUN'}),
+    verified: 'public real-TU regression passed, including explicit/installed bad-object source fallback and actual inc/config failure/control/recovery; full N/SDK NOT_RUN'}),
   Object.freeze({file: 'ci/bootstrap/native-cjdb-shim.integration.test.mjs',
     needs: 'NATIVE_SHIM_TEST_INPUT with fixed real C++ schema, Reference shim, host flatc, paired LLVM15 source/generated configuration; finite native object gate only',
-    verified: '1019 subtraction: complete-TU/installed-object/schema regression passed with archive digest/source controls; full N/link/SDK NOT_RUN'}),
+    verified: 'complete-TU/installed-object/schema regression passed with archive digest/source controls; full N/link/SDK NOT_RUN'}),
   Object.freeze({file: 'ci/bootstrap/native-source-reentry.integration.test.mjs',
     needs: 'NATIVE_SOURCE_REENTRY_INPUT: real fixed compiler, bounds, FlatBuffers and paired LLVM/runtime; private official FlatBuffers target and normal failure recovery',
-    verified: '1019 subtraction: complete official configure and FlatBuffers target/install passed after configure_file/PATCH_COMMAND failures and on reentry; Git and archive inputs; no full native N/stage qualification'}),
+    verified: 'complete official configure and FlatBuffers target/install passed after configure_file/PATCH_COMMAND failures and on reentry; Git and archive inputs; no full native N/stage qualification'}),
   Object.freeze({file: 'ci/bootstrap/native-windows-llvm-trace.test.mjs',
     needs: 'Linux Node for real command/PID/rc and foreign-host rejection controls; native ETW requires admitted Windows runner',
     verified: '5 pass rc0; own-rc cut 4 pass/1 fail rc1 then restored 5 pass rc0; Linux real process records only, native Windows ETW NOT_RUN'}),
@@ -271,40 +271,40 @@ export const DEFERRED = Object.freeze([
     verified: '5 pass rc0; actual official PC/layout over non-executable fixtures; include-dev cut 4 pass/1 fail rc1 then restored 5 pass rc0; Windows PCbuild/CJDB NOT_RUN'}),
   Object.freeze({file: 'ci/bootstrap/native-ast-inputs.test.mjs',
     needs: 'Git/CMake/Ninja/Clang15; actual small Linux and Windows-cross C archive/install facts',
-    verified: '5 pass rc0 on kkk2; native LLVM/AST and full native-cjdb pipeline NOT_RUN'}),
+    verified: '5 pass rc0; native LLVM/AST and full native-cjdb pipeline NOT_RUN'}),
   Object.freeze({file: 'build/test/windows-pe-symbols.test.mjs',
     needs: 'Linux Clang15 C producer and LLVM14 lld-link/llvm-readobj; small actual PE images, no Windows execution',
-    verified: '3 pass rc0 on kkk2; imported/exported positive and zero control, non-PE rejection; native Windows NOT_RUN'}),
+    verified: '3 pass rc0; imported/exported positive and zero control, non-PE rejection; native Windows NOT_RUN'}),
   Object.freeze({file: 'build/test/windows-sdk-interface.test.mjs',
     needs: 'Linux Node configuration/host rejection apparatus using the fixed SDK source closure',
-    verified: '3 pass rc0 on kkk2; Ndb51/R79b target graph and public foreign-host rejection, no native production'}),
+    verified: '3 pass rc0; target graph and public foreign-host rejection, no native production'}),
   Object.freeze({file: 'build/sdk/producers/platform_matrix/windows-native-runtime.test.mjs',
     needs: 'Linux Node installer fixture with Windows selector; no Windows program execution',
-    verified: '3 pass rc0 on kkk2; staging DLL bytes, command input requirement, stale dependency refusal'}),
+    verified: '3 pass rc0; staging DLL bytes, command input requirement, stale dependency refusal'}),
   Object.freeze({
     file: 'build/test/windows-native-cli.test.mjs',
     needs: 'Linux x64 Node script apparatus with public CLI dry-run and host selector fixture; does not run Windows programs',
-    verified: '6 pass rc0 on kkk2 under 8 cores/8GiB; native/cross command plans, dependency rejection and DLL PATH retention; Windows production NOT_RUN',
+    verified: '6 pass rc0 under 8 cores/8GiB; native/cross command plans, dependency rejection and DLL PATH retention; Windows production NOT_RUN',
   }),
   Object.freeze({
     file: 'build/test/stdx-source-selection-cli.test.mjs',
     needs: 'Linux x64 public stdx CLI, LLVM 15 Clang, libssl, git, CMake, Ninja, cc, nm, python3 and tar; '
       + 'same native fixture prerequisites as stdx-build-inputs-cli, absent from generic official CI',
-    verified: 'node --test build/test/stdx-source-selection-cli.test.mjs: 8 pass, rc0 on kkk2 under 8 cores/8GiB; '
+    verified: 'node --test build/test/stdx-source-selection-cli.test.mjs: 8 pass, rc0 under 8 cores/8GiB; '
       + 'explicit originless source selection, unknown/mismatched/unmaterialized source rejection, actual installation and relocated fixed CI reader; not native Cangjie stdx qualification',
   }),
   Object.freeze({
     file: 'build/test/stdx-build-inputs-cli.test.mjs',
-    needs: 'Linux x64 public build CLI host profile kkk2, LLVM 15 Clang, libssl, git, CMake, '
+    needs: 'Linux x64 public build CLI host, LLVM 15 Clang, libssl, git, CMake, '
       + 'Ninja, cc, nm, python3 and tar; executor cases also require STDX_HOST_CONTRACT_FILE naming fixed stdx b10784b27a5b3f815c9542d28f3ba02f48db48d5 build/libs/MakeHostCJNATIVESharedLib.cmake; not yet provided by the generic official CI contract',
-    verified: 'node --test build/test/stdx-build-inputs-cli.test.mjs: 6 pass, rc0 on kkk2 under 8 cores/8GiB; '
-      + 'historical CMake fixture source/config/install facts (graph/hash layer retired by TASK19:27), full/subset separation, failed-producer invalidation and relocated native C consumption; not native Cangjie stdx qualification',
+    verified: 'node --test build/test/stdx-build-inputs-cli.test.mjs: 6 pass, rc0 under 8 cores/8GiB; '
+      + 'CMake fixture source/config/install facts, full/subset separation, failed-producer invalidation and relocated native C consumption; not native Cangjie stdx qualification',
   }),
   Object.freeze({
     file: 'build/test/installed-stdx-cli.test.mjs',
-    needs: 'Linux x64 public build CLI host profile kkk2 with /usr/lib/llvm-15/bin, libssl, cc, nm and python3; '
+    needs: 'Linux x64 public build CLI host with /usr/lib/llvm-15/bin, libssl, cc, nm and python3; '
       + 'the generic official CI contract does not currently install that pinned LLVM 15 prerequisite',
-    verified: 'node --test build/test/installed-stdx-cli.test.mjs: 3 pass, rc0 on kkk2 under 8 cores/8GiB; '
+    verified: 'node --test build/test/installed-stdx-cli.test.mjs: 3 pass, rc0 under 8 cores/8GiB; '
       + 'public build/install and installed-path consumption with external producer fixture plus Windows cross dry-run; no native stdx qualification',
   }),
   Object.freeze({
@@ -313,23 +313,21 @@ export const DEFERRED = Object.freeze([
       + 'support, python3, and nm --defined-only dynamic export inspection; the current CI '
       + 'workflow has not demonstrated this complete dependency set',
     verified: 'node --test build/test/runtime-colour.test.mjs => rc=0 tests 6 pass 6 fail 0 '
-      + 'skipped 0 (2026-09-29, kkk2, Node v20.19.0); defined exports accepted; official, '
+      + 'skipped 0; defined exports accepted; official, '
       + 'retired-marker and undefined exports rejected; versioned exports checked both ways',
   }),
   Object.freeze({
     file: 'ci/build_patched_runtime.test.mjs',
     needs: 'the zx runtime and network access to the runtime remote -- it is not a node:test file at '
       + 'all but a zx self-test that shallow-fetches three refs and prints SELFTEST_RESULT',
-    verified: 'npx --yes zx@8 ci/build_patched_runtime.test.mjs => SELFTEST_RESULT=PASS rc=0 '
-      + '(2026-08-11, local)',
+    verified: 'npx --yes zx@8 ci/build_patched_runtime.test.mjs => SELFTEST_RESULT=PASS rc=0',
   }),
   Object.freeze({
     file: 'build/sdk/producers/platform_matrix/build_windows_std_ast.test.mjs',
     needs: 'the zx runtime -- a zx self-test rather than a node:test file, same shape as '
       + 'verify_windows_runtime_exports.test.mjs. It spawns the product script with a fake MinGW '
       + 'driver and does not need a Windows cross compiler',
-    verified: 'zx build/sdk/producers/platform_matrix/build_windows_std_ast.test.mjs => SELFTEST_RESULT=PASS rc=0 '
-      + '(2026-09-26, local, zx /usr/bin/zx); schema/header/archive/ast_object rejects exit 4/5/7/8 '
+    verified: 'zx build/sdk/producers/platform_matrix/build_windows_std_ast.test.mjs => SELFTEST_RESULT=PASS rc=0; schema/header/archive/ast_object rejects exit 4/5/7/8 '
       + 'before compile, guard divergence exits 3, matching generation installs',
   }),
   Object.freeze({
@@ -337,7 +335,7 @@ export const DEFERRED = Object.freeze([
     needs: 'the zx runtime -- also a zx self-test rather than a node:test file. Note the guard it '
       + 'tests, verify_windows_runtime_exports.mjs, does run in three workflows; only its self-test does not',
     verified: 'npx --yes zx@8 build/sdk/producers/platform_matrix/verify_windows_runtime_exports.test.mjs => '
-      + 'SELFTEST_RESULT=PASS rc=0 (2026-08-11, local)',
+      + 'SELFTEST_RESULT=PASS rc=0',
   }),
 ]);
 

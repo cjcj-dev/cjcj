@@ -51,7 +51,7 @@ export async function evaluateG11Evidence(root, head) {
     // compare.py uses dict.get: absent and null both mean no environment recipe.
     requireEvidence(equal(identities[0].environment_recipe_sha256 ?? null,
       identities[1].environment_recipe_sha256 ?? null), 'different environment recipe');
-    requireEvidence(Array.isArray(manifest.allowances), 'missing Q54-C allowances');
+    requireEvidence(Array.isArray(manifest.allowances), 'missing official failure allowances');
     const allowances = new Map();
     for (const row of manifest.allowances) {
       const key = JSON.stringify([row.suite, row.name]);
@@ -97,7 +97,7 @@ export async function evaluateG11Evidence(root, head) {
     requireEvidence([...allowances.keys()].every(key => officialFailures.has(key)),
       'allowance is not an observed official failure');
     if (unique.length) return {status: 'NOT_MET', value: `selfhost_only_failures=${unique.length}`, failures: unique};
-    requireEvidence(unlicensed.length === 0, `official failures missing Q54-C reasons=${unlicensed.length}`);
+    requireEvidence(unlicensed.length === 0, `official failures missing allowance reasons=${unlicensed.length}`);
     return {status: 'MET', value: `Conformance/HLT/LLT same-recipe; selfhost_only_failures=0; official_allowances=${allowances.size}`};
   } catch (error) {
     return {status: 'UNKNOWN', value: `G11 evidence unavailable: ${error.message}`};

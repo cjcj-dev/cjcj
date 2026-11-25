@@ -44,7 +44,7 @@ const NORMALIZATION_RULES = [
       'object/linked-ELF: same-offset NUL-terminated Cangjie version record in .data',
     ],
     action: `replace only the ${SDK_VERSION_CANONICAL.length}-byte producer-version payload with ${SDK_VERSION_CANONICAL}`,
-    basis: 'REPORT-elfdiff.md: all six samples differ in the producer SDK identity emitted by @cj.sdk.version; the value is provenance, not program state',
+    basis: '@cj.sdk.version identifies the producer SDK; the value is provenance, not program state',
   },
 ];
 

@@ -21,15 +21,8 @@ import {
 export const RELEASE_MANIFEST = 'RELEASE-MANIFEST.jsonl';
 export const RELEASE_SIGNATURE_POLICY = 'SHA_ONLY';
 
-// G14 主控裁决（0811 07:3x）：取 A —— 保留 FULL_YOUNG_SCAN + census。
-//
-// B 的判据是「撤 FYS 前，每一次 minor 都 remsetMiss=0 且 missBare=0」。今晚的 remset
-// 修法把它从中位 13.2/minor 压到中位 0，但仍有离群：FYS=1 时 4/29、FYS=0 时 2/30
-// （fysdecide，256MB，e75cdefd）。「每一次都 0」是严格的，所以 B 不成立。
-//
-// A 原文要求「用启动日志证明启用」，而产品路径没有那一行；实际有的是每次 minor 的
-// [GCV2][setbitmap] ... fullYoung=1，并且有对照臂（FYS=0 时 fullYoung=0、set_n=0）。
-// 每 minor 一次加对照臂比一行启动日志更强，所以这里改的是判据的形式而不是它的实质。
+// Keep full young scans and the census until every minor collection reports
+// both remsetMiss=0 and missBare=0. The per-collection fullYoung flag records coverage.
 export const IDLE_WRITER_POLICY = 'FYS_CENSUS';
 
 const STRUCTURAL_NOT_APPLICABLE_COMPONENTS = new Set(['base-sdk', GATE_APPARATUS_COMPONENT]);
@@ -184,11 +177,7 @@ function isCangjieBinary(bytes) {
   return bytes.indexOf(CJ_RUNTIME_ENTRY_MARKER) >= 0;
 }
 
-// Discovery, not a list. hle is wired today; cjcov and cjtrace-recover land when
-// TOOLS_REF bumps; whatever Cangjie tool ships next is covered the moment it
-// appears in the stage. A name list would have to be edited each time, and the
-// edit is exactly what gets forgotten (arm-soak's hard-coded artifact name, and
-// the four hard-coded counts in kkk2_gate.sh:195, are the same failure).
+// Discover staged tools by their runtime marker so newly shipped tools are covered.
 async function discoverCangjieTools(stage, exeSuffix, platform) {
   const found = [];
   for (const dir of [path.join(stage, 'tools', 'bin'), path.join(stage, 'bin')]) {

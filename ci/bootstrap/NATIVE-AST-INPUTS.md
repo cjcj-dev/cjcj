@@ -71,7 +71,7 @@ This preparation does not execute or qualify the complete native build.
 
 ## Fixed schema successor and the N-only entry
 
-The 2026-10-18 private successor uses C++ commit
+The schema build uses C++ commit
 `f07c55738c12c154160c313c630a42a73a51025d` (tree
 `1c0bedb4bfb8b3fe3d220b6d31be6b5d7c692daa`), based on
 `174db8f40d5efddee63c47a3162bbf676bc227a0` through
@@ -80,10 +80,8 @@ retains the Windows flatc executable suffix, generates all five schema headers
 in the default CMake build, and installs those generated headers through CMake.
 The f07c successor of cad282 also binds schema commands to the executable name
 exported by the actual host ExternalProject, including cross target builds.
-The fixed source repository is the platform owner's
-`/root/cj_build/agent_scratch/impl_platform_delivery_1018/cpp-source`.
-Its incremental bundle requires the 9e26 parent; it is not a standalone source
-archive and the private commit is not claimed reachable at an official URL.
+Supply a Git repository containing the fixed commit. An incremental bundle also
+requires its base commit; it is not a standalone source archive.
 
 After normal fixed-object transfer, select the actual reachable repository in
 the ordinary `source_selection.compiler.url` and f07c in its `tag`.

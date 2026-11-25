@@ -3,7 +3,7 @@ package cjcj::basic
 import std.unittest.*
 import std.unittest.testmacro.*
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/SourceManagerTest.cpp:48 reads CangjieFiles/lsp.cj
+// C++ anchor: cangjie_compiler/unittests/Basic/SourceManagerTest.cpp:48 reads CangjieFiles/lsp.cj
 @When[os == "Windows"]
 private func lspSnippet(): String {
     return "// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.\r\n" +
@@ -24,7 +24,7 @@ private func lspSnippet(): String {
         "    }\r\n"
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/SourceManagerTest.cpp:48 reads CangjieFiles/lsp.cj
+// C++ anchor: cangjie_compiler/unittests/Basic/SourceManagerTest.cpp:48 reads CangjieFiles/lsp.cj
 @When[os != "Windows"]
 private func lspSnippet(): String {
     return "// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.\n" +
@@ -47,7 +47,7 @@ private func lspSnippet(): String {
         "    }\n"
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/SourceManagerTest.cpp:63 TEST_F(SourceManagerTest, GetContentBetweenTest)
+// C++ anchor: cangjie_compiler/unittests/Basic/SourceManagerTest.cpp:63 TEST_F(SourceManagerTest, GetContentBetweenTest)
 @When[os == "Windows"]
 private func GetContentBetweenTest(sm: SourceManager, fileID: UInt64): Unit {
     var code = sm.GetContentBetween(fileID, Position(14, 9), Position(14, 14))
@@ -75,7 +75,7 @@ private func GetContentBetweenTest(sm: SourceManager, fileID: UInt64): Unit {
     @Expect(code, "let a = 1\r\n        print(\"PageRankList" + "$" + "{a}\\n\");\r\n")
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/SourceManagerTest.cpp:63 TEST_F(SourceManagerTest, GetContentBetweenTest)
+// C++ anchor: cangjie_compiler/unittests/Basic/SourceManagerTest.cpp:63 TEST_F(SourceManagerTest, GetContentBetweenTest)
 @When[os != "Windows"]
 private func GetContentBetweenTest(sm: SourceManager, fileID: UInt64): Unit {
     var code = sm.GetContentBetween(fileID, Position(16, 9), Position(16, 14))
@@ -105,7 +105,7 @@ private func GetContentBetweenTest(sm: SourceManager, fileID: UInt64): Unit {
 
 @Test
 class SourceManagerTest {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/SourceManagerTest.cpp:46 TEST_F(SourceManagerTest, AddSourceTest)
+    // C++ anchor: cangjie_compiler/unittests/Basic/SourceManagerTest.cpp:46 TEST_F(SourceManagerTest, AddSourceTest)
     @TestCase
     func addSourceTest(): Unit {
         let sm = SourceManager()
@@ -120,7 +120,7 @@ class SourceManagerTest {
         @Expect(sm.GetFileID(path), Int64(fileID3))
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/SourceManagerTest.cpp:63 TEST_F(SourceManagerTest, GetContentBetweenTest)
+    // C++ anchor: cangjie_compiler/unittests/Basic/SourceManagerTest.cpp:63 TEST_F(SourceManagerTest, GetContentBetweenTest)
     @TestCase
     func getContentBetweenTest(): Unit {
         let sm = SourceManager()

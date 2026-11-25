@@ -10,8 +10,7 @@ carries a `phase` input and takes an optional `ci_run_id`.
    `native-runtime-install-{linux_x86_64,linux_aarch64,windows_x86_64,darwin_aarch64,darwin_x86_64}`.
    `prepare.yml` runs no `release.yml` job; no `native_inputs_*` / `native_runtime_*` input is
    required.
-   **Status (impl_gha_002_prerelease_opus_1124): the prepare producer jobs are NOT wired yet** --
-   see that lane report. Do not dispatch `prepare.yml` expecting these artifacts.
+   Verify both artifact sets exist on the selected prepare run before starting release.
 2. **`ci.yml`** on the same commit, consuming the same generation; record its run id.
 3. **`release.yml`** with `version=0.0.2 prerelease=true draft=false dry_run=false`, the
    prepare run's `native_inputs_artifact`/`native_inputs_run_id`/`native_runtime_artifact`
@@ -41,9 +40,9 @@ product tools pin `TOOLS_REF` of `ci/source_pin.env`; no private repository, no
 `WINDOWS_TOOLS_READ_TOKEN`, and no hard-coded `7ed73323` tools commit remain.
 
 
-状态：`WORKFLOW_WIRED_ENVIRONMENT_NOT_CONFIGURED`。release DAG 已采用“甲：一次构建、两段消费”：同一个候选 run 先完成 producer/package，人工复核该 run 的全部已声明（packageDeclared） 平台的不可变 `pkg-*` artifact；publish job 在 `release-draft` environment 等待批准，批准后仍从该 `github.run_id` 下载并发布同一批 artifact，不再 dispatch 第二个 run。
+release DAG 已采用“甲：一次构建、两段消费”：同一个候选 run 先完成 producer/package，人工复核该 run 的全部已声明（packageDeclared） 平台的不可变 `pkg-*` artifact；publish job 在 `release-draft` environment 等待批准，批准后仍从该 `github.run_id` 下载并发布同一批 artifact，不再 dispatch 第二个 run。
 
-仓库外还有一个启动前硬门：`release-draft` 必须先由仓库管理员配置 required reviewers，并开启 prevent self-review。2026-08-09 的只读现场结果是 `gh api repos/cjcj-dev/cjcj/environments` 返回 `{"total_count":0,"environments":[]}`。GitHub 对不存在的 environment 会自动创建一个**没有 protection rules** 的 environment，所以只写 workflow 名称不能冒充人工审批。完成 §1.2 的环境配置与机械检查前，禁止触发 0.0.2 候选 run。
+仓库外还有一个启动前硬门：`release-draft` 必须先由仓库管理员配置 required reviewers，并开启 prevent self-review。GitHub 对不存在的 environment 会自动创建一个**没有 protection rules** 的 environment，所以只写 workflow 名称不能冒充人工审批。完成 §1.2 的环境配置与机械检查前，禁止触发 0.0.2 候选 run。
 
 本文不授权 push、tag、workflow dispatch 或 release 创建；这些外向动作只由主控执行。`draft` 输入及 `gh release create --draft` 逻辑没有改，0.0.2 仍只能创建 draft。
 
@@ -76,8 +75,9 @@ freeze → 环境门预检 → 单次候选 run（producer/package）→ exact a
 主控在 dispatch 前运行以下只读检查并把原始 JSON 放入版本持久证据目录：
 
 ```bash
+# Run from the candidate checkout; keep its sibling evidence directory across campaigns.
 export RELEASE_REPO=cjcj-dev/cjcj
-export RELEASE_EVIDENCE_ROOT=/root/cj_build/ops/release_evidence/0.0.2
+export RELEASE_EVIDENCE_ROOT=../ops/release_evidence/0.0.2
 ```
 
 `RELEASE_EVIDENCE_ROOT` 是**版本持久**目录：批准记录、environment JSON、各门证据都留在这里，跨 campaign 不变。
@@ -90,9 +90,9 @@ export RELEASE_EVIDENCE_ROOT=/root/cj_build/ops/release_evidence/0.0.2
 
 ```bash
 node ci/generate-freeze.mjs \
-  --base-sdk /root/basesdk-run/fix-basesdk-0811/cangjie-sdk-linux-x64-1.2.0-alpha.20260721165458.tar.gz \
+  --base-sdk "${BASE_SDK_DIR:?}/cangjie-sdk-linux-x64-1.2.0-alpha.20260721165458.tar.gz" \
   --evidence-root "$(dirname "$RELEASE_EVIDENCE_ROOT")" \
-  --approval-record 'user-instruction-2026-08-11T13:14+08:00-g1'
+  --approval-record "${APPROVAL_RECORD_ID:?}"
 # 上面打印 CAMPAIGN_ID=<id>，然后：
 ln -sfn "../<id>/FREEZE.json"      "$RELEASE_EVIDENCE_ROOT/FREEZE.json"
 ln -sfn "../<id>/G2_IDENTITY.json" "$RELEASE_EVIDENCE_ROOT/G2_IDENTITY.json"
@@ -132,7 +132,7 @@ API 404、`jq` 非 0、reviewer 为空或 `prevent_self_review != true` 都是 `
 | 顺序 | 做什么 | 谁做 | 机械判据 | 失败信号与动作 |
 |---|---|---|---|---|
 | 1 · freeze | 在版本证据根写 `FREEZE.json`，固定 version、cjcj full SHA、runtime/LLVM pin、workflow ref、`draft=true`、`dry_run=false`。 | 主控 | 树干净；所有 SHA 为 40 位；JSON 与现场逐字一致。 | `FREEZE_FAIL`；写 STOP，禁止 dispatch。 |
-| 2 · environment | 按 §1.2 配置并只读复验 `release-draft`。 | 仓库管理员配置；主控复验 | required reviewers 至少 1 个且 prevent self-review 为 true；JSON 已持久保存。 | `STOP-ENVIRONMENT`；当前现场就是此状态。 |
+| 2 · environment | 按 §1.2 配置并只读复验 `release-draft`。 | 仓库管理员配置；主控复验 | required reviewers 至少 1 个且 prevent self-review 为 true；JSON 已持久保存。 | `STOP-ENVIRONMENT`。 |
 | 3 · 单次候选 run | 只 dispatch 一次 Release：`version=0.0.2,dry_run=false,draft=true`。等待四个 producer 与全部已声明（packageDeclared） 格 package success；publish 应显示等待 `release-draft` 审批。 | 主控 dispatch；CI 执行 | run head SHA 等于 freeze；四个 producer success；全部已声明（packageDeclared） 格 package success；publish 未开始任何 step。 | 任一 producer/package 非 success，或 publish 未等待审批即启动，为 `STOP-CANDIDATE`；拒绝本 run。 |
 | 4 · exact artifact 复核 | 从该候选 run 抓全部已声明（packageDeclared） artifact 的 ID/digest，下载全部已声明（packageDeclared） 包，验 sidecar checksum、内外 manifest、7 行字段与持久 ledger；复核结束再抓一次 ID/digest。 | 复核 lane；不得由产包 job 自批 | 全部已声明（packageDeclared） 规范名称各一；`expired=false`；前后 TSV `cmp` RC0；全部已声明（packageDeclared） 包 checksum OK；内外 manifest `cmp` RC0。 | 缺格、ID/digest 漂移、checksum/manifest 失败均为 `STOP-PACKAGE-AUDIT`；拒绝审批。 |
 | 5 · 批准并 draft publish | 复核人提交 exact run/attempt/head SHA、全部已声明（packageDeclared） artifact ID/digest、ledger SHA；required reviewer 只批准该 run 的 `release-draft` deployment。publish 从同一 `github.run_id` 下载后创建 draft，run 完结后归档 run/jobs/log。 | 复核 lane交证；required reviewer 批准；CI 发布 | 审批记录完整；download 与复核均绑定相同 run 和全部已声明（packageDeclared） ID；release 状态为 draft；最终证据 ledger 可复算。 | 拒绝/超时/bypass/非 draft/ID 不同为 `STOP-PUBLISH`；不得补跑另一套包。 |
@@ -142,7 +142,7 @@ API 404、`jq` 非 0、reviewer 为空或 `prevent_self_review != true` 都是 `
 持久目录仍使用：
 
 ```text
-/root/cj_build/ops/release_evidence/0.0.2/
+<version-evidence-root>/
 ├── FREEZE.json
 ├── release-draft-environment.json
 └── run-<run_id>-attempt-<attempt>/
@@ -167,7 +167,7 @@ export RELEASE_VERSION=0.0.2
 export RELEASE_REPO=cjcj-dev/cjcj
 export RELEASE_RUN_ID=<the-single-candidate-run-id>
 export RELEASE_RUN_ATTEMPT=<attempt>
-export RELEASE_DIR=/root/cj_build/ops/release_evidence/$RELEASE_VERSION/run-$RELEASE_RUN_ID-attempt-$RELEASE_RUN_ATTEMPT
+export RELEASE_DIR=$RELEASE_EVIDENCE_ROOT/run-$RELEASE_RUN_ID-attempt-$RELEASE_RUN_ATTEMPT
 
 mkdir -p "$RELEASE_DIR/artifacts"
 gh api --paginate --slurp \
@@ -225,10 +225,3 @@ pattern: pkg-*
 ```
 
 发布命令仍只在 `inputs.draft == true` 时加入 `--draft`；0.0.2 的 freeze 与人工核对都必须要求 true。run 完结后立刻抓最终 `run.json`、`jobs.json` 与原始 log，生成 `EVIDENCE_SHA256SUMS`。任何 artifact 到期、被删除或下载 digest mismatch 都应令 publish 失败；不得改成重新 producer。
-
-## 5. 当前裁决
-
-- 两个仓内结构缺口已接线：publish 直接检查全部 producer/package results；最终发布与人工复核绑定同一个 run 的不可变 artifact。
-- 方案甲代价：全部已声明（packageDeclared） package artifact 跨 job 保存 90 天；最终候选 run 在人工批准前保持 waiting；需要仓库管理员维护 `release-draft` protection rules。
-- 第三个同类缺口已经显式化：仓库当前没有任何 environment。workflow 已在下载/发布前 fail-closed；外部配置仍是运行 BLOCKER，§1.2 变绿前禁止发版。
-- `draft:` 的默认值和发布命令语义未改；触发事件未改；本 lane 没有触发 workflow、tag、push 或 release。

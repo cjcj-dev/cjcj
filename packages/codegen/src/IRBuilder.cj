@@ -5306,7 +5306,7 @@ public class IRBuilder2 <: Resource {
             }
         }
         // baseprop: CreatePHI has no operands yet; propagate when incomings land.
-        // C++ IRBuilder.h:183-191 only BitCast; PHI join is selfhost guard (REPORT-baseprop).
+        // C++ IRBuilder.h:183-191 only BitCast; PHI join is selfhost guard.
         PropagateBasePtrFromOperands(phi, values)
     }
 

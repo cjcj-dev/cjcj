@@ -15,11 +15,10 @@ const withBin = async (names, body) => {
   }
 };
 
-// The exact listing the 2026-08-15 release run reported before it failed.
-const RELEASE_RUN_LISTING = ['cjc@cjcj', 'cjc@cjcj.cjo'];
+const PRODUCT_AND_MODULE = ['cjc@cjcj', 'cjc@cjcj.cjo'];
 
-test('resolves the name the failing release run actually produced', async () => {
-  await withBin(RELEASE_RUN_LISTING, async (dir) => {
+test('resolves the cjc@cjcj product name', async () => {
+  await withBin(PRODUCT_AND_MODULE, async (dir) => {
     const found = await resolveProductBinary(dir, 'stage1');
     assert.equal(path.basename(found), 'cjc@cjcj');
   });
@@ -33,7 +32,7 @@ test('resolves the other name too', async () => {
 });
 
 test('the .cjo alongside the product is not mistaken for a second product', async () => {
-  await withBin(RELEASE_RUN_LISTING, async (dir) => {
+  await withBin(PRODUCT_AND_MODULE, async (dir) => {
     assert.equal(path.basename(await resolveProductBinary(dir, 'stage1')), 'cjc@cjcj');
   });
 });

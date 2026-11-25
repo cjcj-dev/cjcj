@@ -142,7 +142,7 @@ test('assemble fails closed on a missing installation, adapter or identity', t =
   assert.deepEqual(darwin.locations.tools, {});
 });
 
-// ---- N/LLVM + AST producers on all five hosts (ruling 1) ----
+// ---- N/LLVM + AST producers on all five hosts ----
 const job = text => loadYaml(text).jobs['prepare-native'];
 test('every prepare host runs its N/LLVM and AST producer and installs both', () => {
   assert.deepEqual(prepareComponentProblems(job(read('prepare')).steps), []);
@@ -1527,7 +1527,7 @@ test('red cut: a drifted compiler-rt assembly.h anchor fails closed and stays un
 // Control arm on the real pinned sources: Mach-O rejects the unpatched trampoline
 // exactly as Xcode 16.4 did (run 45385716455 step 5510/6066); the patched one
 // assembles for x86_64-apple-macos and keeps assembling for x86_64 ELF.
-const LLVM_SOURCE = process.env.CJCJ_LLVM_SOURCE || '/root/cj_build/llvm_rebase';
+const LLVM_SOURCE = process.env.CJCJ_LLVM_SOURCE || path.resolve(root, '../llvm_rebase');
 const XRAY_INPUTS = ['xray/xray_trampoline_x86_64.S', 'builtins/assembly.h', 'sanitizer_common/sanitizer_asm.h'];
 test('Darwin xray x86_64 trampoline uses assembler-local labels that Mach-O and ELF both assemble', async t => {
   const {prepareDarwinCompilerRtSource} = await import('../../../srcbuild/stages/fetch.mjs');
@@ -1604,7 +1604,7 @@ test('prepare.yml persists the one native sccache session that covers runtime an
 // Compiles the Python-facing C++ that SWIG would paste from python-typemaps.swig
 // (the %{...%} helper block plus each integer typemap body) against real Python 3
 // headers, which declare no PyInt_*: SWIG 4.5 no longer supplies those macros.
-const LLDB_TYPEMAPS = '/root/cj_build/llvm_rebase/lldb/bindings/python/python-typemaps.swig';
+const LLDB_TYPEMAPS = path.join(LLVM_SOURCE, 'lldb/bindings/python/python-typemaps.swig');
 const PYTHON3_INCLUDE = spawnSync('python3', ['-c', 'import sysconfig;print(sysconfig.get_paths()["include"])'], {encoding:'utf8'}).stdout?.trim();
 function typemapTranslationUnit(text) {
   const body = start => {let depth = 0; for (let i = start; i < text.length; i++) {

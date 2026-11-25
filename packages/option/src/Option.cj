@@ -1605,18 +1605,11 @@ public open class GlobalOptions <: Option {
             aggressiveParallelCompile = aggressiveParallelCompileSplitNum
             UtilsSemaphore.Get().SetCount(Int64(jobs.value + 2u64))
         } else if (enumIndex(optimizationLevel) >= enumIndex(OptimizationLevel.O2)) {
-            // -O2 and above: one partition, as the reference compiler builds an optimized package (ruling of
-            // 2026-11-10; for optimized builds only it takes precedence over the 0803 default below and gives up
-            // that compile-time gain). A partition is its own LLVM module: an instantiated generic or a
-            // package-internal function that lands in another partition is external there and cannot be inlined
-            // into its callers.
+            // Each partition is a separate LLVM module. Keep optimized builds in one module
+            // so generic and package-internal functions can be inlined into their callers.
             aggressiveParallelCompile = MaybeUInt64(1u64)
         } else {
-            // 默认固定 4 个 APC 分区（0803 用户令）。仍是**固定**分区数，不随 -j 漂移。
-            // 依据 apcwiden 三问实测（CJ-COMPILER-08 的根修复 1781d6b1 落地后重测）：
-            //   reset 边 APC1/2/4/8 全为 2（含多包语料）；跨 J 各 2490/2490 逐字节等同；
-            //   task-clock 相对 APC1 -14.717%（N=5，区间不重叠），APC8 反慢 1.277% 落在噪声内。
-            // 与显式 '--apc-split-num 4' 等价，故同样设置信号量上限。
+            // Keep four partitions regardless of -j, as with explicit --apc-split-num 4.
             aggressiveParallelCompile = MaybeUInt64(4u64)
             UtilsSemaphore.Get().SetCount(Int64(jobs.value + 2u64))
         }

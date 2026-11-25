@@ -114,19 +114,19 @@ private func fixtureAwait(sync: String, role: String): Unit {
         "read token < \"$1/$2\"", "sh", sync, role]), 0)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:121 TEST(UtilsTest, FileExist)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:121 TEST(UtilsTest, FileExist)
 @When[os == "Windows"]
 private func FileExist(): Unit {
     @Expect(FileUtil.FileExist("C:/Windows/System32/cmd.exe"), true)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:121 TEST(UtilsTest, FileExist)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:121 TEST(UtilsTest, FileExist)
 @When[os != "Windows"]
 private func FileExist(): Unit {
     @Expect(FileUtil.FileExist("/bin/bash"), true)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:133 TEST(UtilsTest, FileExist_CaseSencetive)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:133 TEST(UtilsTest, FileExist_CaseSencetive)
 @When[os == "Windows"]
 private func FileExist_CaseSencetive(): Unit {
     @Expect(FileUtil.FileExist("C:/Windows/System32/Cmd.exe", caseSensitive: true), false)
@@ -135,7 +135,7 @@ private func FileExist_CaseSencetive(): Unit {
     @Expect(FileUtil.FileExist("utilstest", caseSensitive: false), true)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:133 TEST(UtilsTest, FileExist_CaseSencetive)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:133 TEST(UtilsTest, FileExist_CaseSencetive)
 @When[os == "macOS"]
 private func FileExist_CaseSencetive(): Unit {
     @Expect(FileUtil.FileExist("/bin/Bash", caseSensitive: true), false)
@@ -144,7 +144,7 @@ private func FileExist_CaseSencetive(): Unit {
     @Expect(FileUtil.FileExist("utilstest", caseSensitive: false), true)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:133 TEST(UtilsTest, FileExist_CaseSencetive)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:133 TEST(UtilsTest, FileExist_CaseSencetive)
 @When[os != "Windows" && os != "macOS"]
 private func FileExist_CaseSencetive(): Unit {
     @Expect(FileUtil.FileExist("/bin/Bash", caseSensitive: true), false)
@@ -153,34 +153,34 @@ private func FileExist_CaseSencetive(): Unit {
     @Expect(FileUtil.FileExist("utilstest", caseSensitive: false), false)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:265 TEST(UtilsTest, GetFilePath)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:265 TEST(UtilsTest, GetFilePath)
 @When[os == "Windows"]
 private func GetFilePath(): Unit {
     @Expect(FileUtil.GetDirPath("lalala.cj"), ".")
     @Expect(FileUtil.GetDirPath("/usr/local/bin/lalala.cj"), "\\usr\\local\\bin")
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:265 TEST(UtilsTest, GetFilePath)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:265 TEST(UtilsTest, GetFilePath)
 @When[os != "Windows"]
 private func GetFilePath(): Unit {
     @Expect(FileUtil.GetDirPath("lalala.cj"), ".")
     @Expect(FileUtil.GetDirPath("/usr/local/bin/lalala.cj"), "/usr/local/bin")
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:406 TEST(UtilsTest, TransferEscapeBacktickTest)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:406 TEST(UtilsTest, TransferEscapeBacktickTest)
 @When[os == "Windows"]
 private func TransferEscapeBacktickTest(): Unit {
     @Expect(FileUtil.TransferEscapeBacktick("`test`"), "`test`")
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:406 TEST(UtilsTest, TransferEscapeBacktickTest)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:406 TEST(UtilsTest, TransferEscapeBacktickTest)
 @When[os != "Windows"]
 private func TransferEscapeBacktickTest(): Unit {
     @Expect(FileUtil.TransferEscapeBacktick("`test`"), "\\`test\\`")
     @Expect(FileUtil.TransferEscapeBacktick("t`test`a"), "t\\`test\\`a")
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:432 TEST(UtilsTest, IsDirTest)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:432 TEST(UtilsTest, IsDirTest)
 @When[os == "Windows"]
 private func IsDirTest(): Unit {
     @Expect(FileUtil.IsDir(GetProjectPath() + "/unittests/Utils/"), true)
@@ -195,7 +195,7 @@ private func IsDirTest(): Unit {
     }
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:432 TEST(UtilsTest, IsDirTest)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:432 TEST(UtilsTest, IsDirTest)
 @When[os != "Windows"]
 private func IsDirTest(): Unit {
     @Expect(FileUtil.IsDir(GetProjectPath() + "/unittests/Utils/"), true)
@@ -212,14 +212,14 @@ private func IsDirTest(): Unit {
     }
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:449 TEST(UtilsTest, JoinPathTest)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:449 TEST(UtilsTest, JoinPathTest)
 @When[os == "Windows"]
 private func JoinPathTest(): Unit {
     @Expect(FileUtil.JoinPath("g:\\test\\package\\", "src"), "g:\\test\\package\\src")
     @Expect(FileUtil.JoinPath("g:\\test\\package", "src"), "g:\\test\\package\\src")
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:449 TEST(UtilsTest, JoinPathTest)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:449 TEST(UtilsTest, JoinPathTest)
 @When[os != "Windows"]
 private func JoinPathTest(): Unit {
     @Expect(FileUtil.JoinPath("a/b/", "c"), "a/b/c")
@@ -227,7 +227,7 @@ private func JoinPathTest(): Unit {
     @Expect(FileUtil.JoinPath("a/b/\\t", "c"), "a/b/\\t/c")
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:469 TEST(UtilsTest, GetRelativePath)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:469 TEST(UtilsTest, GetRelativePath)
 @When[os == "Windows"]
 private func GetRelativePath(): Unit {
     expectSomeString(FileUtil.GetRelativePath("/base/dir1", "/base/dir2"), ".\\dir2")
@@ -258,7 +258,7 @@ private func GetRelativePath(): Unit {
     expectNone<String>(FileUtil.GetRelativePath("/base/a/b/c/d/", ""))
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:469 TEST(UtilsTest, GetRelativePath)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:469 TEST(UtilsTest, GetRelativePath)
 @When[os != "Windows"]
 private func GetRelativePath(): Unit {
     expectSomeString(FileUtil.GetRelativePath("/base/dir1", "/base/dir2"), "./dir2")
@@ -279,7 +279,7 @@ private func GetRelativePath(): Unit {
     expectNone<String>(FileUtil.GetRelativePath("/base/a/b/c/d/", ""))
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:608 TEST(UtilsTest, CheckCommandLineInjection)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:608 TEST(UtilsTest, CheckCommandLineInjection)
 @When[os == "Windows"]
 private func CheckCommandLineInjection(): Unit {
     @Expect(FileUtil.CheckCommandLineInjection("11|"), true)
@@ -295,7 +295,7 @@ private func CheckCommandLineInjection(): Unit {
     @Expect(FileUtil.CheckCommandLineInjection("a`b`c"), false)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:608 TEST(UtilsTest, CheckCommandLineInjection)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:608 TEST(UtilsTest, CheckCommandLineInjection)
 @When[os != "Windows"]
 private func CheckCommandLineInjection(): Unit {
     @Expect(FileUtil.CheckCommandLineInjection("11|"), true)
@@ -317,7 +317,7 @@ private func CheckCommandLineInjection(): Unit {
     @Expect(FileUtil.CheckCommandLineInjection("a`b`c"), false)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:635 TEST(UtilsTest, IsAbsolutePath)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:635 TEST(UtilsTest, IsAbsolutePath)
 @When[os == "Windows"]
 private func IsAbsolutePath(): Unit {
     @Expect(FileUtil.IsAbsolutePath(""), false)
@@ -328,7 +328,7 @@ private func IsAbsolutePath(): Unit {
     @Expect(FileUtil.IsAbsolutePath("D:\\abc"), true)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:635 TEST(UtilsTest, IsAbsolutePath)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:635 TEST(UtilsTest, IsAbsolutePath)
 @When[os != "Windows"]
 private func IsAbsolutePath(): Unit {
     @Expect(FileUtil.IsAbsolutePath(""), false)
@@ -337,7 +337,7 @@ private func IsAbsolutePath(): Unit {
     @Expect(FileUtil.IsAbsolutePath("/abc"), true)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:651 TEST(UtilsTest, ReadBinaryFileToBuffer)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:651 TEST(UtilsTest, ReadBinaryFileToBuffer)
 @When[os == "Windows"]
 private func ReadBinaryFileToBuffer(): Unit {
     let failedReason = Box<String>("")
@@ -348,7 +348,7 @@ private func ReadBinaryFileToBuffer(): Unit {
     @Expect(failedReason.value != "empty binary file", true)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:651 TEST(UtilsTest, ReadBinaryFileToBuffer)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:651 TEST(UtilsTest, ReadBinaryFileToBuffer)
 @When[os != "Windows"]
 private func ReadBinaryFileToBuffer(): Unit {
     let failedReason = Box<String>("")
@@ -359,7 +359,7 @@ private func ReadBinaryFileToBuffer(): Unit {
     @Expect(failedReason.value != "empty binary file", true)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:735 TEST(UtilsTest, FindFileByName)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:735 TEST(UtilsTest, FindFileByName)
 @When[os == "Windows"]
 private func FindFileByName(): Unit {
     var paths = Array<String>()
@@ -369,7 +369,7 @@ private func FindFileByName(): Unit {
     expectNone<String>(FileUtil.FindFileByName("non-exist-file", paths))
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:735 TEST(UtilsTest, FindFileByName)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:735 TEST(UtilsTest, FindFileByName)
 @When[os != "Windows"]
 private func FindFileByName(): Unit {
     var paths = Array<String>()
@@ -380,7 +380,7 @@ private func FindFileByName(): Unit {
     expectSomeString(FileUtil.FindFileByName("bash", paths), "/bin/bash")
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:757 TEST(UtilsTest, NormalizePath)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:757 TEST(UtilsTest, NormalizePath)
 @When[os == "Windows"]
 private func NormalizePath(): Unit {
     @Expect(FileUtil.NormalizePath("main"), ".\\main")
@@ -388,7 +388,7 @@ private func NormalizePath(): Unit {
     @Expect(FileUtil.NormalizePath("/path/to/file"), "\\path\\to\\file")
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:757 TEST(UtilsTest, NormalizePath)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:757 TEST(UtilsTest, NormalizePath)
 @When[os != "Windows"]
 private func NormalizePath(): Unit {
     @Expect(FileUtil.NormalizePath("main"), "./main")
@@ -396,7 +396,7 @@ private func NormalizePath(): Unit {
     @Expect(FileUtil.NormalizePath("/path/to/file"), "/path/to/file")
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:799 TEST(UtilsTest, GetPkgNameFromRelativePath)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:799 TEST(UtilsTest, GetPkgNameFromRelativePath)
 @When[os == "Windows"]
 private func GetPkgNameFromRelativePath(): Unit {
     @Expect(FileUtil.GetPkgNameFromRelativePath("./a"), "a")
@@ -418,7 +418,7 @@ private func GetPkgNameFromRelativePath(): Unit {
     @Expect(FileUtil.GetPkgNameFromRelativePath("xx\\..\\"), "default")
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:799 TEST(UtilsTest, GetPkgNameFromRelativePath)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:799 TEST(UtilsTest, GetPkgNameFromRelativePath)
 @When[os != "Windows"]
 private func GetPkgNameFromRelativePath(): Unit {
     @Expect(FileUtil.GetPkgNameFromRelativePath("./a"), "a")
@@ -432,7 +432,7 @@ private func GetPkgNameFromRelativePath(): Unit {
     @Expect(FileUtil.GetPkgNameFromRelativePath("xx/../"), "default")
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:826 TEST(UtilsTest, IsAbsolutePathAboveLengthLimit)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:826 TEST(UtilsTest, IsAbsolutePathAboveLengthLimit)
 @When[os == "Windows"]
 private func IsAbsolutePathAboveLengthLimit(): Unit {
     @Expect(FileUtil.IsAbsolutePathAboveLengthLimit("C:/Windows/System32/cmd.exe"), false)
@@ -442,7 +442,7 @@ private func IsAbsolutePathAboveLengthLimit(): Unit {
         "1234567890123456789012345678901234567890.cj"), true)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:826 TEST(UtilsTest, IsAbsolutePathAboveLengthLimit)
+// C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:826 TEST(UtilsTest, IsAbsolutePathAboveLengthLimit)
 @When[os != "Windows"]
 private func IsAbsolutePathAboveLengthLimit(): Unit {
     @Expect(FileUtil.IsAbsolutePathAboveLengthLimit("/bin/bash"), false)
@@ -532,32 +532,32 @@ class FileUtilTest {
         // Deliberately leave this owned root to the registered normal-exit cleanup.
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:113 TEST(UtilsTest, Access)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:113 TEST(UtilsTest, Access)
     @TestCase
     func access(): Unit {
         @Expect(FileUtil.Access("./no_such_file.txt", FileMode.FM_EXIST), false)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:121 TEST(UtilsTest, FileExist)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:121 TEST(UtilsTest, FileExist)
     @TestCase
     func fileExist(): Unit {
         FileExist()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:133 TEST(UtilsTest, FileExist_CaseSencetive)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:133 TEST(UtilsTest, FileExist_CaseSencetive)
     @TestCase
     func fileExistCaseSensitive(): Unit {
         FileExist_CaseSencetive()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:176 TEST(UtilsTest, FindProgramByName)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:176 TEST(UtilsTest, FindProgramByName)
     @TestCase
     func findProgramByName(): Unit {
         @Expect(FileUtil.FindProgramByName("./good", []), "./good")
         @Expect(FileUtil.FindProgramByName("bash", ["test/test"]), "")
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:187 TEST(UtilsTest, RemoveDirectoryNonExist)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:187 TEST(UtilsTest, RemoveDirectoryNonExist)
     @TestCase
     func removeDirectoryNonExist(): Unit {
         let path = fileUtilFixture.path("not_exist")
@@ -565,7 +565,7 @@ class FileUtilTest {
         @Expect(FileUtil.RemoveDirectoryRecursively(path), false)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:193 TEST(UtilsTest, RemoveDirectoryRemoveFile)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:193 TEST(UtilsTest, RemoveDirectoryRemoveFile)
     @TestCase
     func removeDirectoryRemoveFile(): Unit {
         let tempFile = fileUtilFixture.path("file.txt")
@@ -578,7 +578,7 @@ class FileUtilTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:204 TEST(UtilsTest, RemoveDirectorySuccess)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:204 TEST(UtilsTest, RemoveDirectorySuccess)
     @TestCase
     func removeDirectorySuccess(): Unit {
         let base = fileUtilFixture.path("success")
@@ -596,16 +596,16 @@ class FileUtilTest {
     }
 
     // PORT-DEFERRED: RemoveDirectoryWithSymlinkChild and RemoveDirectoryTargetIsSymlink require
-    // CreateSymlinkCrossPlatform from /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:71;
+    // CreateSymlinkCrossPlatform from cangjie_compiler/unittests/Utils/UtilsTests.cpp:71;
     // no selfhost utility API currently exposes symlink creation for a faithful setup.
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:265 TEST(UtilsTest, GetFilePath)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:265 TEST(UtilsTest, GetFilePath)
     @TestCase
     func getFilePath(): Unit {
         GetFilePath()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:277 TEST(UtilsTest, GetFileExtensionTest)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:277 TEST(UtilsTest, GetFileExtensionTest)
     @TestCase
     func getFileExtensionTest(): Unit {
         let cases: Array<(String, String)> = [
@@ -619,7 +619,7 @@ class FileUtilTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:313 TEST(UtilsTest, GetFileNameWithoutExtension)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:313 TEST(UtilsTest, GetFileNameWithoutExtension)
     @TestCase
     func getFileNameWithoutExtension(): Unit {
         @Expect(FileUtil.GetFileNameWithoutExtension("main.cj"), "main")
@@ -629,7 +629,7 @@ class FileUtilTest {
         @Expect(FileUtil.GetFileNameWithoutExtension("/some/path/.test3.cj"), ".test3")
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:333 TEST(UtilsTest, GetFileBase)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:333 TEST(UtilsTest, GetFileBase)
     @TestCase
     func getFileBase(): Unit {
         let cases: Array<(String, String)> = [
@@ -643,7 +643,7 @@ class FileUtilTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:366 TEST(UtilsTest, IsIdentifierTest)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:366 TEST(UtilsTest, IsIdentifierTest)
     @TestCase
     func isIdentifierTest(): Unit {
         @Expect(FileUtil.IsIdentifier("`te_s1t`"), true)
@@ -661,13 +661,13 @@ class FileUtilTest {
         @Expect(FileUtil.IsIdentifier("_1"), true)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:406 TEST(UtilsTest, TransferEscapeBacktickTest)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:406 TEST(UtilsTest, TransferEscapeBacktickTest)
     @TestCase
     func transferEscapeBacktickTest(): Unit {
         TransferEscapeBacktickTest()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:418 TEST(UtilsTest, GetFileNameTest)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:418 TEST(UtilsTest, GetFileNameTest)
     @TestCase
     func getFileNameTest(): Unit {
         @Expect(FileUtil.GetFileName("main.cj"), "main.cj")
@@ -675,25 +675,25 @@ class FileUtilTest {
         @Expect(FileUtil.GetFileNameWithoutExtension("/hahaha/yeyeye/test1.cj"), "test1")
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:432 TEST(UtilsTest, IsDirTest)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:432 TEST(UtilsTest, IsDirTest)
     @TestCase
     func isDirTest(): Unit {
         IsDirTest()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:449 TEST(UtilsTest, JoinPathTest)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:449 TEST(UtilsTest, JoinPathTest)
     @TestCase
     func joinPathTest(): Unit {
         JoinPathTest()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:469 TEST(UtilsTest, GetRelativePath)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:469 TEST(UtilsTest, GetRelativePath)
     @TestCase
     func getRelativePath(): Unit {
         GetRelativePath()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:531 TEST(UtilsTest, SplitStrTest)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:531 TEST(UtilsTest, SplitStrTest)
     @TestCase
     func splitStrTest(): Unit {
         expectStringArray(FileUtil.SplitStr("a\nab\nabc\n", b'\n'), ["a", "ab", "abc"])
@@ -701,7 +701,7 @@ class FileUtilTest {
         expectStringArray(FileUtil.SplitStr(" a   ab   abc  ", b' '), ["a", "ab", "abc"])
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:558 TEST(UtilsTest, ReadUtf8WithSignature)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:558 TEST(UtilsTest, ReadUtf8WithSignature)
     @TestCase
     func readUtf8WithSignature(): Unit {
         let reason = Box<String>("")
@@ -717,7 +717,7 @@ class FileUtilTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:567 TEST(UtilsTest, ReadUtf8)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:567 TEST(UtilsTest, ReadUtf8)
     @TestCase
     func readUtf8(): Unit {
         let reason = Box<String>("")
@@ -733,7 +733,7 @@ class FileUtilTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:576 TEST(UtilsTest, ReadEmptyFile)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:576 TEST(UtilsTest, ReadEmptyFile)
     @TestCase
     func readEmptyFile(): Unit {
         let reason = Box<String>("")
@@ -748,25 +748,25 @@ class FileUtilTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:608 TEST(UtilsTest, CheckCommandLineInjection)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:608 TEST(UtilsTest, CheckCommandLineInjection)
     @TestCase
     func checkCommandLineInjection(): Unit {
         CheckCommandLineInjection()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:635 TEST(UtilsTest, IsAbsolutePath)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:635 TEST(UtilsTest, IsAbsolutePath)
     @TestCase
     func isAbsolutePath(): Unit {
         IsAbsolutePath()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:651 TEST(UtilsTest, ReadBinaryFileToBuffer)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:651 TEST(UtilsTest, ReadBinaryFileToBuffer)
     @TestCase
     func readBinaryFileToBuffer(): Unit {
         ReadBinaryFileToBuffer()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:682 TEST(UtilsTest, ReadFileContent)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:682 TEST(UtilsTest, ReadFileContent)
     @TestCase
     func readFileContent(): Unit {
         let reason = Box<String>("")
@@ -774,14 +774,14 @@ class FileUtilTest {
         expectNone<String>(content)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:690 TEST(UtilsTest, AppendExtension)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:690 TEST(UtilsTest, AppendExtension)
     @TestCase
     func appendExtension(): Unit {
         @Expect(FileUtil.AppendExtension("", "backup", ".so"), "backup.so")
         @Expect(FileUtil.AppendExtension("main.exe", "backup", ".so"), "main.so")
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:699 TEST(UtilsTest, GetAbsPath)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:699 TEST(UtilsTest, GetAbsPath)
     @TestCase
     func getAbsPath(): Unit {
         var filePath = "a"
@@ -791,25 +791,25 @@ class FileUtilTest {
         expectNone<String>(FileUtil.GetAbsPath(filePath))
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:735 TEST(UtilsTest, FindFileByName)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:735 TEST(UtilsTest, FindFileByName)
     @TestCase
     func findFileByName(): Unit {
         FindFileByName()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:757 TEST(UtilsTest, NormalizePath)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:757 TEST(UtilsTest, NormalizePath)
     @TestCase
     func normalizePath(): Unit {
         NormalizePath()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:799 TEST(UtilsTest, GetPkgNameFromRelativePath)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:799 TEST(UtilsTest, GetPkgNameFromRelativePath)
     @TestCase
     func getPkgNameFromRelativePath(): Unit {
         GetPkgNameFromRelativePath()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:826 TEST(UtilsTest, IsAbsolutePathAboveLengthLimit)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:826 TEST(UtilsTest, IsAbsolutePathAboveLengthLimit)
     @TestCase
     func isAbsolutePathAboveLengthLimit(): Unit {
         IsAbsolutePathAboveLengthLimit()
@@ -819,7 +819,7 @@ class FileUtilTest {
 @When[os != "Windows"]
 @Test
 class GetAllDirsUnderCurrentPath {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Utils/UtilsTests.cpp:770 #ifndef _WIN32 TEST(UtilsTest, GetAllDirsUnderCurrentPath)
+    // C++ anchor: cangjie_compiler/unittests/Utils/UtilsTests.cpp:770 #ifndef _WIN32 TEST(UtilsTest, GetAllDirsUnderCurrentPath)
     @TestCase
     func getAllDirsUnderCurrentPath(): Unit {
         let base = fileUtilFixture.path("fileUtilsMkdir")

@@ -7,7 +7,7 @@ import cjcj::parse.Parser
 import std.unittest.*
 import std.unittest.testmacro.*
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:33 class LSPDiagnosticHandlerTest
+// C++ anchor: cangjie_compiler/unittests/Basic/EngineTest.cpp:33 class LSPDiagnosticHandlerTest
 private class LSPDiagnosticHandlerTest <: DiagnosticHandler {
     public var lastMessage: String = ""
 
@@ -15,7 +15,7 @@ private class LSPDiagnosticHandlerTest <: DiagnosticHandler {
         super(diag, DiagHandlerKind.LSP_HANDLER)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:41 LSPDiagnosticHandlerTest::HandleDiagnose
+    // C++ anchor: cangjie_compiler/unittests/Basic/EngineTest.cpp:41 LSPDiagnosticHandlerTest::HandleDiagnose
     public override func HandleDiagnose(myDiag: Diagnostic): Unit {
         lastMessage = myDiag.errorMessage
         if (myDiag.diagSeverity == DiagSeverity.DS_ERROR) {
@@ -28,7 +28,7 @@ private class LSPDiagnosticHandlerTest <: DiagnosticHandler {
 
 @Test
 class EngineTest {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:79 TEST(EngineTest, Handle1)
+    // C++ anchor: cangjie_compiler/unittests/Basic/EngineTest.cpp:79 TEST(EngineTest, Handle1)
     @TestCase
     func handle1(): Unit {
         let sm = SourceManager()

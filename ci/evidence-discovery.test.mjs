@@ -53,7 +53,7 @@ function rows() {
   };
 }
 
-async function fixture(t) {
+async function fixture(t, {relativeRoot = false} = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'evidence-discovery-'));
   const checkout = path.join(root, 'checkout');
   const evidenceRoot = path.join(root, 'release-evidence', '0.0.2');
@@ -62,7 +62,7 @@ async function fixture(t) {
   await write(checkout, 'build/lib/release-manifest.mjs', "export const IDLE_WRITER_POLICY = 'FYS_CENSUS';\n");
   await write(checkout, '.github/workflows/release.yml', 'name: release\n');
   await write(checkout, 'ci/docs/release-0.0.2-runbook.md',
-    `export RELEASE_EVIDENCE_ROOT=${evidenceRoot}\n`);
+    `export RELEASE_EVIDENCE_ROOT=${relativeRoot ? path.relative(checkout, evidenceRoot) : evidenceRoot}\n`);
   git(checkout, 'init', '-q');
   git(checkout, 'add', '.');
   git(checkout, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com',
@@ -78,8 +78,8 @@ async function fixture(t) {
   return {checkout, evidenceRoot, evidence, binding};
 }
 
-test('default RELEASE_EVIDENCE_ROOT discovery is MET only while its checkout binding matches', async t => {
-  const state = await fixture(t);
+test('checkout-relative RELEASE_EVIDENCE_ROOT is MET only while its checkout binding matches', async t => {
+  const state = await fixture(t, {relativeRoot: true});
   const positive = run(state.checkout);
   assert.equal(positive.value.status, 'MET', JSON.stringify(positive.value));
   assert.equal(positive.result.status, 0, positive.result.stderr);

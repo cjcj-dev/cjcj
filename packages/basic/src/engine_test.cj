@@ -70,7 +70,7 @@ class EngineTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:72 TEST(EngineTest, Register1)
+    // C++ anchor: cangjie_compiler/unittests/Basic/EngineTest.cpp:72 TEST(EngineTest, Register1)
     @TestCase
     func register1(): Unit {
         let diag = DiagnosticEngine()
@@ -79,7 +79,7 @@ class EngineTest {
         @Expect(diag.GetErrorCount(), 0u64)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:99 TEST(EngineTest, HandlerFilter)
+    // C++ anchor: cangjie_compiler/unittests/Basic/EngineTest.cpp:99 TEST(EngineTest, HandlerFilter)
     @TestCase
     func handlerFilter(): Unit {
         let diag = DiagnosticEngine()
@@ -98,7 +98,7 @@ class EngineTest {
         @Expect(diag.GetErrorCount(), 2u64)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:112 TEST(EngineTest, apiTest)
+    // C++ anchor: cangjie_compiler/unittests/Basic/EngineTest.cpp:112 TEST(EngineTest, apiTest)
     @TestCase
     func apiTest(): Unit {
         let diag = DiagnosticEngine()
@@ -171,7 +171,7 @@ note: this is a note test
         @Expect(DiagnosticEmitter(builder.diagnostic, true, true, sm).Render(), expectedOut)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:189 TEST(EngineTest, apiTest2)
+    // C++ anchor: cangjie_compiler/unittests/Basic/EngineTest.cpp:189 TEST(EngineTest, apiTest2)
     @TestCase
     func apiTest2(): Unit {
         let diag = DiagnosticEngine()
@@ -215,7 +215,7 @@ note: this is a note test
         @Expect(DiagnosticEmitter(builder.diagnostic, true, true, sm).Render(), expectedOut)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:316 TEST(EngineTest, OldDiagKindDefGuard)
+    // C++ anchor: cangjie_compiler/unittests/Basic/EngineTest.cpp:316 TEST(EngineTest, OldDiagKindDefGuard)
     @TestCase
     func oldDiagKindDefGuard(): Unit {
         @Expect(DiagKindIndex(DiagKind.chir_diag_end), 15)
@@ -229,7 +229,7 @@ note: this is a note test
 @When[os != "Windows"]
 @Test
 class ShowColorTest {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/EngineTest.cpp:270 #ifdef __unix__ TEST(EngineTest, ShowColorTest)
+    // C++ anchor: cangjie_compiler/unittests/Basic/EngineTest.cpp:270 #ifdef __unix__ TEST(EngineTest, ShowColorTest)
     @TestCase
     func showColorTest(): Unit {
         let sm = SourceManager()

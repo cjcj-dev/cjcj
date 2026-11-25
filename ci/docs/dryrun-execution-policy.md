@@ -1,20 +1,6 @@
 # 五平台 release dry-run 执行政策
 
-状态：`POLICY_READY / EXECUTION_UNBLOCKED_PENDING_USER_APPROVAL`（0811 06:1x 主控翻）。
-
-> 解阻依据（逐条可复现，`reports/REPORT-execstate.md` 是全表）：
-> 五条顺序契约 + 两条失败证据 **7/7**，且每条另行直读 workflow YAML 核对，不只看测试是否通过。
-> `ci.yml:53-64` 把 `ci/test-manifest.mjs` 的清单喂给 `node --test`（`-ge 26` 地板），该 step
-> 无 `continue-on-error`、无 `|| true`；清单第 23 行含 `phase-control.test.mjs`。逐字跑该步：
-> 128 tests / 128 pass / rc=0，七条契约名全部出现在输出里；阴性对照（查一个不存在的
-> `policy contract 6`）0 命中，证明匹配不是恒真。CI 侧对应 run `2cec8f5b`（27 文件，48s）。
->
-> ⚠ **口径陷阱**：`ci.yml` 里现在**看不到** `phase-control.test.mjs` 这个字面量（已改为清单驱动）。
-> 按“文件名是否出现在 workflow 里”去查会得到**错误的否定**。正确判法是三段组合：清单含它、
-> workflow 消费清单、该 step 不可 `continue-on-error`。
->
-> ⛔ **状态是“只差用户批准”而不是“可执行”**：政策自己规定所有 GitHub Actions 动作都是外向动作，
-> 必须先取得用户批准。解阻解掉的是技术前置，不是那道闸。
+状态：`POLICY_READY / EXECUTION_UNBLOCKED_PENDING_USER_APPROVAL`。
 
 本文只定义执行政策，不授权 workflow dispatch、rerun、cancel、push、tag、draft 或 release。所有 GitHub Actions 动作都是外向动作，必须由主控先向用户取得批准。
 
@@ -30,7 +16,7 @@ publish job 内的 `required_reviewers` 查询是对仓库 environment 配置的
 
 ### 1.2 分阶段 DAG 与失败取证已经就位
 
-旧版政策识别出的两个装置缺口已经在今天的 master 上闭合：
+分阶段执行与失败取证由以下契约覆盖：
 
 1. `.github/workflows/release.yml` 以五个具名 package job 固定 §3 顺序；Phase N 的 source/package 通过 `needs` 等待 Phase N-1 package 成功。source workflow 接收单个 `targets`，不会在 Phase 1 尚未报告时预启后续昂贵 source build。
 2. `.github/workflows/sdk-build.yml` 的 Unix/Windows smoke 只在成功时清理 workspace，并用 `if: failure()` 上传逐平台 `pkg-diagnosis-*`；`.github/workflows/sdk-build.yml` 继续上传逐 target `srcbuild-diagnosis-*`。
@@ -71,7 +57,7 @@ dispatch 后第一项取证是 run JSON。`head_sha != FREEZE.json.head_sha`、`
 | 4 | `darwin-arm64` | 已观测 compiler oracle 失败前缀 1:35:28；先验证 Apple/arm64、Python 3.12 和 dylib，再支付最贵的 Intel 冷编译。 | Python 3.12 选择、Darwin loader/LTO/static-lib 正臂、package/smoke 全绿。 |
 | 5 | `darwin-x64` | 冷缓存 `Build compiler oracle` 已实测 3:02:55，是最贵单格，只有前四格把共享问题排净后才值得启动。 | 全部门全绿；随后才允许形成五格 dry-run 结论。 |
 
-时间依据是 `/root/cj_build/reports/REPORT-citime.md:37-69`。这些是失败路径观测，不是成功时长承诺，只用于排序。
+表中的时长来自失败路径，仅用于排序。
 
 ### 3.1 release 四段全并行架构
 
@@ -147,7 +133,7 @@ dispatch 后第一项取证是 run JSON。`head_sha != FREEZE.json.head_sha`、`
 持久根固定为：
 
 ```text
-/root/cj_build/ops/release_evidence/dry-runs/<campaign_id>/
+<evidence-parent>/dry-runs/<campaign_id>/
 ├── FREEZE.json
 ├── campaign-events.jsonl
 └── run-<run_id>-attempt-<attempt>/

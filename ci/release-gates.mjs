@@ -59,7 +59,7 @@ const GATES = Object.freeze({
   },
   G11: {
     name: 'Conformance',
-    needsRun: 'G10 先通后，以 #482 ci/cangjie-test 跑 Conformance/HLT/LLT 官方 SDK 与自举 SDK 同时段同尺两臂；Q54-C 许可集来自官方臂实测失败并逐项写理由；自举独有失败为 0，绑定 final SHA',
+    needsRun: 'G10 先通后，以 #482 ci/cangjie-test 跑 Conformance/HLT/LLT 官方 SDK 与自举 SDK 同时段同尺两臂；许可集来自官方臂实测失败并逐项写理由；自举独有失败为 0，绑定 final SHA',
   },
   G12: {name: 'GC release floor'},
   G13: {name: 'loaderlife 直接门'},
@@ -155,7 +155,7 @@ function gateResult(gate, status, value, extra = {}) {
     status,
     command: GATES[gate].needsRun ? `需 run：${GATES[gate].needsRun}` : commandFor(gate),
     value,
-    criterion_updated_0811: Boolean(GATES[gate].updated),
+    criterion_updated: Boolean(GATES[gate].updated),
     ...extra,
   };
 }
@@ -262,7 +262,7 @@ async function releaseEvidenceRoot(context) {
   if (!root || root.includes('<')) {
     throw new GateInputError('UNKNOWN', 'runbook does not expose one concrete RELEASE_EVIDENCE_ROOT');
   }
-  return path.resolve(root);
+  return path.resolve(context.repo, root);
 }
 
 async function defaultFreezePath(context) {
@@ -1024,18 +1024,18 @@ async function readG8Results(context, relative) {
 async function evaluateG8(context) {
   const {floor, state} = await loadG8Floor(context);
   if (state.status !== 'MET') {
-    return gateResult('G8', state.status, `判据 0811 已更新；${state.detail}；旧 2005/2472/467 未沿用`);
+    return gateResult('G8', state.status, state.detail);
   }
   if (!context.evidence) {
     return gateResult('G8', 'UNKNOWN',
-      `判据 0811 已更新；floor=READY；missing=--evidence/${floor.evidence.results}`);
+      `floor=READY；missing=--evidence/${floor.evidence.results}`);
   }
   const evidence = await readG8Results(context, floor.evidence.results);
   const results = parseG2Json(evidence.text, evidence.file);
   const resultState = validateG8Results(results);
   if (resultState.status !== 'MET') {
     return gateResult('G8', resultState.status,
-      `判据 0811 已更新；floor=READY；${floor.evidence.results} ${resultState.detail}`);
+      `floor=READY；${floor.evidence.results} ${resultState.detail}`);
   }
 
   const failures = [];
@@ -1068,9 +1068,9 @@ async function evaluateG8(context) {
   }
   if (current.verify_exit !== 0) failures.push(`verify_exit=${current.verify_exit}`);
   if (failures.length) {
-    return gateResult('G8', 'NOT_MET', `判据 0811 已更新；floor=${floor.campaign_id}; failures=${failures.join(';')}`);
+    return gateResult('G8', 'NOT_MET', `floor=${floor.campaign_id}; failures=${failures.join(';')}`);
   }
-  return gateResult('G8', 'MET', `判据 0811 已更新；floor=${floor.campaign_id}; ` +
+  return gateResult('G8', 'MET', `floor=${floor.campaign_id}; ` +
     `difftest=${current.difftest.pass}/${current.difftest.total} mismatch=0 fail=0; ` +
     `smoke=${current.smoke.pass}/0; bcgate shared=${current.bcgate.shared} ` +
     `byte_identical=${current.bcgate.byte_identical} differing=${current.bcgate.differing} compile_errors=0; ` +
@@ -1772,7 +1772,7 @@ function printTable(results) {
   console.log('| 门 | 状态 | 依据命令 | 上次算出来的值 |');
   console.log('|---|---|---|---|');
   for (const result of results) {
-    const label = `${result.gate} ${result.name}${result.criterion_updated_0811 ? '（判据 0811 已更新）' : ''}`;
+    const label = `${result.gate} ${result.name}${result.criterion_updated ? '（判据已更新）' : ''}`;
     console.log(`| ${escapeCell(label)} | ${result.status} | ${escapeCell(result.command)} | ${escapeCell(result.value)} |`);
   }
 }

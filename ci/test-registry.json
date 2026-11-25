@@ -1141,9 +1141,9 @@
     "reason": "Requires an installed linux_x86_64 SDK with STAGE-INPUTS.json and existing std payload archives (SDK_STD_POLICY_SDK), the real standard library build.py (SDK_STD_BUILD_PY) and CMakeLists.txt (SDK_STD_CMAKE_LISTS), a new owned work directory (SDK_STD_POLICY_WORK), git and CMake. Run those variables with npx --yes zx@8 ci/bootstrap/sdk-std-debug-policy.integration.mjs; SDK_STD_POLICY_CASES may select release,debug,relwithdebinfo,legacy. It runs ci/bootstrap/sdk-build.mjs over a committed fixture to check std build-type selection, install and resume without compiling std. Generic GATING provisions none of these inputs."
   },
   {
-    "file": "tests/sema_backports_1105/mock_test.cj",
+    "file": "tests/sema_type_alias_and_mock/mock_test.cj",
     "executor": "manual",
-    "reason": "Input fixture for tests/sema_backports_1105/run.mjs mock case (compiled with --test --mock=on), not a workspace package. Run npx --yes zx@8 tests/sema_backports_1105/run.mjs <compiler> <sdk> <out> mock with a built compiler and matching SDK; no workflow provisions those inputs."
+    "reason": "Input fixture for tests/sema_type_alias_and_mock/run.mjs mock case (compiled with --test --mock=on), not a workspace package. Run npx --yes zx@8 tests/sema_type_alias_and_mock/run.mjs <compiler> <sdk> <out> mock with a built compiler and matching SDK; no workflow provisions those inputs."
   },
   {
     "file": "ci/bootstrap/native-cjdb-job-package.test.mjs",

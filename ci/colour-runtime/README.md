@@ -23,8 +23,7 @@ its same-build target pair. `build/sdk/producers/release/gate_colour_runtime.mjs
 fetches artifact key `1504` in `ci/bootstrap_artifacts_pin.json` through
 `download_pinned.mjs`. That prerelease holds the unwrapped, qualified language
 SDK, including `host/compiler`, original runtime and unchanged `SDK.lock.json`.
-Its archive provenance records the #1504 qualification lane, retained kkk2 SDK
-path and measured component hashes. The runtime's checked-in qualification
+Its archive provenance identifies the qualified SDK by its measured component hashes. The runtime's checked-in qualification
 remains the admission authority; the archive does not replace it.
 
 The gate transmits `GC_UNIT_BUILD_SDK`, `GC_UNIT_LANGUAGE_SDK`,
@@ -74,7 +73,7 @@ restoration, library verification and the missing-std classification.
 The fixed qualified language SDK is preserved in prerelease
 `qualified-language-sdk-1504-878-prerelease`, selected by artifact key `1504`
 in `ci/bootstrap_artifacts_pin.json`. Its original component and compiler-host
-identities, source lane and retained qualification runs are recorded in
+identities and qualification results are recorded in
 [qualified-language-sdk-1504-provenance.json](qualified-language-sdk-1504-provenance.json).
 The tested target runtime is measured independently of this fixed language
 SDK. Updating the production runtime pin and all platform release assets is

@@ -10,7 +10,7 @@ import std.collection.ArrayList
 import std.unittest.*
 import std.unittest.testmacro.*
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:20 ParseExprFromSrc
+// C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:20 ParseExprFromSrc
 private func ParseExprFromSrc(src: String): Expr {
     let diag = DiagnosticEngine()
     let sm = SourceManager()
@@ -19,7 +19,7 @@ private func ParseExprFromSrc(src: String): Expr {
     return parser.ParseExpr()
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:30 ParseTypeFromSrc
+// C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:30 ParseTypeFromSrc
 private func ParseTypeFromSrc(src: String): Type {
     let diag = DiagnosticEngine()
     let sm = SourceManager()
@@ -28,7 +28,7 @@ private func ParseTypeFromSrc(src: String): Type {
     return parser.ParseType()
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:40 ParseDeclFromSrc
+// C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:40 ParseDeclFromSrc
 private func ParseDeclFromSrc(src: String): Decl {
     let diag = DiagnosticEngine()
     let sm = SourceManager()
@@ -37,7 +37,7 @@ private func ParseDeclFromSrc(src: String): Decl {
     return parser.ParseDecl(ParseScopeKind.TOPLEVEL)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:50 ParseDeclFromSrcExperimental
+// C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:50 ParseDeclFromSrcExperimental
 private func ParseDeclFromSrcExperimental(src: String): Decl {
     let diag = DiagnosticEngine()
     let sm = SourceManager()
@@ -47,7 +47,7 @@ private func ParseDeclFromSrcExperimental(src: String): Decl {
     return parser.ParseDecl(ParseScopeKind.TOPLEVEL)
 }
 
-// C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:63 ParseFileFromSrc
+// C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:63 ParseFileFromSrc
 private func ParseFileFromSrc(src: String): File {
     let diag = DiagnosticEngine()
     let sm = SourceManager()
@@ -202,7 +202,7 @@ class ASTTypeValidatorDiagnosticTest {
 
 @Test
 class CreateTest {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/CreateTest.cpp:29 TEST(CreateTest, CreateASTFromSrc)
+    // C++ anchor: cangjie_compiler/unittests/AST/CreateTest.cpp:29 TEST(CreateTest, CreateASTFromSrc)
     @TestCase
     func CreateASTFromSrc(): Unit {
         let expr = ParseExprFromSrc("a=b+c")
@@ -212,7 +212,7 @@ class CreateTest {
 
 @Test
 class ASTToSourceTest {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ASTToSourceTest.cpp:120 TEST_F(ASTToSourceTest, ToStringCov)
+    // C++ anchor: cangjie_compiler/unittests/AST/ASTToSourceTest.cpp:120 TEST_F(ASTToSourceTest, ToStringCov)
     @TestCase
     func ToStringCov(): Unit {
         let pointerExpr = PointerExpr()
@@ -227,7 +227,7 @@ class ASTToSourceTest {
 
 @Test
 class SearchTest {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/SearchTest.cpp:323 WildcardCharacterTest
+    // C++ anchor: cangjie_compiler/unittests/AST/SearchTest.cpp:323 WildcardCharacterTest
     @TestCase
     func WildcardCharacterTest(): Unit {
         let ctx = ASTContext(Package("search_test"))
@@ -259,7 +259,7 @@ class SearchTest {
 
 @Test
 class ToStringTest {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:92 TEST(ToStringTest, BasicNodeSourceRestore)
+    // C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:92 TEST(ToStringTest, BasicNodeSourceRestore)
     @TestCase
     func BasicNodeSourceRestore(): Unit {
         let exprs = ["a.b", "foo()", "foo(1)", "foo(1, 2)", "[1]", "[1, 2]"]
@@ -268,7 +268,7 @@ class ToStringTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:108 TEST(ToStringTest, BasicNodeNullSafety)
+    // C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:108 TEST(ToStringTest, BasicNodeNullSafety)
     @TestCase
     func BasicNodeNullSafety(): Unit {
         let callExpr = ParseExprFromSrc("foo()")
@@ -294,7 +294,7 @@ class ToStringTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:139 TEST(ToStringTest, ExtendedNodesParsing)
+    // C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:139 TEST(ToStringTest, ExtendedNodesParsing)
     @TestCase
     func ExtendedNodesParsing(): Unit {
         let types = ["Int64", "Array<Int64>"]
@@ -313,7 +313,7 @@ class ToStringTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:175 TEST(ToStringTest, TypeAndSpecialTypeRestore)
+    // C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:175 TEST(ToStringTest, TypeAndSpecialTypeRestore)
     @TestCase
     func TypeAndSpecialTypeRestore(): Unit {
         let typeCases: Array<(String, ASTKind)> = [
@@ -360,7 +360,7 @@ class ToStringTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:218 TEST(ToStringTest, TypeAndOptionalExprRestore)
+    // C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:218 TEST(ToStringTest, TypeAndOptionalExprRestore)
     @TestCase
     func TypeAndOptionalExprRestore(): Unit {
         let exprCases: Array<(String, ASTKind)> = [
@@ -400,7 +400,7 @@ class ToStringTest {
         @Expect(primitiveTypeExprCall.ToString(), "Int64.foo()")
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:647 TEST(ToStringTest, ControlFlowRestore)
+    // C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:647 TEST(ToStringTest, ControlFlowRestore)
     @TestCase
     func ControlFlowRestore(): Unit {
         let exactExprs = ["if (true) {}", "if (true) {} else {}", "while (true) {}", "do {} while (true)",
@@ -412,7 +412,7 @@ class ToStringTest {
         let _ = ParseExprFromSrc("return").ToString()
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:659 TEST(ToStringTest, MatchAndTryRestore)
+    // C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:659 TEST(ToStringTest, MatchAndTryRestore)
     @TestCase
     func MatchAndTryRestore(): Unit {
         let exprs = ["match (x) { case 1 => 1 }", "match (x) { case 1 => 1 case 2 => 2 }",
@@ -433,7 +433,7 @@ class ToStringTest {
         }
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:744 TEST(ToStringTest, PR6FileHeaderRestore)
+    // C++ anchor: cangjie_compiler/unittests/AST/ToStringTest.cpp:744 TEST(ToStringTest, PR6FileHeaderRestore)
     @TestCase
     func PR6FileHeaderRestore(): Unit {
         let importFile = ParseFileFromSrc("package my_pkg\nimport std.collection.*\n")

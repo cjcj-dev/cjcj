@@ -34,7 +34,7 @@ private func buildFaithfulMap(keys: Array<String>): FaithfulUnorderedMap<Int64> 
 
 @Test
 class UtilsTest {
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/UtilsTest.cpp:15 TEST(UtilsTest, GetHashTest)
+    // C++ anchor: cangjie_compiler/unittests/Basic/UtilsTest.cpp:15 TEST(UtilsTest, GetHashTest)
     @TestCase
     func getHashTest(): Unit {
         @Expect(GetHash("hello world"), 8618312879776256743u64)
@@ -156,7 +156,7 @@ class UtilsTest {
         @Expect(map.contains("c"), false)
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/UtilsTest.cpp:22 TEST(UtilsTest, JoinStringsTest)
+    // C++ anchor: cangjie_compiler/unittests/Basic/UtilsTest.cpp:22 TEST(UtilsTest, JoinStringsTest)
     @TestCase
     func joinStringsTest(): Unit {
         @Expect(JoinStrings(["hello"], ","), "hello")
@@ -164,14 +164,14 @@ class UtilsTest {
         @Expect(JoinStrings([""], ""), "")
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/UtilsTest.cpp:34 TEST(UtilsTest, StringSplitTest)
+    // C++ anchor: cangjie_compiler/unittests/Basic/UtilsTest.cpp:34 TEST(UtilsTest, StringSplitTest)
     @TestCase
     func stringSplitTest(): Unit {
         expectArray(SplitString("a\nab\nabc\n", "\n"), ["a", "ab", "abc", ""])
         expectArray(SplitString("a;ab;abc", ";"), ["a", "ab", "abc"])
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/UtilsTest.cpp:53 TEST(UtilsTest, SplitLinesTest0)
+    // C++ anchor: cangjie_compiler/unittests/Basic/UtilsTest.cpp:53 TEST(UtilsTest, SplitLinesTest0)
     @TestCase
     func splitLinesTest0(): Unit {
         let res = ["", "", "", ""]
@@ -189,7 +189,7 @@ class UtilsTest {
         @Expect(case4Ret[2], "")
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/UtilsTest.cpp:81 TEST(UtilsTest, SplitLinesTest1)
+    // C++ anchor: cangjie_compiler/unittests/Basic/UtilsTest.cpp:81 TEST(UtilsTest, SplitLinesTest1)
     @TestCase
     func splitLinesTest1(): Unit {
         let res = ["a", "ab", "abc", ""]
@@ -205,7 +205,7 @@ class UtilsTest {
         @Expect(case4Ret[2], "")
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/UtilsTest.cpp:109 TEST(UtilsTest, SplitLinesTest2)
+    // C++ anchor: cangjie_compiler/unittests/Basic/UtilsTest.cpp:109 TEST(UtilsTest, SplitLinesTest2)
     @TestCase
     func splitLinesTest2(): Unit {
         let res = ["a", "ab", "abc", "a"]
@@ -221,7 +221,7 @@ class UtilsTest {
         @Expect(case4Ret[2], "a")
     }
 
-    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/UtilsTest.cpp:137 TEST(UtilsTest, SplitLinesTest3)
+    // C++ anchor: cangjie_compiler/unittests/Basic/UtilsTest.cpp:137 TEST(UtilsTest, SplitLinesTest3)
     @TestCase
     func splitLinesTest3(): Unit {
         let res = ["", "ab", "abc", "a"]

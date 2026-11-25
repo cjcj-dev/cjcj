@@ -1,8 +1,7 @@
 {
   "issue": "cangjie-runtime#1504",
-  "lane": "sym_cangjie_runtime_1504_implement_r6028178076",
   "execution": "retained qualification run; qualification/arm-{1,2,3}, finalized=64 N=3",
-  "source_sdk": "/root/sym_cangjie_runtime_1504_implement_r6028178076/sdk",
+  "source_sdk": "sdk",
   "qualification": {
     "source": "language_toolchain_qualification_evidence.md sha256=b535f296c6b6c724fc7c7db1844d1c2bd869f7a1e8831347b954e79da85978bf; fixed SDK runtime f2283db793; ThreadLocal.cpp:44 producer -> core.o/ELF direct-TLAB consumer; same-SO finalizer N=3 finalized=64",
     "language": {

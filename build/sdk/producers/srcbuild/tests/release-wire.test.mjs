@@ -149,7 +149,7 @@ test('component provenance, final std, and Python inputs are fail-closed in the 
   const checks = await fs.readFile(path.join(root, 'build/sdk/producers/release/verify_native_release.mjs'), 'utf8');
   for (const gate of ['assertNativeReleaseInputs(options,env)', 'consumeInstalledLspMacro({sdk,work,platform:target.spec.llvmPlatform,env:installedEnv})', 'assertSdkCompilerRuntimeAbi({sdk, target})',
     'selectInstalledColourSdk(sdk,', 'build/sdk/producers/package/verify_packaged_cjdb.mjs', 'ci/smoke/run_smoke.mjs', 'readInstalledStdxInputs({sdk,platform:target.spec.llvmPlatform,requireFull:true})',
-    "if (target.spec.os === 'windows')", 'tests/upstream_compiler_1120/linker-response.mjs'])
+    "if (target.spec.os === 'windows')", 'tests/windows_linker_response/linker-response.mjs'])
     assert.ok(checks.includes(gate), gate);
   const stdx = await fs.readFile(path.join(root, 'build/lib/installed-stdx-inputs.mjs'), 'utf8');
   for (const gate of ['STDX_BUILD_INPUTS', "fail('FULL_CONFIGURATION"])

@@ -1,5 +1,5 @@
 #!/usr/bin/env zx
-// Consume existing fixed worktrees. Source transfer belongs to cjops repo sync.
+// Use the supplied worktrees at their fixed revisions.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';

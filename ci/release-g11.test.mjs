@@ -58,7 +58,7 @@ function changeCase(f, suite, category, timeout = false) {
   summary.counts[category]++;
 }
 
-test('G11 actual CLI consumes all three suites and Q54-C official reasons', async t => {
+test('G11 actual CLI consumes all three suites and per-case official failure reasons', async t => {
   const f = await fixture(t);
   const {rc, row} = await runFixture(f);
   assert.equal(row.status, 'MET');

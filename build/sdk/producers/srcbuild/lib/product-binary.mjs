@@ -1,20 +1,5 @@
-// Where the selfhost compiler lands after `cjpm build`.
-//
-// cjpm has emitted it under two names during this campaign -- `cjc@cjcj` and
-// `cjcj::cjc` -- and which one appears depends on the cjpm in the SDK doing the
-// build, not on anything the step controls. Every consumer therefore has to
-// accept both.
-//
-// The 2026-08-15 release run is why this is a shared module rather than a list
-// copied into each step. build-stage3 already knew about both names;
-// build-stage1 and compose-sdk knew only `cjcj::cjc`. cjpm built the compiler
-// successfully, named it `cjc@cjcj`, and stage 1 declared it missing seven
-// hours into a five-platform run, taking every downstream phase with it. The
-// list existed in the repository the whole time, one file over.
-//
-// Exactly-one is the contract, not first-match. Two products in the bin
-// directory means a previous stage left one behind, and silently picking either
-// would make the rest of the pipeline test an artifact nobody chose.
+// cjpm names its compiler product cjc@cjcj or cjcj::cjc, depending on the SDK.
+// Require exactly one so a stale product from another stage cannot be selected.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';

@@ -105,7 +105,7 @@ export const STD_PROVENANCE_UNRESOLVED = 'unresolved';
 // field on stderr, it just does not fail the build; every current caller relies
 // on the defaults for buildSdk/coloured/preflightC2, so failing closed today
 // would turn every std build red. Flip this to true once the callers supply
-// them (see REPORT-emitpop.md for the list of five call sites).
+// them.
 export const STD_PROVENANCE_FAIL_CLOSED_DEFAULT = false;
 
 function resolved(value) {

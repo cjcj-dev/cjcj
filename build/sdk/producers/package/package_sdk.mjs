@@ -230,7 +230,7 @@ if (isWindows) {
 }
 
 // Prove the packaged runtime is the fork rather than a stock library left in place: the fork's
-// diagnostic switches (MRT_GCV2_*) sit in .rodata and are absent from stock (57 vs 0 on 0806).
+// diagnostic switches (MRT_GCV2_*) sit in .rodata and are absent from stock.
 // Copying a file proves an action ran, not that the right library arrived.
 if (!allowStockRuntime) {
   const runtimeLibDir = path.join(stage, 'runtime', 'lib', runtimeDir);
@@ -513,10 +513,8 @@ if (stdDir) {
   console.log(`  merged FFI into ${mergedLibs} static lib(s); size Δ ${mergeBytesDelta} bytes` +
     (coreBefore ? ` (core ${coreBefore}→${coreAfter})` : ''));
 
-  // Prove the overlaid std is ours, not nightly's copied back over itself: nightly's
-  // String.indexOf reads this.myData as a raw base, with zero tag tests (measured 0806 --
-  // 539 across the whole archive, 0 inside that function), which is the SIGSEGV this
-  // release exists to fix. Read the function body, not the archive total.
+  // Check the tag test in String.indexOf itself: archive-wide counts also include
+  // unrelated functions and cannot distinguish an unpatched implementation.
   const barrierProbe = await $({nothrow: true, quiet: true})`objdump -drwC ${coreLib}`;
   const probeBody = barrierProbe.stdout.split('\n');
   const symbol = '_CNat6String7indexOfHRNatY0_E';

@@ -1,6 +1,6 @@
-# 有限夹具与真实安装门（TASK 2026-10-20 01:18）
+# 有限夹具与真实安装门
 
-正式147中的有限夹具不再冒充完整原生SDK。文本工具与小C ABI文件仅用于到达文件布局、来源、ABI或缺件拒绝；不写假的STAGE/BUILD事实，不把任意异常视为通过。`package-fixture.mjs`调用正式`build/cli.mjs package`，只接受具体缺失`STAGE-INPUTS.json`；Windows缺原生compiler仍拒绝。旧首失败保留在本lane r16/r17/r21原件。
+有限夹具不再冒充完整原生SDK。文本工具与小C ABI文件仅用于到达文件布局、来源、ABI或缺件拒绝；不写假的STAGE/BUILD事实，不把任意异常视为通过。`package-fixture.mjs`调用正式`build/cli.mjs package`，只接受具体缺失`STAGE-INPUTS.json`；Windows缺原生compiler仍拒绝。旧首失败保留在本lane r16/r17/r21原件。
 
 | 原保证/测试 | 仍执行的有限断言 | 正向真实责任与当前状态 |
 |---|---|---|
@@ -17,8 +17,6 @@
 
 原正向义务未删除。`ci/test-registry.json`保留真实installed门的manual登记。该门要求`SOURCE_PARITY_INSTALLED_CONFIG`指向私有、同目录完整install及真实officialSdkRoot；不能用H、现成N、组件归档或这些有限fixture替代。release原生包必须由唯一srcbuild producer交实际归档，按正式workflow传`NATIVE_SDK_ARTIFACT_DIR/NATIVE_SDK_INSTALL_DIR/RELEASE_PLATFORM/RELEASE_KEY/CJCJ_NATIVE_SDK_VERSION/GITHUB_SHA/RUNTIME_REF/FINAL_STD_DIR/CROSS_STD_DIR/CROSS_STD_ARTIFACTS`执行compose。各平台所需集合由targets与workflow实际声明，单一Linux手动门不授其它平台。
 
-截至本次变更，主控确认没有合格完整SDK供体；原R081包GC崩溃和完整SDK缺件保持。本清单不新增资格记录或通过章；有限147变绿也不授原正向验收、合并、stage/GHA或发布。
-
-TASK 2026-10-20 01:39：固定SDK042cb九工具producer/layout、raw与install事实、readiness、package及release消费者完整接入CI后继。新增cjlint/cjprof/cjcompat的公开package缺件拒绝只授有限接线；真实九工具正向仍缺最终SDK，不能用SDK owner并行cjprof独立产物替代其它八项。`verify-target-tools.integration.mjs`保留manual登记，等待完整九工具install及真实per-tool业务探针。
+九工具的正向验收要求完整 SDK 和实际的逐工具探针；独立工具产物不能替代其余工具。`verify-target-tools.integration.mjs` 保留 manual 登记。
 
 Native cjlint/cjprof/cjcompat consume ordinary producer/install facts and actual artifacts; no CJTOOL stamp is fabricated for their C++ bodies. Existing Cangjie lineage dye scope stays intact. The finite native-tool-install test checks nine launcher bodies, while its dye rejection assertion applies to the existing Cangjie-bearing tool set; this manual fixture does not qualify the real native producers. The installed positive gate now compares all nine public tools after unpacking.
