@@ -47,11 +47,6 @@ foreach(name cjdb lldb-boundscheck lldb-cangjie-lsp lldb-cangjie-frontend cangji
  add_custom_target(\${name})
 endforeach()
 `);
- await fs.mkdir(source+'/third_party/cmake',{recursive:true});await fs.mkdir(source+'/src',{recursive:true});
- await fs.copyFile(new URL('../../build/test/fixtures/compiler-41b223-cjdb/BuildCJDB.cmake',import.meta.url),source+'/third_party/cmake/BuildCJDB.cmake');
- await fs.writeFile(source+'/src/CMakeLists.txt','if(CANGJIE_BUILD_CJDB)\n    add_dependencies(lldb cangjie-frontend)\nendif()\n');
- await fs.copyFile(new URL('../../build/test/fixtures/compiler-174db8f/third_party/CMakeLists.txt',import.meta.url),source+'/third_party/CMakeLists.txt');
- await fs.cp(new URL('../../build/test/fixtures/compiler-41b223-schema/schema',import.meta.url),source+'/schema',{recursive:true});
  good('git-init',['git','init',source]);good('git-add',['git','-C',source,'add','.']);
  good('git-commit',['git','-C',source,'-c','user.name=Zxilly','-c','user.email=zxilly@outlook.com','commit','-m','Finite native jobs entry']);
  const commit=good('git-head',['git','-C',source,'rev-parse','HEAD']);
@@ -78,31 +73,14 @@ endforeach()
   assert.ok(observed.startsWith(expected.join('|')+'|'),observed);
   assert.ok(observed.includes('-DLLVM_PARALLEL_LINK_JOBS='+expected[1]),observed);
   assert.doesNotMatch(r.stderr,/NATIVE_CPUS/);
-  const child=await fs.readFile(config.build+'.compiler-source/third_party/cmake/BuildCJDB.cmake','utf8');
   const cache=await fs.readFile(config.build+'/CMakeCache.txt','utf8');
   const args=cache.split('\n').find(line=>line.startsWith('CJCJ_LLDB_ARGS:'))??'';
   console.log('LLDB_CHILD_CONFIG_ASSERTION_REACHED '+label);
-  assert.ok(child.includes('CMAKE_ARGS ${LLDB_CMAKE_ARGS} ${CJCJ_LLDB_ARGS}'));
-  assert.ok(child.includes('${CMAKE_BINARY_DIR}/schema'));
   for(const arg of ['-DClang_DIR='+config.build+'/third_party/cjnative-prefix/src/cjnative-build/lib/cmake/clang',
     '-DLLVM_TABLEGEN='+config.build+'/third_party/cjnative-prefix/src/cjnative-build/bin/llvm-tblgen',
     '-DLIBXML2_LIBRARY='+config.build+'/third_party/xml2/lib/libxml2.so','-DPython3_EXECUTABLE=',
     '-DPython3_LIBRARY=','-DLLDB_PYTHON_EXT_SUFFIX=','-DCMAKE_CXX_COMPILER_LAUNCHER='+launcher])
     assert.ok(args.includes(arg),arg);
-  const dependencyFile=config.build+'.compiler-source/third_party/CMakeLists.txt';
-  const before='DEPENDS cangjie-demangler boundscheck)',after='DEPENDS cangjie-demangler boundscheck boundscheck-static)';
-  const prepared=await fs.readFile(dependencyFile,'utf8');
-  console.log('BOUNDSCHECK_NATIVE_TARGET_REACHED '+label+' first');
-  assert.equal(prepared.split(after).length-1,2);
-  if(label==='default'){
-   await fs.writeFile(dependencyFile,prepared.replace(after,before));
-   const restored=run('default-cache-public',[process.execPath,producer,file],{env});
-   assert.equal(restored.status,1,'finite C target stops before installation');
-   assert.match(restored.stdout,/NATIVE_JOBS_BUILD_REACHED jobs=4/);
-   console.log('BOUNDSCHECK_NATIVE_TARGET_REACHED cache-restore');
-   assert.equal(await fs.readFile(dependencyFile,'utf8'),prepared);
-  }
-
  }
 });
 test('public native jobs rejects invalid capacity before creating a build directory',async()=>{

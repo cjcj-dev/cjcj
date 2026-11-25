@@ -7,14 +7,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
-import {patchFetchedCompiler, prepareWindowsLlvmSource} from '../../../../srcbuild/stages/fetch.mjs';
+import {prepareWindowsLlvmSource} from '../../../../srcbuild/stages/fetch.mjs';
 import {putLlvmFolders, putLlvmWindowsFixes} from '../../../../test/fixtures/windows-llvm-source.mjs';
 
 const product = path.resolve(import.meta.dirname, '../job-handoff.mjs');
 const VERSION_FILE = 'packages/basic/src/Version.cj';
 const VERSION_PINNED = 'package std.basic\npublic let CANGJIE_VERSION: String = "0.0.0"\n';
 const VERSION_INJECTED = 'package std.basic\npublic let CANGJIE_VERSION: String = "0.0.2"\n';
-const nested = '.srcbuild/workspace/compiler';
+const nested = '.srcbuild/workspace/cangjie_compiler';
 const git = (cwd, ...args) => {
   const r = spawnSync('git', ['-C', cwd, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', ...args], {encoding: 'utf8'});
   assert.equal(r.status, 0, r.stderr);
@@ -36,7 +36,8 @@ async function fixture(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pinned-handoff-'));
   t.after(() => fs.rm(dir, {recursive: true, force: true}));
   const upstream = path.join(dir, 'upstream');
-  const pinned = await repository(upstream, {'src/compiler.cj': 'pinned compiler source\n'});
+  const pinned = await repository(upstream, {'src/compiler.cj': 'pinned compiler source\n',
+    'schema/CMakeLists.txt': '# pinned schema\n', 'cjpm.toml': 'version = "0.0.0"\n', '.gitignore': '/third_party/llvm-project/\n'});
   await write(path.join(upstream, 'src/compiler.cj'), 'later compiler source\n');
   git(upstream, 'commit', '-qam', 'test: later source');
   const later = git(upstream, 'rev-parse', 'HEAD');
@@ -55,7 +56,7 @@ async function fixture(t) {
   };
   await checkout();
   await fs.mkdir(path.join(root, '.srcbuild/workspace'), {recursive: true});
-  git(path.join(root, '.srcbuild/workspace'), 'clone', '-q', upstream, 'compiler');
+  git(path.join(root, '.srcbuild/workspace'), 'clone', '-q', upstream, 'cangjie_compiler');
   git(path.join(root, nested), 'checkout', '-q', '--detach', pinned);
   await write(path.join(root, nested, 'target/release/bin/cjc'), '#!/bin/sh\necho built\n', 0o755);
   await write(path.join(root, 'runtime_shim/cjc_runtime_config.o'), 'object');
@@ -119,7 +120,7 @@ test('consumer rejects a nested source checkout at a different commit', async t 
   assert.equal(f.run('pack').rc, 0);
   await f.checkout();
   await fs.mkdir(path.join(f.root, '.srcbuild/workspace'), {recursive: true});
-  git(path.join(f.root, '.srcbuild/workspace'), 'clone', '-q', f.upstream, 'compiler');
+  git(path.join(f.root, '.srcbuild/workspace'), 'clone', '-q', f.upstream, 'cangjie_compiler');
   git(path.join(f.root, nested), 'checkout', '-q', '--detach', f.later);
   const rejected = f.run('restore');
   assert.notEqual(rejected.rc, 0);
@@ -267,74 +268,56 @@ test('red cut: restore rejects untracked source the receiving workspace already 
   assert.equal(await fs.readFile(path.join(g.root, 'runtime_shim/cjc_runtime_config.o'), 'utf8'), 'object');
 });
 
-const compilerCheckout = '.srcbuild/workspace/cangjie_compiler';
-async function fetchedFixture(t, windows) {
+test('pack requires a clean compiler checkout, including its schema and manifests', async t => {
   const f = await fixture(t);
-  const upstream = path.join(f.dir, 'compiler-origin');
-  const fixtures = path.resolve(import.meta.dirname, '../../../../test/fixtures');
-  await fs.cp(path.join(fixtures, 'compiler-41b223-windows'), upstream, {recursive: true});
-  await fs.cp(path.join(fixtures, 'compiler-41b223-schema/schema'), path.join(upstream, 'schema'), {recursive: true});
-  // Exercise a pin which also needs the boundscheck edit and whose schema
-  // checks out with CRLF; pack must replay checked-out bytes from HEAD.
-  const thirdParty = path.join(upstream, 'third_party/CMakeLists.txt');
-  await fs.writeFile(thirdParty, (await fs.readFile(thirdParty, 'utf8')).replaceAll('boundscheck boundscheck-static)', 'boundscheck)'));
-  await repository(upstream, {'.gitattributes': 'schema/CMakeLists.txt text eol=crlf\n'});
-  const compilerDir = path.join(f.root, compilerCheckout);
-  git(f.dir, 'clone', '-q', upstream, compilerDir);
-  patchFetchedCompiler(compilerDir, windows);
-  const checkouts = [[compilerCheckout, compilerDir]];
-  if (windows) {
-    const origin = path.join(f.dir, 'llvm-origin'), llvm = 'third_party/llvm-project';
-    putLlvmFolders(origin);
-    putLlvmWindowsFixes(origin);
-    await repository(origin, {});
-    git(f.dir, 'clone', '-q', origin, path.join(compilerDir, llvm));
-    prepareWindowsLlvmSource(path.join(compilerDir, llvm));
-    checkouts.push([compilerCheckout + '/' + llvm, path.join(compilerDir, llvm)]);
+  for (const rel of ['schema/CMakeLists.txt', 'cjpm.toml']) {
+    const file = nested + '/' + rel;
+    await fs.appendFile(path.join(f.root, file), '# unrelated edit\n');
+    const dirty = f.run('pack');
+    assert.equal(dirty.rc, 1, dirty.output);
+    assert.ok(dirty.output.includes('handoff modified tracked source: ' + file), dirty.output);
+    git(path.join(f.root, nested), 'restore', rel);
   }
-  const expected = new Map();
-  for (const [checkout, dir] of checkouts) {
-    const files = git(dir, 'diff', '--name-only', 'HEAD').split('\n');
-    if (windows && checkout === compilerCheckout) files.push('cmake/modules/InstallWindowsToolchain.cmake');
-    for (const rel of files) expected.set(checkout + '/' + rel, {checkout, bytes: await fs.readFile(path.join(dir, rel))});
-  }
-  return {...f, expected, handoff: mode => f.run(mode, 'stage0', {
-    SOURCE_SDK_VERSION: '0.0.2', CJCJ_SRCBUILD_TARGET: windows ? 'windows-x64' : 'linux-x64',
-  })};
+  const clean = f.run('pack');
+  assert.equal(clean.rc, 0, clean.output);
+  const manifest = JSON.parse(await fs.readFile(path.join(f.archive, 'manifest.json')));
+  assert.deepEqual(manifest.derivations, []);
+});
+
+async function windowsFixture(t) {
+  const f = await fixture(t), origin = path.join(f.dir, 'llvm-origin');
+  const checkout = nested + '/third_party/llvm-project', dir = path.join(f.root, checkout);
+  const files = [...putLlvmFolders(origin), ...putLlvmWindowsFixes(origin)];
+  await repository(origin, {});
+  git(f.dir, 'clone', '-q', origin, dir);
+  prepareWindowsLlvmSource(dir);
+  const expected = new Map(files.map(({file, expected}) => [checkout + '/' + path.relative(origin, file).split(path.sep).join('/'), Buffer.from(expected)]));
+  return {...f, expected, checkoutPath: checkout, handoff: mode => f.run(mode, 'stage0', {CJCJ_SRCBUILD_TARGET: 'windows-x64'})};
 }
 
-for (const windows of [false, true]) {
-  test('fetch patch round trip (' + (windows ? 'Windows compiler and LLVM' : 'common compiler') + ')', async t => {
-    const f = await fetchedFixture(t, windows);
-    const packed = f.handoff('pack');
-    assert.equal(packed.rc, 0, packed.output);
-    const manifest = JSON.parse(await fs.readFile(path.join(f.archive, 'manifest.json')));
-    const names = members(path.join(f.archive, 'payload.tar'));
-    assert.equal(f.expected.size, windows ? 22 : 4);
-    assert.deepEqual(new Set(manifest.derivations.map(row => row.path)), new Set(f.expected.keys()));
-    for (const row of manifest.derivations) {
-      const {checkout, bytes} = f.expected.get(row.path);
-      assert.equal(row.kind, 'compiler-fetch-patch');
-      assert.equal(row.checkout, checkout);
-      assert.equal(row.sha256, crypto.createHash('sha256').update(bytes).digest('hex'));
-      assert.ok(!names.includes(row.path), row.path);
-    }
-    await f.checkout();
-    const restored = f.handoff('restore');
-    assert.equal(restored.rc, 0, restored.output);
-    for (const [rel, {bytes}] of f.expected) assert.deepEqual(await fs.readFile(path.join(f.root, rel)), bytes, rel);
-  });
-}
+test('Windows handoff replays only LLVM fetch edits over the pinned sources', async t => {
+  const f = await windowsFixture(t);
+  const packed = f.handoff('pack');
+  assert.equal(packed.rc, 0, packed.output);
+  const manifest = JSON.parse(await fs.readFile(path.join(f.archive, 'manifest.json')));
+  const names = members(path.join(f.archive, 'payload.tar'));
+  assert.deepEqual(new Set(manifest.derivations.map(row => row.path)), new Set(f.expected.keys()));
+  for (const row of manifest.derivations) {
+    assert.equal(row.kind, 'windows-llvm-fetch-patch');
+    assert.equal(row.checkout, f.checkoutPath);
+    assert.equal(row.sha256, crypto.createHash('sha256').update(f.expected.get(row.path)).digest('hex'));
+    assert.ok(!names.includes(row.path), row.path);
+  }
+  await f.checkout();
+  const restored = f.handoff('restore');
+  assert.equal(restored.rc, 0, restored.output);
+  for (const [rel, bytes] of f.expected) assert.deepEqual(await fs.readFile(path.join(f.root, rel)), bytes, rel);
+  assert.equal(git(path.join(f.root, nested), 'diff', '--name-only', 'HEAD'), '');
+});
 
-test('fetch patch rejects an extra schema line, dirty receiver, missing row or wrong digest', async t => {
-  const f = await fetchedFixture(t, false), rel = compilerCheckout + '/schema/CMakeLists.txt';
-  const file = path.join(f.root, rel);
+test('Windows LLVM replay rejects a dirty receiver, a wrong digest or a missing row', async t => {
+  const f = await windowsFixture(t), rel = f.expected.keys().next().value;
   assert.equal(f.handoff('pack').rc, 0);
-  await fs.appendFile(file, '# unrelated edit\n');
-  const rejected = f.handoff('pack');
-  assert.notEqual(rejected.rc, 0);
-  assert.ok(rejected.output.includes('handoff modified tracked source: ' + rel), rejected.output);
-  await fs.writeFile(file, f.expected.get(rel).bytes);
   git(f.root, 'restore', 'cjpm.toml');
   const dirty = f.handoff('restore');
   assert.notEqual(dirty.rc, 0);

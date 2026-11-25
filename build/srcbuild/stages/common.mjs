@@ -164,17 +164,6 @@ export function windowsCrossArgs(config, {sysroot = true} = {}) {
   return args;
 }
 
-export function applyCompilerPathNeutralFlags(repoDir) {
-  const file = path.join(repoDir, 'cmake', 'linux_toolchain.cmake');
-  if (!fs.existsSync(file)) return;
-  applyTextPatch(file, [
-    [
-      'set(C_FLAGS "${WARNINGS_SETTINGS} ${C_OTHER_FLAGS} ${OTHER_FLAGS}")\nset(CPP_FLAGS "${WARNINGS_SETTINGS} ${CXX_OTHER_FLAGS} ${OTHER_FLAGS}")',
-      'set(C_FLAGS "${WARNINGS_SETTINGS} ${C_OTHER_FLAGS} ${OTHER_FLAGS} $ENV{CFLAGS}")\nset(CPP_FLAGS "${WARNINGS_SETTINGS} ${CXX_OTHER_FLAGS} ${OTHER_FLAGS} $ENV{CXXFLAGS}")',
-    ],
-  ], {stage: 'compiler.path-neutral-flags', marker: '$ENV{CXXFLAGS}'});
-}
-
 export function applyTextPatch(file, edits, {stage: stageName, marker} = {}) {
   requireFile(file, {stage: stageName});
   // One code unit per byte lets us splice the original, even around non-UTF-8

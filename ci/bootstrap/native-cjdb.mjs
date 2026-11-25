@@ -1,7 +1,6 @@
 #!/usr/bin/env zx
 // Fixed compiler CMake targets build the complete native LLVM/CJDB dependency closure.
 import fs from 'node:fs/promises';
-import {applyNativeCjdbConfigure,applyCompilerBoundscheckDependencies,applyCompilerLlvmVersion,applyCompilerXml2Install,applyCompilerCjdbPatches,applyCompilerWindowsPatches,applyCompilerSchemaInstall} from '../../build/srcbuild/stages/fetch.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import {fileURLToPath} from 'node:url';
@@ -172,19 +171,9 @@ export async function nativeCjdb(config,{installOnly=false}={}) {
  const prepared=installOnly?{compiler:original.compilerSource.root,source:original.compilerSource}:await prepareNativeCompilerSource({compiler,compilerArchive:config.compilerArchive,
   bounds,flatbuffers,build,install,commits,commit:commits.compiler},run);
  compiler=prepared.compiler;
- if(!installOnly) {
- // Preserve the existing frontend ordering fixes on the selected upstream source.
- applyCompilerCjdbPatches(compiler);
- applyNativeCjdbConfigure(compiler);
- applyCompilerBoundscheckDependencies(compiler);
- applyCompilerSchemaInstall(compiler);
- applyCompilerLlvmVersion(compiler);
- applyCompilerXml2Install(compiler);
- }
  const compilerSource=prepared.source;
  let windowsToolchain;
  if(native.os==='win32') {
-  applyCompilerWindowsPatches(compiler);
   // The selected compiler bin must win every CMake find_program lookup.
   // The probe configures before the main build, while runner PATH contains
   // unrelated MSYS2 and host LLVM tools with the same names.

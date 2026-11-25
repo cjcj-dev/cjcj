@@ -79,6 +79,11 @@ test('public native-stage selects independent source-owned shim and links the re
  // Fixed current shim sources, plus a bounded CJ consumer fixture. No compiler
  // package is rebuilt, and the existing producer target is only a link input.
  await fs.cp(path.join(shimSource,'runtime_shim'),path.join(source,'runtime_shim'),{recursive:true});
+ // The compiler installation publishes its CHIR interface from these selected sources.
+ for(const rel of ['schema/StdxChirFormat.fbs','packages/chir/src/Enums.cj']){
+  await fs.mkdir(path.dirname(path.join(source,rel)),{recursive:true});
+  await fs.copyFile(path.join(shimSource,rel),path.join(source,rel));
+ }
  const packages=[];
  for(const name of await fs.readdir(producerTarget)){
   const dir=path.join(producerTarget,name);

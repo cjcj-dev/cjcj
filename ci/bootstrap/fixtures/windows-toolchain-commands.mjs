@@ -58,8 +58,8 @@ process.env.SystemRoot??=path.join(work,'Windows');
 if(mode==='probe'){
  await windows.probeWindowsToolchain({tools,compiler,work:build,env:{SystemRoot:process.env.SystemRoot,PATH:'ambient'}});
 }else{
- await fs.cp(new URL('../../../build/test/fixtures/compiler-41b223-windows/',import.meta.url),compiler,{recursive:true});
- await fs.cp(new URL('../../../build/test/fixtures/compiler-41b223-schema/schema/',import.meta.url),path.join(compiler,'schema'),{recursive:true});
+ await fs.mkdir(path.join(compiler,'cmake'),{recursive:true});
+ await fs.writeFile(path.join(compiler,'cmake/mingw_x86_64_toolchain.cmake'),'# input to the mocked configure command\n');
  const config={compiler,build,install,tools,commits:{compiler:'f'.repeat(40)},platform:'windows_x86_64',
   llvm:windowsRoot+'\\llvm-fork',runtime:windowsRoot+'\\runtime-source',python:windowsRoot+'\\python',
   xml2Archive:{file:runtime,sha256:await flow.fileDigest(runtime)}};

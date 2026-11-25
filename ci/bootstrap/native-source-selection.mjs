@@ -3,7 +3,7 @@ import {FIXED_INPUTS} from './sdk-targets.mjs';
 import {sdkPlatform} from './sdk-platform.mjs';
 export const NATIVE_REPOSITORIES=Object.freeze({
   llvm:'https://github.com/cjcj-dev/cjcj-llvm.git',runtime:'https://github.com/cjcj-dev/cangjie-runtime.git',
-  ast:'https://gitcode.com/Cangjie/cangjie_compiler.git',h1:'https://github.com/cjcj-dev/cjcj.git',
+  ast:'https://github.com/cjcj-dev/cangjie-compiler.git',h1:'https://github.com/cjcj-dev/cjcj.git',
 });
 // Source selection is resolved at the entry, once, before producers write.
 // The workspace and native-input adapters both use repository/commit rows.

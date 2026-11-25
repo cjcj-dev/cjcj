@@ -9,8 +9,9 @@ import {auditPins, discoverPins, repoRoot} from './pin-sweep.mjs';
 // Canonical source selectors, maintained independently of discoverPins.
 // CJPM's former selector was retired in 95fca23860a8; TOOLS_REF selects it too.
 const EXPECTED_COMMIT_PINS = Object.freeze([
-  'BOUNDS_REF', 'COMPILER_REF', 'FLATBUFFERS_SHA', 'LLVM_SHA',
-  'LOADERLIFE_MIN_REF', 'RUNTIME_REF', 'STDX_REF', 'TOOLS_REF',
+  'BOUNDS_REF', 'COMPILER_REF', 'FLATBUFFERS_SHA', 'JAVA_INTEROP_REF',
+  'LINUX_X64_SDK_LLVM_SHA', 'LINUX_X64_SDK_RUNTIME_REF', 'LLVM_SHA',
+  'LOADERLIFE_MIN_REF', 'PCRE2_REF', 'RUNTIME_REF', 'STDX_REF', 'TOOLS_REF',
 ]);
 
 function git(root, ...arguments_) {

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import {readSourcePins} from '../native-llvm-inputs.mjs';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 const base=process.env.NATIVE_VERSION_EVIDENCE;
@@ -17,14 +18,14 @@ function run(label,argv) {
 }
 const good=(label,argv)=>{const r=run(label,argv);assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
 const write=(file,text)=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,text);};
-const fixture=path.resolve('build/test/fixtures');
+const mirror=process.env.NATIVE_VERSION_COMPILER_REPO;
+assert(mirror,'NATIVE_VERSION_COMPILER_REPO must contain the pinned compiler commit');
 const compiler=path.join(base,'compiler');
 write(compiler+'/cmake/linux_x86_64_toolchain.cmake','set(CMAKE_SYSTEM_NAME Linux)\n');
-for(const name of ['BuildCJDB.cmake','Xml2.cmake']) {fs.mkdirSync(compiler+'/third_party/cmake',{recursive:true});fs.copyFileSync(fixture+'/compiler-41b223-cjdb/'+name,compiler+'/third_party/cmake/'+name);}
-write(compiler+'/src/CMakeLists.txt','if(CANGJIE_BUILD_CJDB)\n    add_dependencies(lldb cangjie-frontend)\nendif()\n');
-fs.copyFileSync(fixture+'/compiler-174db8f/third_party/CMakeLists.txt',compiler+'/third_party/CMakeLists.txt');
-fs.cpSync(fixture+'/compiler-41b223-schema/schema',compiler+'/schema',{recursive:true});
-// Limited compiler graph: use the actual prepared upstream POST_BUILD command,
+const cmakeArchive=path.join(base,'compiler-cmake.tar');
+good('compiler-cmake-archive',['git','-C',mirror,'archive','-o',cmakeArchive,readSourcePins().source.COMPILER_REF,'third_party/CMakeLists.txt','third_party/cmake']);
+good('compiler-cmake-extract',['tar','-xf',cmakeArchive,'-C',compiler]);
+// Limited compiler graph: use the pinned mirror POST_BUILD command,
 // then deliberately stop before native AST/install/Python debugger consumers.
 write(compiler+'/CMakeLists.txt',"cmake_minimum_required(VERSION 3.20)\nproject(NativeVersionEntry NONE)\nfile(STRINGS \"${CMAKE_SOURCE_DIR}/third_party/CMakeLists.txt\" versionCommand REGEX \"COMMAND .*VERSION.txt\")\nlist(LENGTH versionCommand count)\nif(NOT count EQUAL 1)\n message(FATAL_ERROR \"one official version producer required\")\nendif()\nstring(REPLACE \"\\${CMAKE_CURRENT_SOURCE_DIR}\" \"${CMAKE_SOURCE_DIR}/third_party\" versionCommand \"${versionCommand}\")\nset(SOURCE_DIR \"${CANGJIE_CJNATIVE_SOURCE_DIR}\")\nset(THIRD_PARTY_LLVM third_party/llvm)\nfile(MAKE_DIRECTORY \"${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}\")\nset(stopAfterVersion \"COMMAND ${CMAKE_COMMAND} -E false\")\nif(\"$ENV{NATIVE_CLANG_FINITE_INSTALL}\" STREQUAL \"1\")\n set(stopAfterVersion \"\")\n execute_process(COMMAND \"${CMAKE_COMMAND}\" -G Ninja -S \"${CMAKE_SOURCE_DIR}/finite-clang\" -B \"${CMAKE_BINARY_DIR}/third_party/cjnative-prefix/src/cjnative-build\" RESULT_VARIABLE result)\n if(NOT result EQUAL 0)\n  message(FATAL_ERROR \"finite component configuration failed\")\n endif()\n install(FILES \"${CMAKE_SOURCE_DIR}/CMakeLists.txt\" DESTINATION share/finite-clang)\nendif()\ncmake_language(EVAL CODE \"add_custom_target(lldb ${versionCommand} COMMAND ${CMAKE_COMMAND} -E echo NATIVE_VERSION_POST_BUILD_REACHED ${stopAfterVersion} WORKING_DIRECTORY ${SOURCE_DIR})\")\nforeach(name cjdb lldb-boundscheck lldb-cangjie-lsp lldb-cangjie-frontend cangjie-ast-support)\n add_custom_target(${name})\nendforeach()\n");
 

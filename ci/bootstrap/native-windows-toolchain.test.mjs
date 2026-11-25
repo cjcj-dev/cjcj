@@ -5,9 +5,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {assertCjnativeHostArgs} from '../../build/test/fixtures/windows-cjnative-args.mjs';
-import {assertMinGWRuntimeFallback} from '../../build/test/fixtures/windows-mingw-fallback.mjs';
-import {assertCompilerLibcxxEdits} from '../../build/test/fixtures/windows-compiler-libcxx.mjs';
 import {cmakePath,coffImports,requireMsvcrtImports,selectedExecutable,selectedWindowsToolchainEnvironment,windowsInstalledEnvironment} from './native-windows-toolchain.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
 const out=process.env.TOOLCHAIN_TEST_EVIDENCE;
@@ -94,10 +91,6 @@ for(const mode of ['probe','native','install-only']){
    assert.deepEqual(consumer.path.split(';'),[path.join(probeInstall,'bin'),path.join(probeInstall,'third_party/llvm/bin'),path.join(system,'System32'),system]);
   }
   if(mode!=='probe'){
-   const compiler=main.argv[main.argv.indexOf('-S')+1];
-   assertCompilerLibcxxEdits(compiler);
-   const header=await fs.readFile(path.join(compiler,'demangler/Demangler.h'),'utf8');
-   assert.match(header,/#include <vector>\r?\n#ifndef BUILD_LIB_CANGJIE_DEMANGLE/,'native configure must see the unconditional vector include');
    if(mode==='native')assert.equal(incomingProbePath.split(';')[0],bin,'nativeCjdb must bind PATH before invoking probe');
    assert.equal(main.path.split(';')[0],bin,'main configure must search selected bin first: '+mode);
    assert.ok(main.argv.includes('-DCANGJIE_CJNATIVE_SOURCE_DIR=D:/a/cjcj/cjcj/llvm-fork'));
@@ -112,8 +105,6 @@ for(const mode of ['probe','native','install-only']){
    const build=main.argv[main.argv.indexOf('-B')+1];
    const tblgen=cmakePath(path.join(build,'third_party/cjnative-prefix/src/cjnative-build/bin/llvm-tblgen.exe'));
    assert.deepEqual(childArgs.filter(arg=>arg.startsWith('-DLLVM_TABLEGEN=')),['-DLLVM_TABLEGEN='+tblgen]);
-   assertCjnativeHostArgs(compiler,work);
-   assertMinGWRuntimeFallback(compiler,work,main.argv.find(arg=>arg.startsWith('-DCANGJIE_TOOLCHAIN_RUNTIME_FILES=')));
   }
  });
 }

@@ -36,8 +36,7 @@ copied from the official SDK named by `CJCJ_TOOLCHAIN` in
 [`ci/host_sdk_pin.env`](../host_sdk_pin.env), preserving the
 matching Cangjie module and generator. `SHA256SUMS` covers all these files.
 `ci/install_std_sdk_inputs.py` installs them before bootstrap/final std builds.
-The compiler source authority is `https://gitcode.com/Cangjie/cangjie_compiler.git`;
-the former Zxilly mirror does not contain the alpha.06 compiler commit.
+The compiler source authority is `https://github.com/cjcj-dev/cangjie-compiler.git`, pinned in [ci/source_pin.env](../source_pin.env).
 
 Std compilation uses `ci/build-resources.mjs`. Default heap is at most 96GB
 and 75% of the process's effective physical/cgroup memory. Default jobs follow

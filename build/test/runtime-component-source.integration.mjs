@@ -151,7 +151,7 @@ return {...r,source};}
  installations:Object.fromEntries(Object.keys(shapes).map(name=>[name,{install:name,buildResult:name+'/result.json',configuration:{finiteBoundary:name}}]))};
  await write(inputs+'/locations.json',JSON.stringify(locations));
  const gitConfig=root+'/gitconfig';
- await write(gitConfig,'[url "file://'+root+'/transport.git"]\n'+['https://github.com/cjcj-dev/cangjie-runtime.git','https://github.com/cjcj-dev/cjcj-llvm.git','https://github.com/cjcj-dev/cjcj.git','https://gitcode.com/Cangjie/cangjie_compiler.git'].map(url=>' insteadOf = '+url).join('\n')+'\n');
+ await write(gitConfig,'[url "file://'+root+'/transport.git"]\n'+['https://github.com/cjcj-dev/cangjie-runtime.git','https://github.com/cjcj-dev/cjcj-llvm.git','https://github.com/cjcj-dev/cjcj.git','https://github.com/cjcj-dev/cangjie-compiler.git'].map(url=>' insteadOf = '+url).join('\n')+'\n');
  const consumer={NODE_OPTIONS:loader,GIT_CONFIG_GLOBAL:gitConfig,GIT_CONFIG_NOSYSTEM:'1',GIT_ALLOW_PROTOCOL:'file:https',
   CANGJIE_WORKSPACE:root+'/consumer',GITHUB_WORKSPACE:root+'/transport.git',CJCJ_NATIVE_INPUT_ROOT:inputs,CJCJ_OFFICIAL_SDK_ROOT:inputs+'/host',CJCJ_BOOTSTRAP_BASE_ARCHIVE:inputs+'/host-archive',
   CJCJ_NATIVE_H1_REF:commit,CJCJ_NATIVE_RUNTIME_INSTALL:carried,CJCJ_NATIVE_RUNTIME_SOURCE:carried+'/share/runtime-build',CJCJ_NATIVE_LLVM_REF:commit,CJCJ_NATIVE_RUNTIME_REF:commit,CJCJ_NATIVE_HOST_VERSION:version,GITHUB_ENV:''};

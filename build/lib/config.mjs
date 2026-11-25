@@ -16,7 +16,7 @@ const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const FALLBACK_VERSION = '0.0.0-dev';
 const REPO_DEFAULTS = Object.freeze({
   llvm: ['https://github.com/cjcj-dev/cjcj-llvm.git', 'cangjie_compiler/third_party/llvm-project'],
-  compiler: ['https://gitcode.com/Cangjie/cangjie_compiler.git', 'cangjie_compiler'],
+  compiler: ['https://github.com/cjcj-dev/cangjie-compiler.git', 'cangjie_compiler'],
   runtime: ['https://gitcode.com/Cangjie/cangjie_runtime.git', 'cangjie_runtime'],
   tools: ['https://github.com/cjcj-dev/cjcj-tools.git', 'cjcj-tools'],
   stdx: ['https://gitcode.com/Cangjie/cangjie_stdx.git', 'cangjie_stdx'],

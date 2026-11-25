@@ -1,74 +1,12 @@
 {
   "repository": "https://gitcode.com/Cangjie/cangjie_compiler.git",
   "commit": "41b22350b8eb5b0c8244704f906b7b8d3096eb9c",
-  "scope": "Exact CMake sources and compiler excerpts; fixture Git commits are not the canonical repository.",
+  "scope": "Historical CMake source for the compiler-rt install contract.",
   "files": [
-    {
-      "path": "cmake/mingw_x86_64_toolchain.cmake",
-      "sha256": "162b30ce46f9b73f45c1334e34d03a7bc244d6ce4b54d06fd3f5ee37876d2cf1"
-    },
     {
       "path": "third_party/CMakeLists.txt",
       "alsoAt": "2e7b7dd9f363b8b7ae1fc724273e5399a5ea7c0d",
       "sha256": "a03052e115558b7d3b8755e00e864bac0e5bbc004991201fbdba712acaf8a4b2"
-    },
-    {
-      "path": "third_party/cmake/Xml2.cmake",
-      "sha256": "f79d84552b62877133a2f929d0f59068c09c3f57ab76f2dbd4cf89e98a2e2732"
-    },
-    {
-      "path": "third_party/cmake/BuildCJDB.cmake",
-      "sha256": "9ddcd128f8921d998fdb1e468df93c961199f13d84014781e927bfb71144c460"
-    },
-    {
-      "path": "src/CMakeLists.txt",
-      "sha256": "3520410df21eb13e534a1f655479b7b26007976bce7fa3c7ab8715462fe3c48c"
-    },
-    {
-      "path": "demangler/Demangler.h",
-      "lines": "1-21 and final #endif; identical include block at 2e7b7dd9",
-      "sha256": "609fb0efa9f2043367658319811fe26b97059d35b372fe3d5e017388be773678"
-    },
-    {
-      "path": "src/AST/Searcher.cpp",
-      "lines": "13-15",
-      "sha256": "2a2d00e0fa7f965cd3246673aa5668dacb17170d1b9159af77d5c385781290ab"
-    },
-    {
-      "path": "src/Basic/Display.cpp",
-      "lines": "9-12",
-      "sha256": "3024faf8fecdc5ab54a5b33dc93dcd20b74ba50dc4b6285290cf2abaaff14ee7"
-    },
-    {
-      "path": "src/Frontend/CompilerInstance.cpp",
-      "lines": "13-17",
-      "sha256": "349cc36bf4df338f87bccd5e744c872e3f4e7c8899c14656a9bdaf697668eb6f"
-    },
-    {
-      "path": "include/cangjie/Modules/ModulesUtils.h",
-      "lines": "14-16",
-      "sha256": "729591a2d8e2ca8d779beacb5a3e24013ec584ccf15a0ad6d772307fb6a114c5"
-    },
-    {
-      "path": "src/Parse/Parser.cpp",
-      "lines": "13-15",
-      "sha256": "671030958695bf82ec04947a95ef9a19e33bc0987c21783567a602b69fc2f9f7"
-    },
-    {
-      "path": "src/Sema/InheritanceChecker/StructInheritanceChecker.cpp",
-      "lines": "14-16",
-      "sha256": "294d0e8438adef5054dfb2caaea77f50702e4ede47ca8250a71cb617667dffc9"
-    },
-    {
-      "path": "src/Sema/LegalityOfUsage/LegalityOfUsage.cpp",
-      "lines": "13-15",
-      "sha256": "60f6b63f84ffe784af243a30af9f27ad121660d4a5058041dcafb62f027608dd"
-    },
-    {
-      "path": "src/Driver/Driver.cpp",
-      "lines": "246-247",
-      "sha256": "35e391e9dfceb29787b198362818783193bc6cff25e7639d86de2631da81b9bb"
     }
-  ],
-  "compilerExcerptCommit": "2e7b7dd9f363b8b7ae1fc724273e5399a5ea7c0d"
+  ]
 }

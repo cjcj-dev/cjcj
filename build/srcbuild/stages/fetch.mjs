@@ -2,8 +2,6 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {saveSourceSelection} from '../../lib/config.mjs';
 import {BuildError} from '../../lib/errors.mjs';
 import {shallowClone, assertSourceIdentity} from '../../lib/git.mjs';
@@ -11,116 +9,6 @@ import {getLogger, stage} from '../../lib/logging.mjs';
 import {applyTextPatch, ensureDir, requireFile} from './common.mjs';
 
 const logger = getLogger('cangjie_build.stages.fetch');
-const BOUNDSCHECK_DEPENDS = 'DEPENDS cangjie-demangler boundscheck';
-
-// Upstream da68cc5ae3028c724da470b703eff757402cba44. Both cjnative
-// source paths copy the static archive on Windows during their patch step.
-// The shared-library target alone cannot order that producer before the copy.
-export function applyCompilerBoundscheckDependencies(repoDir) {
-  const file = path.join(repoDir, 'third_party', 'CMakeLists.txt');
-  const source = fs.readFileSync(file, 'utf8');
-  const oldText = `${BOUNDSCHECK_DEPENDS})`;
-  const newText = `${BOUNDSCHECK_DEPENDS} boundscheck-static)`;
-  const count = text => source.split(text).length - 1;
-  if (count(oldText) + count(newText) !== 2) {
-    throw new BuildError('fetch.patch', `patch shape drift: expected both cjnative boundscheck dependencies in ${file}`);
-  }
-  if (source.includes(oldText)) fs.writeFileSync(file, source.replaceAll(oldText, newText));
-}
-
-// VERSION.txt is produced by the same normal cjnative POST_BUILD step for
-// Git checkouts and selected archives. Do not require a fabricated repository.
-export function applyCompilerLlvmVersion(repoDir) {
-  const old = 'COMMAND git log -1 --oneline --decorate > ${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/VERSION.txt';
-  const replacement = 'COMMAND "${CJCJ_NATIVE_NODE}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/llvm-source-version.mjs" "${SOURCE_DIR}" "${CMAKE_BINARY_DIR}/${THIRD_PARTY_LLVM}/VERSION.txt" "${CJ_LLVM_COMMIT}"';
-  applyTextPatch(path.join(repoDir, 'third_party', 'CMakeLists.txt'), [[old, replacement]], {
-    stage: 'fetch.patch.llvm-version', marker: replacement,
-  });
-  fs.copyFileSync(fileURLToPath(new URL('../patches/llvm-source-version.mjs', import.meta.url)),
-    path.join(repoDir, 'third_party', 'cmake', 'llvm-source-version.mjs'));
-}
-
-// Xml2.cmake normally builds and installs the selected source before CJDB.
-// Follow that producer's shared-library chain at install time; its entity
-// version need not equal the source release, and the SONAME may change.
-export function applyCompilerXml2Install(repoDir) {
-  const file = path.join(repoDir, 'third_party', 'cmake', 'BuildCJDB.cmake');
-  for (const [entry, soname, entity] of [
-    ['libxml2.dylib', 'libxml2.16.dylib', 'libxml2.2.14.0.dylib'],
-    ['libxml2.so', 'libxml2.so.16', 'libxml2.so.2.14.0'],
-  ]) {
-    const old = `    install(FILES\n        \${CMAKE_BINARY_DIR}/third_party/xml2/lib/${entry}\n        \${CMAKE_BINARY_DIR}/third_party/xml2/lib/${soname}\n        \${CMAKE_BINARY_DIR}/third_party/xml2/lib/${entity}\n        DESTINATION third_party/llvm/lib)`;
-    const replacement = `    install(CODE "file(INSTALL DESTINATION \\\"\\\${CMAKE_INSTALL_PREFIX}/third_party/llvm/lib\\\"\n        TYPE SHARED_LIBRARY FOLLOW_SYMLINK_CHAIN\n        FILES \\\"\${CMAKE_BINARY_DIR}/third_party/xml2/lib/${entry}\\\")")`;
-    applyTextPatch(file, [[old, replacement]], {stage:'fetch.patch.xml2-install', marker:replacement});
-  }
-}
-
-const BUILDCJDB_EDITS = [
-  [
-    'externalproject_get_property(cjnative BINARY_DIR)\nset(LLVM_GC_BINARY_DIR "${BINARY_DIR}")\n',
-    'cmake_policy(SET CMP0114 NEW)\nexternalproject_get_property(cjnative BINARY_DIR)\nset(LLVM_GC_BINARY_DIR "${BINARY_DIR}")\n',
-  ],
-  [
-    '    USES_TERMINAL_BUILD ON\n    DEPENDS cjnative)\n',
-    '    USES_TERMINAL_BUILD ON\n    DEPENDS cjnative\n    STEP_TARGETS build configure)\n',
-  ],
-];
-const SRC_CMAKE_EDITS = [[
-  'if(CANGJIE_BUILD_CJDB)\n    add_dependencies(lldb cangjie-frontend)\nendif()\n',
-  'if(CANGJIE_BUILD_CJDB)\n    add_dependencies(lldb cangjie-frontend)\n    if(TARGET lldb-build)\n        add_dependencies(lldb-build cangjie-frontend cangjie-lsp-share)\n    endif()\nendif()\n',
-]];
-const COMPILER_CJDB_REQUIREMENTS = [
-  [path.join('third_party', 'cmake', 'BuildCJDB.cmake'), [
-    'cmake_policy(SET CMP0114 NEW)',
-    'STEP_TARGETS build configure',
-  ]],
-  [path.join('src', 'CMakeLists.txt'), [
-    'add_dependencies(lldb-build cangjie-frontend cangjie-lsp-share)',
-  ]],
-];
-
-export function verifyCompilerCjdbPatches(repoDir) {
-  for (const [relativePath, requiredTexts] of COMPILER_CJDB_REQUIREMENTS) {
-    const file = path.join(repoDir, relativePath);
-    const source = fs.readFileSync(file, 'utf8').replaceAll('\r\n', '\n');
-    for (const requiredText of requiredTexts) {
-      if (!source.includes(requiredText)) {
-        throw new BuildError('fetch.patch.verify', `required compiler patch text missing from ${file}: ${requiredText}`);
-      }
-    }
-  }
-}
-
-export function applyCompilerCjdbPatches(repoDir) {
-  applyTextPatch(path.join(repoDir, 'third_party', 'cmake', 'BuildCJDB.cmake'), BUILDCJDB_EDITS, {
-    stage: 'fetch.patch', marker: 'STEP_TARGETS build configure',
-  });
-  applyTextPatch(path.join(repoDir, 'src', 'CMakeLists.txt'), SRC_CMAKE_EDITS, {
-    stage: 'fetch.patch', marker: 'add_dependencies(lldb-build cangjie-frontend cangjie-lsp-share)',
-  });
-  verifyCompilerCjdbPatches(repoDir);
-}
-
-export function applyNativeCjdbConfigure(repoDir) {
-  // Keep the public umbrella include in the same tree CMake installs. More
-  // recent explicit compiler sources may already provide their own version.
-  const header = path.join(repoDir,'include/cangjie/Utils/Casting.h');
-  if (!fs.existsSync(header)) {
-    fs.mkdirSync(path.dirname(header),{recursive:true});
-    fs.copyFileSync(new URL('../patches/Casting.h',import.meta.url),header,fs.constants.COPYFILE_EXCL);
-  }
-  // The pinned LLDB plugin assumes compiler/build/build/schema. Our generated
-  // headers live in the outer binary directory, including on resumed builds.
-  const file = path.join(repoDir, 'third_party', 'cmake', 'BuildCJDB.cmake');
-  const anchor = 'if(NOT "${LLDB_CMAKE_CXX_FLAGS}" STREQUAL "")';
-  const replacement = 'string(APPEND LLDB_CMAKE_CXX_FLAGS " -I\\"${CMAKE_BINARY_DIR}/schema\\"")\n' + anchor;
-  applyTextPatch(file, [[anchor, replacement]], {stage:'fetch.patch.cjdb-schema',marker:replacement});
-  // LLVM_BUILD_ARG is Unix-only upstream. Python and the launcher must also
-  // reach the standalone LLDB configure on native Windows.
-  const args = '    CMAKE_ARGS ${LLDB_CMAKE_ARGS}';
-  applyTextPatch(file, [[args, args + ' ${CJCJ_LLDB_ARGS}']], {stage:'fetch.patch.cjdb-args',marker:args + ' ${CJCJ_LLDB_ARGS}'});
-}
-
 // CMake >= 4.0 leaves CMAKE_OSX_SYSROOT empty on macOS unless it is set. The
 // pinned debugserver (eb7ad012 lldb/tools/debugserver/source/CMakeLists.txt:184-187)
 // passes it unquoted to mig, so an empty value makes mig take dbgnub-mig.defs as
@@ -292,129 +180,6 @@ export function prepareLldbSwigPython3Source(llvm) {
     throw new BuildError(stage, `Python 2 API remains in ${file}`);
 }
 
-// The installed public compiler headers include several generated schemas.
-// Install the complete output set owned by the existing flatc target, including
-// libs-only builds; never synthesize headers or copy them after CMake install.
-export function applyCompilerSchemaInstall(repoDir) {
-  const target = 'add_custom_target(CangjieFlatbuffersHeaders DEPENDS ${FLATC_OUTPUTS} ${FLATC_LIBAST_OUTPUTS})';
-  const install = 'install(FILES ${FLATC_OUTPUTS} DESTINATION include/flatbuffers)';
-  applyTextPatch(path.join(repoDir, 'schema', 'CMakeLists.txt'), [[target, target + '\n' + install]], {
-    stage: 'fetch.patch.schema-install', marker: install,
-  });
-}
-
-// Keep the reviewed 53da076 native Windows compiler/install changes when
-// consuming canonical sources. Canonical Flatbuffer.cmake already forwards
-// selected compilers and separates host flatc; preserve its newer recipe.
-export function applyCompilerWindowsPatches(repoDir, patch = new URL('../patches/compiler-windows-native.patch', import.meta.url)) {
-  const stage = 'fetch.patch.windows';
-  const root = fs.realpathSync(repoDir);
-  // This patch edits or creates files in place. Match each section to the
-  // working bytes, including on reverse-check of an already created file.
-  const sections = fs.readFileSync(patch, 'utf8').replaceAll('\r\n', '\n').split(/^(?=diff --git )/m);
-  const input = sections.map(section => {
-    const header = /^diff --git a\/(.+) b\/\1\n/.exec(section);
-    if (!header || header[1].split('/').some(part => !part || part === '.' || part === '..') || /[\\:]/.test(header[1]))
-      throw new BuildError(stage, 'compiler Windows patch shape drift: unsupported diff path');
-    const file = path.join(root, header[1]);
-    const crlf = fs.existsSync(file) && fs.readFileSync(file).includes('\r\n');
-    return crlf ? section.replaceAll('\n', '\r\n') : section;
-  }).join('');
-  // Native preparation removes .git when copying the compiler. Even when the
-  // copy lives inside a checkout, Git must interpret patch paths from the copy.
-  const env = {...process.env, GIT_CEILING_DIRECTORIES: path.dirname(root)};
-  const apply = (...args) => spawnSync('git', [
-    '-c', 'core.autocrlf=false', '-c', 'core.whitespace=cr-at-eol', '-c', 'apply.ignoreWhitespace=no', 'apply', ...args, '-',
-  ], {cwd: root, input, encoding: 'utf8', env});
-  const check = apply('--check');
-  if (check.status === 0) {
-    const result = apply();
-    if (result.status !== 0) throw new BuildError(stage, result.stderr || result.error?.message || `git apply exited ${result.status}`);
-  } else if (apply('--reverse', '--check').status !== 0) {
-    throw new BuildError(stage, `compiler Windows patch shape drift: ${check.stderr || check.error?.message}`);
-  }
-
-  // An explicit system name makes even a Windows-hosted LLVM configure a
-  // cross build. Only a real cross build needs the separate NATIVE tools.
-  const thirdParty = path.join(root, 'third_party/CMakeLists.txt');
-  const system = 'list(APPEND LLVM_CMAKE_ARGS -DCMAKE_SYSTEM_NAME=Windows)';
-  const triple = 'list(APPEND LLVM_CMAKE_ARGS -DLLVM_HOST_TRIPLE=x86_64-w64-mingw32)';
-  const native = 'set(NATIVE_LLVM_CMAKE_ARGS -Wno-dev|-Wno-deprecated)';
-  const flags = 'list(APPEND LLVM_CMAKE_ARGS -DCROSS_TOOLCHAIN_FLAGS_LLVM_NATIVE=${NATIVE_LLVM_CMAKE_ARGS})';
-  const block = lines => ['            list(APPEND LLVM_CMAKE_ARGS -DSANITIZER_CXX_ABI=libc++)',
-    ...lines.map(line => '            ' + line), ''].join('\n');
-  const before = block([system, triple, native, flags]);
-  const after = block([triple, 'if(NOT CMAKE_HOST_WIN32)', '    ' + system, '    ' + native, '    ' + flags, 'endif()']);
-  const source = fs.readFileSync(thirdParty, 'latin1').replaceAll('\r\n', '\n');
-  if ((!source.includes(before) && !source.includes(after)) ||
-      [system, triple, native, flags].some(line => source.split(line).length !== 2))
-    throw new BuildError(stage, `patch shape drift: expected one MinGW cjnative argument block in ${thirdParty}`);
-
-  // The selected toolchain installs its own runtime DLLs. Keep the legacy
-  // external project only for MinGW configurations without those files.
-  const legacyMingw = '\n    if(MINGW)\n        include(AddMinGWLibs)\n    endif()\n    if(OHOS)\n';
-  const fallbackMingw = legacyMingw.replace('if(MINGW)', 'if(MINGW AND NOT CANGJIE_TOOLCHAIN_RUNTIME_FILES)');
-  if (source.split(/AddMinGWLibs/i).length !== 2 || (!source.includes(legacyMingw) && !source.includes(fallbackMingw)))
-    throw new BuildError(stage, `patch shape drift: expected one AddMinGWLibs fallback in ${thirdParty}`);
-  applyTextPatch(thirdParty, [[before, after]], {stage, marker: after});
-  applyTextPatch(thirdParty, [[legacyMingw, fallbackMingw]], {stage, marker: fallbackMingw});
-
-  // Both demangler targets use std::vector with BUILD_LIB_CANGJIE_DEMANGLE set.
-  const guard = '#ifndef BUILD_LIB_CANGJIE_DEMANGLE';
-  const vector = '#include <vector>';
-  const includes = (first, second) => [
-    '#define CANGJIE_DEMANGLER_H', '', '#include <array>', first, second, '#include "Base/CString.h"', '#endif', '',
-  ].join('\n');
-  const fixed = includes(vector, guard);
-  applyTextPatch(path.join(root, 'demangler/Demangler.h'), [[includes(guard, vector), fixed]], {stage, marker: fixed});
-
-  // libc++ does not expose these declarations through unrelated headers.
-  for (const [file, before, include, after] of [
-    ['src/AST/Searcher.cpp', '#include "cangjie/AST/Searcher.h"\n\n', '#include <iterator>\n', '#include <memory>'],
-    ['src/Basic/Display.cpp', '#include <codecvt>\n#include <cassert>\n', '#include <locale>\n', '\n#include "cangjie/Basic/Print.h"'],
-    ['src/Frontend/CompilerInstance.cpp', '#include "cangjie/Frontend/CompilerInstance.h"\n\n#include <fstream>\n', '#include <iterator>\n', '\n#include "PrintSymbolTable.h"'],
-    ['include/cangjie/Modules/ModulesUtils.h', '#define CANGJIE_MODULES_UTILS_H\n\n', '#include <iterator>\n\n', '#include "cangjie/AST/Node.h"'],
-    ['src/Parse/Parser.cpp', '#include "ParserImpl.h"\n\n', '#include <iterator>\n\n', '#include "cangjie/AST/Clone.h"'],
-    ['src/Sema/InheritanceChecker/StructInheritanceChecker.cpp', '#include <algorithm>\n#include <cstddef>\n', '#include <iterator>\n', '#include <map>'],
-    ['src/Sema/LegalityOfUsage/LegalityOfUsage.cpp', '#include "TypeCheckerImpl.h"\n\n', '#include <iterator>\n\n', '#include "Diags.h"'],
-  ]) {
-    const fixedIncludes = before + include + after;
-    applyTextPatch(path.join(root, file), [[before + after, fixedIncludes]], {stage, marker: fixedIncludes});
-  }
-
-  // get() also joins the cleanup task and propagates its exceptions; always call it.
-  const cleanup = '    future.get();', consumed = '    res = future.get() && res;';
-  const stop = '\n    Utils::ProfileRecorder::Stop("Main Stage", "DeleteInstanceLeftTime");';
-  applyTextPatch(path.join(root, 'src/Driver/Driver.cpp'), [[cleanup + stop, consumed + stop]], {stage, marker: consumed + stop});
-
-  // Keep the base patch (and its reverse-check context) stable for cached sources.
-  // The first toolchain read happens before CMake identifies the compiler.
-  const findLld = 'find_program(lld_path lld${CMAKE_EXECUTABLE_SUFFIX})';
-  const selectLinker = [
-    'string(REPLACE [[\\]] "/" _cangjie_cc "${CMAKE_C_COMPILER}")',
-    'get_filename_component(_cangjie_cc_name "${_cangjie_cc}" NAME)',
-    'string(TOLOWER "${_cangjie_cc_name}" _cangjie_cc_name)',
-    'set(_cangjie_clang FALSE)',
-    'if(_cangjie_cc_name MATCHES "(^|-)clang([+][+])?(-[0-9.]+)?([.]exe)?$" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")',
-    '    set(_cangjie_clang TRUE)',
-    'else()',
-    '    ' + findLld,
-    'endif()',
-    'if(_cangjie_clang)',
-    '    set(OTHER_FLAGS "${OTHER_FLAGS} -fuse-ld=lld")',
-    '    get_filename_component(_cangjie_cc_dir "${CMAKE_C_COMPILER}" DIRECTORY)',
-    '    if(_cangjie_cc_dir)',
-    '        find_program(CMAKE_AR NAMES llvm-ar llvm-ar.exe HINTS "${_cangjie_cc_dir}" NO_DEFAULT_PATH)',
-    '        find_program(CMAKE_RANLIB NAMES llvm-ranlib llvm-ranlib.exe HINTS "${_cangjie_cc_dir}" NO_DEFAULT_PATH)',
-    '    endif()',
-    'elseif(NOT lld_path)',
-  ].join('\n');
-  // The unchanged archive lookups below provide fallback; find_program also
-  // respects tools already supplied by the caller.
-  applyTextPatch(path.join(root, 'cmake/mingw_x86_64_toolchain.cmake'),
-    [[findLld + '\nif(NOT lld_path)', selectLinker]], {stage, marker: selectLinker});
-}
-
 export async function fetchRepos(config,names) {
   for (const name of names) {
     const repo=config.repo(name);
@@ -428,20 +193,11 @@ export async function fetchRepos(config,names) {
   }
 }
 
-// Fetch and the source handoff must replay the same edits in the same order.
-export function patchFetchedCompiler(dir, windows) {
-  applyCompilerCjdbPatches(dir);
-  applyCompilerBoundscheckDependencies(dir);
-  applyCompilerSchemaInstall(dir);
-  if (windows) applyCompilerWindowsPatches(dir);
-}
-
 export async function run(config) {
   ensureDir(config.workspace);
   await stage('fetch', async () => {
     await fetchRepos(config,Object.keys(config.repos));
     const windows = config.target.spec.nodePlatform === 'win32';
-    patchFetchedCompiler(config.repoPath('compiler'), windows);
     if (windows) prepareWindowsLlvmSource(config.repoPath('llvm'));
     saveSourceSelection(config);
   });
