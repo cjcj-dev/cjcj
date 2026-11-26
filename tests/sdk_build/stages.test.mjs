@@ -15,6 +15,11 @@ test('source pins use full commit SHAs and select the expected tools revision',(
   assert.equal(pins.repos.tools.sha,'4d14d051c58a5574d6525314b2c695e2e5dd26e6');
 });
 
+test('source pins select the expected runtime revision',()=>{
+  const pins=loadPins();
+  assert.equal(pins.repos.runtime.sha,'b628e2bd5183b809d04f8e5808ecf3b00e46bf29');
+});
+
 const tuple='linux_x86_64_cjnative';
 function fixture(t){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'sdk-stage-'));

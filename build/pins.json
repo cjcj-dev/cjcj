@@ -7,7 +7,7 @@
     },
     "runtime": {
       "url": "https://github.com/cjcj-dev/cangjie-runtime.git",
-      "sha": "b1589e8b1b155036abc08c71cb2aff3582632228"
+      "sha": "b628e2bd5183b809d04f8e5808ecf3b00e46bf29"
     },
     "compiler": {
       "url": "https://github.com/cjcj-dev/cangjie-compiler.git",
