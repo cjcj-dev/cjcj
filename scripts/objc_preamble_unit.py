@@ -13,7 +13,6 @@ import shutil
 from pathlib import Path
 import subprocess
 import time
-import uuid
 
 
 def digest(path):
@@ -77,25 +76,13 @@ def prepare(tree, sdk, out, producer=None, stub_imports=None):
                 record.update(phase='execute', rc=None, argv=argv)
                 log_path = out / (name + '.log')
                 record['logs'][name] = str(log_path)
-                invocation_id = str(uuid.uuid4())
-                summary_path = out / 'producer-evidence' / (name + '-' + invocation_id + '.result.json')
-                stub = {'argv': argv, 'rc': None, 'log': str(log_path),
-                        'collector_process_rc': None, 'child_rc': None, 'child_signal': None,
-                        'invocation_id': invocation_id, 'summary_path': str(summary_path), 'summary': None}
+                stub = {'argv': argv, 'log': str(log_path)}
                 record['stubs'][name] = stub
                 with log_path.open('w') as log:
-                    collector_rc = subprocess.call(['node', str(Path(__file__).resolve().parents[1] / 'ci/producer-evidence.mjs'), '--role', 'package', '--name', name, '--source-tree', str(tree), '--root', str(out / 'producer-evidence'), '--summary-file', str(summary_path), '--invocation-id', invocation_id, '--inputs', json.dumps([str(p) for p in inputs + sources]), '--', *argv], cwd=out, env=env, stdout=log, stderr=subprocess.STDOUT)
-                stub['collector_process_rc'] = collector_rc
-                record['rc'] = collector_rc or 74
-                summary = json.loads(summary_path.read_text())
-                stub['summary'] = summary
-                if summary.get('invocation_id') != invocation_id:
-                    raise ValueError(f'{name} stale collector summary')
-                stub.update(child_rc=summary.get('execution_rc'), child_signal=summary.get('child_signal'),
-                            rc=summary.get('execution_rc'))
-                if collector_rc or summary.get('collector_rc') != 0 or stub['child_rc'] != 0 or summary.get('state') != 'EXITED':
-                    raise ValueError(f'{name} producer rc={stub["child_rc"]}; collector rc={collector_rc}')
-                record['rc'] = 0
+                    rc = subprocess.call(argv, cwd=out, env=env, stdout=log, stderr=subprocess.STDOUT)
+                stub['rc'] = record['rc'] = rc
+                if rc != 0:
+                    raise ValueError(f'{name} producer rc={rc}; see {log_path}')
         record['phase'] = 'verify_products'
         for name in ('internal', 'lang'):
             for filename in ('objc.' + name + '.cjo', name + '.a'):

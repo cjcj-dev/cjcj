@@ -6,8 +6,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {spawn, spawnSync} from 'node:child_process';
-import {parseSummary} from '../build/sdk/producers/release/g8.mjs';
-import {buildFullGateFloor} from '../build/lib/full-gate-floor-schema.mjs';
+import {parseSummary, buildFullGateFloor} from './difftest-summary.mjs';
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'difftest-timeout-test-'));
 const script = path.resolve(argv.script || path.join(import.meta.dirname, 'difftest.mjs'));

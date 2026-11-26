@@ -1,0 +1,213 @@
+{
+  "runtimeVersion": "1.2.0-alpha.20260721165458",
+  "repos": {
+    "llvm": {
+      "url": "https://github.com/cjcj-dev/cjcj-llvm.git",
+      "sha": "66be3b259a4a9b0873e7a1037100c50e075487e7"
+    },
+    "runtime": {
+      "url": "https://github.com/cjcj-dev/cangjie-runtime.git",
+      "sha": "b1589e8b1b155036abc08c71cb2aff3582632228"
+    },
+    "compiler": {
+      "url": "https://github.com/cjcj-dev/cangjie-compiler.git",
+      "sha": "2f91adb378873d428827c75321bde24352e05261"
+    },
+    "stdx": {
+      "url": "https://github.com/cjcj-dev/cangjie-stdx.git",
+      "sha": "a124230201e938fb7a6aaecd56d1bd1c3e5243cc"
+    },
+    "tools": {
+      "url": "https://github.com/cjcj-dev/cjcj-tools.git",
+      "sha": "4d14d051c58a5574d1525314b2c695e2e5dd26e6"
+    },
+    "javaInterop": {
+      "url": "https://gitcode.com/Cangjie/cangjie_multiplatform_interop.git",
+      "sha": "89dc4b378fabdbf86bc04a50dbdaf4fde51256c7"
+    },
+    "bounds": {
+      "url": "https://gitcode.com/openharmony/third_party_bounds_checking_function.git",
+      "sha": "2ae82839ecaaa7d031e66ccbd2076d671acfd615"
+    },
+    "pcre2": {
+      "url": "https://gitcode.com/openharmony/third_party_pcre2.git",
+      "sha": "c71a58667e17dbd058fbce53b203d5ec6600ade5"
+    },
+    "flatbuffers": {
+      "url": "https://gitcode.com/openharmony/third_party_flatbuffers.git",
+      "sha": "c3e4d69cbd5950e43f775ba76eadb30750d6e0b7"
+    },
+    "h1": {
+      "url": "https://github.com/cjcj-dev/cjcj.git",
+      "sha": "83901791548856f0458f3e3e38c4c1ab7ac496c5"
+    }
+  },
+  "hostSdk": {
+    "version": "1.3.0-alpha.20261124001016",
+    "platforms": {
+      "linux-x64": {
+        "archive": "cangjie-sdk-linux-x64-1.3.0-alpha.20261124001016.tar.gz",
+        "url": "https://gitcode.com/Cangjie/nightly_build/releases/download/1.3.0-alpha.20261124001016/cangjie-sdk-linux-x64-1.3.0-alpha.20261124001016.tar.gz",
+        "size": 200455469,
+        "sha256": "9f970f400666ffb64fa4865c6cb0b270b9e52562e7f2928405818447e3540166"
+      },
+      "linux-aarch64": {
+        "archive": "cangjie-sdk-linux-aarch64-1.3.0-alpha.20261124001016.tar.gz",
+        "url": "https://gitcode.com/Cangjie/nightly_build/releases/download/1.3.0-alpha.20261124001016/cangjie-sdk-linux-aarch64-1.3.0-alpha.20261124001016.tar.gz",
+        "size": 202489500,
+        "sha256": "d5ff829a4d5cbc035987f0fbab3357f8c84d9ccc882959599eea9dece6be24d0"
+      },
+      "darwin-arm64": {
+        "archive": "cangjie-sdk-mac-aarch64-1.3.0-alpha.20261124001016.tar.gz",
+        "url": "https://gitcode.com/Cangjie/nightly_build/releases/download/1.3.0-alpha.20261124001016/cangjie-sdk-mac-aarch64-1.3.0-alpha.20261124001016.tar.gz",
+        "size": 164837772,
+        "sha256": "df64118487a03aeb74f55e932215eae1e2b239e87f4e09796762191d03cb8079"
+      },
+      "darwin-x64": {
+        "archive": "cangjie-sdk-mac-x64-1.3.0-alpha.20261124001016.tar.gz",
+        "url": "https://gitcode.com/Cangjie/nightly_build/releases/download/1.3.0-alpha.20261124001016/cangjie-sdk-mac-x64-1.3.0-alpha.20261124001016.tar.gz",
+        "size": 173153310,
+        "sha256": "1dff43de0f7781baf90598efe482082c8fa6e1cc527240445b94c7faca54a304"
+      },
+      "windows-x64": {
+        "archive": "cangjie-sdk-windows-x64-1.3.0-alpha.20261124001016.zip",
+        "url": "https://gitcode.com/Cangjie/nightly_build/releases/download/1.3.0-alpha.20261124001016/cangjie-sdk-windows-x64-1.3.0-alpha.20261124001016.zip",
+        "size": 266904994,
+        "sha256": "211a2afeb06af2a8a3036c4c28da5860629aee0f9af40866952676debf4bfc5b"
+      }
+    }
+  },
+  "crossSdks": {
+    "androidNdk": {
+      "version": "27.3.13750724"
+    },
+    "ohos": {
+      "release": "5.0.1-Release",
+      "linux": {
+        "archive": "ohos-sdk-windows_linux-public.tar.gz",
+        "url": "https://repo.huaweicloud.com/openharmony/os/5.0.1-Release/ohos-sdk-windows_linux-public.tar.gz",
+        "sha256": "575a245258270b7847bc9ea7045757e6430c61143e0958bfe2da89c7c8de9bf1"
+      },
+      "windows": {
+        "archive": "ohos-sdk-windows_linux-public.tar.gz",
+        "url": "https://repo.huaweicloud.com/openharmony/os/5.0.1-Release/ohos-sdk-windows_linux-public.tar.gz",
+        "sha256": "575a245258270b7847bc9ea7045757e6430c61143e0958bfe2da89c7c8de9bf1"
+      },
+      "darwin": {
+        "archive": "L2-SDK-MAC-M1-PUBLIC.tar.gz",
+        "url": "https://repo.huaweicloud.com/openharmony/os/5.0.1-Release/L2-SDK-MAC-M1-PUBLIC.tar.gz",
+        "sha256": "72c4deef4a343a110cf3aa52b4db390a9d3d614073908bc3fc141e32756b25a7"
+      }
+    },
+    "wasiSysroot": {
+      "version": "17.0",
+      "llvmMajor": 15,
+      "nodeMinMajor": 20,
+      "url": "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-17/wasi-sysroot-17.0.tar.gz",
+      "sha256": "454cf7c45119a337c9a11fa34f97951c5ca55bb2fe4049ee58e09dfef5a04bd4"
+    }
+  },
+  "toolchains": {
+    "node": "24.22.1",
+    "sccache": "v0.18.0",
+    "cmakeMacos": {
+      "version": "3.31.12",
+      "url": "https://github.com/Kitware/CMake/releases/download/v3.31.12/cmake-3.31.12-macos-universal.tar.gz",
+      "sha256": "799af7fd545db9bf1b9cfe72f8095880e727a2d4e0df0e3dffc3bc7b95c2d3b0"
+    },
+    "libxml2": {
+      "version": "2.14.0",
+      "url": "https://download.gnome.org/sources/libxml2/2.14/libxml2-2.14.0.tar.xz",
+      "sha256": "3e2ed89d81d210322d70b35460166d4ea285e5bb017576972a1d76a09631985c"
+    },
+    "windowsLlvmMingw": {
+      "directory": "llvm-mingw-20261020-msvcrt-x86_64",
+      "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-msvcrt-x86_64.zip",
+      "size": 172961237,
+      "sha256": "52a3e3f584a74c3cde8ceb0c6960549683178e03b36818cb02b7ed109a68ff67"
+    },
+    "linuxCrossMingw": {
+      "tag": "20220906",
+      "url": "https://github.com/mstorsjo/llvm-mingw/archive/refs/tags/20220906.tar.gz",
+      "llvmProjectUrl": "https://gitee.com/openharmony/third_party_llvm-project.git",
+      "llvmProjectSha": "5c68a1cb123161b54b72ce90e7975d95a8eaf2a4",
+      "mingwW64Url": "https://gitee.com/openharmony/third_party_mingw-w64.git",
+      "opensslVersion": "3.0.9",
+      "opensslUrl": "https://github.com/openssl/openssl/archive/refs/tags/openssl-3.0.9.tar.gz"
+    },
+    "staticLibs": {
+      "ncursesVersion": "6.6",
+      "ncursesUrl": "https://ftp.gnu.org/pub/gnu/ncurses/ncurses-6.6.tar.gz",
+      "libeditTarball": "libedit-20260512-3.1",
+      "libeditUrl": "https://thrysoee.dk/editline/libedit-20260512-3.1.tar.gz"
+    },
+    "python": {
+      "linux-x64": {
+        "version": "3.11.9",
+        "url": "https://github.com/actions/python-versions/releases/download/3.11.9-9947079978/python-3.11.9-linux-22.04-x64.tar.gz",
+        "size": 118991790,
+        "sha256": "6f32bd7be4a7ec53a419afc41e14237c42bcdf654a4397fde5bd66290ba92718"
+      },
+      "linux-aarch64": {
+        "version": "3.11.9",
+        "url": "https://github.com/actions/python-versions/releases/download/3.11.9-9947079978/python-3.11.9-linux-24.04-arm64.tar.gz",
+        "size": 117137740,
+        "sha256": "3681d081b289bc53eecacb306442b530c25456dc6268d37ac60c201fa67073be"
+      },
+      "darwin-arm64": {
+        "version": "3.11.9",
+        "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20240726/cpython-3.11.9+20240726-aarch64-apple-darwin-install_only.tar.gz",
+        "size": 17789090,
+        "sha256": "cbdac9462bab9671c8e84650e425d3f43b775752a930a2ef954a0d457d5c00c3",
+        "prefix": "python"
+      },
+      "darwin-x64": {
+        "version": "3.11.9",
+        "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20240726/cpython-3.11.9+20240726-x86_64-apple-darwin-install_only.tar.gz",
+        "size": 18164076,
+        "sha256": "dc3174666a30f4c38d04e79a80c3159b4b3aa69597c4676701c8386696811611",
+        "prefix": "python"
+      },
+      "windows-x64-source": {
+        "version": "3.11.17",
+        "url": "https://www.python.org/ftp/python/3.11.17/Python-3.11.17.tar.xz",
+        "sha256": "bfb74ad39efae27cda510f134ab408e00f9992c56851cfc0b1cdb5646da11599"
+      },
+      "windows-x64-pbs": {
+        "version": "3.11.9",
+        "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20240726/cpython-3.11.9+20240726-x86_64-pc-windows-msvc-install_only.tar.gz",
+        "size": 40891838,
+        "sha256": "f694be48bdfec1dace6d69a19906b6083f4dd7c7c61f1138ba520e433e5598f8",
+        "prefix": "python"
+      }
+    },
+    "cjbind": {
+      "version": "v1.1.0-alpha.53.1",
+      "linux-x64": {
+        "url": "https://gitcode.com/Cangjie-SIG/cjbind-cangjie/releases/download/v1.1.0-alpha.53.1/cjbind-linux-x64",
+        "size": 90753504,
+        "sha256": "71bf15dbd18a343c366a923a5b25766a373af5d1709a59c25ced545ebc88f21e"
+      },
+      "linux-aarch64": {
+        "url": "https://gitcode.com/Cangjie-SIG/cjbind-cangjie/releases/download/v1.1.0-alpha.53.1/cjbind-linux-arm64",
+        "size": 82689672,
+        "sha256": "18fee7c8d63722f0eb990a5640d877212b195c5d994d78df29e65434d21bb579"
+      },
+      "darwin-arm64": {
+        "url": "https://gitcode.com/Cangjie-SIG/cjbind-cangjie/releases/download/v1.1.0-alpha.53.1/cjbind-darwin-arm64",
+        "size": 92136544,
+        "sha256": "4da660c010203be14660edb5ee0e76f4a894214ca7a7c383702159d2f9d4005b"
+      },
+      "windows-x64": {
+        "url": "https://gitcode.com/Cangjie-SIG/cjbind-cangjie/releases/download/v1.1.0-alpha.53.1/cjbind-windows-x64.exe",
+        "size": 77087232,
+        "sha256": "417c6aac0d2ff448490c2027bbbd619cf09d10b207e1513ebff369d69db9935e"
+      },
+      "darwin-x64-source": {
+        "url": "https://gitcode.com/Cangjie-SIG/cjbind-cangjie.git",
+        "sha": "d9ba9709906fda36fdb486fa55ec615cdb1fa2cb",
+        "tag": "v1.1.0-alpha.53.1"
+      }
+    }
+  }
+}

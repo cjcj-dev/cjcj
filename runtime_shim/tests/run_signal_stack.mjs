@@ -1,4 +1,4 @@
-#!/usr/bin/env zx
+#!/usr/bin/env node
 // Linux native-thread ownership/exit test of the production config object.
 import fs from 'node:fs';
 import path from 'node:path';

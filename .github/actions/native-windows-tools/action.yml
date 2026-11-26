@@ -110,4 +110,4 @@ runs:
     - name: Install fixed native MSVCRT compiler and runtimes
       if: inputs.native-compiler == 'true'
       shell: bash
-      run: node ci/bootstrap/install-windows-toolchain.mjs "$RUNNER_TEMP/native-msvcrt-toolchain"
+      run: node build/setup.mjs windows-toolchain "$RUNNER_TEMP/native-msvcrt-toolchain"

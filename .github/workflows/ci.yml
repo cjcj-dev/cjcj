@@ -1,598 +1,138 @@
 name: CI
-
-on:
+'on':
   push:
-    branches: [master]
-  pull_request:
+    branches:
+    - master
+  pull_request: {}
   workflow_dispatch:
     inputs:
-      native_sdk_version:
-        description: Candidate only - package version emitted by srcbuild-target srcbuild; empty consumes the persisted native_sdk registry entry
+      prepare_run_id:
+        description: 'Successful Prepare run (default: latest on master)'
         type: string
-      native_sdk_run_id:
-        description: Candidate only - fresh srcbuild-target producer run (provenance, never a long-term input)
-        type: string
-      persist_native_sdk:
-        description: After package-tests accepts the candidate, persist it as a new immutable prerelease (latest=false)
-        type: boolean
-        default: false
-      native_inputs_artifact:
-        description: Complete native N/R/AST installations and paired build adapter artifact
-        type: string
-      native_inputs_run_id:
-        description: Run producing the fixed native input artifact
-        type: string
-
+        required: false
 permissions:
   contents: read
   actions: read
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
+defaults:
+  run:
+    shell: bash
 jobs:
-  matrix-plan:
-    runs-on: ubuntu-24.04
-    outputs:
-      build: ${{ steps.matrix.outputs.build }}
-      provision: ${{ steps.matrix.outputs.provision }}
+  lint:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: '24.22.1'
-      - name: Export target matrix
-        id: matrix
-        run: node ci/target-matrix.mjs ci
-
-  static-checks:
-    name: Static source checks
-    runs-on: ubuntu-slim
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - name: Run actionlint
-        run: |
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          ./actionlint -color
-      # The script list is discovered, never written out: the literal list this
-      # replaced named two scripts, and every one of the other seven was added
-      # after the list was last edited. Severity is info rather than error
-      # because SC2086 -- unquoted expansion -- is an info-level check, so error
-      # and warning both look past the class this gate exists to catch.
-      # .shellcheckrc holds the two repository-wide exemptions and why.
-      - name: Run ShellCheck
-        shell: bash
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck --version
-          mapfile -t SCRIPTS < <(git ls-files '*.sh')
-          echo "shellcheck covers ${#SCRIPTS[@]} scripts"
-          test "${#SCRIPTS[@]}" -ge 9
-          shellcheck --severity=info "${SCRIPTS[@]}"
-      - name: Verify zx syntax
-        run: |
-          find ci runtime_shim scripts -type f -name '*.mjs' -print0 \
-            | xargs -0 -n1 node --check
-
-  contract-plan:
-    runs-on: ubuntu-slim
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - name: Export complete validated manifest plan
-        run: |
-          node ci/test-manifest.mjs list > "$RUNNER_TEMP/contract-files.txt"
-          node ci/contract-shards.mjs plan "$RUNNER_TEMP/contract-plan.json" "$RUNNER_TEMP/contract-files.txt"
-      - uses: actions/upload-artifact@v7.0.2
-        with:
-          name: contract-plan
-          path: ${{ runner.temp }}/contract-plan.json
-          if-no-files-found: error
-
-  contracts:
-    name: Contracts group ${{ matrix.group }}
-    needs: contract-plan
-    runs-on: ubuntu-slim
-    timeout-minutes: 10
+    - uses: actions/checkout@v7.0.1
+    - name: Read tool versions
+      run: node -e 'const p=require("./build/pins.json").toolchains; console.log("node="+p.node+"\nsccache="+p.sccache)' >> "$GITHUB_OUTPUT"
+      id: pins
+    - uses: actions/setup-node@v7.1.0
+      with:
+        node-version: ${{ steps.pins.outputs.node }}
+    - name: Check Node, pins and Python
+      run: |-
+        for file in build/*.mjs runtime_shim/build_shim.mjs; do node --check "$file"; done
+        node --input-type=module <<'NODE'
+        import assert from 'node:assert/strict';
+        import {loadPins,PLATFORMS} from './build/common.mjs';
+        const {repos,hostSdk,crossSdks,toolchains}=loadPins();
+        for(const name of 'llvm runtime compiler stdx tools javaInterop bounds pcre2 flatbuffers h1'.split(' ')) assert.match(repos[name].sha,/^[0-9a-f]{40}$/);
+        for(const p of Object.keys(PLATFORMS)){const h=hostSdk.platforms[p]; assert.ok(h.size>0 && h.url.endsWith(h.archive));assert.match(h.sha256,/^[0-9a-f]{64}$/);}
+        for(const name of ['androidNdk','ohos','wasiSysroot']) assert.ok(crossSdks[name]);
+        for(const name of 'node sccache cmakeMacos libxml2 windowsLlvmMingw linuxCrossMingw staticLibs python cjbind'.split(' ')) assert.ok(toolchains[name]);
+        NODE
+        python3 -m py_compile scripts/objc_preamble_unit.py test/store_strength/test_checker.py
+        node --test runtime_shim/tests/compiler_heap_defaults.test.mjs
+    - name: Lint workflows
+      run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
+  build-and-smoke:
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        group: [0, 1, 2, 3]
+        include:
+        - platform: linux-x64
+          runner: ubuntu-24.04
+        - platform: linux-aarch64
+          runner: ubuntu-24.04-arm
+    env:
+      PLATFORM: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/download-artifact@v8.0.2
-        with:
-          name: contract-plan
-          path: ${{ runner.temp }}/contract-plan
-      - name: Install release contract dependencies
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip clang lld llvm clang-15 lld-15 libssl-dev python3 build-essential git gdb jq cmake ninja-build sccache
-          npm exec --yes --package=zx@8 -- node ci/test-zx.mjs prepare "$RUNNER_TEMP/test-zx.json"
-          npm ci --prefix ci/g1-parser --ignore-scripts --no-audit --no-fund
-      # package-lineage compares package bytes with the official host SDK. Load
-      # the consumer's pin, not the build job's independently loaded environment.
-      - name: Install official lineage input
-        shell: bash
-        run: |
-          source ci/host_sdk_pin.env
-          CJCJ_TOOLCHAIN="$(node ci/host-toolchain-pin.mjs)"
-          export CJCJ_TOOLCHAIN
-          mkdir -p "$RUNNER_TEMP/lineage-cjv"
-          curl -fsSL https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP/lineage-cjv"
-          cjv_bin=$(find "$RUNNER_TEMP/lineage-cjv" -type f -name cjv | head -1)
-          "$cjv_bin" install "$CJCJ_TOOLCHAIN"
-      - name: Prepare pinned runtime contract input
-        run: node ci/test-zx.mjs run "$RUNNER_TEMP/test-zx-bin" npx --yes zx@8 ci/prepare-runtime-test-input.mjs "$RUNNER_TEMP/runtime-contract-input"
-      - name: Test build and release contracts
-        shell: bash
-        env:
-          CONTRACT_GROUP: ${{ matrix.group }}
-          RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/release-evidence-tests
-        run: |
-          node ci/contract-shards.mjs run "$RUNNER_TEMP/contract-plan/contract-plan.json" "$CONTRACT_GROUP" "$RUNNER_TEMP/contract-result"
-      - name: Preserve contract group evidence
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: contract-group-${{ matrix.group }}
-          path: ${{ runner.temp }}/contract-result
-          if-no-files-found: error
-      - name: Preserve srcbuild driver evidence
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: srcbuild-driver-evidence-${{ matrix.group }}
-          path: ${{ runner.temp }}/release-evidence-tests/srcbuild-driver-evidence
-          if-no-files-found: warn
-      - name: Preserve producer qualification evidence
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: producer-qualification-${{ matrix.group }}
-          path: ${{ runner.temp }}/release-evidence-tests/producer-evidence-tests
-          if-no-files-found: warn
-          include-hidden-files: true
-
-  source-audits:
-    name: Pin reachability and source policy
-    runs-on: ubuntu-slim
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - name: Audit pin reachability
-        run: node ci/pin-sweep.mjs --remote
-      - name: Verify smoke assets
-        run: |
-          test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5
-          test -f ci/smoke/macro_demo/mymacros/def.cj
-          test -f ci/smoke/macro_demo/app/main.cj
-      - name: Verify LLVM policy
-        run: test -z "$(git ls-files 'ci/prebuilt/**' 'runtime_shim/prebuilt/**')"
-
-
-  lint:
-    name: Verify sources
-    if: always()
-    needs: [static-checks, contract-plan, contracts, source-audits]
-    runs-on: ubuntu-slim
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - name: Require every source job to succeed
-        env:
-          REQUIRED_JOBS: ${{ toJSON(needs) }}
-        run: |
-          node -e 'const jobs=JSON.parse(process.env.REQUIRED_JOBS); if(Object.values(jobs).some(job=>job.result!=="success")) { console.error(jobs); process.exit(1); }'
-      - uses: actions/download-artifact@v8.0.2
-        with:
-          name: contract-plan
-          path: ${{ runner.temp }}/contract-plan
-      - uses: actions/download-artifact@v8.0.2
-        with:
-          pattern: contract-group-*
-          path: ${{ runner.temp }}/contract-results
-      - name: Verify exact coverage and real Node outcomes
-        run: node ci/contract-shards.mjs summary "$RUNNER_TEMP/contract-plan/contract-plan.json" "$RUNNER_TEMP/contract-results"
-
-  script-tests:
-    name: Python and shell contracts
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Checkout cjcj
-        uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: '24.22.1'
-      - name: Install script test dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq python3 build-essential binutils zip unzip
-      - name: Run registered script tests
-        run: node ci/run-registered-tests.mjs scripts "$RUNNER_TEMP/script-tests"
-      - name: Preserve script test results
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: script-tests
-          path: ${{ runner.temp }}/script-tests
-
+    - uses: actions/checkout@v7.0.1
+    - name: Read tool versions
+      run: node -e 'const p=require("./build/pins.json").toolchains; console.log("node="+p.node+"\nsccache="+p.sccache)' >> "$GITHUB_OUTPUT"
+      id: pins
+    - uses: actions/setup-node@v7.1.0
+      with:
+        node-version: ${{ steps.pins.outputs.node }}
+    - name: Select successful Prepare run
+      run: |-
+        id="$PREPARE_RUN"
+        if [[ -z "$id" ]]; then
+          id=$(gh run list --workflow prepare.yml --branch master --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+        fi
+        [[ "$id" =~ ^[0-9]+$ ]]
+        gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq '[.path,.conclusion] | join(" ")' | grep -Fx '.github/workflows/prepare.yml success'
+        echo "run=$id" >> "$GITHUB_OUTPUT"
+      id: prepare
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PREPARE_RUN: ${{ inputs.prepare_run_id }}
+    - uses: actions/download-artifact@v8.0.2
+      with:
+        name: native-base-${{ matrix.platform }}
+        github-token: ${{ github.token }}
+        run-id: ${{ steps.prepare.outputs.run }}
+    - name: Unpack native base
+      run: |-
+        mkdir -p ../base
+        tar -xf native-base.tar -C ../base
+        rm native-base.tar
+    - name: Install build dependencies
+      run: node build/setup.mjs deps --platform "$PLATFORM" --mode full
+    - name: Build and smoke test this checkout
+      run: |-
+        node build/setup.mjs sources --repos h1,runtime,bounds,pcre2 --override "runtime=$(cat ../base/runtime.ref)" --out ../src
+        node build/build-compiler.mjs --stage stage0 --source ../src/h1 --host-sdk ../base/host --native ../base/native --runtime ../base/runtime --out ../stage0
+        node build/build-stdlib.mjs --stage std-bootstrap --sources ../src --sdk ../stage0 --runtime ../base/runtime --out ../initial
+        rm -rf ../stage0
+        node build/build-stdlib.mjs --stage stage1-std --sources ../src --sdk ../initial --runtime ../base/runtime --out ../stage1
+        rm -rf ../initial
+        node build/build-compiler.mjs --stage stage2 --sdk ../stage1 --host-sdk ../base/host --out ../current
+        node build/test-sdk.mjs --sdk ../current --mode smoke
   package-tests:
-    name: Cangjie package tests (native target SDK)
-    needs: fixed-llvm-tools
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    outputs:
-      mode: ${{ steps.native-sdk.outputs.mode }}
-      artifact: ${{ steps.native-sdk.outputs.artifact }}
-      version: ${{ steps.native-sdk.outputs.version }}
-      run: ${{ steps.native-sdk.outputs.run }}
-      digest: ${{ steps.candidate.outputs.digest }}
+    env:
+      PLATFORM: linux-x64
     steps:
-      - name: Checkout cjcj
-        uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: '24.22.1'
-      - name: Download test LLVM shim
-        uses: actions/download-artifact@v8.0.2
-        with:
-          name: fixed-llvm-tools-linux_x86_64
-          path: fixed-toolchain/linux_x86_64
-      - name: Load runtime pin
-        run: node ci/load_runtime_pin.mjs
-      # Default: the single persisted native_sdk entry in ci/bootstrap_artifacts_pin.json
-      # (release asset + SHA-256). Candidate: an explicit fresh producer run under
-      # acceptance, downloaded by the exact selected artifact ID; its digest is the
-      # accepted identity persist-native-sdk must publish. There is no fallback
-      # between the two and no repository variable.
-      - name: Select native SDK input
-        id: native-sdk
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          CANDIDATE_RUN: ${{ inputs.native_sdk_run_id }}
-          CANDIDATE_VERSION: ${{ inputs.native_sdk_version }}
-        run: node build/sdk/producers/release/persist_native_sdk.mjs select linux-x64 >> "$GITHUB_OUTPUT"
-      - name: Receive packaged native SDK
-        id: candidate
-        if: steps.native-sdk.outputs.mode == 'candidate'
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          CANDIDATE_ARTIFACT: ${{ steps.native-sdk.outputs.artifact }}
-          CANDIDATE_RUN: ${{ steps.native-sdk.outputs.run }}
-          CANDIDATE_VERSION: ${{ steps.native-sdk.outputs.version }}
-        run: node build/sdk/producers/release/persist_native_sdk.mjs receive-candidate linux-x64 "$RUNNER_TEMP/native-sdk-artifact" >> "$GITHUB_OUTPUT"
-      - name: Receive persisted native SDK
-        if: steps.native-sdk.outputs.mode == 'persisted'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NATIVE_SDK_ARTIFACT: ${{ steps.native-sdk.outputs.artifact }}
-        run: node build/sdk/producers/release/download_pinned.mjs cjcj-dev/cjcj "$NATIVE_SDK_ARTIFACT" "$RUNNER_TEMP/native-sdk-artifact"
-      - name: Verify and select installed native SDK
-        env:
-          CJCJ_NATIVE_SDK_VERSION: ${{ steps.native-sdk.outputs.version }}
-        run: node build/sdk/producers/release/receive_native_sdk.mjs "$RUNNER_TEMP/native-sdk-artifact" "$RUNNER_TEMP/native-sdk" linux-x64
-      - name: Start sccache
-        uses: ./.github/actions/sccache
-        with:
-          component: runtime-shim
-          platform: ubuntu-24.04
-          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
-          cache-size: 1G
-      - name: Run registered Cangjie package tests
-        env:
-          CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/cjselfhost_llvmshim.o
-        run: |
-          ulimit -c 0
-          node ci/run-native-package-tests.mjs
-      - name: Report sccache
-        if: always()
-        uses: ./.github/actions/sccache
-        with:
-          mode: report
-          component: runtime-shim
-          platform: ubuntu-24.04
-          require-compiles: ${{ job.status == 'success' }}
-      - name: Preserve Cangjie test results
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: package-tests-native-sdk
-          if-no-files-found: warn
-          include-hidden-files: true
-          path: |
-            ${{ runner.temp }}/package-tests/results.json
-            ${{ runner.temp }}/package-tests/run.log
-            ${{ runner.temp }}/package-tests/reports
-            ${{ runner.temp }}/package-tests/prepare
-            ${{ runner.temp }}/package-tests/objc-fixture
-            ${{ runner.temp }}/package-tests/prerequisite.json
-
-  # Publication follows acceptance, never build success: only an explicit
-  # dispatch, only a candidate that package-tests consumed and passed, and the
-  # script re-checks the producer binding and the accepted digest before writing.
-  persist-native-sdk:
-    name: Persist accepted native SDK (linux-x64)
-    needs: package-tests
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.persist_native_sdk && needs.package-tests.result == 'success' && needs.package-tests.outputs.mode == 'candidate' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    permissions:
-      contents: write
-      actions: read
-    steps:
-      - name: Checkout cjcj
-        uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: '24.22.1'
-      - name: Persist, read back and report the accepted native SDK
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          NATIVE_SDK_ARTIFACT_ID: ${{ needs.package-tests.outputs.artifact }}
-          NATIVE_SDK_RUN_ID: ${{ needs.package-tests.outputs.run }}
-          CJCJ_NATIVE_SDK_VERSION: ${{ needs.package-tests.outputs.version }}
-          NATIVE_SDK_ACCEPTED_DIGEST: ${{ needs.package-tests.outputs.digest }}
-          ACCEPTANCE_JOB: package-tests
-        run: |
-          mkdir -p "$RUNNER_TEMP/native-sdk-persist"
-          node build/sdk/producers/release/persist_native_sdk.mjs publish linux-x64 "$RUNNER_TEMP/native-sdk-persist" 2>&1 | tee "$RUNNER_TEMP/native-sdk-persist/persist.log"
-      - name: Preserve persistence provenance and log
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: native-sdk-persist-linux-x64
-          path: ${{ runner.temp }}/native-sdk-persist
-          if-no-files-found: warn
-          retention-days: 90
-
-  fixed-llvm-tools:
-    name: Build LLVM tools
-    uses: ./.github/workflows/sdk-build-target.yml
-    with:
-      llvm_tools_only: true
-
-  native-inputs:
-    runs-on: ubuntu-24.04
-    outputs:
-      artifact: ${{ steps.select.outputs.artifact }}
-      run-id: ${{ steps.select.outputs.run-id }}
-    steps:
-      - name: Select native SDK producer inputs
-        id: select
-        env:
-          ARTIFACT: ${{ inputs.native_inputs_artifact || vars.CJCJ_NATIVE_INPUTS_ARTIFACT }}
-          RUN_ID: ${{ inputs.native_inputs_run_id || vars.CJCJ_NATIVE_INPUTS_RUN_ID }}
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          if [[ -z "$ARTIFACT" && -z "$RUN_ID" && "$GITHUB_EVENT_NAME" == push ]]; then
-            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow prepare.yml --branch "$GITHUB_REF_NAME" \
-              --event workflow_dispatch --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
-            ARTIFACT=native-inputs
-            [[ -n "$RUN_ID" ]] || { echo "::error::No successful Prepare run on $GITHUB_REF_NAME"; exit 1; }
-          fi
-          if [[ -z "$ARTIFACT" || "$ARTIFACT" == *$'\n'* || "$ARTIFACT" == *$'\r'* || ! "$RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::Set both native_inputs_artifact and a positive native_inputs_run_id, or their CJCJ_NATIVE_INPUTS repository variables"
-            exit 1
-          fi
-          printf 'artifact=%s\nrun-id=%s\n' "$ARTIFACT" "$RUN_ID" >> "$GITHUB_OUTPUT"
-
-  build:
-    name: ${{ matrix.runner }} / Build
-    needs: [fixed-llvm-tools, matrix-plan, native-inputs]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
-    continue-on-error: ${{ matrix.experimental }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.matrix-plan.outputs.build) }}
-    steps:
-      - name: Checkout cjcj
-        uses: actions/checkout@v7.0.1
-      - name: Load host toolchain pin
-        shell: bash
-        run: node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
-      - name: Load runtime pin
-        shell: bash
-        run: node ci/load_runtime_pin.mjs
-      - name: Download LLVM tools
-        uses: actions/download-artifact@v8.0.2
-        with:
-          name: fixed-llvm-tools-${{ matrix.llvm_platform }}
-          path: fixed-toolchain/${{ matrix.llvm_platform }}
-      - name: Restore SDK cache
-        id: sdkcache
-        uses: actions/cache/restore@v6.1.0
-        with:
-          path: ~/.cjv
-          key: cjv-host-tools-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: Restore cjpm cache
-        uses: actions/cache@v6.1.0
-        with:
-          path: target
-          key: cjpm-portable-${{ runner.os }}-${{ matrix.runner }}-${{ env.CJCJ_TOOLCHAIN }}-${{ github.sha }}
-          restore-keys: |
-            cjpm-portable-${{ runner.os }}-${{ matrix.runner }}-${{ env.CJCJ_TOOLCHAIN }}-
-      - name: Install SDK
-        id: setup
-        env:
-          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-          FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/llc.gz
-          FIXED_OPT_GZ: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/opt.gz
-        run: npx --yes zx@8 ci/setup_sdk.mjs
-      # Save only after a successful install so a partial ~/.cjv is never cached.
-      - name: Save SDK cache
-        if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: ~/.cjv
-          key: cjv-host-tools-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      # Keyed by matrix.runner: the runtime .so links the builder's glibc, so a cache
-      # entry built on a newer distro is unloadable on an older one (GLIBC_x.y not found).
-      - name: Restore patched runtime cache
-        id: rtcache
-        uses: actions/cache/restore@v6.1.0
-        with:
-          path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.CJCJ_NATIVE_RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
-      - name: Initialize runtime diagnostics
-        run: |
-          dir="$GITHUB_WORKSPACE/runtime-diagnostics/${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runner }}"
-          mkdir -p "$dir"
-          echo "RUNTIME_DIAGNOSTICS_DIR=$dir" >> "$GITHUB_ENV"
-          RUNTIME_DIAGNOSTICS_DIR="$dir" node ci/runtime-diagnostics.mjs
-      - name: Install runtime dependencies
-        id: rtdeps
-        if: steps.rtcache.outputs.cache-hit != 'true'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make gdb
-      # The patched runtime (on a runtime cache miss) and the two shim objects
-      # compile through sccache; keyed per runner because the runtime links the
-      # builder's glibc, as the runtime cache key above already records.
-      - name: Start sccache
-        uses: ./.github/actions/sccache
-        with:
-          component: runtime
-          platform: ${{ matrix.runner }}
-          pin: ${{ env.CJCJ_NATIVE_RUNTIME_REF }}
-          cache-size: 1G
-      - name: Build patched runtime
-        id: rtbuild
-        if: steps.rtcache.outputs.cache-hit != 'true'
-        run: npx --yes zx@8 ci/build_patched_runtime.mjs "$PWD/dist-runtime"
-      - name: Record runtime workflow outcome
-        if: always() && env.RUNTIME_DIAGNOSTICS_DIR != ''
-        env:
-          RUNTIME_CACHE_HIT: ${{ steps.rtcache.outputs.cache-hit }}
-          RUNTIME_DEPENDENCY_OUTCOME: ${{ steps.rtdeps.outcome }}
-          RUNTIME_BUILD_OUTCOME: ${{ steps.rtbuild.outcome }}
-        run: node ci/runtime-diagnostics.mjs
-      - name: Upload runtime diagnostics
-        if: always() && env.RUNTIME_DIAGNOSTICS_DIR != ''
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: runtime-diagnostics-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
-          if-no-files-found: error
-          path: |
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.json
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.log
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.rc
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.txt
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.tsv
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.status
-            ${{ env.RUNTIME_DIAGNOSTICS_DIR }}/**/*.sha256
-      - name: Save patched runtime cache
-        if: steps.rtcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.CJCJ_NATIVE_RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs', 'ci/runtime-diagnostics.mjs') }}
-      - name: Install runtime audit dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libssl-dev
-      - name: Install patched runtime
-        run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime" "$PWD/patched-runtime"
-      - name: Receive native SDK producer inputs
-        uses: actions/download-artifact@v8.0.2
-        with:
-          name: ${{ needs.native-inputs.outputs.artifact }}-${{ matrix.target }}
-          run-id: ${{ needs.native-inputs.outputs.run-id }}
-          github-token: ${{ github.token }}
-          path: ${{ github.workspace }}/.srcbuild/native-inputs
-      # The native-inputs producer (release phase=prepare) ships one mode-preserving tar.
-      - name: Unpack native SDK producer inputs with their file modes
-        shell: bash
-        run: node ci/bootstrap/native-artifact-archive.mjs unpack "$GITHUB_WORKSPACE/.srcbuild/native-inputs" native-inputs.tar
-
-      - name: Prepare paired coloured target SDK
-        env:
-          CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild
-          CJCJ_NATIVE_INPUT_ROOT: ${{ github.workspace }}/.srcbuild/native-inputs
-        run: node ci/prepare-colour-sdk.mjs
-      - name: Build runtime shim
-        env:
-          CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/cjselfhost_llvmshim.o
-        run: node ci/with-colour-sdk.mjs build -- npx --yes zx@8 runtime_shim/build_shim.mjs
-      - name: Report sccache
-        if: always()
-        uses: ./.github/actions/sccache
-        with:
-          mode: report
-          component: runtime
-          platform: ${{ matrix.runner }}
-          require-compiles: ${{ job.status == 'success' }}
-      - name: Build workspace
-        run: |
-          node ci/check-codegen-runtime-layout.mjs
-          node build/sdk/producers/release/trimpath.mjs .
-          node ci/with-runtime-audit.mjs -- node ci/with-colour-sdk.mjs build -- cjpm build
-      # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
-      - name: Compose compiler
-        run: |
-          test -f "target/release/bin/cjc"
-          node ci/check-colour-tlab.mjs "target/release/bin/cjc"
-          cp "target/release/bin/cjc" "target/release/bin/cjcj"
-      - name: Run smoke tests
-        run: node ci/with-colour-sdk.mjs run -- npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj" "$RUNNER_TEMP/smoke-tests"
-      - name: Preserve smoke producer evidence
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: smoke-producer-evidence-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/smoke-tests
-          if-no-files-found: warn
-          include-hidden-files: true
-
-  # Non-gating: verifies SDK provisioning on macOS; does not build cjcj.
-  provision:
-    needs: matrix-plan
-    name: ${{ matrix.runner }} / Verify SDK
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.matrix-plan.outputs.provision) }}
-    steps:
-      - name: Checkout cjcj
-        uses: actions/checkout@v7.0.1
-      - name: Load host toolchain pin
-        shell: bash
-        run: node ci/host-toolchain-pin.mjs --github-env >> "$GITHUB_ENV"
-      - name: Restore SDK cache
-        id: sdkcache
-        uses: actions/cache/restore@v6.1.0
-        with:
-          path: ~/.cjv
-          key: cjv-host-tools-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: Install SDK
-        id: setup
-        env:
-          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-          # This job never compiles with cjcj, so it has no fixed-llc artifact to swap in.
-          CJCJ_SDK_STOCK_LLC: '1'
-        run: npx --yes zx@8 ci/setup_sdk.mjs
-      - name: Save SDK cache
-        if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: ~/.cjv
-          key: cjv-host-tools-isolated-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: Verify SDK layout
-        run: |
-          ls -la "$CANGJIE_HOME/bin" || true
-          file "$CANGJIE_HOME/bin/cjc" || true
-          ls "$CANGJIE_HOME/runtime/lib" || true
-      - name: Verify official compiler
-        run: |
-          set -x
-          if [ "$(uname -s)" = "Darwin" ]; then xattr -dr com.apple.quarantine "$CANGJIE_HOME" || true; fi
-          # shellcheck disable=SC1091
-          source "$CANGJIE_HOME/envsetup.sh"
-          echo 'main(): Int64 { println("provision ok"); return 0 }' > "$RUNNER_TEMP/p.cj"
-          cjc "$RUNNER_TEMP/p.cj" -o "$RUNNER_TEMP/p" && "$RUNNER_TEMP/p"
-
-# Adding a build platform requires a matching row in ci/llvm-tools-matrix.mjs (the fixed-llvm jobs of sdk-build-target.yml) and
-# downloading that platform's fixed-llvm-tools artifact above.
+    - uses: actions/checkout@v7.0.1
+    - name: Read tool versions
+      run: node -e 'const p=require("./build/pins.json").toolchains; console.log("node="+p.node+"\nsccache="+p.sccache)' >> "$GITHUB_OUTPUT"
+      id: pins
+    - uses: actions/setup-node@v7.1.0
+      with:
+        node-version: ${{ steps.pins.outputs.node }}
+    - name: Select successful Prepare run
+      run: |-
+        id="$PREPARE_RUN"
+        if [[ -z "$id" ]]; then
+          id=$(gh run list --workflow prepare.yml --branch master --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+        fi
+        [[ "$id" =~ ^[0-9]+$ ]]
+        gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq '[.path,.conclusion] | join(" ")' | grep -Fx '.github/workflows/prepare.yml success'
+        echo "run=$id" >> "$GITHUB_OUTPUT"
+      id: prepare
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PREPARE_RUN: ${{ inputs.prepare_run_id }}
+    - uses: actions/download-artifact@v8.0.2
+      with:
+        name: ci-sdk-linux-x64
+        github-token: ${{ github.token }}
+        run-id: ${{ steps.prepare.outputs.run }}
+    - name: Install build dependencies
+      run: node build/setup.mjs deps --platform "$PLATFORM" --mode full
+    - name: Build this checkout and run workspace package tests
+      run: |-
+        mkdir -p ../prepared
+        tar -xf ci-sdk.tar.gz -C ../prepared
+        node build/build-compiler.mjs --stage stage2 --sdk ../prepared/cangjie --out ../current
+        node build/test-sdk.mjs --sdk ../current --mode packages

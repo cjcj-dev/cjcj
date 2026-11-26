@@ -1,14 +1,17 @@
-#!/usr/bin/env zx
+#!/usr/bin/env node
 // Compile the self-host LLVM FFI C-shim into a relocatable object linked into cjc.
 // LLVM headers come from the C++ compiler source tree (LLVM 15.0.4, matching libLLVM-15.so).
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-$.stdio = 'inherit';
+import {spawnSync} from 'node:child_process';
 
-// Forward slashes everywhere: zx C-quotes values containing backslashes with
-// $'...', so a raw Windows path like D:\a\... reaches cc with \a as BEL.
+function compile(argv, env = process.env) {
+  const result = spawnSync(argv[0], argv.slice(1), {env, stdio: 'inherit'});
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw Error(argv[0] + ' failed: ' + (result.signal || result.status));
+}
 const norm = (p) => p.replaceAll('\\', '/');
 const here = norm(import.meta.dirname);
 const cpp = norm(process.env.CANGJIE_CPP_SRC || '');
@@ -29,12 +32,12 @@ const repo = norm(path.resolve(here, '..'));
 
 let cjcjCommit = (process.env.CJCJ_COMMIT || '').trim();
 if (!cjcjCommit) {
-  const revision = await $({nothrow: true, quiet: true, stdio: 'pipe'})`git -C ${repo} rev-parse HEAD`;
-  if (revision.exitCode === 0) cjcjCommit = revision.stdout.trim();
+  const revision = spawnSync('git', ['-C', repo, 'rev-parse', 'HEAD'], {encoding:'utf8'});
+  if (revision.status === 0) cjcjCommit = revision.stdout.trim();
 }
 if (!cjcjCommit) cjcjCommit = 'unknown';
-const status = await $({nothrow: true, quiet: true, stdio: 'pipe'})`git -C ${repo} status --porcelain`;
-if (status.exitCode === 0 && status.stdout.trim() && !cjcjCommit.endsWith('-dirty')) {
+const status = spawnSync('git', ['-C', repo, 'status', '--porcelain'], {encoding:'utf8'});
+if (status.status === 0 && status.stdout.trim() && !cjcjCommit.endsWith('-dirty')) {
   cjcjCommit += '-dirty';
 }
 if (!/^[0-9A-Za-z._-]+$/.test(cjcjCommit)) {
@@ -44,7 +47,7 @@ if (!/^[0-9A-Za-z._-]+$/.test(cjcjCommit)) {
 const commitDefine = `-DCJCJ_COMMIT="${cjcjCommit}"`;
 
 async function commandExists(command) {
-  return (await $({nothrow: true, stdio: 'pipe'})`command -v ${command}`).exitCode === 0;
+  return spawnSync(command, ['--version'], {stdio: 'ignore'}).status === 0;
 }
 
 async function isDirectory(target) {
@@ -55,8 +58,8 @@ async function isFile(target) {
   try { return (await fs.stat(target)).isFile(); } catch { return false; }
 }
 
-await $`${ccLauncher} ${cc} -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L ${commitDefine} -c ${here}/cjc_runtime_config.c -o ${here}/cjc_runtime_config.o`;
-await $`${ccLauncher} ${cc} -std=c11 -O2 -fPIC -c ${here}/cjc_heap_defaults.c -o ${here}/cjc_heap_defaults.o`;
+compile([...ccLauncher, cc, '-std=c11', '-O2', '-fPIC', '-D_POSIX_C_SOURCE=200809L', commitDefine, '-c', here+'/cjc_runtime_config.c', '-o', here+'/cjc_runtime_config.o']);
+compile([...ccLauncher, cc, '-std=c11','-O2','-fPIC','-c',here+'/cjc_heap_defaults.c','-o',here+'/cjc_heap_defaults.o']);
 console.log(`CJCJ_COMMIT=${cjcjCommit}`);
 
 // The caller validates an explicitly selected installed object. Without one,
@@ -97,18 +100,21 @@ if (sourceBuiltObject) {
   for (const key of ['CPATH', 'CPLUS_INCLUDE_PATH', 'C_INCLUDE_PATH', 'OBJC_INCLUDE_PATH']) {
     compileEnv[key] = '';
   }
-  await $({env: compileEnv})`${cxxLauncher} ${cxx} -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions -c ${here}/cjselfhost_llvmshim.cpp -o ${shimObject} ${`-I${llvmSrcInc}`} ${`-I${llvmGenInc}`} ${`-I${flatbuffersInc}`} ${`-I${schemaGenInc}`}`;
+  compile([...cxxLauncher,cxx,"-std=c++17","-O2","-fPIC","-fno-rtti","-fno-exceptions","-c",here+"/cjselfhost_llvmshim.cpp","-o",shimObject,...[llvmSrcInc,llvmGenInc,flatbuffersInc,schemaGenInc].map(dir=>"-I"+dir)],compileEnv);
   console.log(`built: ${shimObject}`);
 }
 
 console.log(`built: ${here}/cjc_runtime_config.o`);
-await $({nothrow: true})`set -o pipefail; nm -C ${shimObject} | grep -cE ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost)' | sed 's/^/exported LLVMSelfhost* symbols: /'`;
-
+const symbols = spawnSync("nm", ["-C", shimObject], {encoding: "utf8"});
+console.log("exported LLVMSelfhost* symbols:", (symbols.stdout?.match(/ T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost)/g) || []).length);
 // Macro runtime layout. The compiler resolves its runtime relative to its binary,
 // so the build-tree binary needs a sibling runtime symlink. Installed SDKs already
 // have that layout and need no special handling.
 if (process.env.CANGJIE_HOME && await isDirectory(`${norm(process.env.CANGJIE_HOME)}/runtime`)) {
   await fs.mkdir(`${repo}/target/release`, {recursive: true});
-  await $`ln -sfn ${norm(process.env.CANGJIE_HOME)}/runtime ${repo}/target/release/runtime`;
+  const link = repo+'/target/release/runtime';
+  const previous = await fs.lstat(link).catch(e => { if (e.code !== 'ENOENT') throw e; });
+  if (previous?.isSymbolicLink()) await fs.unlink(link);
+  await fs.symlink(norm(process.env.CANGJIE_HOME)+'/runtime', link, process.platform === 'win32' ? 'junction' : 'dir');
   console.log(`linked runtime layout: ${repo}/target/release/runtime -> ${norm(process.env.CANGJIE_HOME)}/runtime`);
 }

@@ -84,7 +84,7 @@ runs:
         # while bash `test -f` accepts it through MSYS's .exe lookup. Resolve it with
         # Node, which every caller has before this step (report mode runs node too),
         # and re-export the one existing executable for every later step.
-        if ! resolved="$(node "$GITHUB_ACTION_PATH/../../../ci/sccache/resolve-path.mjs")"; then
+        if ! resolved="$(node -e 'const p=process.env.SCCACHE_PATH; const file=[p,p+".exe"].find(f=>require("fs").statSync(f,{throwIfNoEntry:false})?.isFile()); if (!file) process.exit(1); console.log(file)')"; then
           echo "::error::SCCACHE_PATH_MISSING: sccache-action exported SCCACHE_PATH=$SCCACHE_PATH, and neither it nor $SCCACHE_PATH.exe is a file"
           exit 1
         fi
@@ -167,14 +167,17 @@ runs:
         stats="$RUNNER_TEMP/sccache-$COMPONENT-stats.json"
         "$SCCACHE_PATH" --show-stats
         "$SCCACHE_PATH" --show-stats --stats-format=json > "$stats"
-        # A plain string, not an array: macOS runners ship bash 3.2, where an
-        # empty array under set -u is an unbound-variable error.
-        require_flag=""
-        if [ "$REQUIRE_COMPILES" = true ]; then require_flag=--require-compiles; fi
-        node "$GITHUB_ACTION_PATH/../../../ci/sccache/report.mjs" \
-          --stats "$stats" --component "$COMPONENT" --platform "$PLATFORM" \
-          --restored-key "${SCCACHE_RESTORED_KEY:-}" \
-          --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT" ${require_flag:+"$require_flag"}
+        node -e '
+          const fs = require("node:fs");
+          const stats = JSON.parse(fs.readFileSync(process.argv[1])).stats;
+          const count = bucket => Object.values(bucket?.counts ?? {}).reduce((a,b) => a+b, 0);
+          const hits = count(stats.cache_hits), misses = count(stats.cache_misses);
+          if (!Number.isInteger(stats.compile_requests)) throw Error("invalid sccache statistics");
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, "sccache: "+hits+" hits, "+misses+" misses\n");
+          if (process.env.REQUIRE_COMPILES === "true" && (!stats.compile_requests || !(hits+misses)))
+            throw Error("no cacheable compile requests");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, "save="+(stats.compile_requests > 0)+"\n");
+        ' "$stats"
         "$SCCACHE_PATH" --stop-server >/dev/null 2>&1 || true
 
     # always(): a composite action stops at the first failing step, so without

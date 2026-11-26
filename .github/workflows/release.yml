@@ -1,318 +1,330 @@
-# Release. Repackages the official SDK tree as a cjcj SDK: bin/cjc is our
-# Cangjie-built compiler and runtime/lib/<plat>/libcangjie-runtime.{so,dylib,dll} is rebuilt
-# from the pinned cjcj-dev/cangjie-runtime main commit. The Windows runtime is
-# cross-built with the official source-pinned MinGW toolchain. Smoke runs against the
-# packaged bin/cjc. All platforms remain in the release plan; source readiness
-# is checked before scheduling. Set dry_run to build without publishing.
 name: Release
-
-on:
+'on':
   workflow_dispatch:
     inputs:
-      ci_run_id:
-        description: "A successful ci.yml run of this exact commit; required unless dry_run, verified by plan and again before the release is created"
-        type: string
-        required: false
-        default: ''
-      native_runtime_artifact:
-        description: Existing native-runtime-install artifact prefix
-        type: string
-        required: false
-        default: ''
-      native_runtime_run_id:
-        description: Frozen producer run for native runtime installation
-        type: string
-        required: false
-        default: ''
-      native_llvm_ref:
-        description: Explicit paired LLVM full commit
-        type: string
-        required: false
-        default: ''
-      native_runtime_ref:
-        description: Explicit paired runtime full commit
-        type: string
-        required: false
-        default: ''
-      native_host_version:
-        description: Exact official bootstrap host version for this pair
-        type: string
-        required: false
-        default: ''
-      shim_source_selection:
-        description: Cjo header source repository and full commit JSON; private fixed sources require reachable repositories
-        type: string
-        required: false
-        default: "{}"
-      native_build_inputs_artifact:
-        description: Optional native-cjdb source/dependency artifact prefix; runs the existing producer before SDK configuration
-        type: string
-        required: false
-        default: ''
-      native_build_inputs_run_id:
-        description: Original run containing native-cjdb.json and its real dependencies
-        type: string
-        required: false
-        default: ''
-      source_selection:
-        description: Ordinary build repository options JSON, including explicit full stdx url/tag; empty keeps defaults
-        type: string
-        required: false
-        default: '{}'
-      native_inputs_artifact:
-        description: "Reviewed complete native installation artifact prefix (prepare.yml: native-inputs), suffixed by source target"
-        required: false
-        type: string
-        default: ''
-      native_inputs_run_id:
-        description: "The prepare.yml run that produced the native inputs"
-        required: false
-        type: string
-        default: ''
-
       version:
-        description: "Release version, e.g. 0.0.1"
-        required: true
+        description: SDK version
         type: string
-      prerelease:
-        description: "Mark as pre-release"
+        required: true
+        default: 0.0.2
+      prepare_run_id:
+        description: Successful Prepare run
+        type: string
+        required: true
+      ci_run_id:
+        description: Successful CI run for this commit
+        type: string
         required: false
+      dry_run:
+        description: Build and verify without publishing
         type: boolean
+        required: false
+        default: true
+      prerelease:
+        description: Mark as prerelease
+        type: boolean
+        required: false
         default: true
       draft:
-        description: "Create as draft"
-        required: false
+        description: Create a draft release
         type: boolean
-        default: true
-      dry_run:
-        description: "Build artifacts only, skip GitHub release"
         required: false
-        type: boolean
         default: false
-      runtime_ref:
-        description: "Dry-run only: test an exact 40-character runtime commit instead of ci/runtime_pin.env"
-        required: false
-        type: string
-        default: ''
-
 permissions:
-  contents: write
+  contents: read
   actions: read
-
-env:
-  CJCJ_NATIVE_RUNTIME_ARTIFACT: ${{ inputs.native_runtime_artifact }}
-  CJCJ_NATIVE_RUNTIME_RUN_ID: ${{ inputs.native_runtime_run_id }}
-  CJCJ_NATIVE_LLVM_REF: ${{ inputs.native_llvm_ref }}
-  CJCJ_NATIVE_RUNTIME_REF: ${{ inputs.native_runtime_ref }}
-  CJCJ_NATIVE_HOST_VERSION: ${{ inputs.native_host_version }}
-  CJCJ_NATIVE_INPUTS_ARTIFACT: ${{ inputs.native_inputs_artifact }}
-  CJCJ_NATIVE_INPUTS_RUN_ID: ${{ inputs.native_inputs_run_id }}
-  CJCJ_NATIVE_BUILD_INPUTS_ARTIFACT: ${{ inputs.native_build_inputs_artifact }}
-  CJCJ_NATIVE_BUILD_INPUTS_RUN_ID: ${{ inputs.native_build_inputs_run_id }}
-
+defaults:
+  run:
+    shell: bash
 jobs:
-  # Four stages, every stage fully parallel: plan -> source (ONE sdk-build.yml
-  # call, all five hosts and every cross std at once) -> package (ONE 15-cell
-  # sdk-package.yml matrix) -> publish. Each reusable workflow is referenced
-  # once, so the static expansion holds one copy of sdk-build-target.yml.
-  plan:
-    name: Check the release inputs and every source target before release
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7.1.0
-        with:
-          node-version: '24.22.1'
-      - name: Require the native inputs that prepare.yml produced
-        run: |
-          [ -n "$CJCJ_NATIVE_INPUTS_ARTIFACT" ] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_inputs_artifact"; exit 1; }
-          [[ "$CJCJ_NATIVE_INPUTS_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_inputs_run_id"; exit 1; }
-          [ -n "$CJCJ_NATIVE_RUNTIME_ARTIFACT" ] || { echo "::error::PUBLISH_NATIVE_INPUTS_REQUIRED native_runtime_artifact"; exit 1; }
-      # A publishing run must name the CI run of this exact commit before any
-      # source cell starts; publish verifies it again before the tag is claimed.
-      - name: Require and verify the candidate CI run unless dry_run
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DRY_RUN: ${{ inputs.dry_run }}
-          CI_RUN_ID: ${{ inputs.ci_run_id }}
-        run: |
-          if [ "$DRY_RUN" = "true" ] && [ -z "$CI_RUN_ID" ]; then exit 0; fi
-          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::PUBLISH_CI_RUN_ID_REQUIRED $CI_RUN_ID"; exit 1; }
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/ci-run.json"
-          node ci/release-publish.mjs verify-ci-run --run-json "$RUNNER_TEMP/ci-run.json" --sha "$GITHUB_SHA"
-      - name: Check release source targets
-        run: node build/sdk/producers/srcbuild/target-matrix.mjs --targets all --require-ready
-
-  # One call: sdk-build.yml plans all five hosts and fans them out as one
-  # sdk-build-target.yml matrix. Cross stds are gated inside each cell on its
-  # own target (android/wasm/ohos on linux-x64, ios on darwin-arm64).
-  source:
-    needs: plan
-    name: source / five hosts and every cross std in parallel
-    uses: ./.github/workflows/sdk-build.yml
-    with:
-      cangjie_ref: ${{ inputs.version }}
-      native_build_inputs_artifact: ${{ inputs.native_build_inputs_artifact }}
-      native_build_inputs_run_id: ${{ inputs.native_build_inputs_run_id }}
-      source_selection: ${{ inputs.source_selection }}
-      native_inputs_artifact: ${{ inputs.native_inputs_artifact }}
-      shim_source_selection: ${{ inputs.shim_source_selection }}
-      native_inputs_run_id: ${{ inputs.native_inputs_run_id }}
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_runtime_run_id: ${{ inputs.native_runtime_run_id }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      build_type: relwithdebinfo
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-      targets: all
-      build_android: true
-      build_wasm: true
-      build_ohos: true
-      build_ios: true
-
-  # The 15 release assets, all in parallel. Each row is the former package-*
-  # job's inputs verbatim; the Windows rows name the native Windows final std
-  # (final-std-native-windows-x64, build/lib/targets.mjs) that sdk-package.yml
-  # re-derives through package-key.mjs and rejects on any mismatch.
-  package:
-    needs: source
-    name: package / ${{ matrix.release_key }}
+  host-sdk:
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {release_key: linux-x64, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'}
-          - {release_key: linux-arm64, runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64, std_artifact: final-std-linux-aarch64, cross_std_artifacts: '[{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'}
-          - {release_key: win32-x64, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[]'}
-          - {release_key: darwin-arm64, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[]'}
-          - {release_key: darwin-x64, runner: macos-15-intel, platform: darwin-x64, llvm_platform: darwin_x86_64, std_artifact: final-std-darwin-x64, cross_std_artifacts: '[]'}
-          - {release_key: linux-x64-android, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"}]'}
-          - {release_key: darwin-arm64-android, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"}]'}
-          - {release_key: win32-x64-android, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[{"tuple":"linux_android_aarch64_cjnative","artifact":"final-std-android-aarch64"},{"tuple":"linux_x86_64_cjnative","artifact":"final-std-linux-x64"}]'}
-          - {release_key: linux-x64-wasm, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'}
-          - {release_key: darwin-arm64-wasm, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'}
-          - {release_key: win32-x64-wasm, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[{"tuple":"wasi_wasm32_cjnative","artifact":"final-std-wasm32-wasi"}]'}
-          - {release_key: linux-x64-ohos, runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, std_artifact: final-std-linux-x64, cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"},{"tuple":"windows_x86_64_cjnative","artifact":"final-std-windows-x64"}]'}
-          - {release_key: darwin-arm64-ohos, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"}]'}
-          - {release_key: darwin-arm64-ios, runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, std_artifact: final-std-darwin-arm64, cross_std_artifacts: '[{"tuple":"ios_aarch64_cjnative","artifact":"final-std-ios-aarch64-cjnative"},{"tuple":"ios_simulator_aarch64_cjnative","artifact":"final-std-ios-simulator-aarch64-cjnative"},{"tuple":"ios_simulator_x86_64_cjnative","artifact":"final-std-ios-simulator-x86-64-cjnative"}]'}
-          - {release_key: win32-x64-ohos, runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, std_artifact: final-std-native-windows-x64, cross_std_artifacts: '[{"tuple":"linux_ohos_aarch64_cjnative","artifact":"final-std-ohos-aarch64"},{"tuple":"linux_ohos_x86_64_cjnative","artifact":"final-std-ohos-x86-64"}]'}
-    uses: ./.github/workflows/sdk-package.yml
-    with:
-      native_runtime_artifact: ${{ inputs.native_runtime_artifact }}
-      native_llvm_ref: ${{ inputs.native_llvm_ref }}
-      native_runtime_ref: ${{ inputs.native_runtime_ref }}
-      native_host_version: ${{ inputs.native_host_version }}
-      runner: ${{ matrix.runner }}
-      platform: ${{ matrix.platform }}
-      release_key: ${{ matrix.release_key }}
-      std_artifact: ${{ matrix.std_artifact }}
-      cross_std_artifacts: ${{ matrix.cross_std_artifacts }}
-      version: ${{ inputs.version }}
-      dry_run: ${{ inputs.dry_run }}
-      runtime_ref: ${{ inputs.runtime_ref }}
-    secrets: inherit
-
-  publish:
-    name: Publish release
-    needs: [plan, package]
-    # Default needs semantics: a failed, cancelled or skipped plan or any failed
-    # package cell skips publication, and the first step re-checks both direct needs.
-    if: ${{ !inputs.dry_run }}
-    # Manual approval entry: required reviewers are configured on this
-    # environment in the repository settings (not by this workflow).
-    environment: release-publish
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+        - platform: linux-x64
+          runner: ubuntu-24.04
+        - platform: linux-aarch64
+          runner: ubuntu-24.04-arm
+        - platform: darwin-arm64
+          runner: macos-15
+        - platform: darwin-x64
+          runner: macos-15-intel
+        - platform: windows-x64
+          runner: windows-2025
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      VERSION: ${{ inputs.version }}
     steps:
-      - name: Checkout cjcj
-        uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-      - name: Require every direct upstream job to have succeeded
-        env:
-          PUBLISH_NEEDS_JSON: ${{ toJSON(needs) }}
-        run: node ci/release-publish.mjs verify-needs
-      - name: Verify the candidate CI run of this commit
-        if: inputs.ci_run_id != ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CI_RUN_ID: ${{ inputs.ci_run_id }}
-        run: |
-          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::PUBLISH_CI_RUN_ID $CI_RUN_ID"; exit 1; }
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/ci-run.json"
-          node ci/release-publish.mjs verify-ci-run --run-json "$RUNNER_TEMP/ci-run.json" --sha "$GITHUB_SHA"
-      - name: Download SDK artifacts
-        uses: actions/download-artifact@v8.0.2
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          run-id: ${{ github.run_id }}
-          pattern: pkg-*
-          # One directory per artifact: selection is by artifact name, so
-          # pkg-diagnosis-* never reaches dist (file names cannot tell them apart).
-          path: dist-artifacts
-          merge-multiple: false
-      - name: Select the 15 package artifacts by name
-        run: node ci/release-publish.mjs select-packages --from dist-artifacts --to dist
-      - name: Verify exactly 15 package cells and 60 assets
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: node ci/release-publish.mjs verify-assets --dist dist --version "$RELEASE_VERSION" --output "$RUNNER_TEMP/publish-assets.txt"
-      - name: Render release notes from package manifests
-        run: |
-          node scripts/render_release_notes.mjs \
-            --version "${{ inputs.version }}" \
-            --dist dist \
-            --output "$RUNNER_TEMP/release-notes.md"
-      - name: Publish GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_VERSION: ${{ inputs.version }}
-          RELEASE_PRERELEASE: ${{ inputs.prerelease }}
-          RELEASE_DRAFT: ${{ inputs.draft }}
-        run: |
-          tag="v$RELEASE_VERSION"
-          # A formal/latest release needs its own user authorization; this job creates prereleases only.
-          [ "$RELEASE_PRERELEASE" = "true" ] || { echo "::error::PUBLISH_FORMAL_RELEASE_NOT_AUTHORIZED $tag"; exit 1; }
-          # Fail closed: never overwrite an existing release or tag, and never let gh fall back
-          # to the default branch -- the tag is created at the exact commit this run built.
-          if out=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>&1); then
-            echo "::error::RELEASE_ALREADY_EXISTS $tag"; exit 1
-          elif ! grep -q 'HTTP 404' <<<"$out"; then
-            echo "::error::RELEASE_LOOKUP_FAILED $tag: $out"; exit 1
-          fi
-          if out=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" 2>&1); then
-            echo "::error::TAG_ALREADY_EXISTS $tag"; exit 1
-          elif ! grep -q 'HTTP 404' <<<"$out"; then
-            echo "::error::TAG_LOOKUP_FAILED $tag: $out"; exit 1
-          fi
-          mapfile -t assets < "$RUNNER_TEMP/publish-assets.txt"
-          [ "${#assets[@]}" -eq 60 ] || { echo "::error::PUBLISH_ASSET_COUNT ${#assets[@]}"; exit 1; }
-          # Claim the tag atomically at the built commit: creating the ref fails
-          # (422) if any other writer created it after the lookup above. The
-          # release is then attached to that claimed tag only (--verify-tag).
-          if ! out=$(gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" 2>&1); then
-            echo "::error::TAG_ALREADY_EXISTS $tag (claim refused): $out"; exit 1
-          fi
-          flags=(--verify-tag --title "cjcj $tag" --notes-file "$RUNNER_TEMP/release-notes.md" --prerelease --latest=false)
-          if [ "$RELEASE_DRAFT" = "true" ]; then flags+=(--draft); fi
-          if ! gh release create "$tag" "${flags[@]}" "${assets[@]}"; then
-            # Release the claim only while it is still exactly this run's tag.
-            if [ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null)" = "$GITHUB_SHA" ]; then
-              gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" || true
-            fi
-            echo "::error::PUBLISH_RELEASE_CREATE_FAILED $tag"; exit 1
-          fi
-          # Read back what GitHub now serves for this tag.
-          ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.type + " " + .object.sha')
-          [ "$ref" = "commit $GITHUB_SHA" ] || { echo "::error::PUBLISH_READBACK_TAG $tag $ref"; exit 1; }
-          release=$(gh release view "$tag" --json isPrerelease,assets --jq '[.isPrerelease, (.assets | length)] | map(tostring) | join(" ")')
-          [ "$release" = "true 60" ] || { echo "::error::PUBLISH_READBACK_RELEASE $tag $release"; exit 1; }
-
-# Source-build owns the four native LLVM artifacts; the platform_tuples producer (build/sdk/producers/platform_tuples) owns
-# only the Windows tuple. Each release cell consumes final-std-${platform} from
-# the same matrix row, and artifact download failure is intentionally gating.
+    - uses: actions/checkout@v7.0.1
+    - name: Read tool versions
+      run: node -e 'const p=require("./build/pins.json").toolchains; console.log("node="+p.node+"\nsccache="+p.sccache)' >> "$GITHUB_OUTPUT"
+      id: pins
+    - uses: actions/setup-node@v7.1.0
+      with:
+        node-version: ${{ steps.pins.outputs.node }}
+    - name: Select successful Prepare run
+      run: |-
+        id="$PREPARE_RUN"
+        [[ "$id" =~ ^[0-9]+$ ]]
+        gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq '[.path,.conclusion] | join(" ")' | grep -Fx '.github/workflows/prepare.yml success'
+        echo "run=$id" >> "$GITHUB_OUTPUT"
+      id: prepare
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PREPARE_RUN: ${{ inputs.prepare_run_id }}
+    - uses: actions/download-artifact@v8.0.2
+      with:
+        name: native-base-${{ matrix.platform }}
+        github-token: ${{ github.token }}
+        run-id: ${{ steps.prepare.outputs.run }}
+    - name: Unpack native base
+      run: |-
+        mkdir -p ../base
+        tar -xf native-base.tar -C ../base
+        rm native-base.tar
+    - name: Fetch bootstrap and SDK sources
+      run: node build/setup.mjs sources --out ../src --repos h1,runtime,bounds,pcre2,tools,stdx,javaInterop,compiler --override "runtime=$(cat ../base/runtime.ref)"
+    - uses: ./.github/actions/native-windows-tools
+      with:
+        native-compiler: 'true'
+      if: runner.os == 'Windows'
+    - name: Install build dependencies
+      run: node build/setup.mjs deps --platform "$PLATFORM" --mode full
+    - uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: '17'
+      if: env.PLATFORM == 'linux-x64' || env.PLATFORM == 'windows-x64'
+    - name: Build H1 with the official SDK
+      run: node build/build-compiler.mjs --stage stage0 --source ../src/h1 --host-sdk ../base/host --native ../base/native --runtime ../base/runtime --out
+        ../stage0
+    - name: Bootstrap the standard library
+      run: |-
+        node build/build-stdlib.mjs --stage std-bootstrap --sources ../src --runtime ../base/runtime --sdk ../stage0 --out ../initial
+        rm -rf ../stage0
+    - name: Rebuild the standard library using the bootstrap modules
+      run: |-
+        node build/build-stdlib.mjs --stage stage1-std --sources ../src --runtime ../base/runtime --sdk ../initial --out ../stage1
+        rm -rf ../initial
+    - name: Build stage 2
+      run: |-
+        node build/build-compiler.mjs --stage stage2 --sdk ../stage1 --host-sdk ../base/host --out ../stage2 --version "$VERSION"
+        rm -rf ../stage1
+    - name: Archive the cross-build SDK and source selections
+      run: |-
+        cp ../base/*.ref ../stage2/
+        tar -cf stage2.tar -C ../stage2 .
+        rm ../stage2/{llvm,runtime}.ref
+      if: matrix.platform == 'linux-x64' || matrix.platform == 'darwin-arm64'
+    - uses: actions/upload-artifact@v7.0.2
+      with:
+        name: stage2-sdk-${{ matrix.platform }}
+        path: stage2.tar
+        if-no-files-found: error
+        compression-level: 0
+      if: matrix.platform == 'linux-x64' || matrix.platform == 'darwin-arm64'
+    - name: Build final std
+      run: |-
+        node build/build-stdlib.mjs --stage stage3-std --sources ../src --runtime ../base/runtime --sdk ../stage2 --include ../stage2/include --local-mode-api --out ../final-std
+        rm -rf ../stage2
+    - name: Build stage 3
+      run: |-
+        node build/build-compiler.mjs --stage stage3 --sdk ../final-std --host-sdk ../base/host --out ../host-sdk --version "$VERSION"
+        rm -rf ../final-std
+    - name: Prepare the Java annotation processor
+      run: mvn -q dependency:copy -Dartifact=org.projectlombok:lombok:1.18.36 -DoutputDirectory=../jars
+      if: env.PLATFORM == 'linux-x64' || env.PLATFORM == 'windows-x64'
+    - name: Build stdx, SDK tools and applicable interop libraries
+      run: |-
+        suffix=""
+        [[ "$PLATFORM" != windows-x64 ]] || suffix=.exe
+        node build/build-extras.mjs --sdk ../host-sdk --host-sdk ../base/host --sources ../src --cjbind "../base/tools/cjbind$suffix" --lombok ../jars/lombok-1.18.36.jar
+    - name: Archive host SDK
+      run: tar -cf host-sdk.tar -C ../host-sdk .
+    - uses: actions/upload-artifact@v7.0.2
+      with:
+        name: host-sdk-${{ matrix.platform }}
+        path: host-sdk.tar
+        if-no-files-found: error
+        compression-level: 0
+    - name: Read package matrix
+      run: node --input-type=module -e 'import {RELEASE_TARGETS as include} from "./build/common.mjs"; console.log("packages="+JSON.stringify({include}))'
+        >> "$GITHUB_OUTPUT"
+      id: matrix
+    outputs:
+      packages: ${{ steps.matrix.outputs.packages }}
+  cross-std:
+    needs: host-sdk
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - target: windows-x64
+          host: linux-x64
+          runner: ubuntu-24.04
+          kind: mingw
+        - target: android-aarch64
+          host: linux-x64
+          runner: ubuntu-24.04
+          kind: android-ndk
+        - target: ohos-aarch64
+          host: linux-x64
+          runner: ubuntu-24.04
+          kind: ohos
+        - target: ohos-x86_64
+          host: linux-x64
+          runner: ubuntu-24.04
+          kind: ohos
+        - target: wasm32-wasi
+          host: linux-x64
+          runner: ubuntu-24.04
+          kind: wasi
+        - target: ios-aarch64
+          host: darwin-arm64
+          runner: macos-15
+          kind: xcode-ios
+        - target: ios-simulator-aarch64
+          host: darwin-arm64
+          runner: macos-15
+          kind: xcode-ios
+        - target: ios-simulator-x86_64
+          host: darwin-arm64
+          runner: macos-15
+          kind: xcode-ios
+    env:
+      PLATFORM: ${{ matrix.host }}
+      TARGET: ${{ matrix.target }}
+      KIND: ${{ matrix.kind }}
+    steps:
+    - uses: actions/checkout@v7.0.1
+    - name: Read tool versions
+      run: node -e 'const p=require("./build/pins.json").toolchains; console.log("node="+p.node+"\nsccache="+p.sccache)' >> "$GITHUB_OUTPUT"
+      id: pins
+    - uses: actions/setup-node@v7.1.0
+      with:
+        node-version: ${{ steps.pins.outputs.node }}
+    - uses: actions/download-artifact@v8.0.2
+      with:
+        name: stage2-sdk-${{ matrix.host }}
+    - name: Unpack stage 2 and fetch matching sources
+      run: |-
+        mkdir -p ../stage2
+        tar -xf stage2.tar -C ../stage2
+        repos=runtime,bounds,pcre2
+        overrides=(--override "runtime=$(cat ../stage2/runtime.ref)")
+        if [[ "$TARGET" == android-aarch64 ]]; then repos+=,compiler,llvm,flatbuffers; overrides+=(--override "llvm=$(cat ../stage2/llvm.ref)"); fi
+        node build/setup.mjs sources --repos "$repos" --out ../src "${overrides[@]}"
+    - name: Install build dependencies
+      run: node build/setup.mjs deps --platform "$PLATFORM" --mode full
+    - name: Install cross SDK
+      run: node build/setup.mjs cross-sdk --kind "$KIND" --out ../cross-sdk
+    - name: Build cross runtime and stdlib
+      run: |-
+        node build/build-runtime.mjs --sdk ../stage2 --cross "$TARGET" --sources ../src --out ../runtime
+        node build/build-stdlib.mjs --sdk ../stage2 --cross "$TARGET" --sources ../src --runtime ../runtime --out ../cross
+        tar -cf cross.tar -C ../cross .
+    - uses: actions/upload-artifact@v7.0.2
+      with:
+        name: cross-std-${{ matrix.target }}
+        path: cross.tar
+        if-no-files-found: error
+        compression-level: 0
+  package:
+    needs:
+    - host-sdk
+    - cross-std
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.host-sdk.outputs.packages) }}
+    env:
+      PLATFORM: ${{ matrix.host }}
+      CROSS: ${{ toJSON(matrix.cross) }}
+      TARGET: ${{ matrix.key }}
+      VERSION: ${{ inputs.version }}
+    steps:
+    - uses: actions/checkout@v7.0.1
+    - name: Read tool versions
+      run: node -e 'const p=require("./build/pins.json").toolchains; console.log("node="+p.node+"\nsccache="+p.sccache)' >> "$GITHUB_OUTPUT"
+      id: pins
+    - uses: actions/setup-node@v7.1.0
+      with:
+        node-version: ${{ steps.pins.outputs.node }}
+    - uses: ./.github/actions/native-windows-tools
+      with:
+        native-compiler: 'true'
+      if: runner.os == 'Windows'
+    - uses: actions/download-artifact@v8.0.2
+      with:
+        name: host-sdk-${{ matrix.host }}
+    - name: Unpack host and required target libraries
+      run: |-
+        mkdir -p ../host
+        tar -xf host-sdk.tar -C ../host
+        for target in $(jq -r '.[]' <<< "$CROSS"); do
+          name="cross-std-$target"; archive=cross.tar
+          if [[ "$target" == linux-x64 ]]; then name=host-sdk-linux-x64; archive=host-sdk.tar; fi
+          gh run download "$GITHUB_RUN_ID" --name "$name" --dir "../downloads/$target"
+          mkdir -p "../overlays/$target"
+          tar -xf "../downloads/$target/$archive" -C "../overlays/$target"
+        done
+      env:
+        GH_TOKEN: ${{ github.token }}
+    - uses: actions/setup-java@v5
+      if: matrix.host == 'linux-x64' || matrix.host == 'windows-x64'
+      with:
+        distribution: temurin
+        java-version: '17'
+    - uses: actions/download-artifact@v8.0.2
+      if: runner.os == 'Linux'
+      with:
+        name: runtime-tests-${{ matrix.host }}
+        github-token: ${{ github.token }}
+        run-id: ${{ inputs.prepare_run_id }}
+    - name: Package and test relocated SDK
+      run: |-
+        overlays=()
+        if [[ -f runtime-tests.tar ]]; then mkdir ../language; tar -xf runtime-tests.tar -C ../language; overlays+=(--language-inputs ../language); fi
+        for dir in ../overlays/*; do [[ ! -d "$dir" ]] || overlays+=(--cross-dir "$dir"); done
+        node build/package-sdk.mjs --sdk ../host --target "$TARGET" --version "$VERSION" --out archives --verify-relocated "${overlays[@]}"
+    - uses: actions/upload-artifact@v7.0.2
+      with:
+        name: pkg-${{ matrix.archiveKey }}
+        path: archives/*
+        if-no-files-found: error
+        compression-level: 0
+  publish:
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v7.0.1
+    - name: Read tool versions
+      run: node -e 'const p=require("./build/pins.json").toolchains; console.log("node="+p.node+"\nsccache="+p.sccache)' >> "$GITHUB_OUTPUT"
+      id: pins
+    - uses: actions/setup-node@v7.1.0
+      with:
+        node-version: ${{ steps.pins.outputs.node }}
+    - uses: actions/download-artifact@v8.0.2
+      with:
+        pattern: pkg-*
+        merge-multiple: true
+        path: archives
+    - name: Verify all assets and publish tag
+      run: |-
+        opts=()
+        [[ -z "$CI_RUN" ]] || opts+=(--ci-run-id "$CI_RUN")
+        node build/package-sdk.mjs --publish --version "$VERSION" --out archives --prerelease="$PRERELEASE" --draft="$DRAFT" "${opts[@]}"
+      env:
+        GH_TOKEN: ${{ github.token }}
+        VERSION: ${{ inputs.version }}
+        CI_RUN: ${{ inputs.ci_run_id }}
+        PRERELEASE: ${{ inputs.prerelease }}
+        DRAFT: ${{ inputs.draft }}
+    if: ${{ !inputs.dry_run }}
+    environment: release-publish
+    permissions:
+      contents: write
+      actions: read

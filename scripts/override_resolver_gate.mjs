@@ -1,4 +1,4 @@
-#!/usr/bin/env zx
+#!/usr/bin/env node
 // Observe generic-call target selection through the real compiler CLI.
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -6,7 +6,55 @@ import crypto from 'node:crypto';
 import {parseArgs} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
-import {selectBuildJobs,buildCapacity} from '../ci/build-resources.mjs';
+import os from 'node:os';
+async function optional(file) {
+ try {return (await fs.readFile(file,'utf8')).trim();}
+ catch(error){if(error.code==='ENOENT')return '';throw error;}
+}
+async function buildCapacity() {
+ const available=os.availableParallelism();
+ const constrained=process.constrainedMemory();
+ const memory=Math.min(os.totalmem(),constrained>0?constrained:Infinity);
+ let quota=Infinity;
+ if(process.platform==='linux') {
+  const memberships=(await optional('/proc/self/cgroup')).split('\n').map(line=>line.split(':'));
+  const mounts=(await optional('/proc/self/mountinfo')).split('\n');
+  const decode=text=>text.replace(/\\([0-7]{3})/g,(_,digits)=>String.fromCharCode(parseInt(digits,8)));
+  for(const line of mounts) {
+   const [left,right]=line.split(' - ');if(!right)continue;
+   const fields=left.split(' '),kind=right.split(' ')[0],options=right.split(' ')[2]||'';
+   const member=memberships.find(row=>kind==='cgroup2'?row[0]==='0':kind==='cgroup'&&options.split(',').includes('cpu')&&row[1]?.split(',').includes('cpu'));
+   if(!member?.[2])continue;
+   const mountRoot=decode(fields[3]),mount=decode(fields[4]),group=member[2];
+   // mountinfo root may already be the process cgroup in a cgroup namespace.
+   const relative=mountRoot==='/'?group.slice(1):group===mountRoot?'':group.startsWith(mountRoot+'/')?group.slice(mountRoot.length+1):group==='/'?'':null;
+   if(relative===null)continue;
+   let directory=path.resolve(mount,relative);
+   for(;;) {
+    let amount,period;
+    if(kind==='cgroup2') [amount,period]=(await optional(path.join(directory,'cpu.max'))).split(/\s+/);
+    else {amount=await optional(path.join(directory,'cpu.cfs_quota_us'));period=await optional(path.join(directory,'cpu.cfs_period_us'));}
+    if(Number(amount)>0&&Number(period)>0)quota=Math.min(quota,Number(amount)/Number(period));
+    if(directory===mount)break;
+    const parent=path.dirname(directory);
+    if(parent===directory||!directory.startsWith(mount+'/'))break;
+    directory=parent;
+   }
+  }
+ }
+ return {available,quota:Number.isFinite(quota)?quota:null,cpus:Math.max(1,Math.min(available,Math.floor(quota))),memory};
+}
+async function selectBuildJobs(requested,env=process.env,capacity) {
+ capacity??=await buildCapacity();
+ const source=requested!==undefined?'argument':env.CANGJIE_BUILD_JOBS!==undefined?'CANGJIE_BUILD_JOBS':env.CMAKE_BUILD_PARALLEL_LEVEL!==undefined?'CMAKE_BUILD_PARALLEL_LEVEL':'effective CPU';
+ const explicit=requested??env.CANGJIE_BUILD_JOBS??env.CMAKE_BUILD_PARALLEL_LEVEL;
+ const budget=env.KKK2_JOBS===undefined?Infinity:Number(env.KKK2_JOBS);
+ if(budget!==Infinity&&(!Number.isSafeInteger(budget)||budget<1))throw Error('BUILD_JOBS invalid declared KKK2_JOBS='+env.KKK2_JOBS);
+ const jobs=explicit===undefined?Math.min(capacity.cpus,budget):Number(explicit);
+ if(!Number.isSafeInteger(jobs)||jobs<1)throw Error('BUILD_JOBS invalid '+source+'='+explicit);
+ if(jobs>budget)throw Error('BUILD_JOBS '+source+'='+jobs+' exceeds declared KKK2_JOBS budget='+budget);
+ return jobs;
+}
 const {values}=parseArgs({options:{compiler:{type:'string'},out:{type:'string'},jobs:{type:'string'}}});
 if(!values.compiler||!values.out)throw Error('usage: override_resolver_gate.mjs --compiler FILE --out DIRECTORY [--jobs N]');
 const compiler=path.resolve(values.compiler),out=path.resolve(values.out);

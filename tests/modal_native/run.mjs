@@ -4,8 +4,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
-import {cleanSdkEnvironment} from '../../ci/bootstrap/sdk-platform.mjs';
-import {compilerProducer} from '../../ci/bootstrap/compiler_identity.mjs';
+import {cleanSdkEnvironment} from '../../build/common.mjs';
 
 const [install, output, coreChir] = argv._.map(String);
 if (![install, output, coreChir].every(p => p && path.isAbsolute(p))) throw Error('usage: zx run.mjs /installed/sdk /new/output /producer/std.core.chir');
@@ -16,7 +15,7 @@ const llvm = path.join(sdk, 'third_party/llvm/lib');
 const env = cleanSdkEnvironment(sdk,'linux_x86_64',{...process.env,PATH:'/usr/bin:/bin'});
 fs.mkdirSync(output);
 const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const producer = fs.existsSync(path.join(sdk,'STAGE-INPUTS.json')) ? await compilerProducer(sdk) : compiler;
+const producer = fs.existsSync(path.join(sdk,'libexec/compiler/cjcj-stage1')) ? path.join(sdk,'libexec/compiler/cjcj-stage1') : compiler;
 const schema=path.join(sdk,'schema/StdxChirFormat.fbs');
 const generated=path.join(sdk,'include/flatbuffers/StdxChirFormat_generated.h');
 const flatc=path.join(sdk,'third_party/flatbuffers/bin/flatc');

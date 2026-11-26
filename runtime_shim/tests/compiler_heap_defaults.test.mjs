@@ -1,4 +1,4 @@
-#!/usr/bin/env zx
+#!/usr/bin/env node
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
