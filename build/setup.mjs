@@ -21,7 +21,7 @@ async function deps(p,mode) {
     run('sudo',['env','DEBIAN_FRONTEND=noninteractive','apt-get','install','-y','--no-install-recommends',...packages,...(old?['libtinfo5','libncurses5-dev']:['libtinfo6','libncurses-dev'])]);
   }else if(p.os==='darwin'){
     const pkgs=['ninja','llvm@16','openssl@3','bison','googletest','gnu-tar','swig','coreutils',...(p.arch==='x64'?['uv']:[])];
-    const deps=runCapture('brew',['deps','--formula',...pkgs]).split(/\s+/).filter(s=>/^python@\d+\.\d+$/.test(s));
+    const deps=runCapture('brew',['deps','--formula','--union',...pkgs]).split(/\s+/).filter(s=>/^python@\d+\.\d+$/.test(s));
     run('brew',['install','--skip-link',...new Set(['python@3.11',...deps])]);run('brew',['install',...pkgs]);
     appendGithubPath(runCapture('brew',['--prefix','python@3.11']).trim()+'/libexec/bin');
     const dir=path.join(process.env.RUNNER_TEMP||os.tmpdir(),'cmake-'+t.cmakeMacos.version);

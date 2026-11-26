@@ -95,6 +95,30 @@ if sys.argv[1]=='install':
   });
 }
 
+test('macOS installs Python dependencies from the formula union before the requested packages',{skip:process.platform==='win32'},t=>{
+  const dir=fixture(t),log=dir+'/brew.log';
+  put(dir+'/brew',`#!${process.execPath}
+const fs=require('node:fs'),args=process.argv.slice(2);
+fs.appendFileSync(process.env.BREW_LOG,JSON.stringify(args)+'\\n');
+if(args[0]==='deps' && args.includes('--union'))console.log('mpdecimal python@3.12');
+// Stop after both installs, before the unrelated CMake download.
+if(args[0]==='--prefix')process.exit(42);
+`,0o755);
+  const child=spawnSync(process.execPath,[path.join(repo,'build/setup.mjs'),'deps','--platform','darwin-x64','--mode','prepare'],
+    {env:{...process.env,PATH:dir,BREW_LOG:log},encoding:'utf8'});
+  assert.equal(child.status,1,child.error?.message||child.stderr);
+  assert.match(child.stderr,/brew --prefix python@3\.11 exited 42/);
+  const calls=fs.readFileSync(log,'utf8').trim().split('\n').map(line=>JSON.parse(line));
+  const pkgs=calls[2].slice(1);
+  assert.ok(pkgs.length>1 && pkgs.includes('llvm@16'));
+  assert.deepEqual(calls,[
+    ['deps','--formula','--union',...pkgs],
+    ['install','--skip-link','python@3.11','python@3.12'],
+    ['install',...pkgs],
+    ['--prefix','python@3.11'],
+  ]);
+});
+
 test('Linux overlay contains physical files in just three target directories',linux,t=>{
   const dir=fixture(t),sdk=dir+'/host';
   put(sdk+'/tools/unrelated');put(sdk+'/runtime/lib/'+tuple+'/bounds','R');put(sdk+'/modules/'+tuple+'/std/core','std');
