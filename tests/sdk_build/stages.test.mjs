@@ -6,9 +6,12 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import test from 'node:test';
 import {repo,compilerHeap,loadPins,sdkPlatform} from '../../build/common.mjs';
+import {effectiveLinkOptions,h1HeapDefaultsBuild,h1PackageLinkOptions} from '../../build/build-compiler.mjs';
 
 test('source pins use full commit SHAs and select the expected tools revision',()=>{
   const pins=loadPins();
+  assert.equal(pins.repos.h1,undefined);
+  assert.equal(Object.keys(pins.repos).length,9);
   for(const [name,pin] of Object.entries(pins.repos)){
     assert.match(pin.sha,/^[0-9a-f]{40}$/,name+' source SHA');
   }
@@ -19,6 +22,39 @@ test('source pins select the expected runtime revision',()=>{
   const pins=loadPins();
   assert.equal(pins.repos.runtime.sha,'b628e2bd5183b809d04f8e5808ecf3b00e46bf29');
 });
+
+for(const workflow of ['prepare','release','ci']){
+  test(workflow+' builds stage0 from its checkout',()=>{
+    const yaml=fs.readFileSync(path.join(repo,'.github/workflows',workflow+'.yml'),'utf8');
+    assert.doesNotMatch(yaml,/\.\.\/src\/h1\b/);
+    // Join shell continuations and YAML's indented, folded command arguments.
+    const commands=yaml.replace(/\\\r?\n\s*|\r?\n[ \t]+(?=--)/g,' ').split('\n');
+    const stages=commands.filter(line=>line.includes('build/build-compiler.mjs --stage stage0'));
+    assert.ok(stages.length>0);
+    for(const command of stages)assert.doesNotMatch(command,/--source\b/);
+    for(const line of commands.filter(line=>/\brepos\b/.test(line)))assert.doesNotMatch(line,/\bh1\b/);
+    assert.match(yaml,/rm -rf \.\.\/stage0 \.\.\/stage0\.target\b/);
+  });
+}
+
+for(const key of ['linux-x64','linux-aarch64','darwin-arm64','darwin-x64']){
+  test('stage0 uses checkout link and heap inputs: '+key,{skip:process.platform==='win32'},()=>{
+    const {platform,llvmDirectory,llvmLibrary,os}=sdkPlatform(key);
+    const workspaceText=fs.readFileSync(path.join(repo,'cjpm.toml'),'utf8');
+    const packageText=fs.readFileSync(path.join(repo,'packages/cjc/cjpm.toml'),'utf8');
+    const link='runtime_shim/h1-'+llvmLibrary;
+    const llvmLibraryFile=path.resolve(repo,'../native/third_party/llvm',llvmDirectory,llvmLibrary);
+    for(const supports of [true,false]){
+      const rewritten=h1PackageLinkOptions(packageText,{platform,source:repo,linkFile:path.join(repo,link),
+        llvmLibraryFile,hostRuntimeSupportsConfigV1:supports});
+      const flags=effectiveLinkOptions(rewritten,platform);
+      assert.ok(flags.includes(path.normalize(link)));
+      assert.equal(flags.includes('--wrap=CJ_MRT_CjRuntimeInitWithConfigV1'),os==='linux'&&supports);
+    }
+    const sourcePresent=fs.existsSync(path.join(repo,'runtime_shim/cjc_heap_defaults.c'));
+    assert.equal(h1HeapDefaultsBuild({platform,workspaceText,packageText,sourcePresent}),os==='linux');
+  });
+}
 
 const tuple='linux_x86_64_cjnative';
 function fixture(t){
@@ -36,6 +72,61 @@ function cli(name,args,env={},options=[]){
   assert.equal(child.status,0,child.error?.message||child.stderr+child.stdout);
 }
 const linux={skip:process.platform!=='linux'};
+test('stage0 leaves a clean checkout for the stage2 shim build',linux,t=>{
+  const dir=fixture(t),src=dir+'/checkout',host=dir+'/host',native=dir+'/native',out=dir+'/stage0';
+  const shim='runtime_shim/cjselfhost_llvmshim.o',selected=native+'/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o';
+  for(const file of ['.gitignore','cjpm.toml','cjpm.lock','packages/cjc/cjpm.toml','build/common.mjs',
+    'build/build-compiler.mjs','runtime_shim/build_shim.mjs','runtime_shim/cjc_heap_defaults.c','runtime_shim/cjc_runtime_config.c'])
+    put(src+'/'+file,fs.readFileSync(path.join(repo,file)));
+  const env={...process.env,CC:dir+'/bin/cc',CXX:dir+'/bin/cc',CMAKE_C_COMPILER_LAUNCHER:'',
+    PATH:dir+'/bin:'+process.env.PATH};
+  function exec(cmd,args,extra={},expected=0){
+    const child=spawnSync(cmd,args,{cwd:src,env:{...env,...extra},encoding:'utf8'});
+    assert.equal(child.status,expected,child.error?.message||child.stderr+child.stdout);
+    return expected?child.stderr:child.stdout.trim();
+  }
+  exec('git',['init','-q']);exec('git',['add','.']);
+  exec('git',['-c','user.name=Test','-c','user.email=test@example.invalid','-c','commit.gpgSign=false','commit','-qm','fixture']);
+  const commit=exec('git',['rev-parse','HEAD']);
+  put(selected,'stage0 shim');put(native+'/third_party/llvm/lib/libLLVM-15.so');
+  put(host+'/lib/'+tuple+'/host');put(host+'/runtime/lib/'+tuple+'/host');
+  // Stand in for native tools: record which inputs the real stage scripts selected.
+  put(dir+'/bin/cc','#!/bin/sh\nargs="$*"\nwhile [ "$1" != "-o" ]; do shift || exit 1; done\nprintf "%s" "$args" > "$2"\n',0o755);
+  put(dir+'/bin/nm','#!/bin/sh\nexit 0\n',0o755);
+  put(host+'/tools/bin/cjpm',`#!/bin/sh
+set -eu
+test "$(cat runtime_shim/cjselfhost_llvmshim.o)" = 'stage0 shim'
+test -f runtime_shim/h1-libLLVM-15.so
+test -s runtime_shim/cjc_heap_defaults.o
+grep -q -- '-DCJCJ_LEGACY_HOST_RUNTIME' runtime_shim/cjc_runtime_config.o
+echo changed > cjpm.lock
+[ "$FAIL_CJPM" = no ] || exit 42
+mkdir -p "$3/release/bin"
+echo stage0 > "$3/release/bin/cjc"
+`,0o755);
+  put(src+'/'+shim,'existing shim');put(src+'/runtime_shim/cjc_runtime_config.o','existing config');
+  const args=['build/build-compiler.mjs','--stage','stage0','--host-sdk',host,'--native',native,'--out',out];
+  for(const fail of [true,false]){
+    const result=exec(process.execPath,args,{FAIL_CJPM:fail?'yes':'no'},fail?1:0);
+    if(fail)assert.match(result,/cjpm build .* exited 42/);
+    assert.equal(fs.readFileSync(src+'/'+shim,'utf8'),'existing shim');
+    assert.equal(fs.readFileSync(src+'/runtime_shim/cjc_runtime_config.o','utf8'),'existing config');
+    assert.ok(!fs.existsSync(src+'/runtime_shim/cjc_heap_defaults.o'));
+    assert.deepEqual(fs.readdirSync(src+'/runtime_shim').filter(f=>f.startsWith('h1-')),[]);
+    assert.equal(exec('git',['status','--porcelain']),'');
+  }
+  assert.ok(!fs.existsSync(src+'/target'),'stage0 wrote into checkout/target');
+  assert.equal(fs.readFileSync(out+'.target/release/bin/cjc','utf8').trim(),'stage0');
+  // Stage2 selects its own shim and recompiles both C objects using the clean revision.
+  put(selected,'stage2 shim');
+  exec(process.execPath,['runtime_shim/build_shim.mjs'],{CJCJ_COMMIT:commit,CJCJ_LLVM_SHIM_O:selected,CANGJIE_HOME:out});
+  assert.equal(fs.readFileSync(src+'/'+shim,'utf8'),'stage2 shim');
+  const config=fs.readFileSync(src+'/runtime_shim/cjc_runtime_config.o','utf8');
+  assert.ok(config.includes('-DCJCJ_COMMIT="'+commit+'"'));
+  assert.ok(!config.includes('-DCJCJ_LEGACY_HOST_RUNTIME'));
+  assert.ok(fs.readFileSync(src+'/runtime_shim/cjc_heap_defaults.o','utf8').includes(src+'/runtime_shim/cjc_heap_defaults.c'));
+});
+
 test('stage 2, stage 3 and the relocated package exclude bootstrap tools',linux,t=>{
   const dir=fixture(t),host=dir+'/H',native=dir+'/N',src=dir+'/source';
   let parent=dir+'/bootstrap';

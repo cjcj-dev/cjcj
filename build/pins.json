@@ -36,10 +36,6 @@
     "flatbuffers": {
       "url": "https://gitcode.com/openharmony/third_party_flatbuffers.git",
       "sha": "c3e4d69cbd5950e43f775ba76eadb30750d6e0b7"
-    },
-    "h1": {
-      "url": "https://github.com/cjcj-dev/cjcj.git",
-      "sha": "83901791548856f0458f3e3e38c4c1ab7ac496c5"
     }
   },
   "hostSdk": {

@@ -272,7 +272,7 @@ async function assemble(a){
   const p=sdkPlatform(a.platform),platform=p.platform,seed=a.stage==='stage0';
   if(!['stage0','stage2','stage3','installed'].includes(a.stage))throw Error('invalid compiler stage '+a.stage);
   const host=path.resolve(a['host-sdk']||a.sdk),parent=path.resolve(a.sdk||host),out=path.resolve(a.out);
-  const source=path.resolve(a.source||repo),native=path.resolve(a.stage==='installed'?parent:a.native),target=path.resolve(a['target-dir']||(seed?source+'/target':out+'.target'));
+  const source=path.resolve(a.source||repo),native=path.resolve(a.stage==='installed'?parent:a.native),target=path.resolve(a['target-dir']||(out+'.target'));
   const rebuild=a.stage==='installed',std=!seed&&!rebuild?path.resolve(a.std):null;
   const sdk=std?out:parent;
   if([parent,host,native,std].filter(Boolean).some(input=>out===input||out.startsWith(input+path.sep)))throw Error('stage requires a separate output');
@@ -287,15 +287,26 @@ async function assemble(a){
   const files=['cjpm.toml','cjpm.lock','packages/cjc/cjpm.toml',...(!seed&&a.version?[VERSION_SOURCE]:[])];
   const saved=await Promise.all(files.map(async f=>[f,await fs.readFile(path.join(source,f)).catch(e=>{if(e.code!=='ENOENT')throw e;return null;})]));
   const manifest=path.join(source,'cjpm.toml'),pkg=path.join(source,'packages/cjc/cjpm.toml');
+  // H1 links these fixed paths in the checkout. Move existing objects aside so
+  // even a failed compiler cannot overwrite objects belonging to the caller.
+  const shimDir=path.join(source,'runtime_shim');
+  const backup=seed?await fs.mkdtemp(path.join(shimDir,'.stage0-')):null;
+  const objects=[];
   let link;
   try{
     if(seed){
+      for(const name of ['cjselfhost_llvmshim.o','cjc_runtime_config.o','cjc_heap_defaults.o']){
+        const file=path.join(shimDir,name),prior=path.join(backup,name);
+        try{await fs.rename(file,prior);objects.push([file,prior]);}
+        catch(e){if(e.code!=='ENOENT')throw e;objects.push([file,null]);}
+      }
       const rootText=saved[0][1].toString(),pkgText=saved[2][1].toString();
       const so=host+'/runtime/lib/'+p.tuple+'/libcangjie-runtime'+p.shared;
       const supports=win||runCapture('nm',[...(p.os==='linux'?['-D']:['-gU']),so]).includes('CJ_MRT_CjRuntimeInitWithConfigV1');
       if(!win){
         const lib=path.join(native,'third_party/llvm',p.llvmDirectory,p.llvmLibrary);
-        link=path.join(source,'runtime_shim','h1-'+p.llvmLibrary);await fs.symlink(lib,link);
+        const linkFile=path.join(source,'runtime_shim','h1-'+p.llvmLibrary);
+        await fs.symlink(lib,linkFile);link=linkFile;
         await fs.writeFile(pkg,h1PackageLinkOptions(pkgText,{platform,source,linkFile:link,llvmLibraryFile:lib,hostRuntimeSupportsConfigV1:supports}));
       }
       await fs.writeFile(manifest,withSeedOptimization(rootText));
@@ -315,6 +326,11 @@ async function assemble(a){
     const build=()=>run(cjpm,['build','--target-dir',target,'-j',a.jobs||jobs],{cwd:source,env:cleanSdkEnvironment(seed?host:sdk,platform,env,host)});
     if(win)await withWindowsCompilerLinks(source,native,mingw,build);else build();
   }finally{
+    for(const [file,prior] of objects){
+      await fs.rm(file,{force:true});
+      if(prior)await fs.rename(prior,file);
+    }
+    if(backup)await fs.rmdir(backup);
     if(link)await fs.rm(link,{force:true});
     for(const [rel,before] of saved){const file=path.join(source,rel);if(before===null)await fs.rm(file,{force:true});else await fs.writeFile(file,before);}
   }

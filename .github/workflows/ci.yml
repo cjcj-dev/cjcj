@@ -34,7 +34,7 @@ jobs:
         import assert from 'node:assert/strict';
         import {loadPins,PLATFORMS} from './build/common.mjs';
         const {repos,hostSdk,crossSdks,toolchains}=loadPins();
-        for(const name of 'llvm runtime compiler stdx tools javaInterop bounds pcre2 flatbuffers h1'.split(' ')) assert.match(repos[name].sha,/^[0-9a-f]{40}$/);
+        for(const name of 'llvm runtime compiler stdx tools javaInterop bounds pcre2 flatbuffers'.split(' ')) assert.match(repos[name].sha,/^[0-9a-f]{40}$/);
         for(const p of Object.keys(PLATFORMS)){const h=hostSdk.platforms[p]; assert.ok(h.size>0 && h.url.endsWith(h.archive));assert.match(h.sha256,/^[0-9a-f]{64}$/);}
         for(const name of ['androidNdk','ohos','wasiSysroot']) assert.ok(crossSdks[name]);
         for(const name of 'node sccache cmakeMacos libxml2 windowsLlvmMingw linuxCrossMingw staticLibs python cjbind'.split(' ')) assert.ok(toolchains[name]);
@@ -95,10 +95,10 @@ jobs:
       run: node build/setup.mjs deps --platform "$PLATFORM" --mode full
     - name: Build and smoke test this checkout
       run: |-
-        node build/setup.mjs sources --repos h1,runtime,bounds,pcre2 --override "runtime=$(cat ../base/runtime.ref)" --out ../src
-        node build/build-compiler.mjs --stage stage0 --source ../src/h1 --host-sdk ../base/host --native ../base/native --runtime ../base/runtime --out ../stage0
+        node build/setup.mjs sources --repos runtime,bounds,pcre2 --override "runtime=$(cat ../base/runtime.ref)" --out ../src
+        node build/build-compiler.mjs --stage stage0 --host-sdk ../base/host --native ../base/native --runtime ../base/runtime --out ../stage0
         node build/build-stdlib.mjs --stage std-bootstrap --sources ../src --sdk ../stage0 --runtime ../base/runtime --out ../initial
-        rm -rf ../stage0
+        rm -rf ../stage0 ../stage0.target
         node build/build-stdlib.mjs --stage stage1-std --sources ../src --sdk ../initial --runtime ../base/runtime --out ../stage1
         node build/build-compiler.mjs --stage stage2 --sdk ../initial --std ../stage1 --native ../base/native --host-sdk ../base/host --out ../current
         node build/test-sdk.mjs --sdk ../current --mode smoke

@@ -89,7 +89,7 @@ jobs:
         node build/setup.mjs unpack --archive native-base.tar --dir ../base
         rm native-base.tar
     - name: Fetch bootstrap and SDK sources
-      run: node build/setup.mjs sources --out ../src --repos h1,runtime,bounds,pcre2,tools,stdx,javaInterop,compiler --override "runtime=$(cat ../base/runtime.ref)"
+      run: node build/setup.mjs sources --out ../src --repos runtime,bounds,pcre2,tools,stdx,javaInterop,compiler --override "runtime=$(cat ../base/runtime.ref)"
     - uses: ./.github/actions/native-windows-tools
       with:
         native-compiler: 'true'
@@ -102,12 +102,12 @@ jobs:
         java-version: '17'
       if: env.PLATFORM == 'linux-x64' || env.PLATFORM == 'windows-x64'
     - name: Build H1 with the official SDK
-      run: node build/build-compiler.mjs --stage stage0 --source ../src/h1 --host-sdk ../base/host --native ../base/native --runtime ../base/runtime --out
+      run: node build/build-compiler.mjs --stage stage0 --host-sdk ../base/host --native ../base/native --runtime ../base/runtime --out
         ../stage0
     - name: Bootstrap the standard library
       run: |-
         node build/build-stdlib.mjs --stage std-bootstrap --sources ../src --runtime ../base/runtime --sdk ../stage0 --out ../initial
-        rm -rf ../stage0
+        rm -rf ../stage0 ../stage0.target
     - name: Rebuild the standard library using the bootstrap modules
       run: |-
         node build/build-stdlib.mjs --stage stage1-std --sources ../src --runtime ../base/runtime --sdk ../initial --out ../stage1
