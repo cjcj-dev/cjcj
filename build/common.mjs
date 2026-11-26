@@ -163,10 +163,18 @@ export function sdkEnvironment(sdk, platform, base = process.env, runtimeRoot = 
     ...(native.loader === 'PATH' ? {} : {[native.loader]:[...libraries,base[native.loader]].filter(Boolean).join(delimiter)})};
 }
 
+export const darwinX64OnArm = p => p.key==='darwin-x64' && process.arch==='arm64';
+export const homebrewPrefix = () => process.arch==='arm64'?'/opt/homebrew':'/usr/local';
+export function checkDarwinX64(file,{thin=false}={}) {
+  const archs=runCapture('lipo',['-archs',file]).trim();
+  if(!(thin?archs==='x86_64':archs.split(/\s+/).includes('x86_64')))
+    throw Error(file+': expected '+(thin?'only ':'')+'x86_64, got '+archs);
+}
+
 function appendMacBinutils(clean,native) {
   if(native.os!=='darwin')return;
   // Use keg-only tools such as llvm-ranlib only after the SDK and host tools.
-  const keg=(native.arch==='arm64'?'/opt/homebrew':'/usr/local')+'/opt/llvm@16/bin';
+  const keg=homebrewPrefix()+'/opt/llvm@16/bin';
   const hostPath=clean.PATH?clean.PATH.split(':').filter(dir=>dir!==keg):[];
   clean.PATH=[...hostPath,keg].join(':');
 }

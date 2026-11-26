@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import {repo,loadPins,parseCliArgs,sdkPlatform,nativeBuildEnvironment,pathEnvironment,resolveHostPython,run,runCapture,downloadFile,extractArchive,ensureDir,copySource,copyTree,jobs} from './common.mjs';
+import {repo,loadPins,parseCliArgs,sdkPlatform,darwinX64OnArm,checkDarwinX64,nativeBuildEnvironment,pathEnvironment,resolveHostPython,run,runCapture,downloadFile,extractArchive,ensureDir,copySource,copyTree,jobs} from './common.mjs';
 
 const a=parseCliArgs(),p=sdkPlatform(a.platform),win=p.os==='win32',mac=p.os==='darwin';
 const sources=path.resolve(a.sources),out=path.resolve(a.out),work=path.resolve(a.work||out+'.build');
@@ -45,10 +45,20 @@ const conf=runCapture(pyExe,['-I','-c','import sys,sysconfig,ssl,_ctypes; assert
 const pyArgs=['-DPython3_EXECUTABLE='+pyExe,'-DPython3_INCLUDE_DIR='+python+(win?'/include':'/include/python3.11'),'-DPython3_LIBRARY='+python+(win?'/libs/python311.lib':mac?'/lib/libpython3.11.dylib':'/lib/libpython3.11.so')];
 const launch=['-DCMAKE_C_COMPILER_LAUNCHER='+(env.CMAKE_C_COMPILER_LAUNCHER||''),'-DCMAKE_CXX_COMPILER_LAUNCHER='+(env.CMAKE_CXX_COMPILER_LAUNCHER||'')];
 const ar=win?['-DCMAKE_AR='+bin+'/llvm-ar.exe','-DCMAKE_RANLIB='+bin+'/llvm-ranlib.exe']:[];
-const child=[...launch,'-DLLVM_PARALLEL_LINK_JOBS=1','-DCJ_LLVM_COMMIT='+sha,'-DCANGJIE_RUNTIME_SOURCE_DIR='+runtime,...(win?['-DCOMPILER_RT_INCLUDE_TESTS=OFF','-DLLVM_SPLIT_LLVM_DYLIB=ON']:[])];
-const lldb=[...ar,...pyArgs,...launch,'-DLLVM_PARALLEL_LINK_JOBS=1','-DLLDB_PYTHON_EXT_SUFFIX='+conf,'-DClang_DIR='+llvmBuild+'/lib/cmake/clang',
+const intelMac=darwinX64OnArm(p),triple='x86_64-apple-darwin';
+let toolchain=compiler+'/cmake/'+(win?'mingw_x86_64':p.platform)+'_toolchain.cmake';
+const targetArgs=intelMac?['-DCMAKE_OSX_ARCHITECTURES=x86_64','-DLLVM_HOST_TRIPLE='+triple,
+  '-DLLVM_DEFAULT_TARGET_TRIPLE='+triple,'-DCMAKE_SYSTEM_PROCESSOR=x86_64']:[];
+if(intelMac){
+  // Xml2 configures separately with this same file. Rosetta can run the generated tools.
+  const wrapper=work+'/darwin_x86_64_cross_toolchain.cmake';
+  fs.writeFileSync(wrapper,'set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "" FORCE)\ninclude("'+toolchain+'")\nset(CMAKE_CROSSCOMPILING OFF)\n');
+  toolchain=wrapper;
+}
+const child=[...targetArgs,...launch,'-DLLVM_PARALLEL_LINK_JOBS=1','-DCJ_LLVM_COMMIT='+sha,'-DCANGJIE_RUNTIME_SOURCE_DIR='+runtime,...(win?['-DCOMPILER_RT_INCLUDE_TESTS=OFF','-DLLVM_SPLIT_LLVM_DYLIB=ON']:[])];
+const lldb=[...targetArgs,...ar,...pyArgs,...launch,'-DLLVM_PARALLEL_LINK_JOBS=1','-DLLDB_PYTHON_EXT_SUFFIX='+conf,'-DClang_DIR='+llvmBuild+'/lib/cmake/clang',
   '-DLLVM_TABLEGEN='+llvmBuild+'/bin/llvm-tblgen'+p.exe,'-DLIBXML2_INCLUDE_DIR='+build+'/third_party/xml2/include/libxml2','-DLIBXML2_LIBRARY='+build+'/third_party/xml2/lib/libxml2'+(win?'.dll.a':p.shared)];
-const args=['-G','Ninja','-S',compiler,'-B',build,'-DCMAKE_BUILD_TYPE=Release','-DCMAKE_TOOLCHAIN_FILE='+compiler+'/cmake/'+(win?'mingw_x86_64':p.platform)+'_toolchain.cmake',
+const args=['-G','Ninja','-S',compiler,'-B',build,'-DCMAKE_BUILD_TYPE=Release','-DCMAKE_TOOLCHAIN_FILE='+toolchain,
   '-DCMAKE_C_COMPILER='+cc,'-DCMAKE_CXX_COMPILER='+cxx,...launch,...ar,'-DCANGJIE_BUILD_CJC=ON','-DCANGJIE_BUILD_STD_SUPPORT=ON','-DCANGJIE_BUILD_CJDB=ON','-DCANGJIE_BUILD_TESTS=OFF',
   '-DCJCJ_NATIVE_NODE='+process.execPath,'-DCJ_LLVM_COMMIT='+sha,'-DCANGJIE_CJNATIVE_SOURCE_DIR='+llvm,'-DCANGJIE_RUNTIME_SOURCE_DIR='+runtime,'-DCANGJIE_XML2_SOURCE_DIR='+xml,
   '-DCANGJIE_LLVM_BUILD_TYPE=Release','-DCANGJIE_CJDB_BUILD_TYPE=Release','-DCANGJIE_LLVM_BUILD_ARGS='+child.join(';'),'-DCJCJ_LLDB_ARGS='+lldb.join(';'),
@@ -98,10 +108,11 @@ ensureDir(fixed);ensureDir(headers+'/flatbuffers');
 const clean={...process.env};for(const k of ['CPATH','CPLUS_INCLUDE_PATH','C_INCLUDE_PATH','OBJC_INCLUDE_PATH','LD_LIBRARY_PATH','DYLD_LIBRARY_PATH'])delete clean[k];
 run(out+'/third_party/flatbuffers/bin/flatc'+p.exe,['--no-warnings','-c','-o',headers+'/flatbuffers',compiler+'/schema/CjoFormat.fbs'],{env:clean});
 const launcher=env.CMAKE_CXX_COMPILER_LAUNCHER;
-run(launcher||cxx,[...(launcher?[cxx]:[]),'-std=c++17','-O2',...(!win?['-fPIC']:[]),'-fno-rtti','-fno-exceptions',
+run(launcher||cxx,[...(launcher?[cxx]:[]),...(intelMac?['-arch','x86_64']:[]),'-std=c++17','-O2',...(!win?['-fPIC']:[]),'-fno-rtti','-fno-exceptions',
   ...(/^LLVM_ENABLE_ASSERTIONS:BOOL=ON$/m.test(fs.readFileSync(llvmBuild+'/CMakeCache.txt','utf8'))?[]:['-DNDEBUG']),
   ...[llvm+'/llvm/include',llvmBuild+'/include',sources+'/flatbuffers/include',headers].map(dir=>'-I'+dir),'-c',repo+'/runtime_shim/cjselfhost_llvmshim.cpp','-o',object],{env:clean});
 const tool=name=>llvmBuild+'/bin/'+name+p.exe,library=native+'/'+p.llvmDirectory+'/'+p.llvmLibrary;
+if(intelMac)for(const file of [library,native+'/lib/liblldb.dylib',native+'/bin/llc',native+'/lib/libxml2.dylib',object])checkDarwinX64(file);
 const symbols=runCapture(tool(win?'llvm-readobj':'llvm-nm'),win?['--coff-exports',library]:[...(!mac?['--dynamic']:[]),'--defined-only','--extern-only',library]);
 if(!symbols.includes('LLVMInitializeX86TargetInfo'))throw Error('missing libLLVM X86 target export');
 const exports=runCapture(tool('llvm-nm'),['--defined-only','--extern-only',object]);

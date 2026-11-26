@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import {parseCliArgs,sdkPlatform,crossTuples,nativeBuildEnvironment,loadPins,jobs,copySource,copyTree,ensureDir,run,runCapture,resolveHostPython} from './common.mjs';
+import {parseCliArgs,sdkPlatform,darwinX64OnArm,checkDarwinX64,crossTuples,nativeBuildEnvironment,loadPins,jobs,copySource,copyTree,ensureDir,run,runCapture,resolveHostPython} from './common.mjs';
 
 const a=parseCliArgs(),p=sdkPlatform(a.platform),cross=a.cross,tuple=cross?crossTuples[cross]:p.tuple;
 if(!tuple)throw Error('unknown cross target: '+cross);
@@ -19,6 +19,7 @@ if(cross==='wasm32-wasi'){
   run(bin+'/llvm-ar',['s',out+'/runtime/lib/'+tuple+'/libcangjie-runtime.a'],opts);
 }else{
   const windows=(cross||p.key)==='windows-x64',ios=cross?.startsWith('ios-'),ohos=cross?.startsWith('ohos-');
+  const intelMac=!cross && darwinX64OnArm(p);
   const target=cross==='windows-x64'?'windows-x86_64':cross||(windows?'windows-x86_64':'native');
   const args=['build','--target',target,'--build-type','release','--prefix',cwd+'/output/common','-v',version];
   const arch=tuple.includes('aarch64')?'aarch64':'x86_64',suffix=windows?'.dll':ios||(!cross&&p.os==='darwin')?'.dylib':'.so';
@@ -69,11 +70,12 @@ if(cross==='wasm32-wasi'){
         if(!found)throw Error('missing '+name);copyTree(build+'/cjthread-build/'+found,dest);
       }
     }
+    if(intelMac)for(const name of ['libcangjie-runtime','libboundscheck'])checkDarwinX64(lib+'/'+name+suffix,{thin:true});
     const probe=work+'/load'+p.exe;
     fs.writeFileSync(work+'/load.cpp',[
       '#ifdef _WIN32','#include <windows.h>','int main(int n,char**v){auto h=LoadLibraryA(v[1]);return !(h&&GetProcAddress(h,v[2]));}',
       '#else','#include <dlfcn.h>','#include <cstdio>','int main(int n,char**v){auto h=dlopen(v[1],RTLD_NOW);if(!h){puts(dlerror());return 1;}return !dlsym(h,v[2]);}','#endif'].join('\n'));
-    run(windows?path.join(env.CJCJ_NATIVE_LLVM_BIN,'clang++.exe'):(env.CXX||'c++'),[work+'/load.cpp','-o',probe,...(windows?['-static']:p.os==='linux'?['-ldl']:['-isysroot',env.SDKROOT])]);
+    run(windows?path.join(env.CJCJ_NATIVE_LLVM_BIN,'clang++.exe'):(env.CXX||'c++'),[work+'/load.cpp','-o',probe,...(windows?['-static']:p.os==='linux'?['-ldl']:[...(intelMac?['-arch','x86_64']:[]),'-isysroot',env.SDKROOT])]);
     for(const [name,sym] of [['libcangjie-runtime','CJ_MCC_HandleReturnSafepoint'],['libboundscheck','memset_s']])
       run(probe,[lib+'/'+name+suffix,sym],{env:{...env,[p.loader]:[lib,...(windows?[env.CJCJ_NATIVE_LLVM_BIN,env.PATH]:[])].join(path.delimiter)}});
   }

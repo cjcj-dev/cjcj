@@ -3,6 +3,7 @@ import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import test from 'node:test';
 import {repo,compilerHeap,sdkPlatform} from '../../build/common.mjs';
 
@@ -97,6 +98,7 @@ if sys.argv[1]=='install':
 
 test('macOS installs Python dependencies from the formula union before the requested packages',{skip:process.platform==='win32'},t=>{
   const dir=fixture(t),log=dir+'/brew.log';
+  put(dir+'/arch','#!/bin/sh\nexit 0\n',0o755);
   put(dir+'/brew',`#!${process.execPath}
 const fs=require('node:fs'),args=process.argv.slice(2);
 fs.appendFileSync(process.env.BREW_LOG,JSON.stringify(args)+'\\n');
@@ -157,4 +159,126 @@ test('Windows runtime load probes preserve a Path-only host environment',linux,t
     assert.deepEqual(Object.keys(row),['PATH'],'duplicate Windows Path key at load probe');
     assert.ok(row.PATH.endsWith(original),'load probe lost system PATH');
   }
+});
+
+// Run the stage entry on a simulated Apple Silicon host. Record the arguments at
+// the subprocess boundary; these fixtures do not compile or execute Mach-O code.
+function darwinStage(dir,name,args,respond,extra={},options=[]){
+  const preload=dir+'/host.mjs',log=dir+'/calls';
+  put(preload,`
+import fs from 'node:fs';
+import cp from 'node:child_process';
+Object.defineProperty(process,'arch',{value:'arm64'});
+Object.defineProperty(process,'platform',{value:'darwin'});
+cp.spawnSync=(cmd,args,opts)=>{
+  const env=opts?.env??process.env;
+  fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({cmd,args,path:env.PATH})+'\\n');
+  ${respond}
+  return {status:0,stdout:''};
+};
+`);
+  const child=spawnSync(process.execPath,[...options,'--import',preload,path.join(repo,'build',name+'.mjs'),...args],{
+    cwd:repo,encoding:'utf8',env:{...process.env,SDKROOT:'/fixture/MacOSX.sdk',...extra}
+  });
+  return {child,calls:fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse)};
+}
+
+for(const platform of ['darwin-arm64','darwin-x64']){
+  test('Apple Silicon LLVM stages: '+platform,{skip:process.platform==='win32'},t=>{
+    const dir=fixture(t),src=dir+'/sources',work=dir+'/work',out=dir+'/out';
+    put(src+'/bounds/header');put(src+'/flatbuffers/header');
+    const llvm=out+'/third_party/llvm';
+    for(const name of ['llvm-ar','llvm-ranlib','llvm-nm','wasm-ld'])put(llvm+'/bin/'+name);
+    for(const rel of ['lldb/__init__.py','six.py'])put(llvm+'/lib/python3.11/site-packages/'+rel);
+    put(work+'/compiler/third_party/cjnative-prefix/src/cjnative-build/CMakeCache.txt');
+
+    // Skip downloading the pinned archives; the stage still constructs the real CMake command.
+    const loader=dir+'/archives.mjs';
+    const common=pathToFileURL(path.join(repo,'build/common.mjs')).href;
+    put(dir+'/fixture-common.mjs',`export * from ${JSON.stringify(common)}; export const downloadFile=async()=>{};`);
+    put(loader,`import {registerHooks} from 'node:module';
+registerHooks({resolve(specifier,ctx,next){
+  return next(specifier==='./common.mjs' && ctx.parentURL?.endsWith('/build/build-llvm.mjs')
+    ? new URL('./fixture-common.mjs',import.meta.url).href : specifier,ctx);
+}});`);
+    const {child,calls}=darwinStage(dir,'build-llvm',['--platform',platform,'--sources',src,'--work',work,'--out',out],
+      "if(cmd==='lipo')return {status:0,stdout:'arm64 x86_64'}; if(cmd.endsWith('/llvm-nm'))return {status:42};",
+      {CMAKE_CXX_COMPILER_LAUNCHER:'sccache'},['--import',loader]);
+    assert.equal(child.status,1);assert.match(child.stderr,/llvm-nm .* exited 42/);
+    const configure=calls.find(c=>c.cmd==='cmake'),args=configure.args;
+    assert.ok(configure.path.endsWith(':/opt/homebrew/opt/llvm@16/bin'));
+    assert.ok(args.includes('-DCMAKE_CXX_COMPILER=/usr/bin/clang++'));
+    const value=key=>args.find(a=>a.startsWith('-D'+key+'=')).slice(key.length+3);
+    const wrapper=value('CMAKE_TOOLCHAIN_FILE'),intel=platform==='darwin-x64';
+    if(intel)assert.deepEqual(fs.readFileSync(wrapper,'utf8').trimEnd().split('\n'),[
+      'set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "" FORCE)',
+      'include("'+src+'/compiler/cmake/darwin_x86_64_toolchain.cmake")','set(CMAKE_CROSSCOMPILING OFF)']);
+    else assert.equal(wrapper,src+'/compiler/cmake/darwin_aarch64_toolchain.cmake');
+    for(const key of ['CANGJIE_LLVM_BUILD_ARGS','CJCJ_LLDB_ARGS']){
+      const childArgs=value(key).split(';');
+      assert.ok(childArgs.includes('-DCMAKE_CXX_COMPILER_LAUNCHER=sccache'));
+      for(const flag of ['-DCMAKE_OSX_ARCHITECTURES=x86_64','-DLLVM_HOST_TRIPLE=x86_64-apple-darwin',
+        '-DLLVM_DEFAULT_TARGET_TRIPLE=x86_64-apple-darwin','-DCMAKE_SYSTEM_PROCESSOR=x86_64'])
+        assert.equal(childArgs.includes(flag),intel,key+' '+flag);
+    }
+    const shim=calls.find(c=>c.cmd==='sccache').args,i=shim.indexOf('-arch');
+    assert.equal(shim[0],'/usr/bin/clang++');assert.equal(i!==-1,intel);
+    if(intel)assert.equal(shim[i+1],'x86_64');
+    const slices=calls.filter(c=>c.cmd==='lipo').map(c=>c.args);
+    assert.deepEqual(slices,intel?['lib/libLLVM.dylib','lib/liblldb.dylib','bin/llc','lib/libxml2.dylib',
+      'fixed-llc/cjselfhost_llvmshim.o'].map(rel=>['-archs',llvm+'/'+rel]):[]);
+
+  });
+}
+
+test('Rosetta is probed before the first Intel binary runs',{skip:process.platform==='win32'},t=>{
+  for(const installed of [true,false]){
+    const dir=fixture(t);
+    const {child,calls}=darwinStage(dir,'setup',['deps','--platform','darwin-x64','--mode','prepare'],`
+      if(cmd==='arch')return {status:${installed} || fs.existsSync('${dir}/installed')?0:1};
+      if(cmd==='softwareupdate')fs.writeFileSync('${dir}/installed','');
+      if(cmd==='brew')return {status:42};`);
+    assert.match(child.stderr,/brew deps .* exited 42/);
+    const probe=['arch','-x86_64','/usr/bin/true'];
+    assert.deepEqual(calls.slice(0,-1).map(({cmd,args})=>[cmd,...args]),
+      installed?[probe]:[probe,['softwareupdate','--install-rosetta','--agree-to-license'],probe]);
+  }
+});
+
+test('cjbind uses Intel Python and checks the installed executable',{skip:process.platform==='win32'},t=>{
+  for(const arch of ['x86_64','arm64']){
+    const dir=fixture(t),out=dir+'/tools';
+    put(out+'.src/target/release/bin/main');
+    const {child,calls}=darwinStage(dir,'setup',['cjbind','--platform','darwin-x64','--host-sdk',dir+'/sdk','--out',out],
+      `if(cmd==='lipo')return {status:0,stdout:'${arch}'};`);
+    assert.equal(child.status,arch==='x86_64'?0:1,child.stderr);
+    if(arch==='arm64')assert.match(child.stderr,/cjbind: expected only x86_64, got arm64/);
+    const uv=calls.filter(c=>c.cmd==='uv');
+    assert.deepEqual(uv.map(c=>c.args[3]),['python','./scripts/download.py','./scripts/cjpm.py']);
+    for(const c of uv){
+      assert.deepEqual(c.args.slice(0,3),['run','--python','cpython-3.13-macos-x86_64']);
+      assert.ok(c.path.endsWith(':/opt/homebrew/opt/llvm@16/bin'));
+    }
+    assert.deepEqual(calls.at(-1).args,['-archs',out+'/cjbind']);
+  }
+});
+
+test('Intel runtime stages boundscheck and loads both thin libraries',{skip:process.platform==='win32'},t=>{
+  const dir=fixture(t),src=dir+'/sources',out=dir+'/runtime',tuple='darwin_x86_64_cjnative';
+  const lib=out+'/runtime/lib/'+tuple;
+  put(src+'/bounds/header');
+  put(src+'/runtime/runtime/CMakebuild/runtime-staging/lib/x86_64_Release/libboundscheck.dylib','staged');
+  put(lib+'/libcangjie-runtime.dylib');
+  for(const name of ['libcangjie-thread.a','libcangjie-aio.a'])put(out+'/lib/'+tuple+'/'+name);
+  const {child,calls}=darwinStage(dir,'build-runtime',['--platform','darwin-x64','--sources',src,'--out',out],`
+    if(cmd==='lipo')return {status:0,stdout:'x86_64'};
+    if(cmd==='xcrun')return {status:0,stdout:'/fixture/MacOSX.sdk'};`);
+  assert.equal(child.status,0,child.stderr);
+  assert.equal(fs.readFileSync(lib+'/libboundscheck.dylib','utf8'),'staged');
+  assert.deepEqual(calls.filter(c=>c.cmd==='lipo').map(c=>c.args),[
+    ['-archs',lib+'/libcangjie-runtime.dylib'],['-archs',lib+'/libboundscheck.dylib']]);
+  const cc=calls.find(c=>c.cmd==='/usr/bin/clang++').args,i=cc.indexOf('-arch');
+  assert.ok(i>=0);assert.equal(cc[i+1],'x86_64');
+  assert.deepEqual(calls.filter(c=>c.cmd===out+'.work/load').map(c=>c.args),[
+    [lib+'/libcangjie-runtime.dylib','CJ_MCC_HandleReturnSafepoint'],[lib+'/libboundscheck.dylib','memset_s']]);
 });

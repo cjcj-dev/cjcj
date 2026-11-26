@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import {loadPins,parseCliArgs,sdkPlatform,repo,cleanSdkEnvironment,resolveHostPython,jobs,run,runCapture,ensureDir,copyTree} from './common.mjs';
+import {loadPins,parseCliArgs,sdkPlatform,homebrewPrefix,repo,cleanSdkEnvironment,resolveHostPython,jobs,run,runCapture,ensureDir,copyTree} from './common.mjs';
 
 const a=parseCliArgs(),p=sdkPlatform(a.platform),src=path.resolve(a.sources),sdk=path.resolve(a.sdk),host=path.resolve(a['host-sdk']||sdk);
 const work=path.resolve(a.work||sdk+'.extras'),env=cleanSdkEnvironment(sdk,p.key),py=await resolveHostPython(sdk),j=a.jobs||jobs;
 const cwd=src+'/stdx',opts={cwd,env};ensureDir(work);
 const setupSource=src+'/compiler/utils/envsetup/llvm_'+(p.os==='win32'?'windows_x86_64':p.os);
 for(const ext of p.os==='win32'?['sh','bat','ps1']:['sh'])copyTree(setupSource+'.'+ext,sdk+'/envsetup.'+ext);
-const openssl=p.os==='linux'?'/usr/lib/'+(p.arch==='arm64'?'aarch64':'x86_64')+'-linux-gnu':p.os==='win32'?env.CJCJ_NATIVE_OPENSSL_LIB:(p.arch==='arm64'?'/opt/homebrew':'/usr/local')+'/opt/openssl@3/lib';
+const openssl=p.os==='linux'?'/usr/lib/'+(p.arch==='arm64'?'aarch64':'x86_64')+'-linux-gnu':p.os==='win32'?env.CJCJ_NATIVE_OPENSSL_LIB:(env.CJCJ_NATIVE_OPENSSL_LIB||homebrewPrefix()+'/opt/openssl@3/lib');
 Object.assign(env,{CANGJIE_BUILD_JOBS:j,STDX_HOST_CANGJIE_HOME:host});
 for(const key of ['CFLAGS','CXXFLAGS'])env[key]=[env[key],'-ffile-prefix-map='+src+'=.','-fdebug-compilation-dir=.'].filter(Boolean).join(' ');
 if(p.os==='linux')Object.assign(env,{LDFLAGS:'-fuse-ld=lld',CC:'/usr/lib/llvm-15/bin/clang',CXX:'/usr/lib/llvm-15/bin/clang++'});

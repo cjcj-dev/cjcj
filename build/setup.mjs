@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import {run,runCapture,loadPins,parseCliArgs,sdkPlatform,cleanSdkEnvironment,downloadFile,extractArchive,extractSdkArchive,tar,pathEnvironment,
+import {run,runCapture,loadPins,parseCliArgs,sdkPlatform,darwinX64OnArm,checkDarwinX64,cleanSdkEnvironment,downloadFile,extractArchive,extractSdkArchive,tar,pathEnvironment,
   gitFetchCommit,ensureDir,copyTree,appendGithubPath,appendGithubEnv,jobs,main,resolveHostPython} from './common.mjs';
 
 const {toolchains:t,hostSdk,crossSdks,repos}=loadPins();
@@ -20,6 +20,10 @@ async function deps(p,mode) {
     run('sudo',['apt-get','update','-qq']);
     run('sudo',['env','DEBIAN_FRONTEND=noninteractive','apt-get','install','-y','--no-install-recommends',...packages,...(old?['libtinfo5','libncurses5-dev']:['libtinfo6','libncurses-dev'])]);
   }else if(p.os==='darwin'){
+    if(darwinX64OnArm(p)){
+      const probe=()=>run('arch',['-x86_64','/usr/bin/true']);
+      try { probe(); } catch { run('softwareupdate',['--install-rosetta','--agree-to-license']);probe(); }
+    }
     const pkgs=['ninja','llvm@16','openssl@3','bison','googletest','gnu-tar','swig','coreutils',...(p.arch==='x64'?['uv']:[])];
     const deps=runCapture('brew',['deps','--formula','--union',...pkgs]).split(/\s+/).filter(s=>/^python@\d+\.\d+$/.test(s));
     run('brew',['install','--skip-link',...new Set(['python@3.11',...deps])]);run('brew',['install',...pkgs]);
@@ -117,9 +121,12 @@ async function setup(a) {
     if(p.key==='darwin-x64'){
       const pin=t.cjbind['darwin-x64-source'],src=out+'.src';gitFetchCommit(pin.url,pin.sha,src);
       const opts={cwd:src,env:cleanSdkEnvironment(path.resolve(a['host-sdk']),p.key)};
-      run('uv',['run','--python','3.13','./scripts/download.py'],opts);
-      run('uv',['run','--python','3.13','./scripts/cjpm.py','build','--cfg_verbose','-V'],opts);
+      const uv=['run','--python',darwinX64OnArm(p)?'cpython-3.13-macos-x86_64':'3.13'];
+      if(darwinX64OnArm(p))run('uv',[...uv,'python','-I','-c','import platform; assert platform.machine() == "x86_64", platform.machine()'],opts);
+      run('uv',[...uv,'./scripts/download.py'],opts);
+      run('uv',[...uv,'./scripts/cjpm.py','build','--cfg_verbose','-V'],opts);
       copyTree(src+'/target/release/bin/main',file);
+      if(darwinX64OnArm(p))checkDarwinX64(file,{thin:true});
     }else {const pin=t.cjbind[p.key];await downloadFile(pin.url,file,pin);}
     fs.chmodSync(file,0o755);
   }else throw Error('unknown setup command '+sub);
