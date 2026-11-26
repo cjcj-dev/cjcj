@@ -172,7 +172,7 @@ Object.defineProperty(process,'arch',{value:'arm64'});
 Object.defineProperty(process,'platform',{value:'darwin'});
 cp.spawnSync=(cmd,args,opts)=>{
   const env=opts?.env??process.env;
-  fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({cmd,args,path:env.PATH})+'\\n');
+  fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({cmd,args,path:env.PATH,arch:env.CMAKE_OSX_ARCHITECTURES,processor:env.CMAKE_APPLE_SILICON_PROCESSOR})+'\\n');
   ${respond}
   return {status:0,stdout:''};
 };
@@ -210,6 +210,7 @@ registerHooks({resolve(specifier,ctx,next){
     assert.ok(args.includes('-DCMAKE_CXX_COMPILER=/usr/bin/clang++'));
     const value=key=>args.find(a=>a.startsWith('-D'+key+'=')).slice(key.length+3);
     const wrapper=value('CMAKE_TOOLCHAIN_FILE'),intel=platform==='darwin-x64';
+    if(intel){assert.equal(configure.arch,'x86_64');assert.equal(configure.processor,'x86_64');}
     if(intel)assert.deepEqual(fs.readFileSync(wrapper,'utf8').trimEnd().split('\n'),[
       'set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "" FORCE)',
       'include("'+src+'/compiler/cmake/darwin_x86_64_toolchain.cmake")','set(CMAKE_CROSSCOMPILING OFF)']);
@@ -225,8 +226,8 @@ registerHooks({resolve(specifier,ctx,next){
     assert.equal(shim[0],'/usr/bin/clang++');assert.equal(i!==-1,intel);
     if(intel)assert.equal(shim[i+1],'x86_64');
     const slices=calls.filter(c=>c.cmd==='lipo').map(c=>c.args);
-    assert.deepEqual(slices,intel?['lib/libLLVM.dylib','lib/liblldb.dylib','bin/llc','lib/libxml2.dylib',
-      'fixed-llc/cjselfhost_llvmshim.o'].map(rel=>['-archs',llvm+'/'+rel]):[]);
+    assert.deepEqual(slices,intel?['../flatbuffers/bin/flatc','lib/libLLVM.dylib','lib/liblldb.dylib','bin/llc','lib/libxml2.dylib',
+      'fixed-llc/cjselfhost_llvmshim.o'].map(rel=>['-archs',path.join(llvm,rel)]):[]);
 
   });
 }
@@ -274,6 +275,12 @@ test('Intel runtime stages boundscheck and loads both thin libraries',{skip:proc
     if(cmd==='lipo')return {status:0,stdout:'x86_64'};
     if(cmd==='xcrun')return {status:0,stdout:'/fixture/MacOSX.sdk'};`);
   assert.equal(child.status,0,child.stderr);
+  const invocations=calls.filter(c=>c.args.includes('build.py'));
+  assert.deepEqual(invocations.map(c=>[c.cmd,...c.args.slice(0,5)]),['build','install'].map(op=>
+    ['arch','-x86_64','/usr/bin/python3','-I','build.py',op]));
+  assert.deepEqual(invocations[0].args.slice(4,7),['build','--target','native']);
+  assert.match(fs.readFileSync(out+'.work/runtime.cmake','utf8'),/^set\(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "" FORCE\)$/m);
+  for(const c of invocations){assert.equal(c.arch,'x86_64');assert.equal(c.processor,'x86_64');}
   assert.equal(fs.readFileSync(lib+'/libboundscheck.dylib','utf8'),'staged');
   assert.deepEqual(calls.filter(c=>c.cmd==='lipo').map(c=>c.args),[
     ['-archs',lib+'/libcangjie-runtime.dylib'],['-archs',lib+'/libboundscheck.dylib']]);

@@ -9,7 +9,13 @@ const sources=path.resolve(a.sources),cwd=path.join(sources,'runtime/runtime'),o
 const build=cwd+'/CMakebuild',work=out+'.work';
 ensureDir(work);copySource(sources+'/bounds',cwd+'/third_party/third_party_bounds_checking_function');
 const version=loadPins().runtimeVersion,env={...nativeBuildEnvironment(p),RUNTIME_VERSION:version,CANGJIE_BUILD_JOBS:a.jobs||jobs};
-const opts={cwd,env},python=await resolveHostPython(a.sdk,env);
+// The pinned runtime derives its native target from platform.machine().
+const intelMac=!cross && darwinX64OnArm(p);
+const opts={cwd,env},python=intelMac?'/usr/bin/python3':await resolveHostPython(a.sdk,env);
+if(intelMac){
+  env.CMAKE_OSX_ARCHITECTURES='x86_64';
+  env.CMAKE_APPLE_SILICON_PROCESSOR='x86_64';
+}
 if(cross==='wasm32-wasi'){
   const bin=path.resolve(a.sdk,'third_party/llvm/bin');
   env.LD_LIBRARY_PATH=[path.resolve(a.sdk,'third_party/llvm/lib'),env.LD_LIBRARY_PATH].filter(Boolean).join(':');
@@ -19,7 +25,6 @@ if(cross==='wasm32-wasi'){
   run(bin+'/llvm-ar',['s',out+'/runtime/lib/'+tuple+'/libcangjie-runtime.a'],opts);
 }else{
   const windows=(cross||p.key)==='windows-x64',ios=cross?.startsWith('ios-'),ohos=cross?.startsWith('ohos-');
-  const intelMac=!cross && darwinX64OnArm(p);
   const target=cross==='windows-x64'?'windows-x86_64':cross||(windows?'windows-x86_64':'native');
   const args=['build','--target',target,'--build-type','release','--prefix',cwd+'/output/common','-v',version];
   const arch=tuple.includes('aarch64')?'aarch64':'x86_64',suffix=windows?'.dll':ios||(!cross&&p.os==='darwin')?'.dylib':'.so';
@@ -27,6 +32,7 @@ if(cross==='wasm32-wasi'){
   if(!cross){
     let cmake=windows?'cmake_minimum_required(VERSION 3.29)\nset(CMAKE_LINKER_TYPE LLD)\n':'';
     if(p.os==='darwin')cmake+='set(CMAKE_C_COMPILER /usr/bin/clang CACHE FILEPATH "" FORCE)\nset(CMAKE_CXX_COMPILER /usr/bin/clang++ CACHE FILEPATH "" FORCE)\n';
+    if(intelMac)cmake+='set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "" FORCE)\n';
     if(env.SCCACHE_PATH) for(const key of ['CANGJIE_COMPILER_CACHE','CMAKE_C_COMPILER_LAUNCHER','CMAKE_CXX_COMPILER_LAUNCHER'])
       cmake+='set('+key+' "$ENV{SCCACHE_PATH}" CACHE STRING "" FORCE)\n';
     fs.writeFileSync(toolchain,cmake);env.CMAKE_TOOLCHAIN_FILE=toolchain.replaceAll('\\','/');
@@ -51,7 +57,8 @@ if(cross==='wasm32-wasi'){
   function buildPy(args){
     if(!cross && windows){
       run(env.MSYS2_BASH,['--login','-c','set -eu; export PATH="/mingw64/bin:/usr/bin:$PATH"; [[ "$(git --version)" == *.windows.* ]]; cd "$1"; shift; exec "$@"','build-runtime',cwd.replaceAll('\\','/'),python.replaceAll('\\','/'),'build.py',...args.map(x=>x.replaceAll('\\','/'))],opts);
-    }else run(python,['-I','build.py',...args],opts);
+    }else if(intelMac)run('arch',['-x86_64',python,'-I','build.py',...args],opts);
+    else run(python,['-I','build.py',...args],opts);
   }
   if(cross)buildPy(['clean']);buildPy(args);buildPy(['install','--prefix',out]);
   const lib=out+'/runtime/lib/'+tuple,staging=build+'/runtime-staging/'+(windows?'bin':'lib')+'/'+arch+'_Release';

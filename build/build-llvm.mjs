@@ -50,6 +50,10 @@ let toolchain=compiler+'/cmake/'+(win?'mingw_x86_64':p.platform)+'_toolchain.cma
 const targetArgs=intelMac?['-DCMAKE_OSX_ARCHITECTURES=x86_64','-DLLVM_HOST_TRIPLE='+triple,
   '-DLLVM_DEFAULT_TARGET_TRIPLE='+triple,'-DCMAKE_SYSTEM_PROCESSOR=x86_64']:[];
 if(intelMac){
+  // flatc configures without the parent toolchain. Give nested CMake processes
+  // the same target architecture even when they initialize their own caches.
+  env.CMAKE_OSX_ARCHITECTURES='x86_64';
+  env.CMAKE_APPLE_SILICON_PROCESSOR='x86_64';
   // Xml2 configures separately with this same file. Rosetta can run the generated tools.
   const wrapper=work+'/darwin_x86_64_cross_toolchain.cmake';
   fs.writeFileSync(wrapper,'set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "" FORCE)\ninclude("'+toolchain+'")\nset(CMAKE_CROSSCOMPILING OFF)\n');
@@ -112,7 +116,7 @@ run(launcher||cxx,[...(launcher?[cxx]:[]),...(intelMac?['-arch','x86_64']:[]),'-
   ...(/^LLVM_ENABLE_ASSERTIONS:BOOL=ON$/m.test(fs.readFileSync(llvmBuild+'/CMakeCache.txt','utf8'))?[]:['-DNDEBUG']),
   ...[llvm+'/llvm/include',llvmBuild+'/include',sources+'/flatbuffers/include',headers].map(dir=>'-I'+dir),'-c',repo+'/runtime_shim/cjselfhost_llvmshim.cpp','-o',object],{env:clean});
 const tool=name=>llvmBuild+'/bin/'+name+p.exe,library=native+'/'+p.llvmDirectory+'/'+p.llvmLibrary;
-if(intelMac)for(const file of [library,native+'/lib/liblldb.dylib',native+'/bin/llc',native+'/lib/libxml2.dylib',object])checkDarwinX64(file);
+if(intelMac)for(const file of [out+'/third_party/flatbuffers/bin/flatc',library,native+'/lib/liblldb.dylib',native+'/bin/llc',native+'/lib/libxml2.dylib',object])checkDarwinX64(file);
 const symbols=runCapture(tool(win?'llvm-readobj':'llvm-nm'),win?['--coff-exports',library]:[...(!mac?['--dynamic']:[]),'--defined-only','--extern-only',library]);
 if(!symbols.includes('LLVMInitializeX86TargetInfo'))throw Error('missing libLLVM X86 target export');
 const exports=runCapture(tool('llvm-nm'),['--defined-only','--extern-only',object]);
