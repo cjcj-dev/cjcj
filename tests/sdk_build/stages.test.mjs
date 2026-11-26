@@ -5,7 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import test from 'node:test';
-import {repo,compilerHeap,sdkPlatform} from '../../build/common.mjs';
+import {repo,compilerHeap,loadPins,sdkPlatform} from '../../build/common.mjs';
+
+test('source pins use full commit SHAs and select the expected tools revision',()=>{
+  const pins=loadPins();
+  for(const [name,pin] of Object.entries(pins.repos)){
+    assert.match(pin.sha,/^[0-9a-f]{40}$/,name+' source SHA');
+  }
+  assert.equal(pins.repos.tools.sha,'4d14d051c58a5574d6525314b2c695e2e5dd26e6');
+});
 
 const tuple='linux_x86_64_cjnative';
 function fixture(t){
