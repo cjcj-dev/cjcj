@@ -295,15 +295,22 @@ test('SDK environments resolve overrides and replace blank runtime heap settings
   assert.equal(compilerHeap(p,{cjHeapSwap:' off '}).cjHeapSwap,'off');
 });
 
-test('extras passes the repository heap override to the stdx build',linux,t=>{
+function stdxBuildHeap(t,env){
   const dir=fixture(t),src=dir+'/src',sdk=dir+'/sdk';
   put(src+'/compiler/utils/envsetup/llvm_linux.sh');
   put(src+'/stdx/build.py',`import os, pathlib, sys
 if sys.argv[1]=='build': pathlib.Path('build.heap').write_text(os.environ.get('cjHeapSize', ''))
 `);
-  cli('build-extras',['--platform','linux-x64','--sdk',sdk,'--sources',src,'--only','stdx'],
-    {cjHeapSize:'',CJCJ_HEAP_SIZE:'5GB'});
-  assert.equal(fs.readFileSync(src+'/stdx/build.heap','utf8'),'5GB');
+  cli('build-extras',['--platform','linux-x64','--sdk',sdk,'--sources',src,'--only','stdx'],env);
+  return fs.readFileSync(src+'/stdx/build.heap','utf8');
+}
+
+test('extras passes the repository heap override to the stdx build',linux,t=>{
+  assert.equal(stdxBuildHeap(t,{cjHeapSize:'',CJCJ_HEAP_SIZE:'5GB'}),'5GB');
+});
+
+test('whitespace-only cjHeapSize preserves the trimmed repository override in stdx',linux,t=>{
+  assert.equal(stdxBuildHeap(t,{cjHeapSize:'  ',CJCJ_HEAP_SIZE:' 5GB '}),'5GB');
 });
 
 test('Windows runtime load probes preserve a Path-only host environment',linux,t=>{

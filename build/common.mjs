@@ -190,7 +190,7 @@ export function nativeBuildEnvironment(native,base=process.env) {
 }
 
 export function compilerHeap(native,env=process.env,totalMemory=os.totalmem()) {
-  const explicit=(env.cjHeapSize||env.CJCJ_HEAP_SIZE||'').trim();
+  const explicit=(env.cjHeapSize||'').trim()||(env.CJCJ_HEAP_SIZE||'').trim();
   // The bootstrap runtime falls back to 256 MB if the requested heap exceeds RAM.
   const mb=Math.max(4,Math.min(15*1024,Math.floor(totalMemory*0.94/(1024*1024))));
   return {cjHeapSize:explicit||`${mb}MB`,
