@@ -421,6 +421,14 @@ async function buildStd(a){
   if(!tuple||(!cross&&!['std-bootstrap','stage1-std','stage3-std'].includes(a.stage)))throw Error('unknown std stage or target');
   const runtime=path.resolve(a.runtime),work=out+'.work',sdk=cross?work+'/sdk':parent;
   if(fs.existsSync(out)&&fs.readdirSync(out).length)throw Error('std output must be empty: '+out);
+  let include;
+  if(!cross && a.include !== undefined){
+    if(typeof a.include !== 'string' || !a.include)throw Error('--include requires a compiler include directory');
+    include=path.resolve(a.include);
+    const header=path.join(include,'cangjie/CHIR/IR/AttributeInfo.h');
+    if(!/\bclass\s+AttributeInfo\b/.test(fs.readFileSync(header,'utf8')))
+      throw Error(`--include requires the C++ compiler header defining class AttributeInfo: ${header}; use the native compiler include directory`);
+  }
   const py=await resolveHostPython(parent);
   ensureDir(work);
   for(const [from,to] of [['bounds','boundscheck-v1.1.16'],['pcre2','pcre2']])copySource(src+'/'+from,stdlib+'/third_party/'+to);
@@ -457,7 +465,7 @@ async function buildStd(a){
     const snap=work+'/runtime-input',arch=p.arch==='arm64'?'aarch64':'x86_64';
     for(const rel of roots)copyTree(runtime+'/'+rel,snap+'/common/'+(p.os==='win32'?'windows':p.os)+'_relwithdebinfo_'+arch+'/'+rel);
     buildArgs.push('--target-lib='+stdlib+'/build/build/lib','--target-lib='+snap);
-    if(a.include)buildArgs.push('--include='+path.resolve(a.include));
+    if(include)buildArgs.push('--include='+include);
     if(a['local-mode-api'])buildArgs.push('--local_mode_api');
   }else{
     let tool,sysroot;

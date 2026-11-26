@@ -6,7 +6,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import test from 'node:test';
 import {repo,cleanSdkEnvironment,compilerHeap,loadPins,sdkPlatform} from '../../build/common.mjs';
-import {effectiveLinkOptions,h1HeapDefaultsBuild,h1PackageLinkOptions} from '../../build/build-compiler.mjs';
+import {effectiveLinkOptions,h1HeapDefaultsBuild,h1PackageLinkOptions,wireAttributeHeader} from '../../build/build-compiler.mjs';
 
 test('source pins use full commit SHAs and select the expected tools revision',()=>{
   const pins=loadPins();
@@ -34,6 +34,19 @@ for(const workflow of ['prepare','release','ci']){
     for(const command of stages)assert.doesNotMatch(command,/--source\b/);
     for(const line of commands.filter(line=>/\brepos\b/.test(line)))assert.doesNotMatch(line,/\bh1\b/);
     assert.match(yaml,/rm -rf \.\.\/stage0 \.\.\/stage0\.target\b/);
+  });
+}
+
+for(const workflow of ['prepare','release']){
+  test(workflow+' builds final std with the native compiler headers',()=>{
+    const yaml=fs.readFileSync(path.join(repo,'.github/workflows',workflow+'.yml'),'utf8');
+    const commands=yaml.replace(/\\\r?\n\s*|\r?\n[ \t]+(?=--)/g,' ').split('\n');
+    const stages=commands.filter(line=>/^\s*node build\/build-stdlib\.mjs\b/.test(line) && /--stage stage3-std\b/.test(line));
+    assert.ok(stages.length>0,'missing stage3-std command');
+    for(const command of stages){
+      const includes=Array.from(command.matchAll(/(?:^|\s)--include(?:=|\s+)(\S+)/g),m=>m[1]);
+      assert.deepEqual(includes,['../base/native/include']);
+    }
   });
 }
 
@@ -203,22 +216,29 @@ cat "$CANGJIE_HOME/modules/${tuple}/current" > "$3/release/bin/cjc"
   assert.equal(fs.readFileSync(sdk+'/tools/bin/native-only','utf8'),'native');
 });
 
-for(const [platform,tuple,suffix] of [['linux-x64','linux_x86_64_cjnative','.so'],['windows-x64','windows_x86_64_cjnative','.dll'],['darwin-arm64','darwin_aarch64_cjnative','.dylib']]){
-  test('stdlib preserves runtime bytes and native inputs: '+platform,linux,t=>{
-    const dir=fixture(t),src=dir+'/src',sdk=dir+'/sdk',rt=dir+'/R',out=dir+'/out';
-    const lib='lib/'+tuple,run='runtime/'+lib,bounds='libboundscheck'+suffix;
-    put(src+'/bounds/header');put(src+'/pcre2/header');put(rt+'/'+lib+'/rt.a');put(rt+'/'+run+'/'+bounds,'validated R');
-    for(const rel of [lib+'/libcangjie-ast-support.a','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',
-      'third_party/flatbuffers/bin/flatc'+(suffix==='.dll'?'.exe':'')])put(sdk+'/'+rel,'native');
-    const files=['modules/'+tuple+'/std/std.core.cjo','modules/'+tuple+'/std/libstd.core.bc',lib+'/libcangjie-std-core.a',
-      run+'/libcangjie-std-core'+suffix,'lib/libstdFFI'+suffix,lib+'/'+bounds,run+'/'+bounds,lib+'/libcangjie-ast-support.a',
-      'schema/old','include/old','third_party/flatbuffers/bin/old','third_party/python/old','third_party/flatbuffers/modules/current'];
-    put(src+'/runtime/stdlib/build.py',`import os, pathlib, sys
+function stdlibFixture(t,tuple,suffix,withAst=false){
+  const dir=fixture(t),src=dir+'/src',sdk=dir+'/sdk',rt=dir+'/R',out=dir+'/out';
+  const lib='lib/'+tuple,run='runtime/'+lib,bounds='libboundscheck'+suffix;
+  put(src+'/bounds/header');put(src+'/pcre2/header');put(rt+'/'+lib+'/rt.a');put(rt+'/'+run+'/'+bounds,'validated R');
+  for(const rel of [lib+'/libcangjie-ast-support.a','schema/StdAstFormat.fbs','include/flatbuffers/StdAstFormat_generated.h',
+    'third_party/flatbuffers/bin/flatc'+(suffix==='.dll'?'.exe':'')])put(sdk+'/'+rel,'native');
+  const files=['modules/'+tuple+'/std/std.core.cjo','modules/'+tuple+'/std/libstd.core.bc',lib+'/libcangjie-std-core.a',
+    run+'/libcangjie-std-core'+suffix,'lib/libstdFFI'+suffix,lib+'/'+bounds,run+'/'+bounds,lib+'/libcangjie-ast-support.a',
+    'schema/old','include/old','third_party/flatbuffers/bin/old','third_party/python/old','third_party/flatbuffers/modules/current'];
+  if(withAst)files.push('modules/'+tuple+'/std/std.ast.cjo');
+  put(src+'/runtime/stdlib/build.py',`import json, os, pathlib, sys
+with open('calls.jsonl','a') as f: print(json.dumps(sys.argv[1:]),file=f)
 if sys.argv[1]=='build': pathlib.Path('build.heap').write_text(os.environ.get('cjHeapSize', ''))
 if sys.argv[1]=='install':
  for rel in ${JSON.stringify(files)}:
   f=pathlib.Path(sys.argv[-1])/rel; f.parent.mkdir(exist_ok=True,parents=True); f.write_text('std')
 `);
+  return {dir,src,sdk,rt,out,lib,run,bounds};
+}
+
+for(const [platform,tuple,suffix] of [['linux-x64','linux_x86_64_cjnative','.so'],['windows-x64','windows_x86_64_cjnative','.dll'],['darwin-arm64','darwin_aarch64_cjnative','.dylib']]){
+  test('stdlib preserves runtime bytes and native inputs: '+platform,linux,t=>{
+    const {src,sdk,rt,out,lib,run,bounds}=stdlibFixture(t,tuple,suffix);
     cli('build-stdlib',['--stage','stage1-std','--platform',platform,'--sources',src,'--runtime',rt,'--sdk',sdk,'--out',out],
       {cjHeapSize:' ',CJCJ_HEAP_SIZE:''});
     assert.equal(fs.readFileSync(src+'/runtime/stdlib/build.heap','utf8'),compilerHeap(sdkPlatform(platform),{}).cjHeapSize);
@@ -228,6 +248,31 @@ if sys.argv[1]=='install':
       assert.equal(fs.existsSync(out+'/'+f),false,f);
     if(platform==='linux-x64')assert.equal(fs.readlinkSync(out+'/'+lib+'/'+bounds),'../../'+run+'/'+bounds,'relative boundscheck link');
     else assert.equal(fs.existsSync(out+'/'+lib+'/'+bounds),false);
+  });
+}
+
+for(const kind of ['compiler','wire','missing']){
+  test('final std --include: '+kind+' header',linux,t=>{
+    const {dir,src,sdk,rt,out}=stdlibFixture(t,tuple,'.so',true);
+    const include=dir+'/include',header=include+'/cangjie/CHIR/IR/AttributeInfo.h';
+    if(kind==='compiler')put(header,'namespace Cangjie::CHIR { class AttributeInfo {}; }');
+    if(kind==='wire')put(header,wireAttributeHeader(fs.readFileSync(path.join(repo,'packages/chir/src/Enums.cj'),'utf8')));
+    const child=spawnSync(process.execPath,[path.join(repo,'build/build-stdlib.mjs'),'--stage','stage3-std',
+      '--platform','linux-x64','--sources',src,'--sdk',sdk,'--runtime',rt,'--include','include','--out',out],
+      {cwd:dir,encoding:'utf8'});
+    const log=src+'/runtime/stdlib/calls.jsonl';
+    if(kind==='compiler'){
+      assert.equal(child.status,0,child.error?.message||child.stderr);
+      const calls=fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse);
+      assert.deepEqual(calls.map(args=>args[0]),['clean','build','install']);
+      assert.ok(calls[1].includes('--include='+include));
+      assert.equal(fs.readFileSync(out+'/modules/'+tuple+'/std/std.ast.cjo','utf8'),'std');
+    }else{
+      assert.equal(fs.existsSync(log),false,'invalid header reached build.py');
+      assert.equal(child.status,1,child.error?.message||child.stderr);
+      assert.ok(child.stderr.includes(header),child.stderr);
+      assert.match(child.stderr,kind==='wire'?/defining class AttributeInfo/:/ENOENT/);
+    }
   });
 }
 

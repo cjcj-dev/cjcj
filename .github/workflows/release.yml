@@ -130,7 +130,7 @@ jobs:
       if: matrix.platform == 'linux-x64' || matrix.platform == 'darwin-arm64'
     - name: Build final std
       run: |-
-        node build/build-stdlib.mjs --stage stage3-std --sources ../src --runtime ../base/runtime --sdk ../stage2 --include ../stage2/include --local-mode-api --out ../final-std
+        node build/build-stdlib.mjs --stage stage3-std --sources ../src --runtime ../base/runtime --sdk ../stage2 --include ../base/native/include --local-mode-api --out ../final-std
     - name: Build stage 3
       run: |-
         node build/build-compiler.mjs --stage stage3 --sdk ../stage2 --std ../final-std --native ../base/native --host-sdk ../base/host --out ../host-sdk --version "$VERSION"
