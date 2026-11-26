@@ -40,7 +40,7 @@ jobs:
         for(const name of 'node sccache cmakeMacos libxml2 windowsLlvmMingw linuxCrossMingw staticLibs python cjbind'.split(' ')) assert.ok(toolchains[name]);
         NODE
         python3 -m py_compile scripts/objc_preamble_unit.py test/store_strength/test_checker.py
-        node --test runtime_shim/tests/compiler_heap_defaults.test.mjs
+        node --test runtime_shim/tests/compiler_heap_defaults.test.mjs tests/sdk_build/stages.test.mjs
     - name: Lint workflows
       run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
   build-and-smoke:
@@ -54,6 +54,8 @@ jobs:
         - platform: linux-aarch64
           runner: ubuntu-24.04-arm
     env:
+      cjHeapSize: ${{ vars.cjHeapSize || '12GB' }}
+      cjHeapSwap: 'on'
       PLATFORM: ${{ matrix.platform }}
     steps:
     - uses: actions/checkout@v7.0.1
@@ -63,6 +65,9 @@ jobs:
     - uses: actions/setup-node@v7.1.0
       with:
         node-version: ${{ steps.pins.outputs.node }}
+    - name: Enable Linux bootstrap swap
+      if: runner.os == 'Linux'
+      run: node build/setup.mjs swap
     - name: Select successful Prepare run
       run: |-
         id="$PREPARE_RUN"
@@ -84,7 +89,7 @@ jobs:
     - name: Unpack native base
       run: |-
         mkdir -p ../base
-        tar -xf native-base.tar -C ../base
+        node build/setup.mjs unpack --archive native-base.tar --dir ../base
         rm native-base.tar
     - name: Install build dependencies
       run: node build/setup.mjs deps --platform "$PLATFORM" --mode full
@@ -95,12 +100,13 @@ jobs:
         node build/build-stdlib.mjs --stage std-bootstrap --sources ../src --sdk ../stage0 --runtime ../base/runtime --out ../initial
         rm -rf ../stage0
         node build/build-stdlib.mjs --stage stage1-std --sources ../src --sdk ../initial --runtime ../base/runtime --out ../stage1
-        rm -rf ../initial
-        node build/build-compiler.mjs --stage stage2 --sdk ../stage1 --host-sdk ../base/host --out ../current
+        node build/build-compiler.mjs --stage stage2 --sdk ../initial --std ../stage1 --native ../base/native --host-sdk ../base/host --out ../current
         node build/test-sdk.mjs --sdk ../current --mode smoke
   package-tests:
     runs-on: ubuntu-24.04
     env:
+      cjHeapSize: ${{ vars.cjHeapSize || '12GB' }}
+      cjHeapSwap: 'on'
       PLATFORM: linux-x64
     steps:
     - uses: actions/checkout@v7.0.1
@@ -110,6 +116,9 @@ jobs:
     - uses: actions/setup-node@v7.1.0
       with:
         node-version: ${{ steps.pins.outputs.node }}
+    - name: Enable Linux bootstrap swap
+      if: runner.os == 'Linux'
+      run: node build/setup.mjs swap
     - name: Select successful Prepare run
       run: |-
         id="$PREPARE_RUN"
@@ -133,6 +142,6 @@ jobs:
     - name: Build this checkout and run workspace package tests
       run: |-
         mkdir -p ../prepared
-        tar -xf ci-sdk.tar.gz -C ../prepared
-        node build/build-compiler.mjs --stage stage2 --sdk ../prepared/cangjie --out ../current
+        node build/setup.mjs unpack --archive ci-sdk.tar.gz --dir ../prepared --sdk-root cangjie
+        node build/build-compiler.mjs --stage installed --sdk ../prepared/cangjie --out ../current
         node build/test-sdk.mjs --sdk ../current --mode packages

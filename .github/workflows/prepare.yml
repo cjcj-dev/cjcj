@@ -81,7 +81,7 @@ jobs:
       run: node build/build-runtime.mjs --platform "$PLATFORM" --sources ../sources --out ../base/runtime --language-inputs ../language
     - name: Archive deferred runtime test inputs
       if: runner.os == 'Linux'
-      run: tar -cf runtime-tests.tar -C ../language .
+      run: node build/setup.mjs pack --archive runtime-tests.tar --dir ../language
     - uses: actions/upload-artifact@v7.0.2
       if: runner.os == 'Linux'
       with:
@@ -94,7 +94,7 @@ jobs:
     - name: Install cjbind
       run: node build/setup.mjs cjbind --platform "$PLATFORM" --host-sdk ../base/host --out ../base/tools
     - name: Archive native base
-      run: tar -cf native-base.tar -C ../base .
+      run: node build/setup.mjs pack --archive native-base.tar --dir ../base
     - uses: actions/upload-artifact@v7.0.2
       with:
         name: native-base-${{ matrix.platform }}
@@ -113,6 +113,8 @@ jobs:
     needs: native-base
     runs-on: ubuntu-24.04
     env:
+      cjHeapSize: ${{ vars.cjHeapSize || '12GB' }}
+      cjHeapSwap: 'on'
       PLATFORM: linux-x64
       VERSION: ${{ inputs.version }}
     steps:
@@ -123,13 +125,16 @@ jobs:
     - uses: actions/setup-node@v7.1.0
       with:
         node-version: ${{ steps.pins.outputs.node }}
+    - name: Enable Linux bootstrap swap
+      if: runner.os == 'Linux'
+      run: node build/setup.mjs swap
     - uses: actions/download-artifact@v8.0.2
       with:
         name: native-base-linux-x64
     - name: Unpack native base
       run: |-
         mkdir -p ../base
-        tar -xf native-base.tar -C ../base
+        node build/setup.mjs unpack --archive native-base.tar --dir ../base
         rm native-base.tar
     - name: Fetch bootstrap and SDK sources
       run: node build/setup.mjs sources --out ../src --repos h1,runtime,bounds,pcre2,tools,stdx,javaInterop,compiler --override "runtime=$(cat ../base/runtime.ref)"
@@ -154,19 +159,17 @@ jobs:
     - name: Rebuild the standard library using the bootstrap modules
       run: |-
         node build/build-stdlib.mjs --stage stage1-std --sources ../src --runtime ../base/runtime --sdk ../initial --out ../stage1
-        rm -rf ../initial
     - name: Build stage 2
       run: |-
-        node build/build-compiler.mjs --stage stage2 --sdk ../stage1 --host-sdk ../base/host --out ../stage2 --version "$VERSION"
-        rm -rf ../stage1
+        node build/build-compiler.mjs --stage stage2 --sdk ../initial --std ../stage1 --native ../base/native --host-sdk ../base/host --out ../stage2 --version "$VERSION"
+        rm -rf ../initial ../stage1
     - name: Build final std
       run: |-
         node build/build-stdlib.mjs --stage stage3-std --sources ../src --runtime ../base/runtime --sdk ../stage2 --include ../stage2/include --local-mode-api --out ../final-std
-        rm -rf ../stage2
     - name: Build stage 3
       run: |-
-        node build/build-compiler.mjs --stage stage3 --sdk ../final-std --host-sdk ../base/host --out ../host-sdk --version "$VERSION"
-        rm -rf ../final-std
+        node build/build-compiler.mjs --stage stage3 --sdk ../stage2 --std ../final-std --native ../base/native --host-sdk ../base/host --out ../host-sdk --version "$VERSION"
+        rm -rf ../stage2 ../final-std
     - name: Prepare the Java annotation processor
       run: mvn -q dependency:copy -Dartifact=org.projectlombok:lombok:1.18.36 -DoutputDirectory=../jars
       if: env.PLATFORM == 'linux-x64' || env.PLATFORM == 'windows-x64'
@@ -179,7 +182,7 @@ jobs:
       run: |-
         node build/package-sdk.mjs --sdk ../host-sdk --compiler-source ../src/compiler --version "$VERSION" --out ../dist
         mkdir -p ../ci-sdk
-        tar -xf "../dist/cjcj-$VERSION-linux-x64.tar.gz" -C ../ci-sdk
+        node build/setup.mjs unpack --archive "../dist/cjcj-$VERSION-linux-x64.tar.gz" --dir ../ci-sdk --sdk-root cangjie
         node build/test-sdk.mjs --sdk ../ci-sdk/cangjie --mode smoke
         mv "../dist/cjcj-$VERSION-linux-x64.tar.gz" ci-sdk.tar.gz
     - uses: actions/upload-artifact@v7.0.2

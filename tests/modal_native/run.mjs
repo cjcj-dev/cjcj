@@ -1,4 +1,4 @@
-#!/usr/bin/env zx
+#!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -6,8 +6,11 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {cleanSdkEnvironment} from '../../build/common.mjs';
 
-const [install, output, coreChir] = argv._.map(String);
-if (![install, output, coreChir].every(p => p && path.isAbsolute(p))) throw Error('usage: zx run.mjs /installed/sdk /new/output /producer/std.core.chir');
+const [install, output, coreChir] = process.argv.slice(2);
+if (![install, output, coreChir].every(p => p && path.isAbsolute(p))) {
+  console.error('usage: node tests/modal_native/run.mjs /installed/sdk /new/output /producer/std.core.chir');
+  process.exit(2);
+}
 const sdk = fs.realpathSync(install), tuple = 'linux_x86_64_cjnative';
 const compiler = path.join(sdk, 'bin/cjc');
 const runtime = path.join(sdk, 'runtime/lib', tuple);

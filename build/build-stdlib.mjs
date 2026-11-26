@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-import {jobs,parseCliArgs,sdkPlatform,cleanSdkEnvironment,resolveHostPython,run,runCapture,copyTree,
+import {jobs,parseCliArgs,sdkPlatform,linkCompilerRuntime,pathEnvironment,cleanSdkEnvironment,resolveHostPython,run,runCapture,copyTree,
   copySource,rmrf,ensureDir,main,crossTuples,sha256File} from './common.mjs';
 
 const SYSROOT_DIR='third_party/wasi-sysroot';
@@ -389,7 +389,9 @@ const wasiRunner = [
   "  worker.on('exit', code => { process.exitCode = rc ?? (code || 139); });",
   "}",
 ].join('\n')+'\n';
-function androidAst(src,ndk,out,env,j) {
+function androidAst(src,ndk,out,j) {
+  const env=pathEnvironment();
+  delete env.CMAKE_TOOLCHAIN_FILE;
   const source=src+'/compiler',build=out+'.build',flat=source+'/third_party/flatbuffers';
   copySource(src+'/bounds',source+'/third_party/boundscheck');copySource(src+'/flatbuffers',flat);
   const cmake=(...args)=>run('cmake',args,{env});
@@ -399,11 +401,26 @@ function androidAst(src,ndk,out,env,j) {
   cmake('-S',flat,'-B',build+'/third_party/flatbuffers-prefix/src/flatbuffers-build',...options,'-DFLATBUFFERS_BUILD_FLATC=OFF','-DFLATBUFFERS_BUILD_TESTS=OFF','-DFLATBUFFERS_BUILD_FLATHASH=OFF','-DCMAKE_INSTALL_PREFIX='+build);
   cmake('--build',build,'--target','cangjie-ast-support','boundscheck','boundscheck-static','--parallel',j);cmake('--install',build);
 }
+function installStd(install,out,tuple) {
+  const lib='lib/'+tuple,rt='runtime/'+lib,modules='third_party/flatbuffers/modules';
+  copyTree(install,out,{filter:file=>{
+    const rel=path.relative(install,file).split(path.sep).join('/');
+    if(rel==='include'||rel==='schema'||rel===lib+'/libcangjie-ast-support.a')return false;
+    if(rel.startsWith('third_party/'))return rel==='third_party/flatbuffers'||rel===modules||rel.startsWith(modules+'/');
+    return !([lib,rt].includes(path.posix.dirname(rel))&&path.posix.basename(rel).startsWith('libboundscheck.'));
+  }});
+  if(['linux_x86_64_cjnative','linux_aarch64_cjnative'].includes(tuple)){
+    const link=path.join(out,lib,'libboundscheck.so');
+    fs.accessSync(path.join(out,rt,'libboundscheck.so'));
+    rmrf(link);fs.symlinkSync('../../'+rt+'/libboundscheck.so',link);
+  }
+}
 async function buildStd(a){
   const src=path.resolve(a.sources),stdlib=src+'/runtime/stdlib',out=path.resolve(a.out),parent=path.resolve(a.sdk);
   const j=a.jobs||jobs,cross=a.cross,p=sdkPlatform(a.platform),tuple=cross?crossTuples[cross]:p.tuple;
   if(!tuple||(!cross&&!['std-bootstrap','stage1-std','stage3-std'].includes(a.stage)))throw Error('unknown std stage or target');
   const runtime=path.resolve(a.runtime),work=out+'.work',sdk=cross?work+'/sdk':parent;
+  if(fs.existsSync(out)&&fs.readdirSync(out).length)throw Error('std output must be empty: '+out);
   const py=await resolveHostPython(parent);
   ensureDir(work);
   for(const [from,to] of [['bounds','boundscheck-v1.1.16'],['pcre2','pcre2']])copySource(src+'/'+from,stdlib+'/third_party/'+to);
@@ -428,7 +445,7 @@ async function buildStd(a){
     for(const rel of [...roots,'modules/'+tuple,SYSROOT_DIR])copyTree(sdk+'/'+rel,out+'/'+rel);
     ensureDir(out+'/tools/wasm');fs.writeFileSync(out+'/tools/wasm/run_wasi.mjs',wasiRunner,{mode:0o755});return;
   }
-  const install=work+'/install',buildArgs=['build','-t',cross?'release':'relwithdebinfo','--jobs',j];
+  const install=fs.mkdtempSync(work+'/install-'),buildArgs=['build','-t',cross?'release':'relwithdebinfo','--jobs',j];
   const buildPy=(...args)=>run(py,['-I','build.py',...args],{cwd:stdlib,env});
   // Each pass consumes a different compiler/stdlib combination. An old Ninja
   // graph embeds the previous SDK paths even when the target tuple is unchanged.
@@ -459,7 +476,7 @@ async function buildStd(a){
       }else if(cross==='android-aarch64'){
         const ndk=env.ANDROID_NDK_ROOT,pre=ndk+'/toolchains/llvm/prebuilt/linux-x86_64';
         delete env.CMAKE_TOOLCHAIN_FILE;tool=pre+'/bin';sysroot=pre+'/sysroot';
-        androidAst(src,ndk,work+'/ast',env,j);
+        androidAst(src,ndk,work+'/ast',j);
         const rel=roots[0]+'/libcangjie-ast-support.a';copyTree(work+'/ast/'+rel,sdk+'/'+rel);copyTree(work+'/ast/'+rel,out+'/'+rel);
         fs.symlinkSync(stdlib+'/build/build-libs-aarch64-linux-android23/modules/'+tuple,sdk+'/modules/'+tuple,'dir');
       }else{const native=env.OHOS_SDK_HOME+'/native';tool=native+'/llvm/bin';sysroot=native+'/sysroot';}
@@ -472,8 +489,13 @@ async function buildStd(a){
     ...(!cross?['lib/libstdFFI'+p.shared,...(p.os==='linux'?['modules/'+tuple+'/std/libstd.core.bc']:[])]:cross==='windows-x64'?['lib/libstdFFI.dll','lib/libstdFFI.dll.a']:[]),
     ...(a.include||cross==='android-aarch64'?['modules/'+tuple+'/std/std.ast.cjo']:[])];
   for(const rel of required)fs.accessSync(install+'/'+rel);
-  if(!cross)copyTree(parent,out);
-  else for(const rel of roots)copyTree(runtime+'/'+rel,out+'/'+rel);
-  copyTree(install,out);
+  // Only the bootstrap pass needs the previous SDK's public modules.
+  if(a.stage==='std-bootstrap'&&!cross){
+    copyTree(parent,out);
+    if(p.os==='win32')linkCompilerRuntime(out);
+  }
+  for(const rel of cross?roots:['lib','runtime'])if(fs.existsSync(runtime+'/'+rel))copyTree(runtime+'/'+rel,out+'/'+rel);
+  if(!cross&&fs.existsSync(runtime+'/include'))copyTree(runtime+'/include',out+'/runtime/include');
+  installStd(install,out,tuple);
 }
 if(main(import.meta.url))await buildStd(parseCliArgs());

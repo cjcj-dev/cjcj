@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import {repo,loadPins,parseCliArgs,sdkPlatform,run,runCapture,downloadFile,extractArchive,ensureDir,copySource,copyTree,jobs} from './common.mjs';
+import {repo,loadPins,parseCliArgs,sdkPlatform,nativeBuildEnvironment,pathEnvironment,resolveHostPython,run,runCapture,downloadFile,extractArchive,ensureDir,copySource,copyTree,jobs} from './common.mjs';
 
 const a=parseCliArgs(),p=sdkPlatform(a.platform),win=p.os==='win32',mac=p.os==='darwin';
 const sources=path.resolve(a.sources),out=path.resolve(a.out),work=path.resolve(a.work||out+'.build');
@@ -18,22 +18,28 @@ async function unpack(pin,dest,strip,args=[]){
 await unpack(pins.libxml2,xml,true);
 const pyPin=pins.python[win?'windows-x64-source':p.key];
 if(win){
-  const cwd=work+'/cpython',opts={cwd,windowsVerbatimArguments:true};
+  const cwd=work+'/cpython',env=pathEnvironment(process.env,p);
+  const selected={PYTHON:await resolveHostPython(),MSBUILD:runCapture('where.exe',['msbuild.exe']).trim().split(/\r?\n/)[0],
+    IncludeTkinter:'false',IncludeCTypes:'true',IncludeSSL:'true',IncludeLibffi:'true',IncludeExternals:'true'};
+  const clear=new Set(['PYTHONHOME','PYTHONPATH','VIRTUAL_ENV',...Object.keys(selected).map(k=>k.toUpperCase())]);
+  for(const key of Object.keys(env))if(clear.has(key.toUpperCase()))delete env[key];
+  Object.assign(env,selected);
+  const opts={cwd,env,windowsVerbatimArguments:true};
   await unpack(pyPin,cwd,true);
-  const msbuild='msbuild',version=runCapture(msbuild,['-nologo','-version'],{cwd}).trim();
-  const toolset=Number(version.split('.')[0])>=18?runCapture(msbuild,['PCbuild/pythoncore.vcxproj','-nologo','-p:Configuration=Release','-p:Platform=x64','-getProperty:DefaultPlatformToolset'],{cwd}).trim():null;
+  const msbuild=env.MSBUILD,version=runCapture(msbuild,['-nologo','-version'],{cwd,env}).trim();
+  const toolset=Number(version.split('.')[0])>=18?runCapture(msbuild,['PCbuild/pythoncore.vcxproj','-nologo','-p:Configuration=Release','-p:Platform=x64','-getProperty:DefaultPlatformToolset'],{cwd,env}).trim():null;
   if(toolset&&!/^v\d+$/.test(toolset))throw Error('invalid VS toolset '+toolset);
   for(const batch of ['call PCbuild\\get_externals.bat --no-tkinter','call PCbuild\\build.bat -p x64 -c Release -e --no-tkinter -M /m:'+jobsCount+' "/p:KillPython=false"'+(toolset?' "/p:PlatformToolset='+toolset+'"':'')])
     run(process.env.ComSpec||'cmd.exe',['/d','/s','/c',batch],opts);
-  run(cwd+'/PCbuild/amd64/python.exe',['-B',cwd+'/PC/layout','--source',cwd,'--build',cwd+'/PCbuild/amd64','--arch','amd64','--copy',python,'--temp',work+'/layout-temp','--include-dev','--include-stable']);
+  run(cwd+'/PCbuild/amd64/python.exe',['-B',cwd+'/PC/layout','--source',cwd,'--build',cwd+'/PCbuild/amd64','--arch','amd64','--copy',python,'--temp',work+'/layout-temp','--include-dev','--include-stable'],{cwd,env});
 }else{
   await unpack(pyPin,python,!!pyPin.prefix,['bin','lib','include','share'].map(n=>(pyPin.prefix||'.')+'/'+n));
 }
 const bin=win?path.join(process.env.CJCJ_WINDOWS_TOOLCHAIN,'bin'):null;
 const cc=win?bin+'/clang.exe':mac?'/usr/bin/clang':'clang',cxx=win?bin+'/clang++.exe':mac?'/usr/bin/clang++':'clang++';
 const pyExe=python+(win?'/python.exe':'/bin/python3'),edit=win?null:mac?'/usr/lib':'/usr/lib/'+(p.arch==='arm64'?'aarch64':'x86_64')+'-linux-gnu';
-const env={...process.env,TARGET_PYTHON_PATH:python,CMAKE_BUILD_PARALLEL_LEVEL:jobsCount};
-env.PATH=[bin,python+(win?'':'/bin'),env.PATH||env.Path].filter(Boolean).join(path.delimiter);
+const env={...nativeBuildEnvironment(p),TARGET_PYTHON_PATH:python,CMAKE_BUILD_PARALLEL_LEVEL:jobsCount};
+env.PATH=[bin,python+(win?'':'/bin'),env.PATH].filter(Boolean).join(path.delimiter);
 if(!win)env[p.loader]=[python+'/lib',edit].join(':');
 const conf=runCapture(pyExe,['-I','-c','import sys,sysconfig,ssl,_ctypes; assert sys.version_info[:2]==(3,11); print(sysconfig.get_config_var("EXT_SUFFIX"))'],{env}).trim();
 const pyArgs=['-DPython3_EXECUTABLE='+pyExe,'-DPython3_INCLUDE_DIR='+python+(win?'/include':'/include/python3.11'),'-DPython3_LIBRARY='+python+(win?'/libs/python311.lib':mac?'/lib/libpython3.11.dylib':'/lib/libpython3.11.so')];

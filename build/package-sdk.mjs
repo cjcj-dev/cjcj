@@ -2,8 +2,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {repo,parseCliArgs,sdkPlatform,RELEASE_TARGETS,crossTuples,run,runCapture,sha256File,extractArchive,tar,
-  ensureDir,copyTree,rmrf,makeLauncher,installEntry} from './common.mjs';
+import {repo,parseCliArgs,sdkPlatform,RELEASE_TARGETS,crossTuples,run,runCapture,sha256File,extractSdkArchive,tar,
+  ensureDir,copyTree,rmrf,linkCompilerRuntime,makeLauncher,installEntry} from './common.mjs';
 
 const a=parseCliArgs(),out=path.resolve(a.out),version=a.version;
 if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version||''))throw Error('expected --version <SemVer>');
@@ -75,7 +75,8 @@ async function pack(){
   const p=sdkPlatform(t?.host||a.platform),source=path.resolve(a.sdk);
   ensureDir(out);const work=fs.mkdtempSync(path.join(path.dirname(out),'pack-')),sdk=work+'/cangjie';
   try{
-    copyTree(source,sdk);prepareEntries(sdk,p,work);
+    copyTree(source,sdk,{filter:file=>!['.host','libexec/runtime'].includes(path.relative(source,file).split(path.sep).join('/'))});
+    linkCompilerRuntime(sdk);prepareEntries(sdk,p,work);
     const dirs=(a['cross-dir']||[]).map(d=>path.resolve(d));
     const targets=t?.cross??Object.keys(crossTuples).filter(k=>dirs.some(d=>fs.existsSync(d+'/modules/'+crossTuples[k]+'/std/std.core.cjo')));
     overlay(sdk,dirs,targets,p);
@@ -91,7 +92,7 @@ async function pack(){
       const fresh=fs.mkdtempSync(path.join(os.tmpdir(),'sdk-'));
       fs.renameSync(sdk,work+'/hidden');const hidden=source+'.relocation-'+process.pid;
       fs.renameSync(source,hidden);
-      try{extractArchive(archive,fresh);
+      try{extractSdkArchive(archive,fresh,'cangjie');
         run(process.execPath,[repo+'/build/test-sdk.mjs','--mode','installed','--sdk',fresh+'/cangjie','--repo',repo,...(a['language-inputs']?['--language-inputs',path.resolve(a['language-inputs'])]:[])]);
       }finally{fs.renameSync(hidden,source);rmrf(fresh);}
     }

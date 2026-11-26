@@ -2,7 +2,7 @@
 import fs from 'node:fs/promises';
 import sync from 'node:fs';
 import path from 'node:path';
-import {repo,jobs,parseCliArgs,sdkPlatform,cleanSdkEnvironment,ensureDir,copyTree,rmrf,run,runCapture,main,makeLauncher,installEntry} from './common.mjs';
+import {repo,jobs,parseCliArgs,sdkPlatform,compilerHeap,linkCompilerRuntime,cleanSdkEnvironment,ensureDir,copyTree,rmrf,run,runCapture,main,makeLauncher,installEntry} from './common.mjs';
 export const HOST_TRIPLES = Object.freeze({
   linux_x86_64: 'x86_64-unknown-linux-gnu', linux_aarch64: 'aarch64-unknown-linux-gnu',
   darwin_x86_64: 'x86_64-apple-darwin', darwin_aarch64: 'aarch64-apple-darwin',
@@ -251,17 +251,38 @@ export function copyHost(host,out,p) {
   copyTree(host,out,{filter:file=>!skip.has(path.relative(host,file).split(path.sep).join('/'))});
 }
 
+function installNative(native,out,p) {
+  for(const rel of ['third_party/llvm','third_party/python','third_party/flatbuffers','tools','include','lib','schema'])if(sync.existsSync(native+'/'+rel))copyTree(native+'/'+rel,out+'/'+rel);
+  if(sync.existsSync(native+'/libcangjie-ast-support.a'))copyTree(native+'/libcangjie-ast-support.a',out+'/lib/'+p.tuple+'/libcangjie-ast-support.a');
+  if(p.os==='win32')for(const dll of ['libc++.dll','libunwind.dll'])copyTree(native+'/bin/'+dll,out+'/bin/'+dll);
+}
+
+function startStage(parent,host,native,std,out,p) {
+  installNative(native,out,p);
+  copyTree(std,out); // fresh install of the selected std and R
+  for(const legal of ['LICENSE','Open_Source_Software_Notice.docx'])copyTree(path.join(host,legal),path.join(out,legal));
+  // Run the preceding compiler against these public modules. Its private runtime
+  // is replaced with this stage's own execution libraries after the build.
+  for(const rel of ['.compiler-exec','libexec/compiler/cjcj-stage1'+p.exe,...['bin/cjc','bin/cjc-frontend','bin/cjcj-stage1','tools/bin/chir-dis']
+    .flatMap(n=>[n+p.exe,n+p.exe+'.entry'])])copyTree(path.join(parent,rel),path.join(out,rel));
+  linkCompilerRuntime(out);
+}
+
 async function assemble(a){
   const p=sdkPlatform(a.platform),platform=p.platform,seed=a.stage==='stage0';
-  if(!['stage0','stage1','stage2','stage3'].includes(a.stage))throw Error('invalid compiler stage '+a.stage);
-  const host=path.resolve(a['host-sdk']||a.sdk),sdk=path.resolve(a.sdk||host),out=path.resolve(a.out);
-  const source=path.resolve(a.source||repo),native=path.resolve(a.native||sdk),target=path.resolve(a['target-dir']||(seed?source+'/target':out+'.target'));
-  if([sdk,host,native].some(input=>out===input||out.startsWith(input+path.sep)))throw Error('stage requires a separate output');
+  if(!['stage0','stage2','stage3','installed'].includes(a.stage))throw Error('invalid compiler stage '+a.stage);
+  const host=path.resolve(a['host-sdk']||a.sdk),parent=path.resolve(a.sdk||host),out=path.resolve(a.out);
+  const source=path.resolve(a.source||repo),native=path.resolve(a.stage==='installed'?parent:a.native),target=path.resolve(a['target-dir']||(seed?source+'/target':out+'.target'));
+  const rebuild=a.stage==='installed',std=!seed&&!rebuild?path.resolve(a.std):null;
+  const sdk=std?out:parent;
+  if([parent,host,native,std].filter(Boolean).some(input=>out===input||out.startsWith(input+path.sep)))throw Error('stage requires a separate output');
+  if(sync.existsSync(out)&&sync.readdirSync(out).length)throw Error('stage output must be empty: '+out);
+  if(std)startStage(parent,host,native,std,out,p);
   const commit=runCapture('git',['-C',source,'rev-parse','HEAD']).trim(),runtime=seed?host:sdk;
   const win=p.os==='win32',mingw=process.env.CJCJ_WINDOWS_TOOLCHAIN||process.env.MINGW_PATH;
   const shim='third_party/llvm/fixed-llc/cjselfhost_llvmshim.o',env={
     ...cleanSdkEnvironment(seed?host:sdk,platform),CJCJ_COMMIT:commit,
-    CANGJIE_BUILD_JOBS:a.jobs||jobs,cjHeapSize:process.env.cjHeapSize||'8GB',CJCJ_LLVM_SHIM_O:path.join(native,shim),
+    CANGJIE_BUILD_JOBS:a.jobs||jobs,...compilerHeap(p),CJCJ_LLVM_SHIM_O:path.join(native,shim),
     ...(win?{MINGW_PATH:mingw,CC:path.join(mingw,'bin/clang.exe'),CXX:path.join(mingw,'bin/clang++.exe')}:{})};
   const files=['cjpm.toml','cjpm.lock','packages/cjc/cjpm.toml',...(!seed&&a.version?[VERSION_SOURCE]:[])];
   const saved=await Promise.all(files.map(async f=>[f,await fs.readFile(path.join(source,f)).catch(e=>{if(e.code!=='ENOENT')throw e;return null;})]));
@@ -300,15 +321,12 @@ async function assemble(a){
   const product=await resolveProductBinary(target+'/release/bin',a.stage,{windows:win});
   if(seed){
     copyHost(host,out,p);
-    for(const rel of ['third_party/llvm','third_party/python','third_party/flatbuffers','tools','include','lib','schema'])if(sync.existsSync(native+'/'+rel))copyTree(native+'/'+rel,out+'/'+rel);
-    if(sync.existsSync(native+'/libcangjie-ast-support.a'))copyTree(native+'/libcangjie-ast-support.a',out+'/lib/'+p.tuple+'/libcangjie-ast-support.a');
-    if(win)for(const dll of ['libc++.dll','libunwind.dll'])copyTree(native+'/bin/'+dll,out+'/bin/'+dll);
-  }else copyTree(sdk,out);
+    installNative(native,out,p);
+  }else if(rebuild)copyTree(parent,out);
   const body='libexec/compiler/cjcj-stage1'+p.exe,execRoot=out+'/.compiler-exec';rmrf(execRoot);copyTree(product,out+'/'+body);
   for(const rel of ['runtime/lib/'+p.tuple,'lib/'+p.tuple])copyTree(runtime+'/'+rel,execRoot+'/'+rel);
   for(const row of await compilerLlvmLibraries(native,p))copyTree(row.file,path.join(execRoot,row.relative));
-  rmrf(out+'/libexec/runtime');
-  await fs.symlink('../.compiler-exec/runtime',out+'/libexec/runtime','dir');
+  linkCompilerRuntime(out);
   if(a.runtime){
     const rt=path.resolve(a.runtime);for(const rel of ['lib','runtime'])copyTree(rt+'/'+rel,out+'/'+rel);
     if(sync.existsSync(rt+'/include'))copyTree(rt+'/include',out+'/runtime/include');

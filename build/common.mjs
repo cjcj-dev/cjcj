@@ -71,6 +71,12 @@ export function tar() {
 export function extractArchive(archive,dest,args=[]) {
   ensureDir(dest);run(tar(),['-xf',archive,'-C',dest,...args]);
 }
+// A Windows directory link extracted from zip can lose its directory type.
+// Repair it relative to the new root, using the same unpack path for consumers and verification.
+export function extractSdkArchive(archive,dest,root) {
+  extractArchive(archive,dest);
+  if(process.platform==='win32')linkCompilerRuntime(path.join(dest,root));
+}
 export function gitFetchCommit(url,sha,dest,{sparseNoZoneId=false}={}) {
   if(!/^[0-9a-f]{40}$/.test(sha)) throw Error('expected full source commit: '+sha);
   ensureDir(dest);const git=(...args)=>run('git',['-C',dest,...args]);
@@ -122,7 +128,7 @@ export const RELEASE_TARGETS=[
   ['darwin-arm64-ios','darwin-arm64','ios-aarch64','ios-simulator-aarch64','ios-simulator-x86_64'],['win32-x64-ohos','windows-x64','ohos-aarch64','ohos-x86_64'],
 ].map(([key,host,...cross])=>({key,host,cross,archiveKey:({'linux-arm64':'linux-aarch64','win32-x64':'windows-x64'})[key]||key,runner:PLATFORMS[host].runner}));
 
-function pathEnvironment(base,native) {
+export function pathEnvironment(base=process.env,native=sdkPlatform()) {
   const env={...base};
   if(native.os==='win32'){
     // A plain object copied from process.env loses Windows' case folding.
@@ -157,6 +163,34 @@ export function sdkEnvironment(sdk, platform, base = process.env, runtimeRoot = 
     ...(native.loader === 'PATH' ? {} : {[native.loader]:[...libraries,base[native.loader]].filter(Boolean).join(delimiter)})};
 }
 
+function appendMacBinutils(clean,native) {
+  if(native.os!=='darwin')return;
+  // Use keg-only tools such as llvm-ranlib only after the SDK and host tools.
+  const keg=(native.arch==='arm64'?'/opt/homebrew':'/usr/local')+'/opt/llvm@16/bin';
+  const hostPath=clean.PATH?clean.PATH.split(':').filter(dir=>dir!==keg):[];
+  clean.PATH=[...hostPath,keg].join(':');
+}
+
+export function nativeBuildEnvironment(native,base=process.env) {
+  const env=pathEnvironment(base,native);
+  if(native.os==='darwin'){
+    // runtime/build.py selects clang by name. Keep the selected CMake on PATH.
+    env.CC='/usr/bin/clang';env.CXX='/usr/bin/clang++';
+    appendMacBinutils(env,native);
+  }
+  return env;
+}
+
+export function compilerHeap(native,env=process.env) {
+  return {cjHeapSize:env.cjHeapSize||(native.os==='darwin'?'6GB':'12GB'),
+    ...(native.os==='linux'?{cjHeapSwap:env.cjHeapSwap||'on'}:{})};
+}
+
+export function linkCompilerRuntime(sdk) {
+  const link=path.join(sdk,'libexec/runtime');
+  rmrf(link);sync.symlinkSync(path.join('..','.compiler-exec','runtime'),link,'dir');
+}
+
 // Installed consumers must not inherit an earlier SDK's module/library search
 // path. Keep unrelated build controls (including jobserver descriptors) intact.
 export function cleanSdkEnvironment(sdk,platform,base=process.env,runtimeRoot=sdk) {
@@ -169,12 +203,7 @@ export function cleanSdkEnvironment(sdk,platform,base=process.env,runtimeRoot=sd
     const previous=key(base.CANGJIE_HOME).replace(/\/+$/,'');
     clean.PATH=(clean.PATH||'').split(delimiter).filter(p=>key(p)!==previous&&!key(p).startsWith(previous+'/')).join(delimiter);
   }
-  if(native.os==='darwin') {
-    // Use keg-only tools such as llvm-ranlib only after the SDK and host tools.
-    const keg=(native.arch==='arm64'?'/opt/homebrew':'/usr/local')+'/opt/llvm@16/bin';
-    const hostPath=clean.PATH?clean.PATH.split(':').filter(dir=>dir!==keg):[];
-    clean.PATH=[...hostPath,keg].join(':');
-  }
+  appendMacBinutils(clean,native);
   return sdkEnvironment(sdk,platform,clean,runtimeRoot);
 }
 
@@ -189,7 +218,7 @@ export async function resolveHostPython(sdk, env = process.env) {
     const rel = path.relative(root, file);
     return rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
   });
-  const search = env.PATH ?? env.Path ?? '';
+  const search = pathEnvironment(env).PATH ?? '';
   const names = process.platform === 'win32' ? ['python3.exe', 'python.exe'] : ['python3','python'];
   for (const dir of search.split(path.delimiter)) {
     if (!path.isAbsolute(dir) || inSdk(dir)) continue;

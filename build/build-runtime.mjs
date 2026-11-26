@@ -1,21 +1,22 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import {parseCliArgs,sdkPlatform,crossTuples,loadPins,jobs,copySource,copyTree,ensureDir,run,runCapture,resolveHostPython} from './common.mjs';
+import {parseCliArgs,sdkPlatform,crossTuples,nativeBuildEnvironment,loadPins,jobs,copySource,copyTree,ensureDir,run,runCapture,resolveHostPython} from './common.mjs';
 
 const a=parseCliArgs(),p=sdkPlatform(a.platform),cross=a.cross,tuple=cross?crossTuples[cross]:p.tuple;
 if(!tuple)throw Error('unknown cross target: '+cross);
 const sources=path.resolve(a.sources),cwd=path.join(sources,'runtime/runtime'),out=path.resolve(a.out);
 const build=cwd+'/CMakebuild',work=out+'.work';
 ensureDir(work);copySource(sources+'/bounds',cwd+'/third_party/third_party_bounds_checking_function');
-const version=loadPins().runtimeVersion,env={...process.env,RUNTIME_VERSION:version,CANGJIE_BUILD_JOBS:a.jobs||jobs};
-const opts={cwd,env},python=await resolveHostPython(a.sdk);
+const version=loadPins().runtimeVersion,env={...nativeBuildEnvironment(p),RUNTIME_VERSION:version,CANGJIE_BUILD_JOBS:a.jobs||jobs};
+const opts={cwd,env},python=await resolveHostPython(a.sdk,env);
 if(cross==='wasm32-wasi'){
   const bin=path.resolve(a.sdk,'third_party/llvm/bin');
+  env.LD_LIBRARY_PATH=[path.resolve(a.sdk,'third_party/llvm/lib'),env.LD_LIBRARY_PATH].filter(Boolean).join(':');
   run('cmake',['-G','Ninja','-S',cwd+'/src/wasm','-B',work,'-DCMAKE_C_COMPILER='+bin+'/clang',
     '-DCMAKE_AR='+bin+'/llvm-ar','-DCMAKE_RANLIB='+bin+'/llvm-ranlib','-DWASI_SYSROOT='+env.CJCJ_WASI_SYSROOT,'-DCMAKE_INSTALL_PREFIX='+out],opts);
   run('cmake',['--build',work],opts);run('cmake',['--install',work],opts);
-  run(bin+'/llvm-ar',['s',out+'/runtime/lib/'+tuple+'/libcangjie-runtime.a']);
+  run(bin+'/llvm-ar',['s',out+'/runtime/lib/'+tuple+'/libcangjie-runtime.a'],opts);
 }else{
   const windows=(cross||p.key)==='windows-x64',ios=cross?.startsWith('ios-'),ohos=cross?.startsWith('ohos-');
   const target=cross==='windows-x64'?'windows-x86_64':cross||(windows?'windows-x86_64':'native');
@@ -24,6 +25,7 @@ if(cross==='wasm32-wasi'){
   const toolchain=path.join(work,'runtime.cmake');
   if(!cross){
     let cmake=windows?'cmake_minimum_required(VERSION 3.29)\nset(CMAKE_LINKER_TYPE LLD)\n':'';
+    if(p.os==='darwin')cmake+='set(CMAKE_C_COMPILER /usr/bin/clang CACHE FILEPATH "" FORCE)\nset(CMAKE_CXX_COMPILER /usr/bin/clang++ CACHE FILEPATH "" FORCE)\n';
     if(env.SCCACHE_PATH) for(const key of ['CANGJIE_COMPILER_CACHE','CMAKE_C_COMPILER_LAUNCHER','CMAKE_CXX_COMPILER_LAUNCHER'])
       cmake+='set('+key+' "$ENV{SCCACHE_PATH}" CACHE STRING "" FORCE)\n';
     fs.writeFileSync(toolchain,cmake);env.CMAKE_TOOLCHAIN_FILE=toolchain.replaceAll('\\','/');

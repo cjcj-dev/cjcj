@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import {run,runCapture,loadPins,parseCliArgs,sdkPlatform,cleanSdkEnvironment,downloadFile,extractArchive,
+import {run,runCapture,loadPins,parseCliArgs,sdkPlatform,cleanSdkEnvironment,downloadFile,extractArchive,extractSdkArchive,tar,pathEnvironment,
   gitFetchCommit,ensureDir,copyTree,appendGithubPath,appendGithubEnv,jobs,main,resolveHostPython} from './common.mjs';
 
 const {toolchains:t,hostSdk,crossSdks,repos}=loadPins();
@@ -24,7 +24,6 @@ async function deps(p,mode) {
     const deps=runCapture('brew',['deps','--formula',...pkgs]).split(/\s+/).filter(s=>/^python@\d+\.\d+$/.test(s));
     run('brew',['install','--skip-link',...new Set(['python@3.11',...deps])]);run('brew',['install',...pkgs]);
     appendGithubPath(runCapture('brew',['--prefix','python@3.11']).trim()+'/libexec/bin');
-    appendGithubPath(runCapture('brew',['--prefix','llvm@16']).trim()+'/bin');
     const dir=path.join(process.env.RUNNER_TEMP||os.tmpdir(),'cmake-'+t.cmakeMacos.version);
     await unpack(t.cmakeMacos,dir,true);appendGithubPath(path.join(dir,'CMake.app/Contents/bin'));
   }else{
@@ -37,7 +36,7 @@ async function mingw(out) {
   await unpack(pin,src,true);
   gitFetchCommit(pin.llvmProjectUrl,pin.llvmProjectSha,src+'/llvm-project');
   run('git',['clone','--depth=1',pin.mingwW64Url,src+'/mingw-w64']);
-  const env={...process.env,TOOLCHAIN_ARCHS:'x86_64',MAKEFLAGS:'-j'+jobs};
+  const env={...pathEnvironment(),TOOLCHAIN_ARCHS:'x86_64',MAKEFLAGS:'-j'+jobs};
   for(const [script,...args] of [['build-llvm','--disable-lldb'],['strip-llvm'],['install-wrappers'],['build-mingw-w64','--with-default-msvcrt=msvcrt'],['build-mingw-w64-tools'],['build-compiler-rt'],['build-libcxx'],['build-mingw-w64-libraries']]){
     run('./'+script+'.sh',[out,...args],{cwd:src,env:script==='build-llvm'?{...env,LLVM_CMAKEFLAGS:'-DLLVM_USE_LINKER=lld'}:env});
   }
@@ -67,7 +66,10 @@ async function crossSdk(kind,out) {
     appendGithubEnv('CJCJ_WASI_SYSROOT',out+'/wasi-sysroot');
   }else if(kind==='android-ndk'){
     const home=process.env.ANDROID_HOME,ver=crossSdks.androidNdk.version;
-    run(path.join(home,'cmdline-tools/latest/bin/sdkmanager'),['ndk;'+ver]);
+    const manager=path.join(home,'cmdline-tools/latest/bin/sdkmanager');
+    if(process.platform==='win32')
+      run(process.env.ComSpec||'cmd.exe',['/d','/s','/c','""'+manager+'.bat" "ndk;'+ver+'""'],{windowsVerbatimArguments:true});
+    else run(manager,['ndk;'+ver]);
     appendGithubEnv('ANDROID_NDK_ROOT',path.join(home,'ndk',ver));
   }else if(kind==='xcode-ios'){
     const dev='/Applications/Xcode.app/Contents/Developer';run('sudo',['xcode-select','--switch',dev]);appendGithubEnv('DEVELOPER_DIR',dev);
@@ -80,6 +82,20 @@ async function crossSdk(kind,out) {
 }
 async function setup(a) {
   const [sub,dest]=a._,p=sdkPlatform(a.platform);
+  if(sub==='pack'){
+    // The Linux overlay is consumed on Windows: store physical tuple files only.
+    const tuple=sdkPlatform('linux-x64').tuple;
+    const members=a['linux-overlay']?['modules/','lib/','runtime/lib/'].map(d=>d+tuple):['.'];
+    return run(tar(),[...(a['linux-overlay']?['--dereference']:[]),'-cf',a.archive,'-C',a.dir,...members]);
+  }
+  if(sub==='unpack')return a['sdk-root']?extractSdkArchive(a.archive,a.dir,a['sdk-root']):extractArchive(a.archive,a.dir);
+  if(sub==='swap'){
+    appendGithubEnv('cjHeapSwap',process.env.cjHeapSwap||'on');
+    const file='/mnt/cjcj-bootstrap.swap';
+    if(runCapture('swapon',['--noheadings','--show=NAME']).trim().split(/\s+/).includes(file))return;
+    run('sudo',['fallocate','-l','12G',file]);run('sudo',['chmod','600',file]);
+    run('sudo',['mkswap',file]);run('sudo',['swapon',file]);return;
+  }
   if(sub==='deps')return deps(p,a.mode||'full');
   const out=path.resolve(a.out||dest);ensureDir(out);
   if(sub==='sources'){

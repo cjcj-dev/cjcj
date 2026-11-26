@@ -54,6 +54,7 @@ jobs:
         - platform: windows-x64
           runner: windows-2025
     env:
+      cjHeapSize: ${{ vars.cjHeapSize || startsWith(matrix.platform, 'darwin-') && '6GB' || '12GB' }}
       PLATFORM: ${{ matrix.platform }}
       VERSION: ${{ inputs.version }}
     steps:
@@ -64,6 +65,9 @@ jobs:
     - uses: actions/setup-node@v7.1.0
       with:
         node-version: ${{ steps.pins.outputs.node }}
+    - name: Enable Linux bootstrap swap
+      if: runner.os == 'Linux'
+      run: node build/setup.mjs swap
     - name: Select successful Prepare run
       run: |-
         id="$PREPARE_RUN"
@@ -82,7 +86,7 @@ jobs:
     - name: Unpack native base
       run: |-
         mkdir -p ../base
-        tar -xf native-base.tar -C ../base
+        node build/setup.mjs unpack --archive native-base.tar --dir ../base
         rm native-base.tar
     - name: Fetch bootstrap and SDK sources
       run: node build/setup.mjs sources --out ../src --repos h1,runtime,bounds,pcre2,tools,stdx,javaInterop,compiler --override "runtime=$(cat ../base/runtime.ref)"
@@ -107,15 +111,14 @@ jobs:
     - name: Rebuild the standard library using the bootstrap modules
       run: |-
         node build/build-stdlib.mjs --stage stage1-std --sources ../src --runtime ../base/runtime --sdk ../initial --out ../stage1
-        rm -rf ../initial
     - name: Build stage 2
       run: |-
-        node build/build-compiler.mjs --stage stage2 --sdk ../stage1 --host-sdk ../base/host --out ../stage2 --version "$VERSION"
-        rm -rf ../stage1
+        node build/build-compiler.mjs --stage stage2 --sdk ../initial --std ../stage1 --native ../base/native --host-sdk ../base/host --out ../stage2 --version "$VERSION"
+        rm -rf ../initial ../stage1
     - name: Archive the cross-build SDK and source selections
       run: |-
         cp ../base/*.ref ../stage2/
-        tar -cf stage2.tar -C ../stage2 .
+        node build/setup.mjs pack --archive stage2.tar --dir ../stage2
         rm ../stage2/{llvm,runtime}.ref
       if: matrix.platform == 'linux-x64' || matrix.platform == 'darwin-arm64'
     - uses: actions/upload-artifact@v7.0.2
@@ -128,11 +131,10 @@ jobs:
     - name: Build final std
       run: |-
         node build/build-stdlib.mjs --stage stage3-std --sources ../src --runtime ../base/runtime --sdk ../stage2 --include ../stage2/include --local-mode-api --out ../final-std
-        rm -rf ../stage2
     - name: Build stage 3
       run: |-
-        node build/build-compiler.mjs --stage stage3 --sdk ../final-std --host-sdk ../base/host --out ../host-sdk --version "$VERSION"
-        rm -rf ../final-std
+        node build/build-compiler.mjs --stage stage3 --sdk ../stage2 --std ../final-std --native ../base/native --host-sdk ../base/host --out ../host-sdk --version "$VERSION"
+        rm -rf ../stage2 ../final-std
     - name: Prepare the Java annotation processor
       run: mvn -q dependency:copy -Dartifact=org.projectlombok:lombok:1.18.36 -DoutputDirectory=../jars
       if: env.PLATFORM == 'linux-x64' || env.PLATFORM == 'windows-x64'
@@ -142,11 +144,21 @@ jobs:
         [[ "$PLATFORM" != windows-x64 ]] || suffix=.exe
         node build/build-extras.mjs --sdk ../host-sdk --host-sdk ../base/host --sources ../src --cjbind "../base/tools/cjbind$suffix" --lombok ../jars/lombok-1.18.36.jar
     - name: Archive host SDK
-      run: tar -cf host-sdk.tar -C ../host-sdk .
+      run: node build/setup.mjs pack --archive host-sdk.tar --dir ../host-sdk
     - uses: actions/upload-artifact@v7.0.2
       with:
         name: host-sdk-${{ matrix.platform }}
         path: host-sdk.tar
+        if-no-files-found: error
+        compression-level: 0
+    - name: Archive Linux libraries for the Windows Android package
+      if: matrix.platform == 'linux-x64'
+      run: node build/setup.mjs pack --linux-overlay --archive cross.tar --dir ../host-sdk
+    - uses: actions/upload-artifact@v7.0.2
+      if: matrix.platform == 'linux-x64'
+      with:
+        name: cross-std-linux-x64
+        path: cross.tar
         if-no-files-found: error
         compression-level: 0
     - name: Read package matrix
@@ -212,7 +224,7 @@ jobs:
     - name: Unpack stage 2 and fetch matching sources
       run: |-
         mkdir -p ../stage2
-        tar -xf stage2.tar -C ../stage2
+        node build/setup.mjs unpack --archive stage2.tar --dir ../stage2 --sdk-root .
         repos=runtime,bounds,pcre2
         overrides=(--override "runtime=$(cat ../stage2/runtime.ref)")
         if [[ "$TARGET" == android-aarch64 ]]; then repos+=,compiler,llvm,flatbuffers; overrides+=(--override "llvm=$(cat ../stage2/llvm.ref)"); fi
@@ -225,7 +237,7 @@ jobs:
       run: |-
         node build/build-runtime.mjs --sdk ../stage2 --cross "$TARGET" --sources ../src --out ../runtime
         node build/build-stdlib.mjs --sdk ../stage2 --cross "$TARGET" --sources ../src --runtime ../runtime --out ../cross
-        tar -cf cross.tar -C ../cross .
+        node build/setup.mjs pack --archive cross.tar --dir ../cross
     - uses: actions/upload-artifact@v7.0.2
       with:
         name: cross-std-${{ matrix.target }}
@@ -263,14 +275,15 @@ jobs:
     - name: Unpack host and required target libraries
       run: |-
         mkdir -p ../host
-        tar -xf host-sdk.tar -C ../host
-        for target in $(jq -r '.[]' <<< "$CROSS"); do
-          name="cross-std-$target"; archive=cross.tar
-          if [[ "$target" == linux-x64 ]]; then name=host-sdk-linux-x64; archive=host-sdk.tar; fi
-          gh run download "$GITHUB_RUN_ID" --name "$name" --dir "../downloads/$target"
-          mkdir -p "../overlays/$target"
-          tar -xf "../downloads/$target/$archive" -C "../overlays/$target"
-        done
+        node build/setup.mjs unpack --archive host-sdk.tar --dir ../host --sdk-root .
+        node --input-type=module <<'NODE'
+        import {run,extractArchive} from './build/common.mjs';
+        for(const target of JSON.parse(process.env.CROSS)){
+          const dir='../downloads/'+target;
+          run('gh',['run','download',process.env.GITHUB_RUN_ID,'--name','cross-std-'+target,'--dir',dir]);
+          extractArchive(dir+'/cross.tar','../overlays/'+target);
+        }
+        NODE
       env:
         GH_TOKEN: ${{ github.token }}
     - uses: actions/setup-java@v5
@@ -287,7 +300,7 @@ jobs:
     - name: Package and test relocated SDK
       run: |-
         overlays=()
-        if [[ -f runtime-tests.tar ]]; then mkdir ../language; tar -xf runtime-tests.tar -C ../language; overlays+=(--language-inputs ../language); fi
+        if [[ -f runtime-tests.tar ]]; then mkdir ../language; node build/setup.mjs unpack --archive runtime-tests.tar --dir ../language; overlays+=(--language-inputs ../language); fi
         for dir in ../overlays/*; do [[ ! -d "$dir" ]] || overlays+=(--cross-dir "$dir"); done
         node build/package-sdk.mjs --sdk ../host --target "$TARGET" --version "$VERSION" --out archives --verify-relocated "${overlays[@]}"
     - uses: actions/upload-artifact@v7.0.2

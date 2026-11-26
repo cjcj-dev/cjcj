@@ -1,12 +1,12 @@
-#!/usr/bin/env zx
+#!/usr/bin/env node
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 
-const [compiler, work] = (globalThis.argv?._ ?? process.argv.slice(2)).map(String);
+const [compiler, work] = process.argv.slice(2);
 if (!compiler || !work || ![compiler, work].every(p => path.isAbsolute(p))) {
-  throw Error('usage: zx linker-response.mjs /absolute/bin/cjc /new/work');
+  throw Error('usage: node tests/windows_linker_response/linker-response.mjs /absolute/bin/cjc /new/work');
 }
 
 const windows = process.platform === 'win32';

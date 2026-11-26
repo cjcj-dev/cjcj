@@ -7,12 +7,12 @@ import path from 'node:path';
 import {spawn,spawnSync,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {pathToFileURL} from 'node:url';
-import {parseCliArgs,repo,sdkPlatform,cleanSdkEnvironment,run,runCapture,resolveHostPython,ensureDir,rmrf,jobs,sha256File as fileDigest} from './common.mjs';
+import {parseCliArgs,repo,sdkPlatform,pathEnvironment,compilerHeap,cleanSdkEnvironment,run,runCapture,resolveHostPython,ensureDir,rmrf,jobs,sha256File as fileDigest} from './common.mjs';
 
 const execute=promisify(execFile),privateRoot=path.resolve.bind(path);
 const atomicJson=(file,value)=>fs.writeFile(file,JSON.stringify(value,null,2)+'\n');
 const readJson=async file=>JSON.parse(await fs.readFile(file,'utf8'));
-const command=([cmd,...args],opts)=>run(cmd,args,{...opts,env:{...process.env,...opts.env}});
+const command=([cmd,...args],opts)=>run(cmd,args,{...opts,env:{...pathEnvironment(),...pathEnvironment(opts.env||{})}});
 
 export async function precompiledStdxMacros({sdk,work,platform}) {
  const native=sdkPlatform(platform);
@@ -522,10 +522,11 @@ export async function consumeWindowsProfiler(sdk,work,env) {
   }
   const heap=JSON.parse(await run('cli',path.join(sdk,'tools/bin/cjprof.exe'),['heap','-i',input,'--json'],env));
   if(!heap.objects.some(o=>o.retainedSize>o.shallowSize)||!heap.constructors.length)throw Error('WINDOWS_CJPROF_HEAP_GRAPH');
-  const lib=path.join(sdk,'tools/lib'), key=Object.keys(env).find(k=>k.toUpperCase()==='PATH')||'PATH';
+  const lib=path.join(sdk,'tools/lib');
+  env=pathEnvironment(env,sdkPlatform('windows-x64'));
   const java=path.join(process.env.JAVA_HOME,'bin/java.exe');
   const out=await run('jni',java,['-Xcheck:jni','-Djava.library.path='+lib,'--class-path',path.join(sdk,'tools/share/java/cjprof.jar'),
-    path.join(fixtures,'CjprofInstalled.java'),input],{...env,[key]:[lib,path.join(sdk,'runtime/lib/windows_x86_64_cjnative'),path.join(sdk,'lib/windows_x86_64_cjnative'),env[key]].join(path.delimiter)});
+    path.join(fixtures,'CjprofInstalled.java'),input],{...env,PATH:[lib,path.join(sdk,'runtime/lib/windows_x86_64_cjnative'),path.join(sdk,'lib/windows_x86_64_cjnative'),env.PATH].join(path.delimiter)});
   if(!out.split(/\r?\n/).includes('CJPROF_INSTALLED_HEAP_GRAPH'))throw Error('WINDOWS_CJPROF_JNI_GRAPH');
 }
 export function packageCompileOptions(manifest, source = 'cjpm.toml') {
@@ -708,7 +709,7 @@ async function test(a,work) {
     }
   }else if(a.mode==='packages'){
     const tree=path.resolve(a.repo||repo),fixture=work+'/objc',producer=sdk+'/libexec/compiler/cjcj-stage1'+p.exe;
-    env.OBJC_PREAMBLE_PRODUCER=producer;env.OBJC_PREAMBLE_IMPORTS=fixture+'/imports';env.cjHeapSize||='8GB';
+    env.OBJC_PREAMBLE_PRODUCER=producer;env.OBJC_PREAMBLE_IMPORTS=fixture+'/imports';Object.assign(env,compilerHeap(p,env));
     run(python,[tree+'/scripts/objc_preamble_unit.py','--prepare-only','--build-tree',tree,'--sdk',sdk,'--producer',producer,'--out',fixture],{cwd:tree,env});
     run(cjpm,['test','-j',jobs,'--no-color','--report-format=xml','--report-path='+work+'/reports','--target-dir',work+'/target'],{cwd:tree,env});
   }else throw Error('unknown test mode '+a.mode);
