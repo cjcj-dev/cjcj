@@ -317,8 +317,9 @@ async function assemble(a){
         run(cache||cc,[...(cache?[cc]:[]),'-std=c11','-O2','-fPIC','-D_POSIX_C_SOURCE=200809L','-DCJCJ_COMMIT="'+commit+'"',...(!supports?['-DCJCJ_LEGACY_HOST_RUNTIME']:[]),'-c','runtime_shim/'+name+'.c','-o','runtime_shim/'+name+'.o'],{cwd:source,env:{...process.env,LD_LIBRARY_PATH:'',DYLD_LIBRARY_PATH:''}});
       }
     }else{
-      if(a.version)await injectVersion(source,a.version);
+      // Stamp the checkout before the build edits tracked version metadata.
       run(process.execPath,[source+'/runtime_shim/build_shim.mjs'],{cwd:source,env});
+      if(a.version)await injectVersion(source,a.version);
     }
     await prepareTrimpath(source);
     const cjpm=path.join(host,'tools/bin/cjpm'+p.exe);

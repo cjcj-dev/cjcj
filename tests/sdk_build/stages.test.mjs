@@ -37,6 +37,21 @@ for(const workflow of ['prepare','release','ci']){
   });
 }
 
+for(const [workflow,jobs] of Object.entries({prepare:['ci-sdk'],ci:['build-and-smoke','package-tests'],release:['host-sdk']})){
+  test(workflow+' sets the compiler heap for each SDK job',()=>{
+    const yaml=fs.readFileSync(path.join(repo,'.github/workflows',workflow+'.yml'),'utf8');
+    const fallback=workflow==='release'?"startsWith(matrix.platform, 'linux-') && '20GB' || '16GB'":"'20GB'";
+    const blocks=yaml.split(/^  (?=[\w-]+:[ \t]*$)/m);
+    for(const job of jobs){
+      const block=blocks.find(b=>b.startsWith(job+':\n'));
+      assert.ok(block,job);
+      const env=block.match(/^    env:\n((?:      .*\n)+)/m)?.[1]||'';
+      assert.ok(env.split('\n').includes("      cjHeapSize: ${{ vars.cjHeapSize || "+fallback+" }}"),job);
+    }
+    assert.doesNotMatch(yaml,/^\s*cjHeapSize:.*\b(?:6|12)GB\b/m);
+  });
+}
+
 for(const key of ['linux-x64','linux-aarch64','darwin-arm64','darwin-x64']){
   test('stage0 uses checkout link and heap inputs: '+key,{skip:process.platform==='win32'},()=>{
     const {platform,llvmDirectory,llvmLibrary,os}=sdkPlatform(key);
@@ -76,6 +91,7 @@ test('stage0 leaves a clean checkout for the stage2 shim build',linux,t=>{
   const dir=fixture(t),src=dir+'/checkout',host=dir+'/host',native=dir+'/native',out=dir+'/stage0';
   const shim='runtime_shim/cjselfhost_llvmshim.o',selected=native+'/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o';
   for(const file of ['.gitignore','cjpm.toml','cjpm.lock','packages/cjc/cjpm.toml','build/common.mjs',
+    'packages/basic/src/Version.cj','schema/StdxChirFormat.fbs','packages/chir/src/Enums.cj',
     'build/build-compiler.mjs','runtime_shim/build_shim.mjs','runtime_shim/cjc_heap_defaults.c','runtime_shim/cjc_runtime_config.c'])
     put(src+'/'+file,fs.readFileSync(path.join(repo,file)));
   const env={...process.env,CC:dir+'/bin/cc',CXX:dir+'/bin/cc',CMAKE_C_COMPILER_LAUNCHER:'',
@@ -117,12 +133,23 @@ echo stage0 > "$3/release/bin/cjc"
   }
   assert.ok(!fs.existsSync(src+'/target'),'stage0 wrote into checkout/target');
   assert.equal(fs.readFileSync(out+'.target/release/bin/cjc','utf8').trim(),'stage0');
-  // Stage2 selects its own shim and recompiles both C objects using the clean revision.
+  // Build stage2 with a version that differs from the tracked source.
   put(selected,'stage2 shim');
-  exec(process.execPath,['runtime_shim/build_shim.mjs'],{CJCJ_COMMIT:commit,CJCJ_LLVM_SHIM_O:selected,CANGJIE_HOME:out});
+  put(host+'/LICENSE');put(host+'/Open_Source_Software_Notice.docx');
+  put(dir+'/std/lib/'+tuple+'/current');put(dir+'/std/runtime/lib/'+tuple+'/current');
+  put(native+'/third_party/flatbuffers/bin/flatc','#!/bin/sh\nexit 0\n',0o755);
+  put(host+'/tools/bin/cjpm',`#!/bin/sh
+set -eu
+grep -Fx 'public let CANGJIE_VERSION: String = "9.8.7"' packages/basic/src/Version.cj
+mkdir -p "$3/release/bin"
+echo stage2 > "$3/release/bin/cjc"
+`,0o755);
+  exec(process.execPath,['build/build-compiler.mjs','--stage','stage2','--sdk',out,'--native',native,
+    '--std',dir+'/std','--host-sdk',host,'--version','9.8.7','--out',dir+'/stage2']);
+  assert.equal(exec('git',['status','--porcelain']),'');
   assert.equal(fs.readFileSync(src+'/'+shim,'utf8'),'stage2 shim');
   const config=fs.readFileSync(src+'/runtime_shim/cjc_runtime_config.o','utf8');
-  assert.ok(config.includes('-DCJCJ_COMMIT="'+commit+'"'));
+  assert.match(config,new RegExp('-DCJCJ_COMMIT="'+commit+'"'));
   assert.ok(!config.includes('-DCJCJ_LEGACY_HOST_RUNTIME'));
   assert.ok(fs.readFileSync(src+'/runtime_shim/cjc_heap_defaults.o','utf8').includes(src+'/runtime_shim/cjc_heap_defaults.c'));
 });
@@ -155,7 +182,7 @@ cat "$CANGJIE_HOME/modules/${tuple}/current" > "$3/release/bin/cjc"
     put(std+'/modules/'+tuple+'/current',stage);put(std+'/lib/'+tuple+'/current',stage);
     put(std+'/runtime/lib/'+tuple+'/current','R');
     cli('build-compiler',['--stage',stage,'--sdk',parent,'--std',std,'--native',native,'--host-sdk',host,'--source',src,'--out',out],
-      {GIT_DIR:git.stdout.trim(),cjHeapSize:stage==='stage2'?undefined:'4GB',cjHeapSwap:undefined,EXPECTED_HEAP:stage==='stage2'?'12GB':'4GB'});
+      {GIT_DIR:git.stdout.trim(),cjHeapSize:stage==='stage2'?undefined:'4GB',cjHeapSwap:undefined,EXPECTED_HEAP:stage==='stage2'?'20GB':'4GB'});
     assert.equal(fs.existsSync(out+'/'+sentinel),false,stage+' retained H/tools/bin/LSPServer');
     assert.equal(fs.readFileSync(out+'/tools/bin/native-only','utf8'),'native');
     assert.equal(fs.readFileSync(out+'/LICENSE','utf8'),'host license');
@@ -237,7 +264,7 @@ test('Linux overlay contains physical files in just three target directories',li
 });
 
 test('heap defaults and explicit overrides cover all host families',()=>{
-  for(const [key,heap] of [['linux-x64','12GB'],['darwin-arm64','6GB'],['windows-x64','12GB']]){
+  for(const [key,heap] of [['linux-x64','20GB'],['linux-aarch64','20GB'],['darwin-arm64','16GB'],['darwin-x64','16GB'],['windows-x64','16GB']]){
     const p=sdkPlatform(key);
     assert.deepEqual(compilerHeap(p,{}),{cjHeapSize:heap,...(p.os==='linux'?{cjHeapSwap:'on'}:{})});
     assert.equal(compilerHeap(p,{cjHeapSize:'4GB'}).cjHeapSize,'4GB');

@@ -54,7 +54,7 @@ jobs:
         - platform: windows-x64
           runner: windows-2025
     env:
-      cjHeapSize: ${{ vars.cjHeapSize || startsWith(matrix.platform, 'darwin-') && '6GB' || '12GB' }}
+      cjHeapSize: ${{ vars.cjHeapSize || startsWith(matrix.platform, 'linux-') && '20GB' || '16GB' }}
       PLATFORM: ${{ matrix.platform }}
       VERSION: ${{ inputs.version }}
     steps:

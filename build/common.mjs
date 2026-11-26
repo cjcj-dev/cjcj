@@ -190,7 +190,7 @@ export function nativeBuildEnvironment(native,base=process.env) {
 }
 
 export function compilerHeap(native,env=process.env) {
-  return {cjHeapSize:env.cjHeapSize||(native.os==='darwin'?'6GB':'12GB'),
+  return {cjHeapSize:env.cjHeapSize||(native.os==='linux'?'20GB':'16GB'),
     ...(native.os==='linux'?{cjHeapSwap:env.cjHeapSwap||'on'}:{})};
 }
 
