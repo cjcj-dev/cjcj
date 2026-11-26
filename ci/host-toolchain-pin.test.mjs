@@ -5,7 +5,6 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import {baseSdkDownload, RELEASE_HOST_TOOLCHAIN} from '../build/lib/release-component-provenance.mjs';
 import {
   hostToolchainFromCjcVersion,
   parseHostToolchainPin,
@@ -148,17 +147,12 @@ for (const [name, changedFile, mutate] of scanControls) {
   test(`ordinary host scan control: ${name}`, async () => {
     const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'host-scan-'));
     try {
-      for (const directory of ['ci', 'tools', '.github/workflows', 'build/lib']) {
+      for (const directory of ['ci', 'tools', '.github/workflows']) {
         await fs.mkdir(path.join(fixture, directory), {recursive: true});
       }
       for (const relative of [
         'ci/host-toolchain-pin.test.mjs', 'ci/host-toolchain-pin.mjs', 'ci/vendor/js-yaml/js-yaml.mjs',
-        'ci/host_sdk_pin.env', 'build/sdk/producers/release/base-sdk-identities.json',
-        'build/lib/release-component-provenance.mjs', 'build/sdk/producers/release/source-tool-payloads.mjs',
-        'ci/bootstrap/sdk-platform.mjs', 'ci/bootstrap/sdk-io.mjs', 'ci/bootstrap/sdk-flow.mjs',
-        'ci/bootstrap/sdk-command-lifetime.mjs', 'ci/bootstrap/sdk-path.mjs', 'ci/bootstrap/sdk-std-resume.mjs',
-        'ci/bootstrap/sdk-source.mjs', 'ci/bootstrap/sdk-install-entries.mjs', 'ci/build-resources.mjs',
-        'build/lib/targets.mjs', 'build/lib/errors.mjs', 'build/srcbuild/tool-layout.mjs', 'build/lib/pe-symbols.mjs', 'ci/bootstrap/sdk-archive.mjs',
+        'ci/host_sdk_pin.env',
         '.github/workflows/sdk-build.yml', '.github/workflows/sdk-package.yml',
         'ci/cangjie-test/README.md', 'ci/host-runtime/release.json',
       ]) {
@@ -356,6 +350,7 @@ test('measured cjc version is converted to the exact nightly identity', () => {
 });
 
 test('release consumes native installs while official archive selectors retain the declared host pin', async () => {
+  const {baseSdkDownload, RELEASE_HOST_TOOLCHAIN} = await import('../build/lib/release-component-provenance.mjs');
   const release = await fs.readFile(path.join(root, '.github/workflows/sdk-package.yml'), 'utf8');
   for (const name of ['sdk-package.yml', 'sdk-build.yml'])
     assert.doesNotMatch(await fs.readFile(path.join(root, '.github/workflows', name), 'utf8'), /Load release host pin|prepare_base_sdk|setup_sdk/, name);
@@ -598,7 +593,8 @@ test('workflow GitHub environment loaders resolve the execution host and stop on
 
 // Explicit native H selection has a registered original archive; default pins
 // and an arbitrary matching version string cannot select it.
-test('explicit native host archive selection retains the default pin and rejects unregistered hosts',()=>{
+test('explicit native host archive selection retains the default pin and rejects unregistered hosts',async()=>{
+ const {baseSdkDownload} = await import('../build/lib/release-component-provenance.mjs');
  const old='nightly-'+'1.3.0-alpha.20260925001050';
  assert.throws(()=>baseSdkDownload('linux-x64',old),/no pinned archive identity/);
  assert.equal(baseSdkDownload('linux-x64',old,{selectedHost:true}).sha256,

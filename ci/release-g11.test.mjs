@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import test from 'node:test';
 
@@ -35,7 +35,20 @@ async function fixture(t) {
   }
   manifest.allowances = suites.map(suite => ({suite, name: 'baseline-failure', reason: 'Observed official fixture failure'}));
   files['G11.json'] = manifest;
-  return {root, files};
+  return {root, files, repo};
+}
+// The all-gates CLI also runs other gates' contract suites in --repo. Give
+// the G11 aggregate controls their own commit and bind both arms to its HEAD.
+async function aggregateFixture(t) {
+  const f = await fixture(t);
+  f.repo = await fs.mkdtemp(path.join(os.tmpdir(), 'g11-repo-'));
+  t.after(() => fs.rm(f.repo, {recursive: true, force: true}));
+  const git = (...args) => execFileSync('git', ['-C', f.repo, ...args], {encoding: 'utf8'}).trim();
+  git('init', '--quiet');
+  git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+    'commit', '--quiet', '--allow-empty', '--no-gpg-sign', '-m', 'G11 fixture');
+  f.files['G11.json'].cjcj_head_sha = git('rev-parse', 'HEAD');
+  return f;
 }
 async function runFixture(f, mode = 'G11') {
   for (const [relative, contents] of Object.entries(f.files)) {
@@ -43,7 +56,7 @@ async function runFixture(f, mode = 'G11') {
     await fs.mkdir(path.dirname(file), {recursive: true});
     await fs.writeFile(file, typeof contents === 'string' ? contents : JSON.stringify(contents));
   }
-  const result = spawnSync(process.execPath, [cli, mode, '--repo', repo, '--evidence', f.root, '--json'],
+  const result = spawnSync(process.execPath, [cli, mode, '--repo', f.repo, '--evidence', f.root, '--json'],
     {encoding: 'utf8', timeout: 30000});
   assert.equal(result.error, undefined);
   assert.equal(result.signal, null);
@@ -101,7 +114,7 @@ for (const [name, official, selfhost, accepted] of environmentPairs) {
   });
 }
 test('G11 all-gates CLI rejects different environment recipe', async t => {
-  const f = await fixture(t);
+  const f = await aggregateFixture(t);
   f.files['official/identity.json'].environment_recipe_sha256 = environmentHash;
   f.files['selfhost/identity.json'].environment_recipe_sha256 = null;
   const {rc, row} = await runFixture(f, 'all');
@@ -157,8 +170,11 @@ test('G11 missing archive remains UNKNOWN', () => {
   assert.equal(JSON.parse(result.stdout).status, 'UNKNOWN');
 });
 test('G11 all-gates CLI consumes the same evidence', async t => {
-  const f = await fixture(t);
+  const f = await aggregateFixture(t);
+  const direct = await runFixture(f);
+  assert.equal(direct.rc, 0);
   const {rc, row} = await runFixture(f, 'all');
+  assert.deepEqual(row, direct.row);
   assert.equal(row.status, 'MET');
   assert.equal(rc, 0);
 });
