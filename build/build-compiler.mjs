@@ -2,7 +2,7 @@
 import fs from 'node:fs/promises';
 import sync from 'node:fs';
 import path from 'node:path';
-import {repo,jobs,parseCliArgs,sdkPlatform,compilerHeap,linkCompilerRuntime,cleanSdkEnvironment,ensureDir,copyTree,rmrf,run,runCapture,main,makeLauncher,installEntry} from './common.mjs';
+import {repo,jobs,parseCliArgs,sdkPlatform,linkCompilerRuntime,cleanSdkEnvironment,ensureDir,copyTree,rmrf,run,runCapture,main,makeLauncher,installEntry} from './common.mjs';
 export const HOST_TRIPLES = Object.freeze({
   linux_x86_64: 'x86_64-unknown-linux-gnu', linux_aarch64: 'aarch64-unknown-linux-gnu',
   darwin_x86_64: 'x86_64-apple-darwin', darwin_aarch64: 'aarch64-apple-darwin',
@@ -282,7 +282,7 @@ async function assemble(a){
   const win=p.os==='win32',mingw=process.env.CJCJ_WINDOWS_TOOLCHAIN||process.env.MINGW_PATH;
   const shim='third_party/llvm/fixed-llc/cjselfhost_llvmshim.o',env={
     ...cleanSdkEnvironment(seed?host:sdk,platform),CJCJ_COMMIT:commit,
-    CANGJIE_BUILD_JOBS:a.jobs||jobs,...compilerHeap(p),CJCJ_LLVM_SHIM_O:path.join(native,shim),
+    CANGJIE_BUILD_JOBS:a.jobs||jobs,CJCJ_LLVM_SHIM_O:path.join(native,shim),
     ...(win?{MINGW_PATH:mingw,CC:path.join(mingw,'bin/clang.exe'),CXX:path.join(mingw,'bin/clang++.exe')}:{})};
   const files=['cjpm.toml','cjpm.lock','packages/cjc/cjpm.toml',...(!seed&&a.version?[VERSION_SOURCE]:[])];
   const saved=await Promise.all(files.map(async f=>[f,await fs.readFile(path.join(source,f)).catch(e=>{if(e.code!=='ENOENT')throw e;return null;})]));

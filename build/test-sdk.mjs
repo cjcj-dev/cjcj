@@ -417,7 +417,7 @@ public class Base {
 }
 `);
   const runtime=path.join(sdk,'runtime/lib/linux_x86_64_cjnative'),cp='.'+path.delimiter+path.join(sdk,'lib/library-loader.jar');
-  const env={CANGJIE_HOME:sdk,JAVA_HOME:home,LD_LIBRARY_PATH:[cwd,runtime,path.join(sdk,'lib/linux_x86_64_cjnative')].join(path.delimiter)};
+  const env={...compilerHeap(sdkPlatform('linux-x64')),CANGJIE_HOME:sdk,JAVA_HOME:home,LD_LIBRARY_PATH:[cwd,runtime,path.join(sdk,'lib/linux_x86_64_cjnative')].join(path.delimiter)};
   for(const argv of [[path.join(sdk,'bin/cjc'),'--output-type=dylib','-p','src','-L'+runtime,'-ljava.internal','-ljava.lang','--output-javagen-dir=generated'],
     [path.join(home,'bin/javac'),'-cp',cp,'Base.java','generated/Probe.java','-d','.'],
     [path.join(home,'bin/java'),'-cp',cp,'-Djava.library.path='+cwd,'check.Base']])await command(argv,{cwd,env});
@@ -709,7 +709,7 @@ async function test(a,work) {
     }
   }else if(a.mode==='packages'){
     const tree=path.resolve(a.repo||repo),fixture=work+'/objc',producer=sdk+'/libexec/compiler/cjcj-stage1'+p.exe;
-    env.OBJC_PREAMBLE_PRODUCER=producer;env.OBJC_PREAMBLE_IMPORTS=fixture+'/imports';Object.assign(env,compilerHeap(p,env));
+    env.OBJC_PREAMBLE_PRODUCER=producer;env.OBJC_PREAMBLE_IMPORTS=fixture+'/imports';
     run(python,[tree+'/scripts/objc_preamble_unit.py','--prepare-only','--build-tree',tree,'--sdk',sdk,'--producer',producer,'--out',fixture],{cwd:tree,env});
     run(cjpm,['test','-j',jobs,'--no-color','--report-format=xml','--report-path='+work+'/reports','--target-dir',work+'/target'],{cwd:tree,env});
   }else throw Error('unknown test mode '+a.mode);

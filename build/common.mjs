@@ -189,9 +189,12 @@ export function nativeBuildEnvironment(native,base=process.env) {
   return env;
 }
 
-export function compilerHeap(native,env=process.env) {
-  return {cjHeapSize:env.cjHeapSize||(native.os==='linux'?'20GB':'16GB'),
-    ...(native.os==='linux'?{cjHeapSwap:env.cjHeapSwap||'on'}:{})};
+export function compilerHeap(native,env=process.env,totalMemory=os.totalmem()) {
+  const explicit=(env.cjHeapSize||env.CJCJ_HEAP_SIZE||'').trim();
+  // The bootstrap runtime falls back to 256 MB if the requested heap exceeds RAM.
+  const mb=Math.max(4,Math.min(15*1024,Math.floor(totalMemory*0.94/(1024*1024))));
+  return {cjHeapSize:explicit||`${mb}MB`,
+    ...(native.os==='linux'?{cjHeapSwap:(env.cjHeapSwap||'').trim()||'on'}:{})};
 }
 
 export function linkCompilerRuntime(sdk) {
@@ -212,7 +215,7 @@ export function cleanSdkEnvironment(sdk,platform,base=process.env,runtimeRoot=sd
     clean.PATH=(clean.PATH||'').split(delimiter).filter(p=>key(p)!==previous&&!key(p).startsWith(previous+'/')).join(delimiter);
   }
   appendMacBinutils(clean,native);
-  return sdkEnvironment(sdk,platform,clean,runtimeRoot);
+  return sdkEnvironment(sdk,platform,{...clean,...compilerHeap(native,base)},runtimeRoot);
 }
 
 export async function resolveHostPython(sdk, env = process.env) {

@@ -113,7 +113,7 @@ jobs:
     needs: native-base
     runs-on: ubuntu-24.04
     env:
-      cjHeapSize: ${{ vars.cjHeapSize || '20GB' }}
+      CJCJ_HEAP_SIZE: ${{ vars.cjHeapSize }}
       cjHeapSwap: 'on'
       PLATFORM: linux-x64
       VERSION: ${{ inputs.version }}

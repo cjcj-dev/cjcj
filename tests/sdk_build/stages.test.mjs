@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import test from 'node:test';
-import {repo,compilerHeap,loadPins,sdkPlatform} from '../../build/common.mjs';
+import {repo,cleanSdkEnvironment,compilerHeap,loadPins,sdkPlatform} from '../../build/common.mjs';
 import {effectiveLinkOptions,h1HeapDefaultsBuild,h1PackageLinkOptions} from '../../build/build-compiler.mjs';
 
 test('source pins use full commit SHAs and select the expected tools revision',()=>{
@@ -40,15 +40,15 @@ for(const workflow of ['prepare','release','ci']){
 for(const [workflow,jobs] of Object.entries({prepare:['ci-sdk'],ci:['build-and-smoke','package-tests'],release:['host-sdk']})){
   test(workflow+' sets the compiler heap for each SDK job',()=>{
     const yaml=fs.readFileSync(path.join(repo,'.github/workflows',workflow+'.yml'),'utf8');
-    const fallback=workflow==='release'?"startsWith(matrix.platform, 'linux-') && '20GB' || '16GB'":"'20GB'";
     const blocks=yaml.split(/^  (?=[\w-]+:[ \t]*$)/m);
     for(const job of jobs){
       const block=blocks.find(b=>b.startsWith(job+':\n'));
       assert.ok(block,job);
       const env=block.match(/^    env:\n((?:      .*\n)+)/m)?.[1]||'';
-      assert.ok(env.split('\n').includes("      cjHeapSize: ${{ vars.cjHeapSize || "+fallback+" }}"),job);
+      assert.ok(env.split('\n').includes('      CJCJ_HEAP_SIZE: ${{ vars.cjHeapSize }}'),job);
     }
-    assert.doesNotMatch(yaml,/^\s*cjHeapSize:.*\b(?:6|12)GB\b/m);
+    assert.doesNotMatch(yaml,/^\s*cjHeapSize:/m);
+    assert.doesNotMatch(yaml,/^\s*CJCJ_HEAP_SIZE:.*\b(?:6|12|16|20)GB\b/m);
   });
 }
 
@@ -182,7 +182,8 @@ cat "$CANGJIE_HOME/modules/${tuple}/current" > "$3/release/bin/cjc"
     put(std+'/modules/'+tuple+'/current',stage);put(std+'/lib/'+tuple+'/current',stage);
     put(std+'/runtime/lib/'+tuple+'/current','R');
     cli('build-compiler',['--stage',stage,'--sdk',parent,'--std',std,'--native',native,'--host-sdk',host,'--source',src,'--out',out],
-      {GIT_DIR:git.stdout.trim(),cjHeapSize:stage==='stage2'?undefined:'4GB',cjHeapSwap:undefined,EXPECTED_HEAP:stage==='stage2'?'20GB':'4GB'});
+      {GIT_DIR:git.stdout.trim(),cjHeapSize:stage==='stage2'?'':'4GB',CJCJ_HEAP_SIZE:'',cjHeapSwap:undefined,
+        EXPECTED_HEAP:stage==='stage2'?compilerHeap(sdkPlatform(),{}).cjHeapSize:'4GB'});
     assert.equal(fs.existsSync(out+'/'+sentinel),false,stage+' retained H/tools/bin/LSPServer');
     assert.equal(fs.readFileSync(out+'/tools/bin/native-only','utf8'),'native');
     assert.equal(fs.readFileSync(out+'/LICENSE','utf8'),'host license');
@@ -212,12 +213,15 @@ for(const [platform,tuple,suffix] of [['linux-x64','linux_x86_64_cjnative','.so'
     const files=['modules/'+tuple+'/std/std.core.cjo','modules/'+tuple+'/std/libstd.core.bc',lib+'/libcangjie-std-core.a',
       run+'/libcangjie-std-core'+suffix,'lib/libstdFFI'+suffix,lib+'/'+bounds,run+'/'+bounds,lib+'/libcangjie-ast-support.a',
       'schema/old','include/old','third_party/flatbuffers/bin/old','third_party/python/old','third_party/flatbuffers/modules/current'];
-    put(src+'/runtime/stdlib/build.py',`import pathlib, sys
+    put(src+'/runtime/stdlib/build.py',`import os, pathlib, sys
+if sys.argv[1]=='build': pathlib.Path('build.heap').write_text(os.environ.get('cjHeapSize', ''))
 if sys.argv[1]=='install':
  for rel in ${JSON.stringify(files)}:
   f=pathlib.Path(sys.argv[-1])/rel; f.parent.mkdir(exist_ok=True,parents=True); f.write_text('std')
 `);
-    cli('build-stdlib',['--stage','stage1-std','--platform',platform,'--sources',src,'--runtime',rt,'--sdk',sdk,'--out',out]);
+    cli('build-stdlib',['--stage','stage1-std','--platform',platform,'--sources',src,'--runtime',rt,'--sdk',sdk,'--out',out],
+      {cjHeapSize:' ',CJCJ_HEAP_SIZE:''});
+    assert.equal(fs.readFileSync(src+'/runtime/stdlib/build.heap','utf8'),compilerHeap(sdkPlatform(platform),{}).cjHeapSize);
     assert.equal(fs.readFileSync(out+'/'+run+'/'+bounds,'utf8'),'validated R',platform+' std overwrote R');
     assert.equal(fs.readFileSync(out+'/third_party/flatbuffers/modules/current','utf8'),'std');
     for(const f of [lib+'/libcangjie-ast-support.a','schema/old','include/old','third_party/flatbuffers/bin/old','third_party/python/old'])
@@ -263,12 +267,43 @@ test('Linux overlay contains physical files in just three target directories',li
   assert.ok(fs.lstatSync(overlay+'/lib/'+tuple+'/bounds').isFile());assert.equal(fs.readFileSync(overlay+'/lib/'+tuple+'/bounds','utf8'),'R');
 });
 
-test('heap defaults and explicit overrides cover all host families',()=>{
-  for(const [key,heap] of [['linux-x64','20GB'],['linux-aarch64','20GB'],['darwin-arm64','16GB'],['darwin-x64','16GB'],['windows-x64','16GB']]){
-    const p=sdkPlatform(key);
-    assert.deepEqual(compilerHeap(p,{}),{cjHeapSize:heap,...(p.os==='linux'?{cjHeapSwap:'on'}:{})});
-    assert.equal(compilerHeap(p,{cjHeapSize:'4GB'}).cjHeapSize,'4GB');
+test('default compiler heap stays below runner RAM and within runtime limits',()=>{
+  for(const [platform,gib,mb] of [
+    ['darwin-arm64',7,6737], ['darwin-x64',14,13475], ['linux-x64',15.6,15015],
+    ['windows-x64',16,15360], ['linux-aarch64',64,15360],
+  ]){
+    const p=sdkPlatform(platform),bytes=Math.floor(gib*1024**3);
+    const heap=compilerHeap(p,{},bytes);
+    assert.deepEqual(heap,{cjHeapSize:`${mb}MB`,...(p.os==='linux'?{cjHeapSwap:'on'}:{})},platform);
+    assert.ok(parseInt(heap.cjHeapSize,10)*1024**2<bytes,platform);
   }
+  assert.equal(compilerHeap(sdkPlatform('linux-x64'),{},4*1024**2).cjHeapSize,'4MB');
+});
+
+test('SDK environments resolve overrides and replace blank runtime heap settings',()=>{
+  const p=sdkPlatform('linux-x64');
+  for(const blank of ['', '  ']){
+    const env=cleanSdkEnvironment('/sdk',p.key,{cjHeapSize:blank,CJCJ_HEAP_SIZE:'',cjHeapSwap:blank});
+    assert.equal(env.cjHeapSize,compilerHeap(p,{}).cjHeapSize);
+    assert.equal(env.cjHeapSwap,'on');
+  }
+  for(const platform of ['linux-x64','linux-aarch64','darwin-arm64','darwin-x64','windows-x64']){
+    const host=sdkPlatform(platform);
+    assert.equal(compilerHeap(host,{cjHeapSize:'',CJCJ_HEAP_SIZE:' 5GB '}).cjHeapSize,'5GB');
+    assert.equal(compilerHeap(host,{cjHeapSize:' 4GB ',CJCJ_HEAP_SIZE:'5GB'}).cjHeapSize,'4GB');
+  }
+  assert.equal(compilerHeap(p,{cjHeapSwap:' off '}).cjHeapSwap,'off');
+});
+
+test('extras passes the repository heap override to the stdx build',linux,t=>{
+  const dir=fixture(t),src=dir+'/src',sdk=dir+'/sdk';
+  put(src+'/compiler/utils/envsetup/llvm_linux.sh');
+  put(src+'/stdx/build.py',`import os, pathlib, sys
+if sys.argv[1]=='build': pathlib.Path('build.heap').write_text(os.environ.get('cjHeapSize', ''))
+`);
+  cli('build-extras',['--platform','linux-x64','--sdk',sdk,'--sources',src,'--only','stdx'],
+    {cjHeapSize:'',CJCJ_HEAP_SIZE:'5GB'});
+  assert.equal(fs.readFileSync(src+'/stdx/build.heap','utf8'),'5GB');
 });
 
 test('Windows runtime load probes preserve a Path-only host environment',linux,t=>{

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-import {jobs,parseCliArgs,sdkPlatform,linkCompilerRuntime,pathEnvironment,cleanSdkEnvironment,resolveHostPython,run,runCapture,copyTree,
+import {jobs,parseCliArgs,sdkPlatform,compilerHeap,linkCompilerRuntime,pathEnvironment,cleanSdkEnvironment,resolveHostPython,run,runCapture,copyTree,
   copySource,rmrf,ensureDir,main,crossTuples,sha256File} from './common.mjs';
 
 const SYSROOT_DIR='third_party/wasi-sysroot';
@@ -45,7 +45,7 @@ export function wasmStdInputs({stdlibSource, boundscheckSource, clang, llvmAr}) 
 export function buildWasmStdCore(sdk, work, inputs, {cjcArgs = []} = {}) {
   const {core, native, bounds, clang, llvmAr, nativeSources, boundsSources, renames} = inputs;
   fs.mkdirSync(work);
-  const env = {...process.env, CANGJIE_HOME: sdk};
+  const env = {...process.env, ...compilerHeap(sdkPlatform()), CANGJIE_HOME: sdk};
   function run(cmd, args) {
     const {status, signal, error} = spawnSync(cmd, args, {cwd: work, env, stdio: ['ignore', 2, 2]});
     console.error(JSON.stringify({cmd, args, cwd: work, status, signal, error: error?.message}));
@@ -228,7 +228,7 @@ export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Sou
   const run = runner(log);
   const cjc = path.join(sdk, 'bin', process.platform === 'win32' ? 'cjc.exe' : 'cjc');
   const sysroot = path.join(sdk, SYSROOT_DIR);
-  const env = {...process.env, CANGJIE_HOME: sdk};
+  const env = {...process.env, ...compilerHeap(sdkPlatform()), CANGJIE_HOME: sdk};
   const bounds = path.resolve(boundscheckSource);
   const results = [];
   const failed = new Set();

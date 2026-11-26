@@ -71,7 +71,7 @@ if(steps.includes('tools')){
 }
 if(steps.includes('java-interop')){
   if(p.key!=='linux-x64')throw Error('Java interop needs linux-x64');
-  const home=env.JAVA_HOME,jenv={LC_ALL:'C',TZ:'UTC',JAVA_HOME:home,CANGJIE_HOME:sdk,HOME:work+'/home',PATH:[home+'/bin',sdk+'/bin','/usr/lib/llvm-15/bin','/usr/bin','/bin'].join(':')};
+  const home=env.JAVA_HOME,jenv={cjHeapSize:env.cjHeapSize,cjHeapSwap:env.cjHeapSwap,LC_ALL:'C',TZ:'UTC',JAVA_HOME:home,CANGJIE_HOME:sdk,HOME:work+'/home',PATH:[home+'/bin',sdk+'/bin','/usr/lib/llvm-15/bin','/usr/bin','/bin'].join(':')};
   ensureDir(jenv.HOME);if(!/^javac 17(?:\.|$)/.test(runCapture(home+'/bin/javac',['-version']).trim()))throw Error('JDK 17 required');
   const javaOpts={cwd:src+'/javaInterop/java',env:jenv},prefix=work+'/java';
   run(py,['-I','-B','build/build.py','build','-t','release','--target-lib',p.tuple,'--target','x86_64-linux-gnu'],javaOpts);
