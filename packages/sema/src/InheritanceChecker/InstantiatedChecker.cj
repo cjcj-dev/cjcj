@@ -19,17 +19,17 @@ public class InstantiationTriggerInfo {
     }
 }
 
-public class InstantiatedMemberDiagnosticPair {
-    public var parent: MemberSignature
-    public var child: MemberSignature
+class InstantiatedMemberDiagnosticPair {
+    let parentDecl: Decl
+    let childDecl: Decl
 
-    public init(parent: MemberSignature, child: MemberSignature) {
-        this.parent = parent.Clone()
-        this.child = child.Clone()
+    init(parentDecl: Decl, childDecl: Decl) {
+        this.parentDecl = parentDecl
+        this.childDecl = childDecl
     }
 }
 
-// C++ StructInheritanceChecker.h:156-165 uses (Decl*, vector<Ty*>) for all three instantiation caches.
+// Key equality follows the identity of both the declaration and the instantiated types.
 public class DeclTySeqKey <: Hashable & Equatable<DeclTySeqKey> {
     public let decl: Decl
     public let tys: Array<Ty>
@@ -161,7 +161,7 @@ func CheckInstMemberSignatures(
         return
     }
     let key = DeclTySeqKey(decl, instTys.toArray())
-    if (checker.HasInstantiatedKey(key)) {
+    if (checker.checkedInstantiatedMemberKeys.contains(key)) {
         checker.ReplayInstantiatedMemberDiagnostics(key)
         return
     }
@@ -188,7 +188,7 @@ func CheckInstMemberSignatures(
             }
             if (let Some(memberTy) <- memberSig.ty) {
                 if (memberTy.HasGeneric()) {
-                    genericTyMembers.Add(members.entries[idx].name, memberSig.Clone())
+                    genericTyMembers.Add(members.entries[idx].name, memberSig)
                     members.Remove(idx)
                     continue
                 }
@@ -196,24 +196,31 @@ func CheckInstMemberSignatures(
         }
         idx++
     }
+    // These signatures already belong to our private clone of the member map.
+    // Only the substituted function type is used when comparing later overloads.
+    let instantiatedTypes = HashMap<Ptr<Ty>, Ty>()
     for (entry in genericTyMembers.entries) {
-        let memberSig = entry.signature.Clone()
-        if (let Some(memberTy) <- memberSig.ty) {
-            memberSig.ty = checker.GetCachedInstantiatedTy(key, memberTy, typeMapping)
-        }
-        if (let Some(memberStructTy) <- memberSig.structTy) {
-            memberSig.structTy = checker.GetCachedInstantiatedTy(key, memberStructTy, typeMapping)
+        let memberSig = entry.signature
+        let ty = memberSig.ty.getOrThrow()
+        let tyKey = Ptr<Ty>(ty)
+        if (let Some(instTy) <- instantiatedTypes.get(tyKey)) {
+            memberSig.ty = instTy
+        } else {
+            let instTy = checker.typeManager.GetInstantiatedTy(ty, typeMapping)
+            instantiatedTypes[tyKey] = instTy
+            memberSig.ty = instTy
         }
         for (candidate in members.Get(entry.name)) {
-            let parent = candidate.Clone()
-            if (let Some(parentStructTy) <- parent.structTy) {
-                parent.structTy = checker.GetCachedInstantiatedTy(key, parentStructTy, typeMapping)
+            if (HasInstantiatedMemberConflict(checker, candidate, memberSig)) {
+                let parentDecl = candidate.decl.getOrThrow()
+                let childDecl = memberSig.decl.getOrThrow()
+                EmitInstantiatedMemberConflictDiagnostic(checker, parentDecl, childDecl)
+                checker.RecordInstantiatedMemberDiagnostic(key, parentDecl, childDecl)
             }
-            checker.DiagnoseForInstantiatedMember(parent, memberSig)
-            checker.RecordInstantiatedMemberDiagnostic(key, parent, memberSig)
         }
         members.Add(entry.name, memberSig)
     }
+    checker.checkedInstantiatedMemberKeys.add(key)
 }
 
 private func InstantiationTriggeredInside(checker: StructInheritanceChecker, decl: Decl): Bool {
@@ -542,39 +549,33 @@ func CheckCStruct(checker: StructInheritanceChecker, ty: Ty, typeArg: Type): Uni
     }
 }
 
-func DiagnoseForInstantiatedMemberImpl(
+private func HasInstantiatedMemberConflict(
     checker: StructInheritanceChecker,
     parent: MemberSignature,
     child: MemberSignature
-): Unit {
-    if (let None <- checker.CurrentInstantiationTrigger()) {
-        return
+): Bool {
+    if (let Some(parentDecl) <- parent.decl && let Some(childDecl) <- child.decl &&
+        let Some(parentFuncTy) <- FuncTyFromOption(parent.ty) && let Some(childFuncTy) <- FuncTyFromOption(child.ty)) {
+        let sameStatic = parentDecl.TestAttr(Attribute.STATIC) == childDecl.TestAttr(Attribute.STATIC)
+        return sameStatic && SameModalInputs(parentDecl, childDecl) &&
+            checker.typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)
     }
+    return false
+}
+
+func EmitInstantiatedMemberConflictDiagnostic(checker: StructInheritanceChecker, parentDecl: Decl, childDecl: Decl): Unit {
     let trigger = checker.CurrentInstantiationTrigger().getOrThrow()
-    if (let Some(parentDecl) <- parent.decl) {
-        if (let Some(childDecl) <- child.decl) {
-            if (let Some(parentFuncTy) <- FuncTyFromOption(parent.ty)) {
-                if (let Some(childFuncTy) <- FuncTyFromOption(child.ty)) {
-                    let sameStatic = parentDecl.TestAttr(Attribute.STATIC) == childDecl.TestAttr(Attribute.STATIC)
-                    if (sameStatic && SameModalInputs(parentDecl, childDecl) &&
-                        checker.typeManager.IsFuncParameterTypesIdentical(parentFuncTy, childFuncTy)) {
-                        let triggeredDeclType = trigger.decl.identifier.Val() + "<" +
-                            Ty.GetTypesToStr(trigger.instTys, ", ") + ">"
-                        let builder = DiagnoseRefactor(checker.diag,
-                            DiagKindRefactor.sema_generic_instantiation_causes_ambiguous_functions,
-                            trigger.node,
-                            arguments: [triggeredDeclType, childDecl.identifier.Val()]
-                        )
-                        let candidates = ArrayList<Decl>()
-                        AddInheritanceDeclUniqueByPosition(candidates, parentDecl)
-                        AddInheritanceDeclUniqueByPosition(candidates, childDecl)
-                        for (candidate in candidates) {
-                            AddNote(builder, candidate, MakeRangeForDeclIdentifier(candidate), "found candidate")
-                        }
-                        builder.Emit()
-                    }
-                }
-            }
-        }
+    let triggeredDeclType = trigger.decl.identifier.Val() + "<" + Ty.GetTypesToStr(trigger.instTys, ", ") + ">"
+    let builder = DiagnoseRefactor(checker.diag,
+        DiagKindRefactor.sema_generic_instantiation_causes_ambiguous_functions,
+        trigger.node,
+        arguments: [triggeredDeclType, childDecl.identifier.Val()]
+    )
+    let candidates = ArrayList<Decl>()
+    AddInheritanceDeclUniqueByPosition(candidates, parentDecl)
+    AddInheritanceDeclUniqueByPosition(candidates, childDecl)
+    for (candidate in candidates) {
+        AddNote(builder, candidate, MakeRangeForDeclIdentifier(candidate), "found candidate")
     }
+    builder.Emit()
 }

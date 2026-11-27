@@ -581,11 +581,11 @@ public class StructInheritanceChecker {
     private let structInheritedMembers: HashMap<InheritableDecl, MemberMap> = HashMap<InheritableDecl, MemberMap>()
     private let checkingDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
     private let instantiatedKeys: HashSet<DeclTySeqKey> = HashSet<DeclTySeqKey>()
-    private let instantiatedMemberDiagnostics:
+    // A completed signature scan (including a visible extend) is independent of AST visitation.
+    internal let checkedInstantiatedMemberKeys = HashSet<DeclTySeqKey>()
+    internal let instantiatedMemberDiagnostics:
         HashMap<DeclTySeqKey, ArrayList<InstantiatedMemberDiagnosticPair>> =
         HashMap<DeclTySeqKey, ArrayList<InstantiatedMemberDiagnosticPair>>()
-    private let instantiatedTyCaches: HashMap<DeclTySeqKey, HashMap<Ptr<Ty>, Ty>> =
-        HashMap<DeclTySeqKey, HashMap<Ptr<Ty>, Ty>>()
     private let instantiationTriggers: ArrayList<InstantiationTriggerInfo> = ArrayList<InstantiationTriggerInfo>()
     private let instantiationTypeMaps: ArrayList<TypeSubst> = ArrayList<TypeSubst>()
     private var infiniteInstantiationOccurred: Bool = false
@@ -661,18 +661,18 @@ public class StructInheritanceChecker {
         instantiatedKeys.add(key)
     }
 
-    public func ReplayInstantiatedMemberDiagnostics(key: DeclTySeqKey): Unit {
+    internal func ReplayInstantiatedMemberDiagnostics(key: DeclTySeqKey): Unit {
         if (let Some(pairs) <- instantiatedMemberDiagnostics.get(key)) {
             for (pair in pairs) {
-                DiagnoseForInstantiatedMember(pair.parent, pair.child)
+                EmitInstantiatedMemberConflictDiagnostic(this, pair.parentDecl, pair.childDecl)
             }
         }
     }
 
-    public func RecordInstantiatedMemberDiagnostic(
+    internal func RecordInstantiatedMemberDiagnostic(
         key: DeclTySeqKey,
-        parent: MemberSignature,
-        child: MemberSignature
+        parent: Decl,
+        child: Decl
     ): Unit {
         if (let Some(pairs) <- instantiatedMemberDiagnostics.get(key)) {
             pairs.add(InstantiatedMemberDiagnosticPair(parent, child))
@@ -681,23 +681,6 @@ public class StructInheritanceChecker {
         let pairs = ArrayList<InstantiatedMemberDiagnosticPair>()
         pairs.add(InstantiatedMemberDiagnosticPair(parent, child))
         instantiatedMemberDiagnostics[key] = pairs
-    }
-
-    public func GetCachedInstantiatedTy(key: DeclTySeqKey, ty: Ty, typeMapping: TypeSubst): Ty {
-        let tyKey = Ptr<Ty>(ty)
-        if (let Some(cache) <- instantiatedTyCaches.get(key)) {
-            if (let Some(instantiatedTy) <- cache.get(tyKey)) {
-                return instantiatedTy
-            }
-            let instantiatedTy = typeManager.GetInstantiatedTy(ty, typeMapping)
-            cache[tyKey] = instantiatedTy
-            return instantiatedTy
-        }
-        let cache = HashMap<Ptr<Ty>, Ty>()
-        let instantiatedTy = typeManager.GetInstantiatedTy(ty, typeMapping)
-        cache[tyKey] = instantiatedTy
-        instantiatedTyCaches[key] = cache
-        return instantiatedTy
     }
 
     public func HasInstantiationTrigger(): Bool {
@@ -752,10 +735,6 @@ public class StructInheritanceChecker {
 
     public func CheckInstWithCStructTypeArg(node: Node): Unit {
         CheckInstWithCStructTypeArgImpl(this, node)
-    }
-
-    public func DiagnoseForInstantiatedMember(parent: MemberSignature, child: MemberSignature): Unit {
-        DiagnoseForInstantiatedMemberImpl(this, parent, child)
     }
 
     public func GetStoredMembersForDecl(decl: InheritableDecl): MemberMap {
