@@ -268,6 +268,15 @@ function startStage(parent,host,native,std,out,p) {
   linkCompilerRuntime(out);
 }
 
+export function cjpmBuildEnvironment(stage,env){
+  // Stage2 runs the stage0 compiler on the official CMC runtime.
+  if(stage!=='stage2')return env;
+  return {...env,
+    cjRegionSize:env.cjRegionSize?.trim()||'2048KB',
+    cjExemptionThreshold:env.cjExemptionThreshold?.trim()||'1.0',
+    cjGarbageThreshold:env.cjGarbageThreshold?.trim()||'0.1'};
+}
+
 async function assemble(a){
   const p=sdkPlatform(a.platform),platform=p.platform,seed=a.stage==='stage0';
   if(!['stage0','stage2','stage3','installed'].includes(a.stage))throw Error('invalid compiler stage '+a.stage);
@@ -324,7 +333,8 @@ async function assemble(a){
     await prepareTrimpath(source);
     const cjpm=path.join(host,'tools/bin/cjpm'+p.exe);
     // CJPM is a host executable. Its cjc child selects its own private loader domain.
-    const build=()=>run(cjpm,['build','--target-dir',target,'-j',a.jobs||jobs],{cwd:source,env:cleanSdkEnvironment(seed?host:sdk,platform,env,host)});
+    const cjpmEnv=cjpmBuildEnvironment(a.stage,cleanSdkEnvironment(seed?host:sdk,platform,env,host));
+    const build=()=>run(cjpm,['build','--target-dir',target,'-j',a.jobs||jobs],{cwd:source,env:cjpmEnv});
     if(win)await withWindowsCompilerLinks(source,native,mingw,build);else build();
   }finally{
     for(const [file,prior] of objects){

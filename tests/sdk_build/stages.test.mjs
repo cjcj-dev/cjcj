@@ -6,7 +6,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import test from 'node:test';
 import {repo,RELEASE_TARGETS,cleanSdkEnvironment,compilerHeap,loadPins,sdkPlatform} from '../../build/common.mjs';
-import {effectiveLinkOptions,h1HeapDefaultsBuild,h1PackageLinkOptions,wireAttributeHeader} from '../../build/build-compiler.mjs';
+import {cjpmBuildEnvironment,effectiveLinkOptions,h1HeapDefaultsBuild,h1PackageLinkOptions,wireAttributeHeader} from '../../build/build-compiler.mjs';
 
 test('source pins use full commit SHAs and select the expected tools revision',()=>{
   const pins=loadPins();
@@ -110,7 +110,7 @@ function cli(name,args,env={},options=[]){
   assert.equal(child.status,0,child.error?.message||child.stderr+child.stdout);
 }
 const linux={skip:process.platform!=='linux'};
-test('stage0 leaves a clean checkout for the stage2 shim build',linux,t=>{
+function compilerFixture(t){
   const dir=fixture(t),src=dir+'/checkout',host=dir+'/host',native=dir+'/native',out=dir+'/stage0';
   const shim='runtime_shim/cjselfhost_llvmshim.o',selected=native+'/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o';
   for(const file of ['.gitignore','cjpm.toml','cjpm.lock','packages/cjc/cjpm.toml','build/common.mjs',
@@ -132,6 +132,14 @@ test('stage0 leaves a clean checkout for the stage2 shim build',linux,t=>{
   // Stand in for native tools: record which inputs the real stage scripts selected.
   put(dir+'/bin/cc','#!/bin/sh\nargs="$*"\nwhile [ "$1" != "-o" ]; do shift || exit 1; done\nprintf "%s" "$args" > "$2"\n',0o755);
   put(dir+'/bin/nm','#!/bin/sh\nexit 0\n',0o755);
+  put(host+'/LICENSE');put(host+'/Open_Source_Software_Notice.docx');
+  put(dir+'/std/lib/'+tuple+'/current');put(dir+'/std/runtime/lib/'+tuple+'/current');
+  put(native+'/third_party/flatbuffers/bin/flatc','#!/bin/sh\nexit 0\n',0o755);
+  return {dir,src,host,native,out,shim,selected,commit,exec};
+}
+
+test('stage0 leaves a clean checkout for the stage2 shim build',linux,t=>{
+  const {dir,src,host,native,out,shim,selected,commit,exec}=compilerFixture(t);
   put(host+'/tools/bin/cjpm',`#!/bin/sh
 set -eu
 test "$(cat runtime_shim/cjselfhost_llvmshim.o)" = 'stage0 shim'
@@ -158,9 +166,6 @@ echo stage0 > "$3/release/bin/cjc"
   assert.equal(fs.readFileSync(out+'.target/release/bin/cjc','utf8').trim(),'stage0');
   // Build stage2 with a version that differs from the tracked source.
   put(selected,'stage2 shim');
-  put(host+'/LICENSE');put(host+'/Open_Source_Software_Notice.docx');
-  put(dir+'/std/lib/'+tuple+'/current');put(dir+'/std/runtime/lib/'+tuple+'/current');
-  put(native+'/third_party/flatbuffers/bin/flatc','#!/bin/sh\nexit 0\n',0o755);
   put(host+'/tools/bin/cjpm',`#!/bin/sh
 set -eu
 grep -Fx 'public let CANGJIE_VERSION: String = "9.8.7"' packages/basic/src/Version.cj
@@ -175,6 +180,48 @@ echo stage2 > "$3/release/bin/cjc"
   assert.match(config,new RegExp('-DCJCJ_COMMIT="'+commit+'"'));
   assert.ok(!config.includes('-DCJCJ_LEGACY_HOST_RUNTIME'));
   assert.ok(fs.readFileSync(src+'/runtime_shim/cjc_heap_defaults.o','utf8').includes(src+'/runtime_shim/cjc_heap_defaults.c'));
+});
+
+const cmcDefaults={cjRegionSize:'2048KB',cjExemptionThreshold:'1.0',cjGarbageThreshold:'0.1'};
+test('stage2 resolves each CMC setting independently',()=>{
+  const input={cjRegionSize:' 1024KB ',cjExemptionThreshold:' \t',PATH:'/bin'};
+  assert.deepEqual(cjpmBuildEnvironment('stage2',input),{...cmcDefaults,cjRegionSize:'1024KB',PATH:'/bin'});
+});
+
+test('other compiler stages preserve the caller CMC environment',()=>{
+  for(const stage of ['stage0','stage3','installed']){
+    for(const env of [{},{cjRegionSize:'512KB',cjGarbageThreshold:'0.4'}])
+      assert.deepEqual(cjpmBuildEnvironment(stage,{...env}),env,stage);
+  }
+});
+
+test('build-compiler CLI passes CMC settings to cjpm build',linux,async t=>{
+  const {dir,host,native,out,exec}=compilerFixture(t);
+  const keys=Object.keys(cmcDefaults);
+  const unset=Object.fromEntries(keys.map(k=>[k,undefined]));
+  put(host+'/tools/bin/cjpm',`#!${process.execPath}
+const fs=require('node:fs'),[cmd,flag,target]=process.argv.slice(2);
+if(cmd!=='build'||flag!=='--target-dir')process.exit(1);
+fs.mkdirSync(target+'/release/bin',{recursive:true});
+fs.writeFileSync(target+'/release/bin/cjc','fixture');
+fs.writeFileSync(target+'/cmc.json',JSON.stringify(Object.fromEntries(${JSON.stringify(keys)}.map(k=>[k,process.env[k]]))));
+`,0o755);
+  const overrides={cjRegionSize:'1024KB',cjExemptionThreshold:'0.9',cjGarbageThreshold:'0.2'};
+  for(const [stage,label,input,expected] of [
+    ['stage0','unset',{},{}],
+    ['stage2','unset',{},cmcDefaults],
+    ['stage2','explicit',Object.fromEntries(Object.entries(overrides).map(([k,v])=>[k,' '+v+' '])),overrides],
+    ['stage2','blank',{cjRegionSize:' \t',cjExemptionThreshold:'',cjGarbageThreshold:'  '},cmcDefaults],
+    ['stage3','unset',{},{}],
+    ['installed','unset',{},{}],
+  ]){
+    await t.test(stage+' '+label,()=>{
+      const dest=stage==='stage0'?out:dir+'/'+stage+'-'+label;
+      exec(process.execPath,['build/build-compiler.mjs','--stage',stage,'--host-sdk',host,'--native',native,
+        '--sdk',stage==='stage0'?host:out,'--std',dir+'/std','--out',dest],{...unset,...input});
+      assert.deepEqual(JSON.parse(fs.readFileSync(dest+'.target/cmc.json','utf8')),expected);
+    });
+  }
 });
 
 test('stage 2, stage 3 and the relocated package exclude bootstrap tools',linux,t=>{
