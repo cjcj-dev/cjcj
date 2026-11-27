@@ -19,7 +19,7 @@
     },
     "tools": {
       "url": "https://github.com/cjcj-dev/cjcj-tools.git",
-      "sha": "4d14d051c58a5574d6525314b2c695e2e5dd26e6"
+      "sha": "30b72a46b25eb191877ca47ff91f9bfbe458166c"
     },
     "javaInterop": {
       "url": "https://gitcode.com/Cangjie/cangjie_multiplatform_interop.git",

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import test from 'node:test';
-import {repo,cleanSdkEnvironment,compilerHeap,loadPins,sdkPlatform} from '../../build/common.mjs';
+import {repo,RELEASE_TARGETS,cleanSdkEnvironment,compilerHeap,loadPins,sdkPlatform} from '../../build/common.mjs';
 import {effectiveLinkOptions,h1HeapDefaultsBuild,h1PackageLinkOptions,wireAttributeHeader} from '../../build/build-compiler.mjs';
 
 test('source pins use full commit SHAs and select the expected tools revision',()=>{
@@ -15,7 +15,7 @@ test('source pins use full commit SHAs and select the expected tools revision',(
   for(const [name,pin] of Object.entries(pins.repos)){
     assert.match(pin.sha,/^[0-9a-f]{40}$/,name+' source SHA');
   }
-  assert.equal(pins.repos.tools.sha,'4d14d051c58a5574d6525314b2c695e2e5dd26e6');
+  assert.equal(pins.repos.tools.sha,'30b72a46b25eb191877ca47ff91f9bfbe458166c');
 });
 
 test('source pins select the expected runtime revision',()=>{
@@ -608,4 +608,219 @@ test('Intel runtime stages boundscheck and loads both thin libraries',{skip:proc
   assert.ok(i>=0);assert.equal(cc[i+1],'x86_64');
   assert.deepEqual(calls.filter(c=>c.cmd===out+'.work/load').map(c=>c.args),[
     [lib+'/libcangjie-runtime.dylib','CJ_MCC_HandleReturnSafepoint'],[lib+'/libboundscheck.dylib','memset_s']]);
+});
+
+// Expectations from the pinned compiler toolchains and runtime/stdlib/build.py.
+const crossRows=[
+  ['android-aarch64','linux_android_aarch64_cjnative','aarch64-linux-android23','android_aarch64'],
+  ['ohos-aarch64','linux_ohos_aarch64_cjnative','aarch64-linux-ohos','ohos_aarch64_clang'],
+  ['ohos-x86_64','linux_ohos_x86_64_cjnative','x86_64-linux-ohos','ohos_x86_64_clang'],
+  ['ios-aarch64','ios_aarch64_cjnative','arm64-apple-ios11','ios_arm64'],
+  ['ios-simulator-aarch64','ios_simulator_aarch64_cjnative','arm64-apple-ios11-simulator','ios_simulator_arm64'],
+  ['ios-simulator-x86_64','ios_simulator_x86_64_cjnative','x86_64-apple-ios11-simulator','ios_simulator_x86_64'],
+];
+function releaseJobs(){
+  const result=spawnSync('/usr/bin/python3',['-c','import json,sys,yaml; print(json.dumps(yaml.safe_load(sys.stdin)["jobs"]))'],
+    {input:fs.readFileSync(path.join(repo,'.github/workflows/release.yml')),encoding:'utf8'});
+  assert.equal(result.status,0,result.stderr);return JSON.parse(result.stdout);
+}
+
+test('release produces exactly one overlay for every package dependency',linux,()=>{
+  const {'host-sdk':host,'cross-std':cross,package:pkg}=releaseJobs();
+  assert.deepEqual(pkg.needs.sort(),['cross-std','host-sdk']);
+  assert.match(pkg.strategy.matrix,/fromJSON\(needs\.host-sdk\.outputs\.packages\)/);
+  assert.match(host.steps.find(s=>s.id==='matrix').run,/RELEASE_TARGETS as include/);
+  assert.deepEqual(cross.strategy.matrix.include.map(r=>r.target).sort(),[...crossRows.map(([t])=>t),'wasm32-wasi'].sort());
+  const hosts=host.strategy.matrix.include.map(r=>r.platform);
+  const producers=[];
+  for(const platform of ['windows-x64','linux-x64']){
+    const condition="matrix.platform == '"+platform+"'";
+    const upload=host.steps.find(s=>s.with?.name==='cross-std-'+platform);
+    assert.equal(upload?.if,condition);assert.match(upload.uses,/actions\/upload-artifact@/);
+    const flag=platform==='windows-x64'?'--windows-overlay':'--linux-overlay';
+    const pack=host.steps.find(s=>s.run?.includes(flag));
+    assert.equal(pack?.if,condition);
+    assert.equal(pack.run,'node build/setup.mjs pack '+flag+' --archive '+upload.with.path+' --dir ../host-sdk');
+    assert.equal(upload.with.path,'cross.tar');assert.ok(hosts.includes(platform));
+    producers.push(platform);
+  }
+  const upload=cross.steps.find(s=>s.with?.name==='cross-std-${{ matrix.target }}');
+  assert.match(upload.uses,/actions\/upload-artifact@/);assert.equal(upload.with.path,'cross.tar');
+  for(const {target,host:platform} of cross.strategy.matrix.include){assert.ok(hosts.includes(platform));producers.push(target);}
+  const expected={
+    'linux-x64':['windows-x64'],'linux-arm64':['windows-x64'],'win32-x64':[],'darwin-arm64':[],'darwin-x64':[],
+    'linux-x64-android':['android-aarch64'],'darwin-arm64-android':['android-aarch64'],'win32-x64-android':['android-aarch64','linux-x64'],
+    'linux-x64-wasm':['wasm32-wasi'],'darwin-arm64-wasm':['wasm32-wasi'],'win32-x64-wasm':['wasm32-wasi'],
+    'linux-x64-ohos':['ohos-aarch64','ohos-x86_64','windows-x64'],'darwin-arm64-ohos':['ohos-aarch64'],
+    'win32-x64-ohos':['ohos-aarch64','ohos-x86_64'],'darwin-arm64-ios':['ios-aarch64','ios-simulator-aarch64','ios-simulator-x86_64'],
+  };
+  assert.deepEqual(RELEASE_TARGETS.map(p=>p.key).sort(),Object.keys(expected).sort());
+  assert.deepEqual([...new Set(Object.values(expected).flat())].sort(),producers.sort());
+  for(const p of RELEASE_TARGETS){assert.ok(hosts.includes(p.host),p.key);assert.deepEqual(p.cross,expected[p.key],p.key);}
+  assert.equal(pkg.env.CROSS,'${{ toJSON(matrix.cross) }}');
+  const download=pkg.steps.find(s=>s.run?.includes('JSON.parse(process.env.CROSS)'));
+  assert.match(download.run,/'--name','cross-std-'\+target/);assert.match(download.run,/dir\+'\/cross\.tar'/);
+});
+
+test('release fetches and passes cross compiler inputs only for native std targets',linux,t=>{
+  const dir=fixture(t),steps=releaseJobs()['cross-std'].steps,cwd=dir+'/checkout';
+  fs.mkdirSync(cwd);put(dir+'/stage2/llvm.ref','selected-llvm');put(dir+'/stage2/runtime.ref','selected-runtime');
+  const script=steps.filter(s=>s.run?.includes('build/setup.mjs sources')||s.run?.includes('build/build-stdlib.mjs')).map(s=>s.run).join('\n');
+  // Execute the actual bash branches; intercept only the external producers.
+  for(const target of [...crossRows.map(([t])=>t),'wasm32-wasi']){
+    const result=spawnSync('bash',['-eu','-c',`node(){ printf '%s\\037' "$@"; printf '\\n'; }\n`+script],{cwd,env:{...process.env,TARGET:target},encoding:'utf8'});
+    assert.equal(result.status,0,result.stderr);
+    const calls=result.stdout.trimEnd().split('\n').map(line=>line.split('\x1f').slice(0,-1));
+    const sources=calls.find(c=>c[1]==='sources'),build=calls.find(c=>c[0]==='build/build-stdlib.mjs'),native=target!=='wasm32-wasi';
+    assert.deepEqual(sources[sources.indexOf('--repos')+1].split(',').sort(),
+      ['runtime','bounds','pcre2',...(native?['compiler','llvm','flatbuffers']:[])].sort());
+    assert.deepEqual(sources.flatMap((v,i)=>v==='--override'?[sources[i+1]]:[]),['runtime=selected-runtime',...(native?['llvm=selected-llvm']:[])]);
+    assert.deepEqual(build.flatMap((v,i)=>v==='--include'?[build[i+1]]:[]),native?['../src/compiler/include']:[]);
+    assert.deepEqual(calls.find(c=>c[1]==='pack'),['build/setup.mjs','pack','--dereference','--archive','cross.tar','--dir','../cross']);
+  }
+});
+
+test('Windows overlay contains only physical tuple files and both root FFI libraries',linux,t=>{
+  const root=fixture(t),sdk=root+'/sdk',out=root+'/unpacked',tuple='windows_x86_64_cjnative';
+  const files=['modules/'+tuple+'/std/std.core.cjo','runtime/lib/'+tuple+'/runtime.dll','lib/'+tuple+'/std.a','lib/libstdFFI.dll','lib/libstdFFI.dll.a'];
+  for(const rel of files){put(sdk+'/private/'+path.basename(rel),rel);fs.mkdirSync(path.dirname(sdk+'/'+rel),{recursive:true});
+    fs.symlinkSync(path.relative(path.dirname(sdk+'/'+rel),sdk+'/private/'+path.basename(rel)),sdk+'/'+rel);}
+  put(sdk+'/lib/unrelated');put(sdk+'/modules/other/mod');
+  cli('setup',['pack','--windows-overlay','--archive',root+'/cross.tar','--dir',sdk]);
+  cli('setup',['unpack','--archive',root+'/cross.tar','--dir',out]);
+  const entries=fs.readdirSync(out,{recursive:true}).filter(f=>!fs.lstatSync(path.join(out,f)).isDirectory());
+  assert.deepEqual(entries.sort(),files.sort());
+  for(const rel of files){assert.ok(fs.lstatSync(out+'/'+rel).isFile(),rel);assert.equal(fs.readFileSync(out+'/'+rel,'utf8'),rel);}
+});
+
+test('cross tar materializes chained pcre2 links only when dereference is selected',linux,t=>{
+  const root=fixture(t),sdk=root+'/sdk';put(sdk+'/libpcre2-8.so.0.12','target bytes');
+  fs.symlinkSync('libpcre2-8.so.0.12',sdk+'/libpcre2-8.so.0');fs.symlinkSync('libpcre2-8.so.0',sdk+'/libpcre2-8.so');
+  for(const follow of [false,true]){
+    const out=root+'/out-'+follow,archive=out+'.tar';
+    cli('setup',['pack',...(follow?['--dereference']:[]),'--archive',archive,'--dir',sdk]);
+    cli('setup',['unpack','--archive',archive,'--dir',out]);
+    for(const name of ['libpcre2-8.so','libpcre2-8.so.0']){
+      assert.equal(fs.lstatSync(out+'/'+name).isSymbolicLink(),!follow);assert.equal(fs.readFileSync(out+'/'+name,'utf8'),'target bytes');
+    }
+  }
+});
+
+const wireHeader=()=>wireAttributeHeader(fs.readFileSync(path.join(repo,'packages/chir/src/Enums.cj'),'utf8'));
+function crossStage(t,row,{header='compiler',withAst=true}={}){
+  const [target,tuple,triple,name]=row,ios=target.startsWith('ios-'),android=target.startsWith('android-');
+  const {dir,src,sdk,rt,out}=stdlibFixture(t,tuple,ios?'.dylib':'.so',withAst);
+  const include=src+'/compiler/include',rel='/cangjie/CHIR/IR/AttributeInfo.h';
+  if(header==='compiler')put(include+rel,'namespace Cangjie::CHIR { class AttributeInfo {}; }');
+  if(header==='wire')put(include+rel,wireHeader());
+  put(sdk+'/include'+rel,wireHeader());
+  const bin=dir+'/bin',ndk=dir+'/NDK',ohos=dir+'/Harmony SDK',xcode=dir+'/Xcode Toolchain';
+  const pre=ndk+'/toolchains/llvm/prebuilt/linux-x86_64';
+  const tool=ios?xcode+'/bin':android?pre+'/bin':ohos+'/native/llvm/bin';
+  const id=target.includes('simulator')?'iphonesimulator':'iphoneos';
+  const sysroot=ios?dir+'/SDKs/'+id+'.sdk':android?pre+'/sysroot':ohos+'/native/sysroot';
+  const resource=dir+'/clang resource/21';
+  put(bin+'/xcrun',`#!/bin/sh
+set -eu
+case "$3" in
+--show-sdk-path) echo "$FIXTURE/SDKs/$2.sdk";;
+--find) echo "$FIXTURE/Xcode Toolchain/bin/$4";;
+*) exit 3;;
+esac\n`,0o755);
+  put(tool+'/clang','#!/bin/sh\n[ "$1" = -print-resource-dir ] && echo "$RESOURCE"\n',0o755);
+  // Run CMake and Ninja without target compilers. Each toolchain selects a
+  // distinct install tuple. Capture effective variables after toolchain inclusion.
+  const original=src+'/compiler/cmake/'+name+'_toolchain.cmake';
+  put(original,`set(tuple ${tuple})\n`+(ios?'set(CMAKE_IOS_SDK_ROOT /old/17.5.sdk)\nset(CMAKE_OSX_SYSROOT /old/17.5.sdk)\n':''));
+  const keys=['tuple','CMAKE_IOS_SDK_ROOT','CMAKE_OSX_SYSROOT','CMAKE_OSX_ARCHITECTURES','CMAKE_C_COMPILER','CMAKE_CXX_COMPILER',
+    'CMAKE_AR','CMAKE_RANLIB','CANGJIE_TARGET_TOOLCHAIN','CANGJIE_TARGET_SYSROOT','CMAKE_C_COMPILER_TARGET','CMAKE_CXX_COMPILER_TARGET',
+    'CMAKE_TRY_COMPILE_PLATFORM_VARIABLES','CMAKE_ANDROID_NDK','CMAKE_ANDROID_API','CANGJIE_CJNATIVE_SOURCE_DIR','FLATBUFFERS_BUILD_FLATC'];
+  const project='cmake_minimum_required(VERSION 3.16)\nproject(fixture LANGUAGES NONE)\n'+
+    'file(WRITE ${CMAKE_BINARY_DIR}/effective "'+keys.map(k=>k+'=${'+k+'}\\n').join('')+'hostSDK=$ENV{SDKROOT}\\n")\n';
+  put(src+'/compiler/CMakeLists.txt',project+'add_subdirectory(src)\n');
+  put(src+'/flatbuffers/CMakeLists.txt',project);
+  put(src+'/compiler/src/CMakeLists.txt',`add_custom_target(boundscheck COMMAND "\${CMAKE_COMMAND}" -E touch bounds.shared)
+add_custom_target(boundscheck-static COMMAND "\${CMAKE_COMMAND}" -E touch bounds.static)
+add_custom_target(cangjie-ast-support COMMAND "\${CMAKE_COMMAND}" -E copy "\${CMAKE_CURRENT_SOURCE_DIR}/marker" libcangjie-ast-support.a)
+install(FILES "\${CMAKE_CURRENT_BINARY_DIR}/libcangjie-ast-support.a" DESTINATION lib/\${tuple})\n`);
+  put(src+'/compiler/src/marker','AST '+target);
+  const stdlib=src+'/runtime/stdlib',link=out+'.work/sdk/modules/'+tuple;
+  fs.appendFileSync(stdlib+'/build.py',`if sys.argv[1]=='build':
+ link=pathlib.Path(os.environ['CANGJIE_HOME'])/'modules'/'${tuple}'
+ pathlib.Path('module-path').write_text(str(link.resolve()) if link.is_dir() and link.is_symlink() else 'missing')
+`);
+  const args=['--platform',ios?'darwin-arm64':'linux-x64','--cross',target,'--sources',src,'--runtime',rt,'--sdk',sdk,'--out',out];
+  if(header!=='omitted')args.push('--include','src/compiler/include');
+  const child=spawnSync(process.execPath,[path.join(repo,'build/build-stdlib.mjs'),...args],{cwd:dir,encoding:'utf8',
+    env:{...process.env,PATH:bin+':'+process.env.PATH,FIXTURE:dir,RESOURCE:resource,ANDROID_NDK_ROOT:ndk,OHOS_SDK_HOME:ohos,
+      SDKROOT:'/inherited-sdk',CMAKE_TOOLCHAIN_FILE:'/inherited-toolchain'}});
+  const log=stdlib+'/calls.jsonl',calls=fs.existsSync(log)?fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse):[];
+  return {child,calls,stdlib,out,sdk,include,tool,sysroot,resource,ndk,ios,android,link};
+}
+
+test('six cross targets reject omitted, missing and wire compiler headers before clean',linux,t=>{
+  for(const row of crossRows)for(const header of ['omitted','missing','wire']){
+    const {child,calls}=crossStage(t,row,{header});
+    assert.deepEqual(calls,[],row[0]+' '+header+' reached build.py');
+    assert.equal(child.status,1,child.stderr);
+    assert.match(child.stderr,header==='omitted'?/--include requires a compiler include directory/:
+      header==='missing'?/ENOENT.*AttributeInfo\.h/:/defining class AttributeInfo/);
+  }
+});
+
+for(const row of crossRows){
+  const [target,tuple,triple]=row;
+  test('cross std builds and installs the selected target: '+target,linux,t=>{
+    const {child,calls,stdlib,out,sdk,include,tool,sysroot,resource,ndk,ios,android,link}=crossStage(t,row);
+    assert.equal(child.status,0,child.stderr+child.stdout);
+    assert.deepEqual(calls.map(args=>args[0]),['clean','build','install']);
+    const build=calls[1];
+    assert.deepEqual(build.filter(v=>v.startsWith('--include=')),['--include='+include]);
+    for(const [arg,value] of [['--target',target],['--target-toolchain',tool],['--target-sysroot',sysroot]])assert.equal(build[build.indexOf(arg)+1],value);
+    const libs=build.filter(v=>v.startsWith('--target-lib=')).map(v=>v.slice(13));
+    const rt=path.dirname(sdk)+'/R',source=path.dirname(include)+'/..';
+    assert.deepEqual(libs,[path.resolve(source,'runtime/runtime/output'),rt+'/lib/'+tuple,rt+'/runtime/lib/'+tuple,
+      ...(ios?[resource+'/lib/darwin']:android?[]:[resource+'/lib/'+triple,path.dirname(tool)+'/lib/'+triple])]);
+    const moduleDir=stdlib+'/build/build-libs-'+triple+'/modules/'+tuple;
+    assert.equal(fs.readFileSync(stdlib+'/module-path','utf8'),moduleDir);assert.equal(fs.realpathSync(link),moduleDir);
+    for(const root of [out+'.work/sdk',out])assert.equal(fs.readFileSync(root+'/lib/'+tuple+'/libcangjie-ast-support.a','utf8'),'AST '+target);
+    assert.equal(fs.readFileSync(out+'/modules/'+tuple+'/std/std.ast.cjo','utf8'),'std');
+    assert.equal(fs.readFileSync(sdk+'/include/cangjie/CHIR/IR/AttributeInfo.h','utf8'),wireHeader());
+    const ast=out+'.work/ast.build';
+    for(const marker of ['bounds.shared','bounds.static'])assert.ok(fs.statSync(ast+'/src/'+marker).isFile());
+    for(const loc of [ast,ast+'/third_party/flatbuffers-prefix/src/flatbuffers-build']){
+      const defs=Object.fromEntries(fs.readFileSync(loc+'/effective','utf8').trimEnd().split('\n').map(line=>line.split('=')));
+      const expected={tuple,CMAKE_C_COMPILER:tool+'/clang',CMAKE_CXX_COMPILER:tool+'/clang++',CMAKE_AR:tool+(ios?'/ar':'/llvm-ar'),
+        CMAKE_RANLIB:tool+(ios?'/ranlib':'/llvm-ranlib'),CANGJIE_TARGET_TOOLCHAIN:tool,CANGJIE_TARGET_SYSROOT:sysroot,hostSDK:''};
+      if(ios)Object.assign(expected,{CMAKE_IOS_SDK_ROOT:sysroot,CMAKE_OSX_SYSROOT:sysroot,CMAKE_OSX_ARCHITECTURES:triple.split('-')[0]});
+      if(android)Object.assign(expected,{CMAKE_ANDROID_API:'23',CMAKE_ANDROID_NDK:ndk});
+      else Object.assign(expected,{CMAKE_C_COMPILER_TARGET:triple,CMAKE_CXX_COMPILER_TARGET:triple});
+      for(const [k,v] of Object.entries(expected))assert.equal(defs[k],v,k+' @ '+loc);
+      assert.equal(loc===ast?defs.CANGJIE_CJNATIVE_SOURCE_DIR:defs.FLATBUFFERS_BUILD_FLATC,loc===ast?path.resolve(source,'llvm'):'OFF');
+      for(const k of ['CANGJIE_TARGET_TOOLCHAIN','CANGJIE_TARGET_SYSROOT',...(android?['CMAKE_ANDROID_NDK','CMAKE_ANDROID_API']:[])])
+        assert.ok(defs.CMAKE_TRY_COMPILE_PLATFORM_VARIABLES.split(';').includes(k),k+' in compiler probes');
+    }
+  });
+}
+test('cross install rejects a missing std.ast module for each native target',linux,t=>{
+  for(const row of crossRows){
+    const {child,calls}=crossStage(t,row,{withAst:false});
+    assert.deepEqual(calls.map(args=>args[0]),['clean','build','install']);assert.equal(child.status,1,child.stderr);
+    assert.match(child.stderr,/ENOENT.*std\.ast\.cjo/);
+  }
+});
+
+test('WASI builds std.core without compiler sources or an include argument',linux,t=>{
+  const dir=fixture(t),src=dir+'/src',sdk=dir+'/sdk',rt=dir+'/rt',out=dir+'/out',tuple='wasi_wasm32_cjnative';
+  const core=src+'/runtime/stdlib/libs/std/core',bin=sdk+'/third_party/llvm/bin';
+  put(core+'/core.cj','package std.core');put(core+'/native/typetemplate.c');
+  put(core+'/native/CMakeLists.txt','--redefine-sym ${SYM_PREFIX}Old=${SYM_PREFIX}New');
+  put(src+'/bounds/include/b.h');put(src+'/bounds/src/b.c');put(src+'/pcre2/p.h');
+  put(dir+'/sysroot/marker');put(rt+'/runtime/lib/'+tuple+'/libcangjie-runtime.a','runtime');
+  put(sdk+'/bin/cjc','#!/bin/sh\nfor a do case "$a" in --output=*) f=${a#*=}; echo core > "$f"; echo mod > "$f.cjo"; exit 0;; esac; done; exit 1\n',0o755);
+  put(bin+'/clang','#!/bin/sh\nwhile [ "$1" != -o ]; do shift; done; echo @Old > "$2"\n',0o755);
+  put(bin+'/llvm-ar','#!/bin/sh\ntest -s "$2"\n',0o755);
+  cli('build-stdlib',['--cross','wasm32-wasi','--sources',src,'--runtime',rt,'--sdk',sdk,'--out',out],{CJCJ_WASI_SYSROOT:dir+'/sysroot'});
+  assert.equal(fs.readFileSync(out+'/modules/'+tuple+'/std/std.core.cjo','utf8'),'mod\n');
+  assert.match(fs.readFileSync(out+'/lib/'+tuple+'/wasm-toolchain.id','utf8'),/^cjw2-[0-9a-f]{32}\n$/);
 });

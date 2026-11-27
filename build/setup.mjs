@@ -87,10 +87,12 @@ async function crossSdk(kind,out) {
 async function setup(a) {
   const [sub,dest]=a._,p=sdkPlatform(a.platform);
   if(sub==='pack'){
-    // The Linux overlay is consumed on Windows: store physical tuple files only.
-    const tuple=sdkPlatform('linux-x64').tuple;
-    const members=a['linux-overlay']?['modules/','lib/','runtime/lib/'].map(d=>d+tuple):['.'];
-    return run(tar(),[...(a['linux-overlay']?['--dereference']:[]),'-cf',a.archive,'-C',a.dir,...members]);
+    const windows=a['windows-overlay'],overlay=windows||a['linux-overlay'];
+    const tuple=sdkPlatform(windows?'windows-x64':'linux-x64').tuple;
+    const members=overlay?['modules/','lib/','runtime/lib/'].map(d=>d+tuple):['.'];
+    if(windows)members.push('lib/libstdFFI.dll','lib/libstdFFI.dll.a');
+    // -h follows links on both GNU tar and the Windows system bsdtar.
+    return run(tar(),[...(overlay||a.dereference?['-h']:[]),'-cf',a.archive,'-C',a.dir,...members]);
   }
   if(sub==='unpack')return a['sdk-root']?extractSdkArchive(a.archive,a.dir,a['sdk-root']):extractArchive(a.archive,a.dir);
   if(sub==='swap'){

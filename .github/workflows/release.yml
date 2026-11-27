@@ -161,6 +161,16 @@ jobs:
         path: cross.tar
         if-no-files-found: error
         compression-level: 0
+    - name: Archive Windows libraries for cross packages
+      if: matrix.platform == 'windows-x64'
+      run: node build/setup.mjs pack --windows-overlay --archive cross.tar --dir ../host-sdk
+    - uses: actions/upload-artifact@v7.0.2
+      if: matrix.platform == 'windows-x64'
+      with:
+        name: cross-std-windows-x64
+        path: cross.tar
+        if-no-files-found: error
+        compression-level: 0
     - name: Read package matrix
       run: node --input-type=module -e 'import {RELEASE_TARGETS as include} from "./build/common.mjs"; console.log("packages="+JSON.stringify({include}))'
         >> "$GITHUB_OUTPUT"
@@ -174,10 +184,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - target: windows-x64
-          host: linux-x64
-          runner: ubuntu-24.04
-          kind: mingw
         - target: android-aarch64
           host: linux-x64
           runner: ubuntu-24.04
@@ -227,7 +233,7 @@ jobs:
         node build/setup.mjs unpack --archive stage2.tar --dir ../stage2 --sdk-root .
         repos=runtime,bounds,pcre2
         overrides=(--override "runtime=$(cat ../stage2/runtime.ref)")
-        if [[ "$TARGET" == android-aarch64 ]]; then repos+=,compiler,llvm,flatbuffers; overrides+=(--override "llvm=$(cat ../stage2/llvm.ref)"); fi
+        if [[ "$TARGET" != wasm32-wasi ]]; then repos+=,compiler,llvm,flatbuffers; overrides+=(--override "llvm=$(cat ../stage2/llvm.ref)"); fi
         node build/setup.mjs sources --repos "$repos" --out ../src "${overrides[@]}"
     - name: Install build dependencies
       run: node build/setup.mjs deps --platform "$PLATFORM" --mode full
@@ -236,8 +242,10 @@ jobs:
     - name: Build cross runtime and stdlib
       run: |-
         node build/build-runtime.mjs --sdk ../stage2 --cross "$TARGET" --sources ../src --out ../runtime
-        node build/build-stdlib.mjs --sdk ../stage2 --cross "$TARGET" --sources ../src --runtime ../runtime --out ../cross
-        node build/setup.mjs pack --archive cross.tar --dir ../cross
+        include=()
+        if [[ "$TARGET" != wasm32-wasi ]]; then include=(--include ../src/compiler/include); fi
+        node build/build-stdlib.mjs --sdk ../stage2 --cross "$TARGET" --sources ../src --runtime ../runtime --out ../cross "${include[@]}"
+        node build/setup.mjs pack --dereference --archive cross.tar --dir ../cross
     - uses: actions/upload-artifact@v7.0.2
       with:
         name: cross-std-${{ matrix.target }}

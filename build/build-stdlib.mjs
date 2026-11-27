@@ -389,17 +389,67 @@ const wasiRunner = [
   "  worker.on('exit', code => { process.exitCode = rc ?? (code || 139); });",
   "}",
 ].join('\n')+'\n';
-function androidAst(src,ndk,out,j) {
+// Compiler toolchain basename and runtime/stdlib/build.py TARGET_DICTIONARY value.
+const crossAstTargets={
+  'android-aarch64':['android_aarch64','aarch64-linux-android23'],
+  'ohos-aarch64':['ohos_aarch64_clang','aarch64-linux-ohos'],
+  'ohos-x86_64':['ohos_x86_64_clang','x86_64-linux-ohos'],
+  'ios-aarch64':['ios_arm64','arm64-apple-ios11'],
+  'ios-simulator-aarch64':['ios_simulator_arm64','arm64-apple-ios11-simulator'],
+  'ios-simulator-x86_64':['ios_simulator_x86_64','x86_64-apple-ios11-simulator'],
+};
+function crossToolchain(cross,env){
+  const [name,triple]=crossAstTargets[cross];
+  let tool,sysroot,ar,ranlib;
+  const defs={},libs=[];
+  if(cross.startsWith('ios-')){
+    const id=cross.includes('simulator')?'iphonesimulator':'iphoneos';
+    const xcrun=(...args)=>runCapture('xcrun',['--sdk',id,...args]).trim();
+    sysroot=xcrun('--show-sdk-path');tool=path.dirname(xcrun('--find','clang'));
+    ar=xcrun('--find','ar');ranlib=xcrun('--find','ranlib');
+    defs.CMAKE_OSX_ARCHITECTURES=triple.split('-')[0];
+    env.SDKROOT=sysroot;
+  }else if(cross==='android-aarch64'){
+    const ndk=env.ANDROID_NDK_ROOT,pre=ndk+'/toolchains/llvm/prebuilt/linux-x86_64';
+    tool=pre+'/bin';sysroot=pre+'/sysroot';
+    defs.CMAKE_ANDROID_NDK=ndk;defs.CMAKE_ANDROID_API='23';
+  }else{
+    const native=env.OHOS_SDK_HOME+'/native';
+    tool=native+'/llvm/bin';sysroot=native+'/sysroot';
+  }
+  if(cross!=='android-aarch64'){
+    defs.CMAKE_C_COMPILER_TARGET=triple;defs.CMAKE_CXX_COMPILER_TARGET=triple;
+    const resource=runCapture(tool+'/clang',['-print-resource-dir']).trim();
+    if(cross.startsWith('ios-'))libs.push(resource+'/lib/darwin');
+    else libs.push(resource+'/lib/'+triple,path.dirname(tool)+'/lib/'+triple);
+  }
+  Object.assign(defs,{CANGJIE_TARGET_TOOLCHAIN:tool,CANGJIE_TARGET_SYSROOT:sysroot,
+    CMAKE_C_COMPILER:tool+'/clang',CMAKE_CXX_COMPILER:tool+'/clang++',
+    CMAKE_AR:ar??tool+'/llvm-ar',CMAKE_RANLIB:ranlib??tool+'/llvm-ranlib'});
+  return {name,triple,tool,sysroot,defs,libs};
+}
+function crossAst(src,{name,sysroot,defs},out,j) {
   const env=pathEnvironment();
-  delete env.CMAKE_TOOLCHAIN_FILE;
+  // The ExternalProject also builds a flatc that must run on the host.
+  delete env.CMAKE_TOOLCHAIN_FILE;delete env.SDKROOT;
   const source=src+'/compiler',build=out+'.build',flat=source+'/third_party/flatbuffers';
   copySource(src+'/bounds',source+'/third_party/boundscheck');copySource(src+'/flatbuffers',flat);
+  let toolchain=source+'/cmake/'+name+'_toolchain.cmake';
+  if(name.startsWith('ios_')){
+    // The pinned toolchains set both paths to SDK 17.5, overriding cache arguments.
+    const wrapper=out+'-toolchain.cmake';
+    fs.writeFileSync(wrapper,`include([[${toolchain}]])\nset(CMAKE_IOS_SDK_ROOT [[${sysroot}]])\nset(CMAKE_OSX_SYSROOT [[${sysroot}]])\n`);
+    toolchain=wrapper;
+  }
   const cmake=(...args)=>run('cmake',args,{env});
-  const options=['-G','Ninja','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_TOOLCHAIN_FILE='+source+'/cmake/android_aarch64_toolchain.cmake',
-    '-DCMAKE_ANDROID_NDK='+ndk,'-DCMAKE_ANDROID_API=23','-DCMAKE_TRY_COMPILE_PLATFORM_VARIABLES=CMAKE_ANDROID_NDK;CMAKE_ANDROID_API'];
+  const options=['-G','Ninja','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_TOOLCHAIN_FILE='+toolchain,
+    ...Object.entries(defs).map(([key,value])=>'-D'+key+'='+value),
+    '-DCMAKE_TRY_COMPILE_PLATFORM_VARIABLES='+Object.keys(defs).join(';')];
   cmake('-S',source,'-B',build,...options,'-DCANGJIE_BUILD_CJC=OFF','-DCANGJIE_BUILD_STD_SUPPORT=ON','-DCANGJIE_SKIP_BUILD_CLANG_RT=ON','-DCANGJIE_BUILD_TESTS=OFF','-DCANGJIE_BUILD_CJDB=OFF','-DCANGJIE_CJNATIVE_SOURCE_DIR='+src+'/llvm','-DCMAKE_INSTALL_PREFIX='+out);
   cmake('-S',flat,'-B',build+'/third_party/flatbuffers-prefix/src/flatbuffers-build',...options,'-DFLATBUFFERS_BUILD_FLATC=OFF','-DFLATBUFFERS_BUILD_TESTS=OFF','-DFLATBUFFERS_BUILD_FLATHASH=OFF','-DCMAKE_INSTALL_PREFIX='+build);
-  cmake('--build',build,'--target','cangjie-ast-support','boundscheck','boundscheck-static','--parallel',j);cmake('--install',build);
+  cmake('--build',build,'--target','cangjie-ast-support','boundscheck','boundscheck-static','--parallel',j);
+  // Only src installs the AST archive. The OHOS top-level install also requires external-deps-ohos.
+  cmake('--install',build+'/src');
 }
 function installStd(install,out,tuple) {
   const lib='lib/'+tuple,rt='runtime/'+lib,modules='third_party/flatbuffers/modules';
@@ -418,10 +468,10 @@ function installStd(install,out,tuple) {
 async function buildStd(a){
   const src=path.resolve(a.sources),stdlib=src+'/runtime/stdlib',out=path.resolve(a.out),parent=path.resolve(a.sdk);
   const j=a.jobs||jobs,cross=a.cross,p=sdkPlatform(a.platform),tuple=cross?crossTuples[cross]:p.tuple;
-  if(!tuple||(!cross&&!['std-bootstrap','stage1-std','stage3-std'].includes(a.stage)))throw Error('unknown std stage or target');
+  if(!tuple||(cross&&cross!=='wasm32-wasi'&&!Object.hasOwn(crossAstTargets,cross))||(!cross&&!['std-bootstrap','stage1-std','stage3-std'].includes(a.stage)))throw Error('unknown std stage or target');
   const runtime=path.resolve(a.runtime),work=out+'.work',sdk=cross?work+'/sdk':parent;
   if(fs.existsSync(out)&&fs.readdirSync(out).length)throw Error('std output must be empty: '+out);
-  const include=!cross && a.include!==undefined ? requireCompilerInclude(a.include) : undefined;
+  const include=(cross ? cross!=='wasm32-wasi' : a.include!==undefined) ? requireCompilerInclude(a.include) : undefined;
   const py=await resolveHostPython(parent);
   ensureDir(work);
   for(const [from,to] of [['bounds','boundscheck-v1.1.16'],['pcre2','pcre2']])copySource(src+'/'+from,stdlib+'/third_party/'+to);
@@ -458,37 +508,26 @@ async function buildStd(a){
     const snap=work+'/runtime-input',arch=p.arch==='arm64'?'aarch64':'x86_64';
     for(const rel of roots)copyTree(runtime+'/'+rel,snap+'/common/'+(p.os==='win32'?'windows':p.os)+'_relwithdebinfo_'+arch+'/'+rel);
     buildArgs.push('--target-lib='+stdlib+'/build/build/lib','--target-lib='+snap);
-    if(include)buildArgs.push('--include='+include);
     if(a['local-mode-api'])buildArgs.push('--local_mode_api');
   }else{
-    let tool,sysroot;
-    buildArgs.push('--target',cross==='windows-x64'?'windows-x86_64':cross);
-    if(cross==='windows-x64'){
-      const mingw=env.MINGW_PATH;tool=mingw+'/bin';sysroot=mingw+'/';env.ARCH='x86_64';env.LDFLAGS='-fuse-ld=lld';
-      env.CMAKE_PREFIX_PATH=mingw+'/x86_64-w64-mingw32';env.PATH=tool+':'+env.PATH;
-      const staged=src+'/runtime/runtime/target/common/windows_release_x86_64';copyTree(runtime,staged);
-      buildArgs.push('--target-lib='+src+'/runtime/runtime/target','--target-lib='+env.CMAKE_PREFIX_PATH+'/lib');
-    }else{
-      buildArgs.push('--target-lib='+src+'/runtime/runtime/output',...roots.map(rel=>'--target-lib='+runtime+'/'+rel));
-      if(cross.startsWith('ios-')){
-        const id=cross.includes('simulator')?'iphonesimulator':'iphoneos';
-        sysroot=runCapture('xcrun',['--sdk',id,'--show-sdk-path']).trim();env.SDKROOT=sysroot;
-        tool=path.dirname(runCapture('xcrun',['--sdk',id,'--find','clang']).trim());
-      }else if(cross==='android-aarch64'){
-        const ndk=env.ANDROID_NDK_ROOT,pre=ndk+'/toolchains/llvm/prebuilt/linux-x86_64';
-        delete env.CMAKE_TOOLCHAIN_FILE;tool=pre+'/bin';sysroot=pre+'/sysroot';
-        androidAst(src,ndk,work+'/ast',j);
-        const rel=roots[0]+'/libcangjie-ast-support.a';copyTree(work+'/ast/'+rel,sdk+'/'+rel);copyTree(work+'/ast/'+rel,out+'/'+rel);
-        fs.symlinkSync(stdlib+'/build/build-libs-aarch64-linux-android23/modules/'+tuple,sdk+'/modules/'+tuple,'dir');
-      }else{const native=env.OHOS_SDK_HOME+'/native';tool=native+'/llvm/bin';sysroot=native+'/sysroot';}
-    }
-    buildArgs.push('--target-toolchain',tool,'--target-sysroot',sysroot);
+    delete env.CMAKE_TOOLCHAIN_FILE;
+    const target=crossToolchain(cross,env),ast=work+'/ast';
+    crossAst(src,target,ast,j);
+    const rel=roots[0]+'/libcangjie-ast-support.a';
+    copyTree(ast+'/'+rel,sdk+'/'+rel);
+    const modules=stdlib+'/build/build-libs-'+target.triple+'/modules/'+tuple;
+    ensureDir(modules);ensureDir(sdk+'/modules');
+    const link=sdk+'/modules/'+tuple;
+    rmrf(link);fs.symlinkSync(modules,link,'dir');
+    buildArgs.push('--target',cross,'--target-toolchain',target.tool,'--target-sysroot',target.sysroot,
+      ...[src+'/runtime/runtime/output',...roots.map(dir=>runtime+'/'+dir),...target.libs].map(lib=>'--target-lib='+lib));
   }
+  if(include)buildArgs.push('--include='+include);
   buildPy(...buildArgs);buildPy('install','--prefix',install);
-  const suffix=cross?(cross==='windows-x64'?'.dll':cross.startsWith('ios')?'.dylib':'.so'):p.shared;
+  const suffix=cross?(cross.startsWith('ios')?'.dylib':'.so'):p.shared;
   const required=['modules/'+tuple+'/std/std.core.cjo','lib/'+tuple+'/libcangjie-std-core.a','runtime/lib/'+tuple+'/libcangjie-std-core'+suffix,
-    ...(!cross?['lib/libstdFFI'+p.shared,...(p.os==='linux'?['modules/'+tuple+'/std/libstd.core.bc']:[])]:cross==='windows-x64'?['lib/libstdFFI.dll','lib/libstdFFI.dll.a']:[]),
-    ...(a.include||cross==='android-aarch64'?['modules/'+tuple+'/std/std.ast.cjo']:[])];
+    ...(!cross?['lib/libstdFFI'+p.shared,...(p.os==='linux'?['modules/'+tuple+'/std/libstd.core.bc']:[])]:[]),
+    ...(include?['modules/'+tuple+'/std/std.ast.cjo']:[])];
   for(const rel of required)fs.accessSync(install+'/'+rel);
   // Only the bootstrap pass needs the previous SDK's public modules.
   if(a.stage==='std-bootstrap'&&!cross){
@@ -497,6 +536,10 @@ async function buildStd(a){
   }
   for(const rel of cross?roots:['lib','runtime'])if(fs.existsSync(runtime+'/'+rel))copyTree(runtime+'/'+rel,out+'/'+rel);
   if(!cross&&fs.existsSync(runtime+'/include'))copyTree(runtime+'/include',out+'/runtime/include');
+  if(cross){
+    const rel=roots[0]+'/libcangjie-ast-support.a';
+    copyTree(sdk+'/'+rel,out+'/'+rel);
+  }
   installStd(install,out,tuple);
 }
 if(main(import.meta.url))await buildStd(parseCliArgs());
