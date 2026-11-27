@@ -243,6 +243,10 @@ test('stage 2, stage 3 and the relocated package exclude bootstrap tools',linux,
   put(host+'/tools/bin/cjpm',`#!/bin/sh
 set -eu
 test "$cjHeapSize" = "$EXPECTED_HEAP" && test "$cjHeapSwap" = on || exit 44
+test "$4" = -j && test "$5" = 1 && test "$CANGJIE_BUILD_JOBS" = 1 || exit 45
+if [ "$EXPECTED_HEAP" = 15360MB ]; then
+  test "$cjRegionSize/$cjExemptionThreshold/$cjGarbageThreshold" = 2048KB/1.0/0.1 || exit 46
+fi
 mkdir -p "$3/release/bin"
 cat "$CANGJIE_HOME/modules/${tuple}/current" > "$3/release/bin/cjc"
 `,0o755);
@@ -262,7 +266,8 @@ cat "$CANGJIE_HOME/modules/${tuple}/current" > "$3/release/bin/cjc"
     put(std+'/runtime/lib/'+tuple+'/current','R');
     cli('build-compiler',['--stage',stage,'--sdk',parent,'--std',std,'--native',native,'--host-sdk',host,'--source',src,'--out',out],
       {GIT_DIR:git.stdout.trim(),cjHeapSize:stage==='stage2'?'':'4GB',CJCJ_HEAP_SIZE:'',cjHeapSwap:undefined,
-        EXPECTED_HEAP:stage==='stage2'?compilerHeap(sdkPlatform(),{},os.totalmem(),true).cjHeapSize:'4GB'});
+        cjRegionSize:'',cjExemptionThreshold:'',cjGarbageThreshold:'',
+        EXPECTED_HEAP:stage==='stage2'?'15360MB':'4GB'},hardware(dir,16,4));
     assert.equal(fs.existsSync(out+'/'+sentinel),false,stage+' retained H/tools/bin/LSPServer');
     assert.equal(fs.readFileSync(out+'/tools/bin/native-only','utf8'),'native');
     assert.equal(fs.readFileSync(out+'/LICENSE','utf8'),'host license');
@@ -306,8 +311,10 @@ for(const [platform,tuple,suffix] of [['linux-x64','linux_x86_64_cjnative','.so'
   test('stdlib preserves runtime bytes and native inputs: '+platform,linux,t=>{
     const {src,sdk,rt,out,lib,run,bounds}=stdlibFixture(t,tuple,suffix);
     cli('build-stdlib',['--stage','stage1-std','--platform',platform,'--sources',src,'--runtime',rt,'--sdk',sdk,'--out',out],
-      {cjHeapSize:' ',CJCJ_HEAP_SIZE:''});
-    assert.equal(fs.readFileSync(src+'/runtime/stdlib/build.heap','utf8'),compilerHeap(sdkPlatform(platform),{}).cjHeapSize);
+      {cjHeapSize:' ',CJCJ_HEAP_SIZE:''},hardware(path.dirname(src),16,4));
+    assert.equal(fs.readFileSync(src+'/runtime/stdlib/build.heap','utf8'),'4096MB');
+    const build=JSON.parse(fs.readFileSync(src+'/runtime/stdlib/calls.jsonl','utf8').split('\n')[1]);
+    assert.equal(build[build.indexOf('--jobs')+1],'3');
     assert.equal(fs.readFileSync(out+'/'+run+'/'+bounds,'utf8'),'validated R',platform+' std overwrote R');
     assert.equal(fs.readFileSync(out+'/third_party/flatbuffers/modules/current','utf8'),'std');
     for(const f of [lib+'/libcangjie-ast-support.a','schema/old','include/old','third_party/flatbuffers/bin/old','third_party/python/old'])
@@ -316,6 +323,18 @@ for(const [platform,tuple,suffix] of [['linux-x64','linux_x86_64_cjnative','.so'
     else assert.equal(fs.existsSync(out+'/'+lib+'/'+bounds),false);
   });
 }
+
+test('bootstrap and final std pass the host budget to build.py',linux,t=>{
+  for(const stage of ['std-bootstrap','stage3-std']){
+    for(const [gib,cpus,jobs,heap] of [[7,3,'2','2688MB'],[16,4,'3','4096MB'],[128,32,'24','4096MB']]){
+      const {dir,src,sdk,rt,out}=stdlibFixture(t,tuple,'.so');
+      cli('build-stdlib',['--stage',stage,'--sources',src,'--runtime',rt,'--sdk',sdk,'--out',out],noHeap,hardware(dir,gib,cpus));
+      const build=JSON.parse(fs.readFileSync(src+'/runtime/stdlib/calls.jsonl','utf8').split('\n')[1]);
+      assert.equal(build[build.indexOf('--jobs')+1],jobs,stage);
+      assert.equal(fs.readFileSync(src+'/runtime/stdlib/build.heap','utf8'),heap,stage);
+    }
+  }
+});
 
 for(const kind of ['compiler','wire','missing']){
   test('final std --include: '+kind+' header',linux,t=>{
@@ -550,7 +569,7 @@ Object.defineProperty(process,'arch',{value:${JSON.stringify(arch)}});
 Object.defineProperty(process,'platform',{value:'darwin'});
 cp.spawnSync=(cmd,args,opts)=>{
   const env=opts?.env??process.env;
-  fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({cmd,args,path:env.PATH,home:env.CANGJIE_HOME,host:env.STDX_HOST_CANGJIE_HOME,heap:env.cjHeapSize,jobs:env.CANGJIE_BUILD_JOBS,targetArch:env.CJCJ_TARGET_ARCH,arch:env.CMAKE_OSX_ARCHITECTURES,processor:env.CMAKE_APPLE_SILICON_PROCESSOR})+'\\n');
+  fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({cmd,args,path:env.PATH,home:env.CANGJIE_HOME,host:env.STDX_HOST_CANGJIE_HOME,lsp:env.CANGJIE_LSP_PATH,heap:env.cjHeapSize,jobs:env.CANGJIE_BUILD_JOBS,targetArch:env.CJCJ_TARGET_ARCH,arch:env.CMAKE_OSX_ARCHITECTURES,processor:env.CMAKE_APPLE_SILICON_PROCESSOR})+'\\n');
   ${respond}
   return {status:0,stdout:''};
 };
@@ -622,6 +641,14 @@ test('Rosetta is probed before the first Intel binary runs',{skip:process.platfo
     assert.deepEqual(calls.slice(0,-1).map(({cmd,args})=>[cmd,...args]),
       installed?[probe]:[probe,['softwareupdate','--install-rosetta','--agree-to-license'],probe]);
   }
+});
+
+test('Rosetta setup on Linux is a repeatable no-op',linux,t=>{
+  const dir=fixture(t),log=dir+'/calls';
+  for(const tool of ['arch','softwareupdate'])
+    put(dir+'/'+tool,'#!/bin/sh\necho called >> "$PROBE_LOG"\nexit 42\n',0o755);
+  for(let i=0;i<2;i++)cli('setup',['rosetta','--platform','linux-x64'],{PATH:dir,PROBE_LOG:log});
+  assert.ok(!fs.existsSync(log),'unexpected Rosetta command');
 });
 
 test('cjbind uses Intel Python and checks the installed executable',{skip:process.platform==='win32'},t=>{
@@ -809,8 +836,8 @@ install(FILES "\${CMAKE_CURRENT_BINARY_DIR}/libcangjie-ast-support.a" DESTINATIO
 `);
   const args=['--platform',ios?'darwin-arm64':'linux-x64','--cross',target,'--sources',src,'--runtime',rt,'--sdk',sdk,'--out',out];
   if(header!=='omitted')args.push('--include','src/compiler/include');
-  const child=spawnSync(process.execPath,[path.join(repo,'build/build-stdlib.mjs'),...args],{cwd:dir,encoding:'utf8',
-    env:{...process.env,PATH:bin+':'+process.env.PATH,FIXTURE:dir,RESOURCE:resource,ANDROID_NDK_ROOT:ndk,OHOS_SDK_HOME:ohos,
+  const child=spawnSync(process.execPath,[...hardware(dir,16,4),path.join(repo,'build/build-stdlib.mjs'),...args],{cwd:dir,encoding:'utf8',
+    env:{...process.env,...noHeap,PATH:bin+':'+process.env.PATH,FIXTURE:dir,RESOURCE:resource,ANDROID_NDK_ROOT:ndk,OHOS_SDK_HOME:ohos,
       SDKROOT:'/inherited-sdk',CMAKE_TOOLCHAIN_FILE:'/inherited-toolchain'}});
   const log=stdlib+'/calls.jsonl',calls=fs.existsSync(log)?fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse):[];
   return {child,calls,stdlib,out,sdk,include,tool,sysroot,resource,ndk,ios,android,link};
@@ -833,6 +860,8 @@ for(const row of crossRows){
     assert.equal(child.status,0,child.stderr+child.stdout);
     assert.deepEqual(calls.map(args=>args[0]),['clean','build','install']);
     const build=calls[1];
+    assert.equal(build[build.indexOf('--jobs')+1],'3');
+    assert.equal(fs.readFileSync(stdlib+'/build.heap','utf8'),'4096MB');
     assert.deepEqual(build.filter(v=>v.startsWith('--include=')),['--include='+include]);
     for(const [arg,value] of [['--target',target],['--target-toolchain',tool],['--target-sysroot',sysroot]])assert.equal(build[build.indexOf(arg)+1],value);
     const libs=build.filter(v=>v.startsWith('--target-lib=')).map(v=>v.slice(13));
@@ -875,10 +904,10 @@ test('WASI builds std.core without compiler sources or an include argument',linu
   put(core+'/native/CMakeLists.txt','--redefine-sym ${SYM_PREFIX}Old=${SYM_PREFIX}New');
   put(src+'/bounds/include/b.h');put(src+'/bounds/src/b.c');put(src+'/pcre2/p.h');
   put(dir+'/sysroot/marker');put(rt+'/runtime/lib/'+tuple+'/libcangjie-runtime.a','runtime');
-  put(sdk+'/bin/cjc','#!/bin/sh\nfor a do case "$a" in --output=*) f=${a#*=}; echo core > "$f"; echo mod > "$f.cjo"; exit 0;; esac; done; exit 1\n',0o755);
+  put(sdk+'/bin/cjc','#!/bin/sh\n[ "$cjHeapSize/$CANGJIE_BUILD_JOBS" = 4096MB/3 ] || exit 43\nfor a do case "$a" in --output=*) f=${a#*=}; echo core > "$f"; echo mod > "$f.cjo"; exit 0;; esac; done; exit 1\n',0o755);
   put(bin+'/clang','#!/bin/sh\nwhile [ "$1" != -o ]; do shift; done; echo @Old > "$2"\n',0o755);
   put(bin+'/llvm-ar','#!/bin/sh\ntest -s "$2"\n',0o755);
-  cli('build-stdlib',['--cross','wasm32-wasi','--sources',src,'--runtime',rt,'--sdk',sdk,'--out',out],{CJCJ_WASI_SYSROOT:dir+'/sysroot'});
+  cli('build-stdlib',['--cross','wasm32-wasi','--sources',src,'--runtime',rt,'--sdk',sdk,'--out',out],{...noHeap,CJCJ_WASI_SYSROOT:dir+'/sysroot'},hardware(dir,16,4));
   assert.equal(fs.readFileSync(out+'/modules/'+tuple+'/std/std.core.cjo','utf8'),'mod\n');
   assert.match(fs.readFileSync(out+'/lib/'+tuple+'/wasm-toolchain.id','utf8'),/^cjw2-[0-9a-f]{32}\n$/);
 });
@@ -903,19 +932,23 @@ test('compiler budgets divide the host memory across active processes',()=>{
     const mem=gib*GiB;
     assert.deepEqual(parallelCompilerBudget(p,cpus,{},mem),{jobs:String(jobs),cjHeapSize:mb+'MB'});
     assert.deepEqual(compilerStageBudget('stage3',p,undefined,{},mem,cpus),{jobs:String(largeJobs),cjHeapSize:largeMb+'MB'});
-    for(const stage of ['stage0','stage2'])assert.deepEqual(compilerStageBudget(stage,p,undefined,{},mem,cpus),
+    assert.deepEqual(compilerStageBudget('stage2',p,undefined,{},mem,cpus),{jobs:String(largeJobs),cjHeapSize:largeMb+'MB'});
+    assert.deepEqual(compilerStageBudget('stage0',p,undefined,{},mem,cpus),
       {jobs:String(cpus),cjHeapSize:(gib===7?6737:15360)+'MB'});
   }
+  for(const stage of ['stage2','stage3'])
+    assert.deepEqual(compilerStageBudget(stage,p,undefined,{},20*GiB,4),{jobs:'1',cjHeapSize:'15360MB'});
   const mem=16*GiB;
   for(const key of ['cjHeapSize','CJCJ_HEAP_SIZE']){
     assert.deepEqual(parallelCompilerBudget(p,4,{[key]:' 6GB '},mem),{jobs:'4',cjHeapSize:'6GB'});
-    assert.deepEqual(compilerStageBudget('stage3',p,'2',{[key]:'6GB'},mem,4),{jobs:'2',cjHeapSize:'6GB'});
+    for(const stage of ['stage2','stage3'])
+      assert.deepEqual(compilerStageBudget(stage,p,'2',{[key]:'6GB'},mem,4),{jobs:'2',cjHeapSize:'6GB'});
   }
   assert.deepEqual(parallelCompilerBudget(p,4,{},mem,'2'),{jobs:'2',cjHeapSize:'15360MB'});
 });
 
 // Pin the simulated hardware, not the budget implementation. Assert what the child received.
-function macHardware(dir,gib,cpus){
+function hardware(dir,gib,cpus){
   const file=dir+'/hardware.mjs';
   put(file,`import os from 'node:os'; os.totalmem=()=>${gib}*1024**3; os.availableParallelism=()=>${cpus};`);
   return ['--import',file];
@@ -933,14 +966,14 @@ function macInputs(dir) {
   return {parent,src,native,rt,out};
 }
 test('ARM64 final std consumes prepared Intel AST, installs the target macros and budgets Ninja',linux,t=>{
-  for(const bad of [false,true]){
+  for(const [localApi,bad] of [[false,false],[true,false],[true,true]]){
     const dir=fixture(t),{parent,src,native,rt,out}=macInputs(dir);
     put(src+'/bounds/b');put(src+'/pcre2/p');put(src+'/runtime/stdlib/build.py');
     const files=['lib/libstdFFI.dylib','modules/'+macTuple+'/std/std.core.cjo','modules/'+macTuple+'/std/std.ast.cjo',
       'lib/'+macTuple+'/libcangjie-std-core.a',...['core',...macros].map(n=>'runtime/lib/'+macTuple+'/libcangjie-std-'+n+'.dylib'),
       ...macros.map(n=>'modules/'+macTuple+'/std/std.'+n+'.cjo')];
     const {child,calls}=darwinStage(dir,'build-stdlib',['--platform','darwin-x64','--stage','stage3-std','--sdk',parent,
-      '--out',out,'--runtime',rt,'--native',native,'--include',native+'/include','--sources',src],`
+      '--out',out,'--runtime',rt,'--native',native,'--include',native+'/include','--sources',src,...(localApi?['--local-mode-api']:[])],`
       if(cmd==='lipo')return {status:0,stdout:${bad}&&args[1].endsWith('deriving.dylib')?'arm64 x86_64':'x86_64'};
       if(args.includes('build')){
         for(const [rel,want] of ${JSON.stringify([['bin/cjc','arm'],['third_party/flatbuffers/bin/flatc','arm'],['lib/'+macTuple+'/libcangjie-ast-support.a','ast-x64'],['runtime/lib/'+macTuple+'/runtime','x64']])})
@@ -948,7 +981,7 @@ test('ARM64 final std consumes prepared Intel AST, installs the target macros an
       }
       if(args.includes('install'))for(const rel of ${JSON.stringify(files)}){
         const f=args.at(-1)+'/'+rel;fs.mkdirSync(f.slice(0,f.lastIndexOf('/')),{recursive:true});fs.writeFileSync(f,'std');
-      }`,noHeap,macHardware(dir,7,3));
+      }`,noHeap,hardware(dir,7,3));
     assert.equal(child.status,bad?1:0,child.stderr);
     if(bad){assert.match(child.stderr,/deriving.dylib: expected only x86_64/);continue;}
     for(const rel of files)assert.ok(fs.existsSync(out+'/'+rel),rel);
@@ -956,7 +989,8 @@ test('ARM64 final std consumes prepared Intel AST, installs the target macros an
     assert.deepEqual(py.map(c=>c.args[2]),['clean','build','install']);
     assert.deepEqual(py[2].args.slice(2,-1),['install','--prefix']);
     const b=py[1];assert.equal(b.heap,'2688MB');assert.equal(b.args[b.args.indexOf('--jobs')+1],'2');
-    for(const arg of ['relwithdebinfo','--local_mode_api','--include='+native+'/include'])assert.ok(b.args.includes(arg));
+    assert.equal(b.args.includes('--local_mode_api'),localApi);
+    for(const arg of ['relwithdebinfo','--include='+native+'/include'])assert.ok(b.args.includes(arg));
     assert.deepEqual(b.args.slice(b.args.indexOf('--target'),b.args.indexOf('--target')+6),
       ['--target','darwin-x86_64','--target-toolchain','/usr/bin','--target-sysroot','/fixture/MacOSX.sdk']);
     assert.ok(!calls.some(c=>c.cmd==='cmake'));assert.ok(!fs.existsSync(parent+'/lib/'+macTuple));
@@ -964,22 +998,37 @@ test('ARM64 final std consumes prepared Intel AST, installs the target macros an
 });
 
 test('ARM64 stdx uses the stage2 compiler on PATH with the Intel std and budget',linux,t=>{
-  const dir=fixture(t),{parent,src,native,out}=macInputs(dir);
-  for(const rel of ['lib/'+macTuple,'modules/'+macTuple,'runtime/lib/'+macTuple,'third_party/flatbuffers/modules'])
-    put(out+'/'+rel+'/target','x64');
-  put(src+'/compiler/utils/envsetup/llvm_darwin.sh');
-  const {calls,child}=darwinStage(dir,'build-extras',['--platform','darwin-x64','--only','stdx','--sdk',out,'--host-sdk',parent,
-    '--include',native+'/include','--sources',src],`
-    if(fs.readFileSync(env.STDX_HOST_CANGJIE_HOME+'/bin/cjc','utf8')!=='arm'||
-       fs.readFileSync(env.CANGJIE_HOME+'/modules/${macTuple}/target','utf8')!=='x64')throw Error('wrong SDK');`,
-    noHeap,macHardware(dir,16,4));
-  assert.equal(child.status,0,child.stderr);
-  assert.deepEqual(calls.map(c=>c.args[2]),['clean','build','install']);
-  const b=calls[1];assert.equal(b.path.split(':')[0],b.host+'/bin');assert.equal(b.heap,'4096MB');
-  assert.deepEqual(b.args.slice(2),['build','-t','release','--target','darwin-x86_64','--target-toolchain','/usr/bin',
-    '--target-sysroot','/fixture/MacOSX.sdk','--include='+native+'/include','--target-lib=/opt/homebrew/opt/openssl@3/lib','--jobs','3']);
-  assert.deepEqual(calls[2].args.slice(2),['install','--prefix',out+'/stdx']);
-  assert.ok(!fs.existsSync(parent+'/modules/'+macTuple));
+  const dylibs=['libstdx.syntaxFFI.dylib','libstdx.syntax.dylib','libstdx.chir.dylib',
+    'lib-macro_stdx.chir.to_string_macro.dylib','lib-macro_stdx.plugin.dylib'];
+  for(const universal of [null,...dylibs]){
+    const dir=fixture(t),{parent,src,native,out}=macInputs(dir);
+    const tuples=['lib/'+macTuple,'modules/'+macTuple,'runtime/lib/'+macTuple];
+    for(const rel of tuples)put(out+'/'+rel+'/target','x64');
+    const fb='third_party/flatbuffers/modules/flatbuffers.cjo';
+    put(parent+'/'+fb,'arm');put(out+'/'+fb,'x64');
+    put(src+'/compiler/utils/envsetup/llvm_darwin.sh');
+    const {calls,child}=darwinStage(dir,'build-extras',['--platform','darwin-x64','--only','stdx','--sdk',out,'--host-sdk',parent,
+      '--include',native+'/include','--sources',src],`
+      if(cmd==='lipo')return {status:0,stdout:args[1].split('/').at(-1)===${JSON.stringify(universal)}?'arm64 x86_64':'x86_64'};
+      if(fs.readFileSync(env.STDX_HOST_CANGJIE_HOME+'/bin/cjc','utf8')!=='arm'||
+         fs.readFileSync(env.CANGJIE_HOME+'/${fb}','utf8')!=='arm')throw Error('overwrote host inputs');
+      for(const rel of ${JSON.stringify(tuples)})
+        if(fs.readFileSync(env.CANGJIE_HOME+'/'+rel+'/target','utf8')!=='x64')throw Error(rel);`,
+      noHeap,hardware(dir,16,4));
+    const libs=out+'/stdx/'+macTuple+'/dynamic/stdx/';
+    assert.equal(child.status,universal?1:0,child.stderr);
+    if(universal){
+      assert.ok(child.stderr.includes(libs+universal+': expected only x86_64, got arm64 x86_64'),child.stderr);
+      continue;
+    }
+    assert.deepEqual(calls.slice(0,3).map(c=>c.args[2]),['clean','build','install']);
+    const b=calls[1];assert.equal(b.lsp,out+'/tools/lib');assert.equal(b.path.split(':')[0],b.host+'/bin');assert.equal(b.heap,'4096MB');
+    assert.deepEqual(b.args.slice(2),['build','-t','release','--target','darwin-x86_64','--target-toolchain','/usr/bin',
+      '--target-sysroot','/fixture/MacOSX.sdk','--include='+native+'/include','--target-lib=/opt/homebrew/opt/openssl@3/lib','--jobs','3']);
+    assert.deepEqual(calls[2].args.slice(2),['install','--prefix',out+'/stdx']);
+    assert.deepEqual(calls.slice(3).map(c=>[c.cmd,...c.args]),dylibs.map(name=>['lipo','-archs',libs+name]));
+    assert.ok(!fs.existsSync(parent+'/modules/'+macTuple));
+  }
 });
 
 test('ARM64 stage3 keeps native tools, links Intel LLVM, restores manifests and serializes cjpm',linux,t=>{
@@ -1010,7 +1059,7 @@ test('ARM64 stage3 keeps native tools, links Intel LLVM, restores manifests and 
         if(${fail})return {status:42};
         put('${release}/bin/cjc','intel');put('${release}/driver.cjo','intel');
       }
-      if(args.includes('-std=c++17'))put(args[args.indexOf('-o')+1],'launcher');`,noHeap,macHardware(dir,16,4));
+      if(args.includes('-std=c++17'))put(args[args.indexOf('-o')+1],'launcher');`,noHeap,hardware(dir,16,4));
     assert.equal(child.status,fail?1:0,child.stderr);
     assert.equal(fs.readFileSync(source+'/packages/cjc/cjpm.toml','utf8'),manifest);
     const during=fs.readFileSync(dir+'/during','utf8');

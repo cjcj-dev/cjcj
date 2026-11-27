@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import {loadPins,parseCliArgs,sdkPlatform,darwinX64OnArm,darwinStdTargetArgs,withDarwinWorkSdk,overlayDarwinStd,parallelCompilerBudget,checkDarwinX64,homebrewPrefix,repo,cleanSdkEnvironment,resolveHostPython,requireCompilerInclude,jobs,run,runCapture,ensureDir,copyTree} from './common.mjs';
+import {loadPins,parseCliArgs,sdkPlatform,darwinX64OnArm,darwinStdTargetArgs,withDarwinWorkSdk,overlayDarwinStdTuple,parallelCompilerBudget,checkDarwinX64,homebrewPrefix,repo,cleanSdkEnvironment,resolveHostPython,requireCompilerInclude,jobs,run,runCapture,ensureDir,copyTree} from './common.mjs';
 
 const a=parseCliArgs(),p=sdkPlatform(a.platform),src=path.resolve(a.sources),sdk=path.resolve(a.sdk),host=path.resolve(a['host-sdk']||sdk);
 const work=path.resolve(a.work||sdk+'.extras'),env=cleanSdkEnvironment(sdk,p.key),py=await resolveHostPython(sdk),j=a.jobs||jobs;
@@ -21,7 +21,8 @@ if(steps.includes('stdx')){
     // stage2 copy must contain both tuples for host macros and target imports.
     const stdEnv=cross?cleanSdkEnvironment(stage2,'darwin-arm64',env):{...env};
     if(cross){
-      overlayDarwinStd(sdk,stage2,p.tuple);
+      overlayDarwinStdTuple(sdk,stage2,p.tuple);
+      stdEnv.CANGJIE_LSP_PATH=sdk+'/tools/lib';
       stdEnv.STDX_HOST_CANGJIE_HOME=stage2;
       delete stdEnv.CMAKE_TOOLCHAIN_FILE;
     }
@@ -32,6 +33,11 @@ if(steps.includes('stdx')){
       '--include='+compilerInclude,'--target-lib='+openssl,'--jobs',budget.jobs],opts);
     // Pinned build.py discovers the build-libs-* directory after clean.
     run(py,['-I','build.py','install','--prefix',sdk+'/stdx'],opts);
+    if(cross){
+      const libs=sdk+'/stdx/'+p.tuple+'/dynamic/stdx';
+      for(const name of ['libstdx.syntaxFFI','libstdx.syntax','libstdx.chir','lib-macro_stdx.chir.to_string_macro','lib-macro_stdx.plugin'])
+        checkDarwinX64(libs+'/'+name+'.dylib',{thin:true});
+    }
   };
   if(cross)await withDarwinWorkSdk(host,work+'/stage2-arm64-',buildStdX);
   else buildStdX(sdk);

@@ -2,7 +2,7 @@
 import fs from 'node:fs/promises';
 import sync from 'node:fs';
 import path from 'node:path';
-import {repo,compilerStageBudget,darwinX64OnArm,withDarwinWorkSdk,overlayDarwinStd,checkDarwinX64,parseCliArgs,sdkPlatform,linkCompilerRuntime,cleanSdkEnvironment,ensureDir,copyTree,rmrf,run,runCapture,main,makeLauncher,installEntry} from './common.mjs';
+import {repo,compilerStageBudget,darwinX64OnArm,withDarwinWorkSdk,overlayDarwinStdTuple,checkDarwinX64,parseCliArgs,sdkPlatform,linkCompilerRuntime,cleanSdkEnvironment,ensureDir,copyTree,rmrf,run,runCapture,main,makeLauncher,installEntry} from './common.mjs';
 export const HOST_TRIPLES = Object.freeze({
   linux_x86_64: 'x86_64-unknown-linux-gnu', linux_aarch64: 'aarch64-unknown-linux-gnu',
   darwin_x86_64: 'x86_64-apple-darwin', darwin_aarch64: 'aarch64-apple-darwin',
@@ -293,7 +293,8 @@ async function assembleStage(a,darwinSdk){
   if([parent,host,native,std].filter(Boolean).some(input=>out===input||out.startsWith(input+path.sep)))throw Error('stage requires a separate output');
   if(sync.existsSync(out)&&sync.readdirSync(out).length)throw Error('stage output must be empty: '+out);
   if(darwinSdk){
-    overlayDarwinStd(std,sdk,p.tuple);
+    overlayDarwinStdTuple(std,sdk,p.tuple);
+    copyTree(std+'/third_party/flatbuffers/modules',sdk+'/third_party/flatbuffers/modules');
     installNative(native,out,p);
     copyTree(std,out);
     for(const file of ['LICENSE','Open_Source_Software_Notice.docx'])copyTree(parent+'/'+file,out+'/'+file);

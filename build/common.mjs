@@ -219,7 +219,7 @@ export function parallelCompilerBudget(native,requestedJobs,env=process.env,tota
 
 export function compilerStageBudget(stage,native,explicitJobs,env=process.env,totalMemory=os.totalmem(),cpus=jobs) {
   const {cjHeapSize}=compilerHeap(native,env,totalMemory,stage==='stage0'||stage==='stage2');
-  if(stage!=='stage3'||explicitJobs!==undefined)return {jobs:String(explicitJobs??cpus),cjHeapSize};
+  if((stage!=='stage2' && stage!=='stage3')||explicitJobs!==undefined)return {jobs:String(explicitJobs??cpus),cjHeapSize};
   if(totalMemory<=20*GiB)return {jobs:'1',cjHeapSize};
   const budget=Math.floor(totalMemory*0.75/MiB);
   // An arbitrary caller heap (including runtime-specific units) is safe to honor serially.
@@ -236,8 +236,8 @@ export async function withDarwinWorkSdk(parent,prefix,build) {
   try {copyTree(parent,sdk,{mode:sync.constants.COPYFILE_FICLONE});return await build(sdk);}
   finally {rmrf(sdk);}
 }
-export function overlayDarwinStd(source,sdk,tuple) {
-  for(const dir of ['lib/'+tuple,'runtime/lib/'+tuple,'modules/'+tuple,'third_party/flatbuffers/modules'])
+export function overlayDarwinStdTuple(source,sdk,tuple) {
+  for(const dir of ['lib/'+tuple,'runtime/lib/'+tuple,'modules/'+tuple])
     copyTree(path.join(source,dir),path.join(sdk,dir));
 }
 export const darwinStdTargetArgs=env=>['--target','darwin-x86_64','--target-toolchain','/usr/bin','--target-sysroot',env.SDKROOT];

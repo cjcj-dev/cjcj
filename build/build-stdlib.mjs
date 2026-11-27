@@ -42,10 +42,11 @@ export function wasmStdInputs({stdlibSource, boundscheckSource, clang, llvmAr}) 
   return {stdlibSource: path.resolve(stdlibSource), core, native, bounds, clang, llvmAr, nativeSources, boundsSources, renames};
 }
 
-export function buildWasmStdCore(sdk, work, inputs, {cjcArgs = []} = {}) {
+const wasmCompilerEnv = sdk => ({...process.env, ...compilerHeap(sdkPlatform()), CANGJIE_HOME: sdk});
+
+export function buildWasmStdCore(sdk, work, inputs, {cjcArgs = [], env = wasmCompilerEnv(sdk)} = {}) {
   const {core, native, bounds, clang, llvmAr, nativeSources, boundsSources, renames} = inputs;
   fs.mkdirSync(work);
-  const env = {...process.env, ...compilerHeap(sdkPlatform()), CANGJIE_HOME: sdk};
   function run(cmd, args) {
     const {status, signal, error} = spawnSync(cmd, args, {cwd: work, env, stdio: ['ignore', 2, 2]});
     console.error(JSON.stringify({cmd, args, cwd: work, status, signal, error: error?.message}));
@@ -216,7 +217,8 @@ export function pcre2Objects({pcre2Source, clang, sysroot, work, run}) {
   return {ok: true, objects, include: work};
 }
 
-export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Source, clang, llvmAr, work, only, fallbackOpt = false}) {
+export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Source, clang, llvmAr, work, only, fallbackOpt = false,
+  env = wasmCompilerEnv(sdk)}) {
   const stdRoot = path.join(stdlibSource, 'libs', 'std');
   const {pkgs, order} = packageGraph(stdRoot);
   const libDir = path.join(sdk, 'lib', WASM_TARGET_DIR);
@@ -228,7 +230,6 @@ export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Sou
   const run = runner(log);
   const cjc = path.join(sdk, 'bin', process.platform === 'win32' ? 'cjc.exe' : 'cjc');
   const sysroot = path.join(sdk, SYSROOT_DIR);
-  const env = {...process.env, ...compilerHeap(sdkPlatform()), CANGJIE_HOME: sdk};
   const bounds = path.resolve(boundscheckSource);
   const results = [];
   const failed = new Set();
@@ -251,7 +252,7 @@ export function buildWasmStdFull({sdk, stdlibSource, boundscheckSource, pcre2Sou
       let built;
       for (const [level, cjcArgs] of [['O2', ['-O2']], ['default', []]]) {
         fs.rmSync(pw, {recursive: true, force: true});
-        try { built = buildWasmStdCore(sdk, pw, inputs, {cjcArgs}); rec.opt = level; break; }
+        try { built = buildWasmStdCore(sdk, pw, inputs, {cjcArgs, env}); rec.opt = level; break; }
         catch (e) { rec.attempts = [...(rec.attempts || []), {level, error: String(e.message).slice(0, 300)}]; }
       }
       if (!built) { rec.status = 'CJC_FAILED'; rec.reason = JSON.stringify(rec.attempts); failed.add(name); continue; }
@@ -474,8 +475,7 @@ async function buildStdPass(a,darwinSdk){
   const src=path.resolve(a.sources),stdlib=src+'/runtime/stdlib',out=path.resolve(a.out),parent=path.resolve(a.sdk);
   const cross=a.cross,p=sdkPlatform(a.platform),tuple=cross?crossTuples[cross]:p.tuple;
   if(!tuple||(cross&&cross!=='wasm32-wasi'&&!Object.hasOwn(crossAstTargets,cross))||(!cross&&!['std-bootstrap','stage1-std','stage3-std'].includes(a.stage)))throw Error('unknown std stage or target');
-  const budget=(a.stage==='stage3-std'||cross)?parallelCompilerBudget(p,jobs,process.env,undefined,a.jobs):null;
-  const j=budget?.jobs||a.jobs||jobs;
+  const {jobs:j,cjHeapSize}=parallelCompilerBudget(p,jobs,process.env,undefined,a.jobs);
   const runtime=path.resolve(a.runtime||a.native),work=out+'.work',sdk=darwinSdk||(cross?work+'/sdk':parent);
   if(fs.existsSync(out)&&fs.readdirSync(out).length)throw Error('std output must be empty: '+out);
   const include=(darwinSdk || (cross ? cross!=='wasm32-wasi' : a.include!==undefined)) ? requireCompilerInclude(a.include) : undefined;
@@ -483,7 +483,7 @@ async function buildStdPass(a,darwinSdk){
   ensureDir(work);
   for(const [from,to] of [['bounds','boundscheck-v1.1.16'],['pcre2','pcre2']])copySource(src+'/'+from,stdlib+'/third_party/'+to);
   const roots=['lib/'+tuple,'runtime/lib/'+tuple],env=cleanSdkEnvironment(sdk,darwinSdk?'darwin-arm64':p.key);
-  if(budget)Object.assign(env,{cjHeapSize:budget.cjHeapSize,CANGJIE_BUILD_JOBS:j});
+  Object.assign(env,{cjHeapSize,CANGJIE_BUILD_JOBS:j});
   if(darwinSdk){
     const native=path.resolve(a.native||runtime);
     copyTree(native+'/'+roots[0],sdk+'/'+roots[0]);
@@ -500,7 +500,7 @@ async function buildStdPass(a,darwinSdk){
     copyTree(process.env.CJCJ_WASI_SYSROOT,sdk+'/'+SYSROOT_DIR);
     const bin=sdk+'/third_party/llvm/bin',lib='lib/'+tuple,mods='modules/'+tuple+'/std',rt='runtime/lib/'+tuple+'/libcangjie-runtime.a';
     run(bin+'/llvm-ar',['s',sdk+'/'+rt]);
-    const {results}=buildWasmStdFull({sdk,stdlibSource:stdlib,boundscheckSource:src+'/bounds',pcre2Source:src+'/pcre2',clang:bin+'/clang',llvmAr:bin+'/llvm-ar',work:work+'/wasm'});
+    const {results}=buildWasmStdFull({sdk,env,stdlibSource:stdlib,boundscheckSource:src+'/bounds',pcre2Source:src+'/pcre2',clang:bin+'/clang',llvmAr:bin+'/llvm-ar',work:work+'/wasm'});
     const bad=results.filter(r=>!['BUILT','BUILT_CORE_DEFAULT_OPT','HOST_ONLY'].includes(r.status));
     if(bad.length)throw Error('WASI std packages: '+JSON.stringify(bad));
     const archives=fs.readdirSync(sdk+'/'+lib).filter(x=>x.endsWith('.a')).sort().map(n=>lib+'/'+n);
@@ -527,14 +527,14 @@ async function buildStdPass(a,darwinSdk){
       const modules=build+'/modules/'+tuple;
       ensureDir(modules);ensureDir(sdk+'/modules');rmrf(sdk+'/modules/'+tuple);
       fs.symlinkSync(modules,sdk+'/modules/'+tuple,'dir');
-      buildArgs.push(...darwinStdTargetArgs(env),'--local_mode_api','--target-lib='+build+'/lib',
+      buildArgs.push(...darwinStdTargetArgs(env),'--target-lib='+build+'/lib',
         '--target-lib='+homebrewPrefix()+'/opt/openssl@3/lib',...roots.map(rel=>'--target-lib='+sdk+'/'+rel));
     }else{
       const snap=work+'/runtime-input',arch=p.arch==='arm64'?'aarch64':'x86_64';
       for(const rel of roots)copyTree(runtime+'/'+rel,snap+'/common/'+(p.os==='win32'?'windows':p.os)+'_relwithdebinfo_'+arch+'/'+rel);
       buildArgs.push('--target-lib='+stdlib+'/build/build/lib','--target-lib='+snap);
-      if(a['local-mode-api'])buildArgs.push('--local_mode_api');
     }
+    if(a['local-mode-api'])buildArgs.push('--local_mode_api');
   }else{
     delete env.CMAKE_TOOLCHAIN_FILE;
     const target=crossToolchain(cross,env),ast=work+'/ast';
