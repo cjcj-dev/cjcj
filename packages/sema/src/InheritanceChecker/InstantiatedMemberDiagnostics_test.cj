@@ -50,11 +50,11 @@ public class InstantiatedMemberDiagnosticsTest {
     @TestCase
     public func DistinctOverloadsDoNotRetainDiagnostics(): Unit {
         let result = CompileSource("""
-            class Legal<T> {
+            interface StaticSide<T> { static func scope(x: T): Unit {} }
+            interface InstanceSide { func scope(x: Int64): Unit {} }
+            class Legal<T> <: StaticSide<T> & InstanceSide {
                 public func mode(this @local!, x: T): Unit {}
                 public func mode(this @local?, x: Int64): Unit {}
-                public static func scope(x: T): Unit {}
-                public func scope(x: Int64): Unit {}
                 public func typed(x: T): Unit {}
                 public func typed(x: Bool): Unit {}
             }
@@ -67,7 +67,10 @@ public class InstantiatedMemberDiagnosticsTest {
         let checker = StructInheritanceChecker(ci.diag.getOrThrow(), ci.typeManager, pkg, ci.importManager.getOrThrow(),
             opts: ci.globalOptions)
         checker.Check()
-        let key = DeclTySeqKey(pkg.files[0].decls[0], [TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)])
+        let legal = (pkg.files[0].decls[2] as ClassDecl).getOrThrow()
+        let members = checker.GetStoredMembersForDecl(legal)
+        for (name in ["scope", "mode", "typed"]) { @Expect(members.Get(name).size, 2) }
+        let key = DeclTySeqKey(legal, [TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)])
         @Assert(checker.checkedInstantiatedMemberKeys.contains(key))
         @Expect(checker.instantiatedMemberDiagnostics.size, 0)
         @Expect(ci.diag.getOrThrow().GetErrorCount(), 0u64)
