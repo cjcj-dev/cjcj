@@ -3,7 +3,7 @@
   "repos": {
     "llvm": {
       "url": "https://github.com/cjcj-dev/cjcj-llvm.git",
-      "sha": "66be3b259a4a9b0873e7a1037100c50e075487e7"
+      "sha": "95bc92f8348f77236a5373817cc0e1b677fd3d08"
     },
     "runtime": {
       "url": "https://github.com/cjcj-dev/cangjie-runtime.git",

@@ -23,6 +23,11 @@ test('source pins select the expected runtime revision',()=>{
   assert.equal(pins.repos.runtime.sha,'b628e2bd5183b809d04f8e5808ecf3b00e46bf29');
 });
 
+test('source pins select the expected LLVM revision',()=>{
+  const pins=loadPins();
+  assert.equal(pins.repos.llvm.sha,'95bc92f8348f77236a5373817cc0e1b677fd3d08');
+});
+
 for(const workflow of ['prepare','release','ci']){
   test(workflow+' builds stage0 from its checkout',()=>{
     const yaml=fs.readFileSync(path.join(repo,'.github/workflows',workflow+'.yml'),'utf8');
