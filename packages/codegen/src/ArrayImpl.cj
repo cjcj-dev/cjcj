@@ -154,6 +154,18 @@ private func InitArrayFilledWithConstant(irBuilder: IRBuilder2, array: LLVMValue
         }
     }
     let arrayConstant = cgMod.GetOrCreateGlobalVariable(constVal, serialized, false)
+    let int64Type = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let dataSize = unsafe { LLVMConstInt(int64Type, cgMod.GetTypeSize(LLVMGlobalGetValueType(arrayConstant)), 0) }
+    if (!arrayConstantElems.isEmpty() && elemType.GetSize().isSome() && !irBuilder.IsTypeContainsRef(elemLLVMType)) {
+        // The immutable AS0 constant holds no managed slot and the RawArray is
+        // freshly allocated, so its payload needs no GC barrier (ZGC
+        // zBarrierSet.inline.hpp:395-426 only barriers zpointer slots).  Copy
+        // from the AS0 global into the indexed element address (0, 1, 0)
+        // instead of reinterpreting the global as an AS1 object view.
+        let dstElemPtr = irBuilder.GetArrayElementAddr(arrTy, array, irBuilder.GetInt64(0), false)
+        irBuilder.CreateMemCpy(dstElemPtr, 1u32, arrayConstant, 1u32, dataSize)
+        return array
+    }
     let arrPayloadPtr = irBuilder.GetPayloadFromObject(array)
     let arrPtr = irBuilder.CreateBitCast(arrPayloadPtr, unsafe { LLVMPointerType(arrayType, 1u32) },
         name: "arr.ptr")
@@ -161,8 +173,6 @@ private func InitArrayFilledWithConstant(irBuilder: IRBuilder2, array: LLVMValue
     let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 1u32) }
     let srcArrI8Ptr = irBuilder.CreatePointerCast(arrayConstant, i8PtrType, name: "src.arr.i8")
     let dstArrI8Ptr = irBuilder.CreateBitCast(arrDataPtr, i8PtrType, name: "dst.arr.i8")
-    let int64Type = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
-    let dataSize = unsafe { LLVMConstInt(int64Type, cgMod.GetTypeSize(LLVMGlobalGetValueType(arrayConstant)), 0) }
     let elemCnt = unsafe { LLVMConstInt(int64Type, UInt64(arrayConstantElems.size), 0) }
     // The constant global is not a managed object; use a typed null source
     // base token.  LLVMNullValue() is a null C handle and crashes in
