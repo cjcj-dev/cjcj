@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {repo,parseCliArgs,sdkPlatform,RELEASE_TARGETS,crossTuples,run,runCapture,sha256File,extractSdkArchive,tar,
-  ensureDir,copyTree,rmrf,linkCompilerRuntime,makeLauncher,installEntry} from './common.mjs';
+  ensureDir,copyTree,rmrf,checkDarwinX64,linkCompilerRuntime,makeLauncher,installEntry} from './common.mjs';
 
 const a=parseCliArgs(),out=path.resolve(a.out),version=a.version;
 if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version||''))throw Error('expected --version <SemVer>');
@@ -51,7 +51,8 @@ function prepareEntries(sdk,p,work) {
     '#ifdef _WIN32\nSetEnvironmentVariableW(L"PYTHONHOME",py.c_str()); SetEnvironmentVariableW(L"PYTHONPATH",(py/L"Lib/site-packages").c_str());\n'+
     '#else\nsetenv("PYTHONHOME",py.c_str(),1); setenv("PYTHONPATH",(py/"lib/python3.11/site-packages").c_str(),1);\n#endif\n} } pythonHome; }\n');
   run(p.os==='win32'?path.join(process.env.CJCJ_WINDOWS_TOOLCHAIN,'bin/clang++.exe'):(process.env.CXX||'c++'),
-    ['-std=c++17','-O2','-I'+repo+'/build',file,'-o',bin,...(p.os==='win32'?['-static','-lshell32']:[])]);
+    ['-std=c++17','-O2','-I'+repo+'/build',file,'-o',bin,...(p.key==='darwin-x64'?['-arch','x86_64']:[]),...(p.os==='win32'?['-static','-lshell32']:[])]);
+  if(p.key==='darwin-x64')checkDarwinX64(bin,{thin:true});
   installEntry(sdk,'tools/bin/cjdb'+p.exe,'third_party/llvm/bin/lldb'+p.exe,['third_party/python','third_party/python/lib',...libs],bin,p);
 }
 function overlay(sdk,dirs,targets,p) {
@@ -93,7 +94,7 @@ async function pack(){
       fs.renameSync(sdk,work+'/hidden');const hidden=source+'.relocation-'+process.pid;
       fs.renameSync(source,hidden);
       try{extractSdkArchive(archive,fresh,'cangjie');
-        run(process.execPath,[repo+'/build/test-sdk.mjs','--mode','installed','--sdk',fresh+'/cangjie','--repo',repo,...(a['language-inputs']?['--language-inputs',path.resolve(a['language-inputs'])]:[])]);
+        run(process.execPath,[repo+'/build/test-sdk.mjs','--mode','installed','--platform',p.key,'--sdk',fresh+'/cangjie','--repo',repo,...(a['language-inputs']?['--language-inputs',path.resolve(a['language-inputs'])]:[])]);
       }finally{fs.renameSync(hidden,source);rmrf(fresh);}
     }
     const line=await sha256File(archive)+'  '+name+'\n';for(const file of checks)fs.writeFileSync(path.join(out,file),line);

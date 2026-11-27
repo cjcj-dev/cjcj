@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import test from 'node:test';
-import {repo,RELEASE_TARGETS,cleanSdkEnvironment,compilerHeap,loadPins,sdkPlatform} from '../../build/common.mjs';
+import {repo,RELEASE_TARGETS,parallelCompilerBudget,compilerStageBudget,homebrewPrefix,cleanSdkEnvironment,compilerHeap,loadPins,sdkPlatform} from '../../build/common.mjs';
 import {cjpmBuildEnvironment,effectiveLinkOptions,h1HeapDefaultsBuild,h1PackageLinkOptions,wireAttributeHeader} from '../../build/build-compiler.mjs';
 
 test('source pins use full commit SHAs and select the expected tools revision',()=>{
@@ -20,7 +20,11 @@ test('source pins use full commit SHAs and select the expected tools revision',(
 
 test('source pins select the expected runtime revision',()=>{
   const pins=loadPins();
-  assert.equal(pins.repos.runtime.sha,'b628e2bd5183b809d04f8e5808ecf3b00e46bf29');
+  assert.equal(pins.repos.runtime.sha,'9830715f11f510aec027a1ad51a4cab09480b76f');
+});
+
+test('source pins select Darwin cross stdx',()=>{
+  assert.equal(loadPins().repos.stdx.sha,'7780ef7b507b411bdffeb66e84a66dd5d215006c');
 });
 
 test('source pins select the expected LLVM revision',()=>{
@@ -65,7 +69,7 @@ for(const workflow of ['prepare','release']){
   });
 }
 
-for(const [workflow,jobs] of Object.entries({prepare:['ci-sdk'],ci:['build-and-smoke','package-tests'],release:['host-sdk']})){
+for(const [workflow,jobs] of Object.entries({prepare:['ci-sdk'],ci:['build-and-smoke','package-tests'],release:['host-sdk','host-sdk-darwin-x64']})){
   test(workflow+' sets the compiler heap for each SDK job',()=>{
     const yaml=fs.readFileSync(path.join(repo,'.github/workflows',workflow+'.yml'),'utf8');
     const blocks=yaml.split(/^  (?=[\w-]+:[ \t]*$)/m);
@@ -258,7 +262,7 @@ cat "$CANGJIE_HOME/modules/${tuple}/current" > "$3/release/bin/cjc"
     put(std+'/runtime/lib/'+tuple+'/current','R');
     cli('build-compiler',['--stage',stage,'--sdk',parent,'--std',std,'--native',native,'--host-sdk',host,'--source',src,'--out',out],
       {GIT_DIR:git.stdout.trim(),cjHeapSize:stage==='stage2'?'':'4GB',CJCJ_HEAP_SIZE:'',cjHeapSwap:undefined,
-        EXPECTED_HEAP:stage==='stage2'?compilerHeap(sdkPlatform(),{}).cjHeapSize:'4GB'});
+        EXPECTED_HEAP:stage==='stage2'?compilerHeap(sdkPlatform(),{},os.totalmem(),true).cjHeapSize:'4GB'});
     assert.equal(fs.existsSync(out+'/'+sentinel),false,stage+' retained H/tools/bin/LSPServer');
     assert.equal(fs.readFileSync(out+'/tools/bin/native-only','utf8'),'native');
     assert.equal(fs.readFileSync(out+'/LICENSE','utf8'),'host license');
@@ -377,7 +381,7 @@ test('Linux overlay contains physical files in just three target directories',li
 test('default compiler heap stays below runner RAM and within runtime limits',()=>{
   for(const [platform,gib,mb] of [
     ['darwin-arm64',7,6737], ['darwin-x64',14,13475], ['linux-x64',15.6,15015],
-    ['windows-x64',16,15360], ['linux-aarch64',64,15360],
+    ['windows-x64',16,15360], ['linux-aarch64',64,49152], ['linux-x64',24,19660],
   ]){
     const p=sdkPlatform(platform),bytes=Math.floor(gib*1024**3);
     const heap=compilerHeap(p,{},bytes);
@@ -535,16 +539,18 @@ test('Windows runtime load probes preserve a Path-only host environment',linux,t
 
 // Run the stage entry on a simulated Apple Silicon host. Record the arguments at
 // the subprocess boundary; these fixtures do not compile or execute Mach-O code.
-function darwinStage(dir,name,args,respond,extra={},options=[]){
+function darwinStage(dir,name,args,respond,extra={},options=[],arch='arm64'){
   const preload=dir+'/host.mjs',log=dir+'/calls';
   put(preload,`
 import fs from 'node:fs';
 import cp from 'node:child_process';
-Object.defineProperty(process,'arch',{value:'arm64'});
+const exists=fs.existsSync;
+fs.existsSync=file=>file==='/opt/homebrew/bin/brew'||exists(file);
+Object.defineProperty(process,'arch',{value:${JSON.stringify(arch)}});
 Object.defineProperty(process,'platform',{value:'darwin'});
 cp.spawnSync=(cmd,args,opts)=>{
   const env=opts?.env??process.env;
-  fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({cmd,args,path:env.PATH,arch:env.CMAKE_OSX_ARCHITECTURES,processor:env.CMAKE_APPLE_SILICON_PROCESSOR})+'\\n');
+  fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({cmd,args,path:env.PATH,home:env.CANGJIE_HOME,host:env.STDX_HOST_CANGJIE_HOME,heap:env.cjHeapSize,jobs:env.CANGJIE_BUILD_JOBS,targetArch:env.CJCJ_TARGET_ARCH,arch:env.CMAKE_OSX_ARCHITECTURES,processor:env.CMAKE_APPLE_SILICON_PROCESSOR})+'\\n');
   ${respond}
   return {status:0,stdout:''};
 };
@@ -678,8 +684,8 @@ function releaseJobs(){
 }
 
 test('release produces exactly one overlay for every package dependency',linux,()=>{
-  const {'host-sdk':host,'cross-std':cross,package:pkg}=releaseJobs();
-  assert.deepEqual(pkg.needs.sort(),['cross-std','host-sdk']);
+  const workflow=releaseJobs(),{'host-sdk':host,'cross-std':cross,package:pkg}=workflow;
+  assert.deepEqual(pkg.needs.sort(),['cross-std','host-sdk','host-sdk-darwin-x64']);
   assert.match(pkg.strategy.matrix,/fromJSON\(needs\.host-sdk\.outputs\.packages\)/);
   assert.match(host.steps.find(s=>s.id==='matrix').run,/RELEASE_TARGETS as include/);
   assert.deepEqual(cross.strategy.matrix.include.map(r=>r.target).sort(),[...crossRows.map(([t])=>t),'wasm32-wasi'].sort());
@@ -708,7 +714,7 @@ test('release produces exactly one overlay for every package dependency',linux,(
   };
   assert.deepEqual(RELEASE_TARGETS.map(p=>p.key).sort(),Object.keys(expected).sort());
   assert.deepEqual([...new Set(Object.values(expected).flat())].sort(),producers.sort());
-  for(const p of RELEASE_TARGETS){assert.ok(hosts.includes(p.host),p.key);assert.deepEqual(p.cross,expected[p.key],p.key);}
+  for(const p of RELEASE_TARGETS){assert.ok(hosts.includes(p.host)||workflow['host-sdk-'+p.host]?.steps.some(s=>s.with?.name==='host-sdk-'+p.host&&s.uses?.includes('upload-artifact')),p.key);assert.deepEqual(p.cross,expected[p.key],p.key);}
   assert.equal(pkg.env.CROSS,'${{ toJSON(matrix.cross) }}');
   const download=pkg.steps.find(s=>s.run?.includes('JSON.parse(process.env.CROSS)'));
   assert.match(download.run,/'--name','cross-std-'\+target/);assert.match(download.run,/dir\+'\/cross\.tar'/);
@@ -875,4 +881,225 @@ test('WASI builds std.core without compiler sources or an include argument',linu
   cli('build-stdlib',['--cross','wasm32-wasi','--sources',src,'--runtime',rt,'--sdk',sdk,'--out',out],{CJCJ_WASI_SYSROOT:dir+'/sysroot'});
   assert.equal(fs.readFileSync(out+'/modules/'+tuple+'/std/std.core.cjo','utf8'),'mod\n');
   assert.match(fs.readFileSync(out+'/lib/'+tuple+'/wasm-toolchain.id','utf8'),/^cjw2-[0-9a-f]{32}\n$/);
+});
+
+test('Homebrew follows the installed brew under x64 Node',t=>{
+  const exists=fs.existsSync;
+  t.mock.method(fs,'existsSync',file=>file==='/opt/homebrew/bin/brew'||exists(file));
+  const arch=Object.getOwnPropertyDescriptor(process,'arch');
+  try {
+    Object.defineProperty(process,'arch',{value:'x64'});
+    assert.equal(homebrewPrefix(),'/opt/homebrew');
+    fs.existsSync.mock.mockImplementation(()=>false);
+    assert.equal(homebrewPrefix(),'/usr/local');
+  }finally{Object.defineProperty(process,'arch',arch);}
+});
+
+test('compiler budgets divide the host memory across active processes',()=>{
+  const p=sdkPlatform('linux-x64'),GiB=1024**3;
+  for(const [gib,cpus,jobs,mb,largeJobs,largeMb] of [
+    [7,3,2,2688,1,6737],[16,4,3,4096,1,15360],[128,32,24,4096,8,12288]
+  ]){
+    const mem=gib*GiB;
+    assert.deepEqual(parallelCompilerBudget(p,cpus,{},mem),{jobs:String(jobs),cjHeapSize:mb+'MB'});
+    assert.deepEqual(compilerStageBudget('stage3',p,undefined,{},mem,cpus),{jobs:String(largeJobs),cjHeapSize:largeMb+'MB'});
+    for(const stage of ['stage0','stage2'])assert.deepEqual(compilerStageBudget(stage,p,undefined,{},mem,cpus),
+      {jobs:String(cpus),cjHeapSize:(gib===7?6737:15360)+'MB'});
+  }
+  const mem=16*GiB;
+  for(const key of ['cjHeapSize','CJCJ_HEAP_SIZE']){
+    assert.deepEqual(parallelCompilerBudget(p,4,{[key]:' 6GB '},mem),{jobs:'4',cjHeapSize:'6GB'});
+    assert.deepEqual(compilerStageBudget('stage3',p,'2',{[key]:'6GB'},mem,4),{jobs:'2',cjHeapSize:'6GB'});
+  }
+  assert.deepEqual(parallelCompilerBudget(p,4,{},mem,'2'),{jobs:'2',cjHeapSize:'15360MB'});
+});
+
+// Pin the simulated hardware, not the budget implementation. Assert what the child received.
+function macHardware(dir,gib,cpus){
+  const file=dir+'/hardware.mjs';
+  put(file,`import os from 'node:os'; os.totalmem=()=>${gib}*1024**3; os.availableParallelism=()=>${cpus};`);
+  return ['--import',file];
+}
+const noHeap={cjHeapSize:'',CJCJ_HEAP_SIZE:''},macTuple='darwin_x86_64_cjnative';
+const macros=['unittest.testmacro','unittest.mock.mockmacro','deriving'];
+function macInputs(dir) {
+  const parent=dir+'/stage2',src=dir+'/src',native=dir+'/native',rt=dir+'/runtime',out=dir+'/out';
+  for(const bin of ['opt','llc','ld64.lld'])put(parent+'/third_party/llvm/bin/'+bin,'arm');
+  for(const rel of ['bin/cjc','third_party/flatbuffers/bin/flatc','schema/StdAstFormat.fbs',
+    'include/flatbuffers/StdAstFormat_generated.h','LICENSE','Open_Source_Software_Notice.docx'])put(parent+'/'+rel,'arm');
+  put(native+'/lib/'+macTuple+'/builtins','x64');put(native+'/libcangjie-ast-support.a','ast-x64');
+  put(native+'/include/cangjie/CHIR/IR/AttributeInfo.h','class AttributeInfo {};');
+  put(rt+'/lib/'+macTuple+'/thread','x64');put(rt+'/runtime/lib/'+macTuple+'/runtime','x64');
+  return {parent,src,native,rt,out};
+}
+test('ARM64 final std consumes prepared Intel AST, installs the target macros and budgets Ninja',linux,t=>{
+  for(const bad of [false,true]){
+    const dir=fixture(t),{parent,src,native,rt,out}=macInputs(dir);
+    put(src+'/bounds/b');put(src+'/pcre2/p');put(src+'/runtime/stdlib/build.py');
+    const files=['lib/libstdFFI.dylib','modules/'+macTuple+'/std/std.core.cjo','modules/'+macTuple+'/std/std.ast.cjo',
+      'lib/'+macTuple+'/libcangjie-std-core.a',...['core',...macros].map(n=>'runtime/lib/'+macTuple+'/libcangjie-std-'+n+'.dylib'),
+      ...macros.map(n=>'modules/'+macTuple+'/std/std.'+n+'.cjo')];
+    const {child,calls}=darwinStage(dir,'build-stdlib',['--platform','darwin-x64','--stage','stage3-std','--sdk',parent,
+      '--out',out,'--runtime',rt,'--native',native,'--include',native+'/include','--sources',src],`
+      if(cmd==='lipo')return {status:0,stdout:${bad}&&args[1].endsWith('deriving.dylib')?'arm64 x86_64':'x86_64'};
+      if(args.includes('build')){
+        for(const [rel,want] of ${JSON.stringify([['bin/cjc','arm'],['third_party/flatbuffers/bin/flatc','arm'],['lib/'+macTuple+'/libcangjie-ast-support.a','ast-x64'],['runtime/lib/'+macTuple+'/runtime','x64']])})
+          if(fs.readFileSync(env.CANGJIE_HOME+'/'+rel,'utf8')!==want)throw Error(rel);
+      }
+      if(args.includes('install'))for(const rel of ${JSON.stringify(files)}){
+        const f=args.at(-1)+'/'+rel;fs.mkdirSync(f.slice(0,f.lastIndexOf('/')),{recursive:true});fs.writeFileSync(f,'std');
+      }`,noHeap,macHardware(dir,7,3));
+    assert.equal(child.status,bad?1:0,child.stderr);
+    if(bad){assert.match(child.stderr,/deriving.dylib: expected only x86_64/);continue;}
+    for(const rel of files)assert.ok(fs.existsSync(out+'/'+rel),rel);
+    const py=calls.filter(c=>c.args.includes('build.py'));
+    assert.deepEqual(py.map(c=>c.args[2]),['clean','build','install']);
+    assert.deepEqual(py[2].args.slice(2,-1),['install','--prefix']);
+    const b=py[1];assert.equal(b.heap,'2688MB');assert.equal(b.args[b.args.indexOf('--jobs')+1],'2');
+    for(const arg of ['relwithdebinfo','--local_mode_api','--include='+native+'/include'])assert.ok(b.args.includes(arg));
+    assert.deepEqual(b.args.slice(b.args.indexOf('--target'),b.args.indexOf('--target')+6),
+      ['--target','darwin-x86_64','--target-toolchain','/usr/bin','--target-sysroot','/fixture/MacOSX.sdk']);
+    assert.ok(!calls.some(c=>c.cmd==='cmake'));assert.ok(!fs.existsSync(parent+'/lib/'+macTuple));
+  }
+});
+
+test('ARM64 stdx uses the stage2 compiler on PATH with the Intel std and budget',linux,t=>{
+  const dir=fixture(t),{parent,src,native,out}=macInputs(dir);
+  for(const rel of ['lib/'+macTuple,'modules/'+macTuple,'runtime/lib/'+macTuple,'third_party/flatbuffers/modules'])
+    put(out+'/'+rel+'/target','x64');
+  put(src+'/compiler/utils/envsetup/llvm_darwin.sh');
+  const {calls,child}=darwinStage(dir,'build-extras',['--platform','darwin-x64','--only','stdx','--sdk',out,'--host-sdk',parent,
+    '--include',native+'/include','--sources',src],`
+    if(fs.readFileSync(env.STDX_HOST_CANGJIE_HOME+'/bin/cjc','utf8')!=='arm'||
+       fs.readFileSync(env.CANGJIE_HOME+'/modules/${macTuple}/target','utf8')!=='x64')throw Error('wrong SDK');`,
+    noHeap,macHardware(dir,16,4));
+  assert.equal(child.status,0,child.stderr);
+  assert.deepEqual(calls.map(c=>c.args[2]),['clean','build','install']);
+  const b=calls[1];assert.equal(b.path.split(':')[0],b.host+'/bin');assert.equal(b.heap,'4096MB');
+  assert.deepEqual(b.args.slice(2),['build','-t','release','--target','darwin-x86_64','--target-toolchain','/usr/bin',
+    '--target-sysroot','/fixture/MacOSX.sdk','--include='+native+'/include','--target-lib=/opt/homebrew/opt/openssl@3/lib','--jobs','3']);
+  assert.deepEqual(calls[2].args.slice(2),['install','--prefix',out+'/stdx']);
+  assert.ok(!fs.existsSync(parent+'/modules/'+macTuple));
+});
+
+test('ARM64 stage3 keeps native tools, links Intel LLVM, restores manifests and serializes cjpm',linux,t=>{
+  for(const fail of [true,false]){
+    const dir=fixture(t),{parent,native,out}=macInputs(dir),std=dir+'/std',source=dir+'/source',host=dir+'/arm-host';
+    const triple='x86_64-apple-darwin',release=out+'.target/'+triple+'/release';
+    const manifest=fs.readFileSync(repo+'/packages/cjc/cjpm.toml','utf8');
+    put(source+'/packages/cjc/cjpm.toml',manifest);put(source+'/cjpm.toml','compile-option = "-O2"\n');
+    put(source+'/packages/chir/src/Enums.cj',fs.readFileSync(repo+'/packages/chir/src/Enums.cj'));
+    put(source+'/schema/StdxChirFormat.fbs');
+    for(const rel of ['third_party/llvm/lib/libLLVM.dylib','third_party/llvm/bin/opt','third_party/flatbuffers/bin/flatc'])
+      put(native+'/'+rel,'intel');
+    for(const dir of ['lib/'+macTuple,'runtime/lib/'+macTuple,'modules/'+macTuple,'third_party/flatbuffers/modules'])
+      put(std+'/'+dir+'/current','final');
+    const objects=['cjselfhost_llvmshim','cjc_runtime_config','cjc_heap_defaults'];
+    const {child,calls}=darwinStage(dir,'build-compiler',['--platform','darwin-x64','--stage','stage3','--sdk',parent,
+      '--native',native,'--std',std,'--source',source,'--out',out,'--host-sdk',host],`
+      const put=(p,s)=>{fs.mkdirSync(p.slice(0,p.lastIndexOf('/')),{recursive:true});fs.writeFileSync(p,s)};
+      if(cmd==='git')return {status:0,stdout:'12345'};
+      if(cmd==='lipo')return {status:0,stdout:'x86_64'};
+      if(args[0]?.endsWith('build_shim.mjs'))for(const name of ${JSON.stringify(objects)})put(opts.cwd+'/runtime_shim/'+name+'.o','intel');
+      if(cmd.endsWith('/cjpm')){
+        const text=fs.readFileSync(opts.cwd+'/packages/cjc/cjpm.toml','utf8');
+        fs.writeFileSync('${dir}/during',text);
+        for(const rel of ['third_party/llvm/bin/opt','third_party/llvm/bin/llc','third_party/llvm/bin/ld64.lld','bin/cjc'])
+          if(fs.readFileSync(env.CANGJIE_HOME+'/'+rel,'utf8')!=='arm')throw Error(rel);
+        if(fs.readFileSync(env.CANGJIE_HOME+'/modules/${macTuple}/current','utf8')!=='final')throw Error('target modules');
+        if(${fail})return {status:42};
+        put('${release}/bin/cjc','intel');put('${release}/driver.cjo','intel');
+      }
+      if(args.includes('-std=c++17'))put(args[args.indexOf('-o')+1],'launcher');`,noHeap,macHardware(dir,16,4));
+    assert.equal(child.status,fail?1:0,child.stderr);
+    assert.equal(fs.readFileSync(source+'/packages/cjc/cjpm.toml','utf8'),manifest);
+    const during=fs.readFileSync(dir+'/during','utf8');
+    assert.ok(effectiveLinkOptions(during,'darwin_x86_64').includes(native+'/third_party/llvm/lib/libLLVM.dylib'));
+    assert.deepEqual(effectiveLinkOptions(during,'darwin_aarch64'),effectiveLinkOptions(manifest,'darwin_aarch64'));
+    const build=calls.find(c=>c.cmd===host+'/tools/bin/cjpm');
+    assert.deepEqual(build.args,['build','--target',triple,'--target-dir',out+'.target','-j','1']);assert.equal(build.heap,'15360MB');
+    assert.equal(calls.find(c=>c.args[0]?.endsWith('build_shim.mjs')).targetArch,'x86_64');
+    if(fail){assert.match(child.stderr,/exited 42/);continue;}
+    assert.equal(fs.readFileSync(out+'/libexec/compiler/cjcj-stage1','utf8'),'intel');
+    assert.equal(fs.readFileSync(out+'/share/cjcj/cjo/driver.cjo','utf8'),'intel');
+    assert.equal(fs.readFileSync(out+'/third_party/llvm/bin/opt','utf8'),'intel');
+    assert.ok(calls.some(c=>c.cmd===build.home+'/third_party/flatbuffers/bin/flatc'));
+    for(const rel of ['libexec/compiler/cjcj-stage1','bin/cjc',...objects.map(n=>'share/cjcj/runtime_shim/'+n+'.o')])
+      assert.ok(calls.some(c=>c.cmd==='lipo' && c.args[1]===out+'/'+rel),rel);
+  }
+});
+
+test('Darwin shim passes -arch to both target C compiles',linux,t=>{
+  const dir=fixture(t),src=dir+'/runtime_shim',cc=dir+'/cc';
+  put(src+'/build_shim.mjs',fs.readFileSync(repo+'/runtime_shim/build_shim.mjs'));
+  put(dir+'/prebuilt','intel');
+  put(cc,'#!/bin/sh\nprintf "%s\\n" "$*" >> "$CC_LOG"\n',0o755);
+  put(dir+'/darwin.mjs',"Object.defineProperty(process,'platform',{value:'darwin'});");
+  const child=spawnSync(process.execPath,['--import',dir+'/darwin.mjs',src+'/build_shim.mjs'],{encoding:'utf8',
+    env:{...process.env,CC:cc,CC_LOG:dir+'/log',CMAKE_C_COMPILER_LAUNCHER:'',CANGJIE_HOME:'',CJCJ_COMMIT:'fixture',
+      CJCJ_TARGET_ARCH:'x86_64',CJCJ_LLVM_SHIM_O:dir+'/prebuilt'}});
+  assert.equal(child.status,0,child.stderr);
+  const lines=fs.readFileSync(dir+'/log','utf8').trim().split('\n');
+  assert.equal(lines.length,2);
+  for(const [i,name] of ['cjc_runtime_config','cjc_heap_defaults'].entries()){
+    assert.ok(lines[i].includes('-arch x86_64'));assert.ok(lines[i].includes(name+'.c'));
+  }
+});
+
+test('Rosetta tools validate the copied Node and all six installed executables',linux,t=>{
+  const dir=fixture(t),{src,out}=macInputs(dir);
+  put(src+'/compiler/utils/envsetup/llvm_darwin.sh');put(src+'/tools/packages/hle/src/dtsparser/package.json','{}');put(dir+'/cjbind');
+  const {calls,child}=darwinStage(dir,'build-extras',['--only','tools','--platform','darwin-x64','--sdk',out,
+    '--sources',src,'--cjbind',dir+'/cjbind'],`
+    if(cmd==='lipo')return {status:0,stdout:'x86_64'};
+    if(args[1]==='install'){
+      const bin=args[args.indexOf('--prefix')+1]+'/bin';fs.mkdirSync(bin,{recursive:true});
+      fs.writeFileSync(bin+'/'+args[args.indexOf('--tool')+1],'tool');
+    }`,{},[],'x64');
+  assert.equal(child.status,0,child.stderr);
+  assert.deepEqual(calls.filter(c=>c.cmd==='lipo').map(c=>c.args),[
+    out+'/tools/bin/node',...['cjpm','cjfmt','hle','cjcov','cjtrace-recover','cjcompat'].map(n=>out+'/.target-tools/tools/bin/'+n)
+  ].map(f=>['-archs',f]));
+  assert.ok(!calls.some(c=>c.args.includes('build.py')));
+});
+
+test('Intel packaging builds two thin launchers and verifies the requested platform',linux,t=>{
+  const dir=fixture(t),sdk=dir+'/sdk',out=dir+'/dist';
+  for(const rel of ['libexec/compiler/cjcj-stage1','third_party/llvm/bin/lldb','LICENSE','envsetup.sh'])put(sdk+'/'+rel);
+  const {child,calls}=darwinStage(dir,'package-sdk',['--sdk',sdk,'--target','darwin-x64','--out',out,'--version','1.0.0','--verify-relocated'],`
+    if(cmd==='lipo')return {status:0,stdout:'x86_64'};
+    if(args.includes('-o'))fs.writeFileSync(args[args.indexOf('-o')+1],'entry');
+    if(args[0]==='-czf')fs.writeFileSync(args[1],'archive');`,{},[],'x64');
+  assert.equal(child.status,0,child.stderr);
+  const compiles=calls.filter(c=>c.args.includes('-std=c++17'));
+  assert.equal(compiles.length,2);
+  for(const c of compiles){
+    assert.ok(c.args.includes('-arch'));assert.equal(c.args[c.args.indexOf('-arch')+1],'x86_64');
+    assert.ok(calls.some(l=>l.cmd==='lipo'&&l.args[1]===c.args[c.args.indexOf('-o')+1]));
+  }
+  const verify=calls.find(c=>c.args[0]?.endsWith('test-sdk.mjs'));
+  assert.equal(verify.args[verify.args.indexOf('--platform')+1],'darwin-x64');
+});
+
+test('Release builds the Intel host next to cross-std and switches Node only for tools and packaging',linux,()=>{
+  const jobs=releaseJobs(),host=jobs['host-sdk'],intel=jobs['host-sdk-darwin-x64'],pkg=jobs.package;
+  assert.ok(!host.strategy.matrix.include.some(row=>row.platform==='darwin-x64'));
+  assert.equal(intel['runs-on'],'macos-15');assert.equal(intel.needs,'host-sdk');assert.equal(jobs['cross-std'].needs,'host-sdk');
+  const downloads=intel.steps.filter(s=>s.uses?.includes('download-artifact')).map(s=>[s.with.name,s.with['run-id']]);
+  assert.deepEqual(downloads,[['native-base-darwin-x64','${{ inputs.prepare_run_id }}'],['stage2-sdk-darwin-arm64',undefined]]);
+  let arch;const sequence=[];
+  for(const step of intel.steps){
+    if(step.uses?.includes('setup-node'))arch=step.with.architecture;
+    for(const line of (step.run||'').split('\n'))if(line.startsWith('node build/build-')){
+      assert.ok(line.includes('--platform darwin-x64'));sequence.push([arch,line.match(/--(?:only|stage) (\S+)/)[1]]);
+    }
+  }
+  assert.deepEqual(sequence,[['arm64','stage3-std'],['arm64','stage3'],['arm64','stdx'],['x64','tools']]);
+  assert.equal(intel.steps.at(-1).with.name,'host-sdk-darwin-x64');
+  assert.deepEqual(pkg.needs,['host-sdk','host-sdk-darwin-x64','cross-std']);
+  assert.equal(RELEASE_TARGETS.find(r=>r.key==='darwin-x64').runner,'macos-15');
+  const rosetta=pkg.steps.findIndex(s=>s.run?.includes('setup.mjs rosetta'));
+  const x64=pkg.steps.findIndex(s=>s.uses?.includes('setup-node')&&s.with.architecture==='x64');
+  assert.ok(rosetta>=0 && x64>rosetta && x64<pkg.steps.findIndex(s=>s.run?.includes('--verify-relocated')));
+  for(const i of [rosetta,x64])assert.equal(pkg.steps[i].if,"matrix.host == 'darwin-x64'");
 });

@@ -2,7 +2,7 @@
 import fs from 'node:fs/promises';
 import sync from 'node:fs';
 import path from 'node:path';
-import {repo,jobs,parseCliArgs,sdkPlatform,linkCompilerRuntime,cleanSdkEnvironment,ensureDir,copyTree,rmrf,run,runCapture,main,makeLauncher,installEntry} from './common.mjs';
+import {repo,compilerStageBudget,darwinX64OnArm,withDarwinWorkSdk,overlayDarwinStd,checkDarwinX64,parseCliArgs,sdkPlatform,linkCompilerRuntime,cleanSdkEnvironment,ensureDir,copyTree,rmrf,run,runCapture,main,makeLauncher,installEntry} from './common.mjs';
 export const HOST_TRIPLES = Object.freeze({
   linux_x86_64: 'x86_64-unknown-linux-gnu', linux_aarch64: 'aarch64-unknown-linux-gnu',
   darwin_x86_64: 'x86_64-apple-darwin', darwin_aarch64: 'aarch64-apple-darwin',
@@ -278,20 +278,32 @@ export function cjpmBuildEnvironment(stage,env){
 }
 
 async function assemble(a){
+  if(a.stage==='stage3' && darwinX64OnArm(sdkPlatform(a.platform)))
+    return withDarwinWorkSdk(path.resolve(a.sdk),path.resolve(a.out)+'.stage2-',sdk=>assembleStage(a,sdk));
+  return assembleStage(a);
+}
+async function assembleStage(a,darwinSdk){
   const p=sdkPlatform(a.platform),platform=p.platform,seed=a.stage==='stage0';
   if(!['stage0','stage2','stage3','installed'].includes(a.stage))throw Error('invalid compiler stage '+a.stage);
   const host=path.resolve(a['host-sdk']||a.sdk),parent=path.resolve(a.sdk||host),out=path.resolve(a.out);
   const source=path.resolve(a.source||repo),native=path.resolve(a.stage==='installed'?parent:a.native),target=path.resolve(a['target-dir']||(out+'.target'));
   const rebuild=a.stage==='installed',std=!seed&&!rebuild?path.resolve(a.std):null;
-  const sdk=std?out:parent;
+  const sdk=darwinSdk||(std?out:parent),hostPlatform=darwinSdk?'darwin-arm64':platform;
+  const budget=compilerStageBudget(a.stage,p,a.jobs);
   if([parent,host,native,std].filter(Boolean).some(input=>out===input||out.startsWith(input+path.sep)))throw Error('stage requires a separate output');
   if(sync.existsSync(out)&&sync.readdirSync(out).length)throw Error('stage output must be empty: '+out);
-  if(std)startStage(parent,host,native,std,out,p);
-  const commit=runCapture('git',['-C',source,'rev-parse','HEAD']).trim(),runtime=seed?host:sdk;
+  if(darwinSdk){
+    overlayDarwinStd(std,sdk,p.tuple);
+    installNative(native,out,p);
+    copyTree(std,out);
+    for(const file of ['LICENSE','Open_Source_Software_Notice.docx'])copyTree(parent+'/'+file,out+'/'+file);
+  }else if(std)startStage(parent,host,native,std,out,p);
+  const commit=runCapture('git',['-C',source,'rev-parse','HEAD']).trim(),runtime=seed?host:darwinSdk?out:sdk;
   const win=p.os==='win32',mingw=process.env.CJCJ_WINDOWS_TOOLCHAIN||process.env.MINGW_PATH;
   const shim='third_party/llvm/fixed-llc/cjselfhost_llvmshim.o',env={
-    ...cleanSdkEnvironment(seed?host:sdk,platform),CJCJ_COMMIT:commit,
-    CANGJIE_BUILD_JOBS:a.jobs||jobs,CJCJ_LLVM_SHIM_O:path.join(native,shim),
+    ...cleanSdkEnvironment(seed?host:sdk,hostPlatform),CJCJ_COMMIT:commit,cjHeapSize:budget.cjHeapSize,
+    ...(darwinSdk?{CJCJ_TARGET_ARCH:'x86_64'}:{}),
+    CANGJIE_BUILD_JOBS:budget.jobs,CJCJ_LLVM_SHIM_O:path.join(native,shim),
     ...(win?{MINGW_PATH:mingw,CC:path.join(mingw,'bin/clang.exe'),CXX:path.join(mingw,'bin/clang++.exe')}:{})};
   const files=['cjpm.toml','cjpm.lock','packages/cjc/cjpm.toml',...(!seed&&a.version?[VERSION_SOURCE]:[])];
   const saved=await Promise.all(files.map(async f=>[f,await fs.readFile(path.join(source,f)).catch(e=>{if(e.code!=='ENOENT')throw e;return null;})]));
@@ -328,13 +340,21 @@ async function assemble(a){
     }else{
       // Stamp the checkout before the build edits tracked version metadata.
       run(process.execPath,[source+'/runtime_shim/build_shim.mjs'],{cwd:source,env});
+      if(darwinSdk){
+        const old='${CANGJIE_HOME}/third_party/llvm/lib',lib=native+'/third_party/llvm/lib';
+        const before=saved[2][1].toString();
+        if(!effectiveLinkOptions(before,platform).includes(old+'/libLLVM.dylib'))throw Error('missing Darwin LLVM link input');
+        // The launcher supplies the shipped LLVM; do not embed the build host's temporary SDK path.
+        await fs.writeFile(pkg,rewriteEffectiveLinkOptions(before,platform,value=>value.split(' ').map(token=>
+          token===old+'/libLLVM.dylib'?lib+'/libLLVM.dylib':token===old?'@executable_path/../../third_party/llvm/lib':token).join(' ')));
+      }
       if(a.version)await injectVersion(source,a.version);
     }
     await prepareTrimpath(source);
     const cjpm=path.join(host,'tools/bin/cjpm'+p.exe);
     // CJPM is a host executable. Its cjc child selects its own private loader domain.
-    const cjpmEnv=cjpmBuildEnvironment(a.stage,cleanSdkEnvironment(seed?host:sdk,platform,env,host));
-    const build=()=>run(cjpm,['build','--target-dir',target,'-j',a.jobs||jobs],{cwd:source,env:cjpmEnv});
+    const cjpmEnv=cjpmBuildEnvironment(a.stage,cleanSdkEnvironment(seed?host:sdk,hostPlatform,env,host));
+    const build=()=>run(cjpm,['build',...(darwinSdk?['--target',HOST_TRIPLES[platform]]:[]),'--target-dir',target,'-j',budget.jobs],{cwd:source,env:cjpmEnv});
     if(win)await withWindowsCompilerLinks(source,native,mingw,build);else build();
   }finally{
     for(const [file,prior] of objects){
@@ -345,7 +365,8 @@ async function assemble(a){
     if(link)await fs.rm(link,{force:true});
     for(const [rel,before] of saved){const file=path.join(source,rel);if(before===null)await fs.rm(file,{force:true});else await fs.writeFile(file,before);}
   }
-  const product=await resolveProductBinary(target+'/release/bin',a.stage,{windows:win});
+  const release=path.join(target,...(darwinSdk?[HOST_TRIPLES[platform]]:[]),'release');
+  const product=await resolveProductBinary(release+'/bin',a.stage,{windows:win});
   if(seed){
     copyHost(host,out,p);
     installNative(native,out,p);
@@ -362,14 +383,16 @@ async function assemble(a){
   const launcher=out+'.entry'+p.exe;makeLauncher(launcher,p);
   for(const rel of ['bin/cjc','bin/cjc-frontend','bin/cjcj-stage1','tools/bin/chir-dis'])installEntry(out,rel+p.exe,body,libraries,launcher,p);
   if(!seed){
-    const release=target+'/release',cjo=out+'/share/cjcj/cjo';rmrf(cjo);
+    const cjo=out+'/share/cjcj/cjo';rmrf(cjo);
     copyTree(release,cjo,{filter:file=>!['bin','runtime'].includes(path.relative(release,file).split(path.sep)[0])});
     for(const name of ['cjselfhost_llvmshim','cjc_runtime_config','cjc_heap_defaults'])copyTree(source+'/runtime_shim/'+name+'.o',out+'/share/cjcj/runtime_shim/'+name+'.o');
+    if(darwinSdk)for(const rel of [body,'bin/cjc',...['cjselfhost_llvmshim','cjc_runtime_config','cjc_heap_defaults'].map(n=>'share/cjcj/runtime_shim/'+n+'.o')])
+      checkDarwinX64(out+'/'+rel,{thin:true});
     const schema='schema/StdxChirFormat.fbs',header=out+'/include/cangjie/CHIR/IR/AttributeInfo.h';
     copyTree(source+'/'+schema,out+'/'+schema);ensureDir(path.dirname(header));
     await fs.writeFile(header,wireAttributeHeader(await fs.readFile(source+'/packages/chir/src/Enums.cj','utf8')));
     ensureDir(out+'/include/flatbuffers');
-    run(native+'/third_party/flatbuffers/bin/flatc'+p.exe,['--no-warnings','-c','-o',out+'/include/flatbuffers',out+'/'+schema],{env});
+    run((darwinSdk||native)+'/third_party/flatbuffers/bin/flatc'+p.exe,['--no-warnings','-c','-o',out+'/include/flatbuffers',out+'/'+schema],{env});
   }
 }
 if(main(import.meta.url))await assemble(parseCliArgs());

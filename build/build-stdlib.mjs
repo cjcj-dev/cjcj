@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-import {jobs,parseCliArgs,sdkPlatform,compilerHeap,linkCompilerRuntime,pathEnvironment,cleanSdkEnvironment,resolveHostPython,requireCompilerInclude,run,runCapture,copyTree,
+import {jobs,parallelCompilerBudget,darwinX64OnArm,darwinStdTargetArgs,withDarwinWorkSdk,checkDarwinX64,homebrewPrefix,parseCliArgs,sdkPlatform,compilerHeap,linkCompilerRuntime,pathEnvironment,cleanSdkEnvironment,resolveHostPython,requireCompilerInclude,run,runCapture,copyTree,
   copySource,rmrf,ensureDir,main,crossTuples,sha256File} from './common.mjs';
 
 const SYSROOT_DIR='third_party/wasi-sysroot';
@@ -466,16 +466,32 @@ function installStd(install,out,tuple) {
   }
 }
 async function buildStd(a){
+  if(a.stage==='stage3-std'&&!a.cross&&darwinX64OnArm(sdkPlatform(a.platform)))
+    return withDarwinWorkSdk(path.resolve(a.sdk),path.resolve(a.out)+'.stage2-',sdk=>buildStdPass(a,sdk));
+  return buildStdPass(a);
+}
+async function buildStdPass(a,darwinSdk){
   const src=path.resolve(a.sources),stdlib=src+'/runtime/stdlib',out=path.resolve(a.out),parent=path.resolve(a.sdk);
-  const j=a.jobs||jobs,cross=a.cross,p=sdkPlatform(a.platform),tuple=cross?crossTuples[cross]:p.tuple;
+  const cross=a.cross,p=sdkPlatform(a.platform),tuple=cross?crossTuples[cross]:p.tuple;
   if(!tuple||(cross&&cross!=='wasm32-wasi'&&!Object.hasOwn(crossAstTargets,cross))||(!cross&&!['std-bootstrap','stage1-std','stage3-std'].includes(a.stage)))throw Error('unknown std stage or target');
-  const runtime=path.resolve(a.runtime),work=out+'.work',sdk=cross?work+'/sdk':parent;
+  const budget=(a.stage==='stage3-std'||cross)?parallelCompilerBudget(p,jobs,process.env,undefined,a.jobs):null;
+  const j=budget?.jobs||a.jobs||jobs;
+  const runtime=path.resolve(a.runtime||a.native),work=out+'.work',sdk=darwinSdk||(cross?work+'/sdk':parent);
   if(fs.existsSync(out)&&fs.readdirSync(out).length)throw Error('std output must be empty: '+out);
-  const include=(cross ? cross!=='wasm32-wasi' : a.include!==undefined) ? requireCompilerInclude(a.include) : undefined;
+  const include=(darwinSdk || (cross ? cross!=='wasm32-wasi' : a.include!==undefined)) ? requireCompilerInclude(a.include) : undefined;
   const py=await resolveHostPython(parent);
   ensureDir(work);
   for(const [from,to] of [['bounds','boundscheck-v1.1.16'],['pcre2','pcre2']])copySource(src+'/'+from,stdlib+'/third_party/'+to);
-  const roots=['lib/'+tuple,'runtime/lib/'+tuple],env=cleanSdkEnvironment(sdk,p.key);
+  const roots=['lib/'+tuple,'runtime/lib/'+tuple],env=cleanSdkEnvironment(sdk,darwinSdk?'darwin-arm64':p.key);
+  if(budget)Object.assign(env,{cjHeapSize:budget.cjHeapSize,CANGJIE_BUILD_JOBS:j});
+  if(darwinSdk){
+    const native=path.resolve(a.native||runtime);
+    copyTree(native+'/'+roots[0],sdk+'/'+roots[0]);
+    for(const rel of roots)copyTree(runtime+'/'+rel,sdk+'/'+rel);
+    // The native install can place the AST archive at the prefix root.
+    if(fs.existsSync(native+'/libcangjie-ast-support.a'))
+      copyTree(native+'/libcangjie-ast-support.a',sdk+'/'+roots[0]+'/libcangjie-ast-support.a');
+  }
   if(cross){
     copyTree(parent,sdk,{filter:f=>![...roots,'modules/'+tuple].includes(path.relative(parent,f).split(path.sep).join('/'))});
     for(const rel of roots)if(fs.existsSync(runtime+'/'+rel))copyTree(runtime+'/'+rel,sdk+'/'+rel);
@@ -505,10 +521,20 @@ async function buildStd(a){
     for(const rel of ['lib/'+tuple+'/libcangjie-ast-support.a','schema/StdAstFormat.fbs',
       'include/flatbuffers/StdAstFormat_generated.h','third_party/flatbuffers/bin/flatc'+p.exe])
       if(!fs.statSync(path.join(sdk,rel)).isFile())throw Error('missing standard-library input: '+rel);
-    const snap=work+'/runtime-input',arch=p.arch==='arm64'?'aarch64':'x86_64';
-    for(const rel of roots)copyTree(runtime+'/'+rel,snap+'/common/'+(p.os==='win32'?'windows':p.os)+'_relwithdebinfo_'+arch+'/'+rel);
-    buildArgs.push('--target-lib='+stdlib+'/build/build/lib','--target-lib='+snap);
-    if(a['local-mode-api'])buildArgs.push('--local_mode_api');
+    if(darwinSdk){
+      delete env.CMAKE_TOOLCHAIN_FILE;
+      const build=stdlib+'/build/build-libs-x86_64-apple-darwin';
+      const modules=build+'/modules/'+tuple;
+      ensureDir(modules);ensureDir(sdk+'/modules');rmrf(sdk+'/modules/'+tuple);
+      fs.symlinkSync(modules,sdk+'/modules/'+tuple,'dir');
+      buildArgs.push(...darwinStdTargetArgs(env),'--local_mode_api','--target-lib='+build+'/lib',
+        '--target-lib='+homebrewPrefix()+'/opt/openssl@3/lib',...roots.map(rel=>'--target-lib='+sdk+'/'+rel));
+    }else{
+      const snap=work+'/runtime-input',arch=p.arch==='arm64'?'aarch64':'x86_64';
+      for(const rel of roots)copyTree(runtime+'/'+rel,snap+'/common/'+(p.os==='win32'?'windows':p.os)+'_relwithdebinfo_'+arch+'/'+rel);
+      buildArgs.push('--target-lib='+stdlib+'/build/build/lib','--target-lib='+snap);
+      if(a['local-mode-api'])buildArgs.push('--local_mode_api');
+    }
   }else{
     delete env.CMAKE_TOOLCHAIN_FILE;
     const target=crossToolchain(cross,env),ast=work+'/ast';
@@ -528,6 +554,15 @@ async function buildStd(a){
   const required=['modules/'+tuple+'/std/std.core.cjo','lib/'+tuple+'/libcangjie-std-core.a','runtime/lib/'+tuple+'/libcangjie-std-core'+suffix,
     ...(!cross?['lib/libstdFFI'+p.shared,...(p.os==='linux'?['modules/'+tuple+'/std/libstd.core.bc']:[])]:[]),
     ...(include?['modules/'+tuple+'/std/std.ast.cjo']:[])];
+  if(darwinSdk){
+    const dylibs=['lib/libstdFFI.dylib','runtime/lib/'+tuple+'/libcangjie-std-core.dylib'];
+    for(const name of ['unittest.testmacro','unittest.mock.mockmacro','deriving']){
+      required.push('modules/'+tuple+'/std/std.'+name+'.cjo');
+      dylibs.push('runtime/lib/'+tuple+'/libcangjie-std-'+name+'.dylib');
+    }
+    for(const rel of dylibs)checkDarwinX64(install+'/'+rel,{thin:true});
+    copyTree(sdk+'/'+roots[0],out+'/'+roots[0]);
+  }
   for(const rel of required)fs.accessSync(install+'/'+rel);
   // Only the bootstrap pass needs the previous SDK's public modules.
   if(a.stage==='std-bootstrap'&&!cross){

@@ -107,7 +107,7 @@ const hosts=[
   ['linux-x64','linux_x86_64','linux','x64','ubuntu-24.04'],
   ['linux-aarch64','linux_aarch64','linux','arm64','ubuntu-24.04-arm'],
   ['darwin-arm64','darwin_aarch64','darwin','arm64','macos-15'],
-  ['darwin-x64','darwin_x86_64','darwin','x64','macos-15-intel'],
+  ['darwin-x64','darwin_x86_64','darwin','x64','macos-15'],
   ['windows-x64','windows_x86_64','win32','x64','windows-2025'],
 ];
 export const PLATFORMS=Object.fromEntries(hosts.map(([key,platform,os,arch,runner])=>[key,{
@@ -172,7 +172,7 @@ export function sdkEnvironment(sdk, platform, base = process.env, runtimeRoot = 
 }
 
 export const darwinX64OnArm = p => p.key==='darwin-x64' && process.arch==='arm64';
-export const homebrewPrefix = () => process.arch==='arm64'?'/opt/homebrew':'/usr/local';
+export const homebrewPrefix = () => sync.existsSync('/opt/homebrew/bin/brew')?'/opt/homebrew':'/usr/local';
 export function checkDarwinX64(file,{thin=false}={}) {
   const archs=runCapture('lipo',['-archs',file]).trim();
   if(!(thin?archs==='x86_64':archs.split(/\s+/).includes('x86_64')))
@@ -197,13 +197,50 @@ export function nativeBuildEnvironment(native,base=process.env) {
   return env;
 }
 
-export function compilerHeap(native,env=process.env,totalMemory=os.totalmem()) {
-  const explicit=(env.cjHeapSize||'').trim()||(env.CJCJ_HEAP_SIZE||'').trim();
+const MiB=1024**2, GiB=1024*MiB;
+const explicitHeap=env=>env.cjHeapSize?.trim()||env.CJCJ_HEAP_SIZE?.trim();
+export function compilerHeap(native,env=process.env,totalMemory=os.totalmem(),bootstrap=false) {
+  const explicit=explicitHeap(env);
   // The bootstrap runtime falls back to 256 MB if the requested heap exceeds RAM.
-  const mb=Math.max(4,Math.min(15*1024,Math.floor(totalMemory*0.94/(1024*1024))));
+  const large=!bootstrap && totalMemory>20*GiB;
+  const mb=Math.max(4,Math.min(large?49152:15360,Math.floor(totalMemory*(large?0.80:0.94)/MiB)));
   return {cjHeapSize:explicit||`${mb}MB`,
     ...(native.os==='linux'?{cjHeapSwap:(env.cjHeapSwap||'').trim()||'on'}:{})};
 }
+
+// requestedJobs is the CPU limit; explicitJobs is a caller's --jobs override.
+export function parallelCompilerBudget(native,requestedJobs,env=process.env,totalMemory=os.totalmem(),explicitJobs) {
+  const {cjHeapSize}=compilerHeap(native,env,totalMemory);
+  if(explicitJobs!==undefined || explicitHeap(env))return {jobs:String(explicitJobs??requestedJobs),cjHeapSize};
+  const budget=Math.floor(totalMemory*0.75/MiB);
+  const count=Math.max(1,Math.min(requestedJobs,Math.floor(budget/(totalMemory<12*GiB?2560:4096))));
+  return {jobs:String(count),cjHeapSize:Math.min(parseInt(cjHeapSize),Math.floor(budget/count))+'MB'};
+}
+
+export function compilerStageBudget(stage,native,explicitJobs,env=process.env,totalMemory=os.totalmem(),cpus=jobs) {
+  const {cjHeapSize}=compilerHeap(native,env,totalMemory,stage==='stage0'||stage==='stage2');
+  if(stage!=='stage3'||explicitJobs!==undefined)return {jobs:String(explicitJobs??cpus),cjHeapSize};
+  if(totalMemory<=20*GiB)return {jobs:'1',cjHeapSize};
+  const budget=Math.floor(totalMemory*0.75/MiB);
+  // An arbitrary caller heap (including runtime-specific units) is safe to honor serially.
+  if(explicitHeap(env))return {jobs:'1',cjHeapSize};
+  const count=Math.max(1,Math.min(cpus,Math.floor(budget/12288)));
+  return {jobs:String(count),cjHeapSize:Math.min(parseInt(cjHeapSize),Math.floor(budget/count))+'MB'};
+}
+
+// A launcher derives its SDK root from its own executable. Copy the host SDK
+// and overlay only target resources, retaining its host executables/private runtime.
+export async function withDarwinWorkSdk(parent,prefix,build) {
+  ensureDir(path.dirname(prefix));
+  const sdk=sync.mkdtempSync(prefix);
+  try {copyTree(parent,sdk,{mode:sync.constants.COPYFILE_FICLONE});return await build(sdk);}
+  finally {rmrf(sdk);}
+}
+export function overlayDarwinStd(source,sdk,tuple) {
+  for(const dir of ['lib/'+tuple,'runtime/lib/'+tuple,'modules/'+tuple,'third_party/flatbuffers/modules'])
+    copyTree(path.join(source,dir),path.join(sdk,dir));
+}
+export const darwinStdTargetArgs=env=>['--target','darwin-x86_64','--target-toolchain','/usr/bin','--target-sysroot',env.SDKROOT];
 
 export function linkCompilerRuntime(sdk) {
   const link=path.join(sdk,'libexec/runtime');
@@ -259,8 +296,10 @@ export async function resolveHostPython(sdk, env = process.env) {
 export function makeLauncher(file,p) {
   ensureDir(path.dirname(file));
   const args=['-std=c++17','-O2',path.join(repo,'build/entry.cpp'),'-o',file];
+  if(p.key==='darwin-x64')args.push('-arch','x86_64');
   if(p.os==='win32')args.push('-static','-lshell32');
   run(p.os==='win32'?path.join(process.env.CJCJ_WINDOWS_TOOLCHAIN,'bin/clang++.exe'):(process.env.CXX||'c++'),args);
+  if(p.key==='darwin-x64')checkDarwinX64(file,{thin:true});
 }
 export function installEntry(sdk,entry,real,libraries,launcher,p) {
   const bin=path.join(sdk,entry);

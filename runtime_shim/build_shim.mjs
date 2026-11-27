@@ -21,6 +21,7 @@ const flatbuffersInc = `${cpp}/build/build/include`;
 const schemaGenInc = `${cpp}/build/build/schema`;
 const schemaHeader = `${schemaGenInc}/flatbuffers/CjoFormat_generated.h`;
 let cxx = process.env.CXX || 'clang++';
+const archArgs = process.platform === 'darwin' && process.env.CJCJ_TARGET_ARCH === 'x86_64' ? ['-arch','x86_64'] : [];
 const cc = process.env.CC || 'cc';
 // The same launcher cmake-driven builds use (sccache on GitHub Actions), so the
 // two shim objects are cached alongside the runtime. Empty when unset.
@@ -58,8 +59,8 @@ async function isFile(target) {
   try { return (await fs.stat(target)).isFile(); } catch { return false; }
 }
 
-compile([...ccLauncher, cc, '-std=c11', '-O2', '-fPIC', '-D_POSIX_C_SOURCE=200809L', commitDefine, '-c', here+'/cjc_runtime_config.c', '-o', here+'/cjc_runtime_config.o']);
-compile([...ccLauncher, cc, '-std=c11','-O2','-fPIC','-c',here+'/cjc_heap_defaults.c','-o',here+'/cjc_heap_defaults.o']);
+compile([...ccLauncher, cc, ...archArgs, '-std=c11', '-O2', '-fPIC', '-D_POSIX_C_SOURCE=200809L', commitDefine, '-c', here+'/cjc_runtime_config.c', '-o', here+'/cjc_runtime_config.o']);
+compile([...ccLauncher, cc, ...archArgs, '-std=c11','-O2','-fPIC','-c',here+'/cjc_heap_defaults.c','-o',here+'/cjc_heap_defaults.o']);
 console.log(`CJCJ_COMMIT=${cjcjCommit}`);
 
 // The caller validates an explicitly selected installed object. Without one,
@@ -100,7 +101,7 @@ if (sourceBuiltObject) {
   for (const key of ['CPATH', 'CPLUS_INCLUDE_PATH', 'C_INCLUDE_PATH', 'OBJC_INCLUDE_PATH']) {
     compileEnv[key] = '';
   }
-  compile([...cxxLauncher,cxx,"-std=c++17","-O2","-fPIC","-fno-rtti","-fno-exceptions","-c",here+"/cjselfhost_llvmshim.cpp","-o",shimObject,...[llvmSrcInc,llvmGenInc,flatbuffersInc,schemaGenInc].map(dir=>"-I"+dir)],compileEnv);
+  compile([...cxxLauncher,cxx,...archArgs,"-std=c++17","-O2","-fPIC","-fno-rtti","-fno-exceptions","-c",here+"/cjselfhost_llvmshim.cpp","-o",shimObject,...[llvmSrcInc,llvmGenInc,flatbuffersInc,schemaGenInc].map(dir=>"-I"+dir)],compileEnv);
   console.log(`built: ${shimObject}`);
 }
 

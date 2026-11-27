@@ -7,7 +7,7 @@
     },
     "runtime": {
       "url": "https://github.com/cjcj-dev/cangjie-runtime.git",
-      "sha": "b628e2bd5183b809d04f8e5808ecf3b00e46bf29"
+      "sha": "9830715f11f510aec027a1ad51a4cab09480b76f"
     },
     "compiler": {
       "url": "https://github.com/cjcj-dev/cangjie-compiler.git",
@@ -15,7 +15,7 @@
     },
     "stdx": {
       "url": "https://github.com/cjcj-dev/cangjie-stdx.git",
-      "sha": "a124230201e938fb7a6aaecd56d1bd1c3e5243cc"
+      "sha": "7780ef7b507b411bdffeb66e84a66dd5d215006c"
     },
     "tools": {
       "url": "https://github.com/cjcj-dev/cjcj-tools.git",

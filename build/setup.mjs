@@ -11,6 +11,10 @@ async function unpack(pin,dir,strip=false) {
   await downloadFile(pin.url,file,pin);extractArchive(file,dir,strip?['--strip-components=1']:[]);
   return file;
 }
+function rosetta() {
+  const probe=()=>run('arch',['-x86_64','/usr/bin/true']);
+  try { probe(); } catch { run('softwareupdate',['--install-rosetta','--agree-to-license']);probe(); }
+}
 async function deps(p,mode) {
   if(!['full','prepare'].includes(mode))throw Error('expected prepare or full');
   if(p.os==='linux'){
@@ -20,10 +24,7 @@ async function deps(p,mode) {
     run('sudo',['apt-get','update','-qq']);
     run('sudo',['env','DEBIAN_FRONTEND=noninteractive','apt-get','install','-y','--no-install-recommends',...packages,...(old?['libtinfo5','libncurses5-dev']:['libtinfo6','libncurses-dev'])]);
   }else if(p.os==='darwin'){
-    if(darwinX64OnArm(p)){
-      const probe=()=>run('arch',['-x86_64','/usr/bin/true']);
-      try { probe(); } catch { run('softwareupdate',['--install-rosetta','--agree-to-license']);probe(); }
-    }
+    if(darwinX64OnArm(p))rosetta();
     const pkgs=['ninja','llvm@16','openssl@3','bison','googletest','gnu-tar','swig','coreutils',...(p.arch==='x64'?['uv']:[])];
     const deps=runCapture('brew',['deps','--formula','--union',...pkgs]).split(/\s+/).filter(s=>/^python@\d+\.\d+$/.test(s));
     run('brew',['install','--skip-link',...new Set(['python@3.11',...deps])]);run('brew',['install',...pkgs]);
@@ -102,6 +103,7 @@ async function setup(a) {
     run('sudo',['fallocate','-l','12G',file]);run('sudo',['chmod','600',file]);
     run('sudo',['mkswap',file]);run('sudo',['swapon',file]);return;
   }
+  if(sub==='rosetta')return rosetta();
   if(sub==='deps')return deps(p,a.mode||'full');
   const out=path.resolve(a.out||dest);ensureDir(out);
   if(sub==='sources'){

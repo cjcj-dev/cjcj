@@ -49,8 +49,6 @@ jobs:
           runner: ubuntu-24.04-arm
         - platform: darwin-arm64
           runner: macos-15
-        - platform: darwin-x64
-          runner: macos-15-intel
         - platform: windows-x64
           runner: windows-2025
     env:
@@ -177,6 +175,60 @@ jobs:
       id: matrix
     outputs:
       packages: ${{ steps.matrix.outputs.packages }}
+  host-sdk-darwin-x64:
+    needs: host-sdk
+    runs-on: macos-15
+    env:
+      CJCJ_HEAP_SIZE: ${{ vars.cjHeapSize }}
+      VERSION: ${{ inputs.version }}
+    steps:
+    - uses: actions/checkout@v7.0.1
+    - id: pins
+      run: node -e 'console.log("node="+require("./build/pins.json").toolchains.node)' >> "$GITHUB_OUTPUT"
+    - uses: actions/setup-node@v7.1.0
+      with:
+        node-version: ${{ steps.pins.outputs.node }}
+        architecture: arm64
+    - uses: actions/download-artifact@v8.0.2
+      with:
+        name: native-base-darwin-x64
+        github-token: ${{ github.token }}
+        run-id: ${{ inputs.prepare_run_id }}
+    - uses: actions/download-artifact@v8.0.2
+      with:
+        name: stage2-sdk-darwin-arm64
+    - name: Unpack stage 2 and matching target native base
+      run: |
+        node build/setup.mjs unpack --archive native-base.tar --dir ../base
+        node build/setup.mjs unpack --archive stage2.tar --dir ../stage2 --sdk-root .
+        rm native-base.tar stage2.tar
+        cmp ../base/runtime.ref ../stage2/runtime.ref
+        cmp ../base/llvm.ref ../stage2/llvm.ref
+        node build/setup.mjs sources --repos runtime,bounds,pcre2,tools,stdx,compiler --out ../src --override "runtime=$(cat ../base/runtime.ref)"
+    - name: Install dependencies and the ARM64 cjpm used to drive stage 2
+      run: |
+        node build/setup.mjs deps --platform darwin-x64 --mode full
+        node build/setup.mjs host-sdk --platform darwin-arm64 --out ../arm-host
+    - name: Cross-build final std, stage 3 and stdx with ARM64 stage 2
+      run: |
+        node build/build-stdlib.mjs --stage stage3-std --platform darwin-x64 --sdk ../stage2 --sources ../src --runtime ../base/runtime --native ../base/native --include ../base/native/include --local-mode-api --out ../final-std
+        node build/build-compiler.mjs --stage stage3 --platform darwin-x64 --sdk ../stage2 --std ../final-std --native ../base/native --host-sdk ../arm-host --out ../host-sdk --version "$VERSION"
+        rm -rf ../final-std ../host-sdk.target ../arm-host
+        node build/build-extras.mjs --only stdx --platform darwin-x64 --sdk ../host-sdk --host-sdk ../stage2 --sources ../src --include ../base/native/include
+    - uses: actions/setup-node@v7.1.0
+      with:
+        node-version: ${{ steps.pins.outputs.node }}
+        architecture: x64
+    - name: Build x64 tools under Rosetta and archive the host SDK
+      run: |
+        node build/build-extras.mjs --only tools --platform darwin-x64 --sdk ../host-sdk --host-sdk ../base/host --sources ../src --include ../base/native/include --cjbind ../base/tools/cjbind
+        node build/setup.mjs pack --archive host-sdk.tar --dir ../host-sdk
+    - uses: actions/upload-artifact@v7.0.2
+      with:
+        name: host-sdk-darwin-x64
+        path: host-sdk.tar
+        if-no-files-found: error
+        compression-level: 0
   cross-std:
     needs: host-sdk
     runs-on: ${{ matrix.runner }}
@@ -255,6 +307,7 @@ jobs:
   package:
     needs:
     - host-sdk
+    - host-sdk-darwin-x64
     - cross-std
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -270,8 +323,17 @@ jobs:
     - name: Read tool versions
       run: node -e 'const p=require("./build/pins.json").toolchains; console.log("node="+p.node+"\nsccache="+p.sccache)' >> "$GITHUB_OUTPUT"
       id: pins
+    - name: Ensure Rosetta before selecting x64 Node
+      if: matrix.host == 'darwin-x64'
+      run: node build/setup.mjs rosetta --platform darwin-x64
     - uses: actions/setup-node@v7.1.0
+      if: matrix.host != 'darwin-x64'
       with:
+        node-version: ${{ steps.pins.outputs.node }}
+    - uses: actions/setup-node@v7.1.0
+      if: matrix.host == 'darwin-x64'
+      with:
+        architecture: x64
         node-version: ${{ steps.pins.outputs.node }}
     - uses: ./.github/actions/native-windows-tools
       with:

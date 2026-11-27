@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import {loadPins,parseCliArgs,sdkPlatform,homebrewPrefix,repo,cleanSdkEnvironment,resolveHostPython,requireCompilerInclude,jobs,run,runCapture,ensureDir,copyTree} from './common.mjs';
+import {loadPins,parseCliArgs,sdkPlatform,darwinX64OnArm,darwinStdTargetArgs,withDarwinWorkSdk,overlayDarwinStd,parallelCompilerBudget,checkDarwinX64,homebrewPrefix,repo,cleanSdkEnvironment,resolveHostPython,requireCompilerInclude,jobs,run,runCapture,ensureDir,copyTree} from './common.mjs';
 
 const a=parseCliArgs(),p=sdkPlatform(a.platform),src=path.resolve(a.sources),sdk=path.resolve(a.sdk),host=path.resolve(a['host-sdk']||sdk);
 const work=path.resolve(a.work||sdk+'.extras'),env=cleanSdkEnvironment(sdk,p.key),py=await resolveHostPython(sdk),j=a.jobs||jobs;
-const cwd=src+'/stdx',opts={cwd,env};ensureDir(work);
+ensureDir(work);
 const setupSource=src+'/compiler/utils/envsetup/llvm_'+(p.os==='win32'?'windows_x86_64':p.os);
 for(const ext of p.os==='win32'?['sh','bat','ps1']:['sh'])copyTree(setupSource+'.'+ext,sdk+'/envsetup.'+ext);
 const openssl=p.os==='linux'?'/usr/lib/'+(p.arch==='arm64'?'aarch64':'x86_64')+'-linux-gnu':p.os==='win32'?env.CJCJ_NATIVE_OPENSSL_LIB:(env.CJCJ_NATIVE_OPENSSL_LIB||homebrewPrefix()+'/opt/openssl@3/lib');
@@ -15,9 +15,26 @@ if(p.os==='linux')Object.assign(env,{LDFLAGS:'-fuse-ld=lld',CC:'/usr/lib/llvm-15
 const steps=(a.only||('stdx,tools'+(p.key==='linux-x64'?',java-interop':''))).split(',');
 if(steps.includes('stdx')){
   const compilerInclude=requireCompilerInclude(a.include);
-  run(py,['-I','build.py','clean'],opts);
-  run(py,['-I','build.py','build','-t','release','--include='+compilerInclude,'--target-lib='+openssl,'--jobs',j],opts);
-  run(py,['-I','build.py','install','--prefix',sdk+'/stdx'],opts);
+  const cross=darwinX64OnArm(p),budget=parallelCompilerBudget(p,jobs,process.env,undefined,a.jobs);
+  const buildStdX=stage2=>{
+    // entry.cpp binds CANGJIE_HOME to the launcher's directory. The private
+    // stage2 copy must contain both tuples for host macros and target imports.
+    const stdEnv=cross?cleanSdkEnvironment(stage2,'darwin-arm64',env):{...env};
+    if(cross){
+      overlayDarwinStd(sdk,stage2,p.tuple);
+      stdEnv.STDX_HOST_CANGJIE_HOME=stage2;
+      delete stdEnv.CMAKE_TOOLCHAIN_FILE;
+    }
+    Object.assign(stdEnv,{CANGJIE_BUILD_JOBS:budget.jobs,cjHeapSize:budget.cjHeapSize});
+    const opts={cwd:src+'/stdx',env:stdEnv};
+    run(py,['-I','build.py','clean'],opts);
+    run(py,['-I','build.py','build','-t','release',...(cross?darwinStdTargetArgs(stdEnv):[]),
+      '--include='+compilerInclude,'--target-lib='+openssl,'--jobs',budget.jobs],opts);
+    // Pinned build.py discovers the build-libs-* directory after clean.
+    run(py,['-I','build.py','install','--prefix',sdk+'/stdx'],opts);
+  };
+  if(cross)await withDarwinWorkSdk(host,work+'/stage2-arm64-',buildStdX);
+  else buildStdX(sdk);
 }
 if(steps.includes('tools')){
   const tools=src+'/tools',sha=runCapture('git',['-C',repo,'rev-parse','HEAD']).trim(),tsha=runCapture('git',['-C',tools,'rev-parse','HEAD']).trim();
@@ -48,6 +65,7 @@ if(steps.includes('tools')){
   if(p.os==='win32')run(process.execPath,[npmCli,'install','--ignore-scripts','--no-package-lock','--no-audit','--no-fund'],{cwd:parser});
   else run('npm',['install','--ignore-scripts','--no-package-lock','--no-audit','--no-fund'],{cwd:parser});
   copyTree(path.resolve(a.cjbind),parser+'/node_modules/.bin/cjbind'+p.exe);copyTree(process.execPath,sdk+'/tools/bin/node'+p.exe);
+  if(p.key==='darwin-x64')checkDarwinX64(sdk+'/tools/bin/node',{thin:true});
   env.CJCJ_HLE_DEPENDENCIES=work+'/hle-dependencies.json';
   fs.writeFileSync(env.CJCJ_HLE_DEPENDENCIES,JSON.stringify({platform:p.platform,
     node:{source:'host node',version:process.version,path:process.execPath},
@@ -63,6 +81,7 @@ if(steps.includes('tools')){
     const installed=[binary,...(name==='hle'?['main']:[])].map(n=>prefix+'/bin/'+n+p.exe).find(f=>fs.existsSync(f));
     if(!installed)throw Error('missing installed '+name+' binary under '+prefix);
     copyTree(installed,sdk+'/.target-tools/tools/bin/'+publicName+p.exe);
+    if(p.key==='darwin-x64')checkDarwinX64(sdk+'/.target-tools/tools/bin/'+publicName,{thin:true});
     for(const part of ['config','lib','share'])if(fs.existsSync(prefix+'/'+part)&&(!['cjlint','lsp','cjhead','cjtrace-recover'].includes(name)||part==='config')){
       copyTree(prefix+'/'+part,sdk+'/tools/'+part);if(name==='cjprof')copyTree(prefix+'/'+part,sdk+'/.target-tools/tools/'+part);
     }
