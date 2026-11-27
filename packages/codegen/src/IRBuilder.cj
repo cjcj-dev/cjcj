@@ -5775,9 +5775,10 @@ public class IRBuilder2 <: Resource {
                 data = unsafe { LLVMConstStringInContext(GetLLVMContext().raw, bytes.value, UInt32(value.size), 1) }
             }
             let source = cgMod.GetOrCreateGlobalVariable(data, value, false)
-            let layout = CGArrayType.GenerateArrayLayoutType(cgMod, ty)
-            let payload = CreateBitCast(GetPayloadFromObject(array), unsafe { LLVMPointerType(layout, 1u32) })
-            let dest = CreateStructGEP(layout, payload, 1u32)
+            // Same indexed element address as the global literal materializer
+            // (EmitCjStringLiteralIR.cj:152): AS0 constant bytes into a fresh
+            // UInt8 RawArray payload carry no managed slot to barrier.
+            let dest = GetArrayElementAddr(ty, array, GetInt64(0), false)
             CreateMemCpy(dest, 1u32, source, 1u32, GetInt64(value.size))
         }
         return CreateAggregateValue(GetCGContext().GetCjStringType(),
