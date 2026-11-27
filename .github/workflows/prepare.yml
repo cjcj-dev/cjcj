@@ -177,7 +177,7 @@ jobs:
       run: |-
         suffix=""
         [[ "$PLATFORM" != windows-x64 ]] || suffix=.exe
-        node build/build-extras.mjs --sdk ../host-sdk --host-sdk ../base/host --sources ../src --cjbind "../base/tools/cjbind$suffix" --lombok ../jars/lombok-1.18.36.jar
+        node build/build-extras.mjs --sdk ../host-sdk --include ../base/native/include --host-sdk ../base/host --sources ../src --cjbind "../base/tools/cjbind$suffix" --lombok ../jars/lombok-1.18.36.jar
     - name: Package and smoke test the CI SDK
       run: |-
         node build/package-sdk.mjs --sdk ../host-sdk --compiler-source ../src/compiler --version "$VERSION" --out ../dist

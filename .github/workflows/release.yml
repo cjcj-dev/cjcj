@@ -142,7 +142,7 @@ jobs:
       run: |-
         suffix=""
         [[ "$PLATFORM" != windows-x64 ]] || suffix=.exe
-        node build/build-extras.mjs --sdk ../host-sdk --host-sdk ../base/host --sources ../src --cjbind "../base/tools/cjbind$suffix" --lombok ../jars/lombok-1.18.36.jar
+        node build/build-extras.mjs --sdk ../host-sdk --include ../base/native/include --host-sdk ../base/host --sources ../src --cjbind "../base/tools/cjbind$suffix" --lombok ../jars/lombok-1.18.36.jar
     - name: Archive host SDK
       run: node build/setup.mjs pack --archive host-sdk.tar --dir ../host-sdk
     - uses: actions/upload-artifact@v7.0.2

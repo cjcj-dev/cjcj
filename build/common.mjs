@@ -37,6 +37,14 @@ export const run=(cmd,args=[],opts={})=>execute(cmd,args,opts,false);
 export const runCapture=(cmd,args=[],opts={})=>execute(cmd,args,opts,true);
 export const ensureDir=dir=>sync.mkdirSync(dir,{recursive:true});
 export const rmrf=dir=>sync.rmSync(dir,{recursive:true,force:true});
+export function requireCompilerInclude(includeDir) {
+  if(typeof includeDir!=='string'||!includeDir)throw Error('--include requires a compiler include directory');
+  const include=path.resolve(includeDir),header=path.join(include,'cangjie/CHIR/IR/AttributeInfo.h');
+  const source=sync.readFileSync(header,'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,' ');
+  if(!/\bclass\s+AttributeInfo\s*\{/.test(source))
+    throw Error(`--include requires the C++ compiler header defining class AttributeInfo: ${header}; use the native compiler include directory`);
+  return include;
+}
 export function copyTree(src,dst,options={}) {
   ensureDir(path.dirname(dst));
   sync.cpSync(src,dst,{recursive:true,force:true,verbatimSymlinks:true,...options});

@@ -16,7 +16,7 @@ async function deps(p,mode) {
   if(p.os==='linux'){
     const old=/^VERSION_ID="?22\.04"?$/m.test(fs.readFileSync('/etc/os-release','utf8'));
     const packages='clang llvm lld cmake ninja-build make gdb coreutils swig libedit-dev libffi-dev'.split(' ');
-    if(mode==='full') packages.push(...'tar unzip wget curl libcurl4 expat openssl gcc g++ gettext nfs-common libtool sqlite3 zlib1g-dev libssl-dev libcurl4-openssl-dev autoconf build-essential rapidjson-dev texinfo binutils libelf-dev libdwarf-dev openssh-client ssh dos2unix libxext-dev libxtst-dev libxt-dev libcups2-dev clang-15 libxrender-dev zip bzip2 libopenmpi-dev vim lldb libclang-15-dev libgtest-dev rpm patch cpio rpm2cpio strace net-tools python3-dev'.split(' '));
+    if(mode==='full') packages.push(...'patchelf tar unzip wget curl libcurl4 expat openssl gcc g++ gettext nfs-common libtool sqlite3 zlib1g-dev libssl-dev libcurl4-openssl-dev autoconf build-essential rapidjson-dev texinfo binutils libelf-dev libdwarf-dev openssh-client ssh dos2unix libxext-dev libxtst-dev libxt-dev libcups2-dev clang-15 libxrender-dev zip bzip2 libopenmpi-dev vim lldb libclang-15-dev libgtest-dev rpm patch cpio rpm2cpio strace net-tools python3-dev'.split(' '));
     run('sudo',['apt-get','update','-qq']);
     run('sudo',['env','DEBIAN_FRONTEND=noninteractive','apt-get','install','-y','--no-install-recommends',...packages,...(old?['libtinfo5','libncurses5-dev']:['libtinfo6','libncurses-dev'])]);
   }else if(p.os==='darwin'){

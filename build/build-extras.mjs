@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import {loadPins,parseCliArgs,sdkPlatform,homebrewPrefix,repo,cleanSdkEnvironment,resolveHostPython,jobs,run,runCapture,ensureDir,copyTree} from './common.mjs';
+import {loadPins,parseCliArgs,sdkPlatform,homebrewPrefix,repo,cleanSdkEnvironment,resolveHostPython,requireCompilerInclude,jobs,run,runCapture,ensureDir,copyTree} from './common.mjs';
 
 const a=parseCliArgs(),p=sdkPlatform(a.platform),src=path.resolve(a.sources),sdk=path.resolve(a.sdk),host=path.resolve(a['host-sdk']||sdk);
 const work=path.resolve(a.work||sdk+'.extras'),env=cleanSdkEnvironment(sdk,p.key),py=await resolveHostPython(sdk),j=a.jobs||jobs;
@@ -9,13 +9,14 @@ const cwd=src+'/stdx',opts={cwd,env};ensureDir(work);
 const setupSource=src+'/compiler/utils/envsetup/llvm_'+(p.os==='win32'?'windows_x86_64':p.os);
 for(const ext of p.os==='win32'?['sh','bat','ps1']:['sh'])copyTree(setupSource+'.'+ext,sdk+'/envsetup.'+ext);
 const openssl=p.os==='linux'?'/usr/lib/'+(p.arch==='arm64'?'aarch64':'x86_64')+'-linux-gnu':p.os==='win32'?env.CJCJ_NATIVE_OPENSSL_LIB:(env.CJCJ_NATIVE_OPENSSL_LIB||homebrewPrefix()+'/opt/openssl@3/lib');
-Object.assign(env,{CANGJIE_BUILD_JOBS:j,STDX_HOST_CANGJIE_HOME:host});
+Object.assign(env,{CANGJIE_BUILD_JOBS:j,STDX_HOST_CANGJIE_HOME:sdk});
 for(const key of ['CFLAGS','CXXFLAGS'])env[key]=[env[key],'-ffile-prefix-map='+src+'=.','-fdebug-compilation-dir=.'].filter(Boolean).join(' ');
 if(p.os==='linux')Object.assign(env,{LDFLAGS:'-fuse-ld=lld',CC:'/usr/lib/llvm-15/bin/clang',CXX:'/usr/lib/llvm-15/bin/clang++'});
 const steps=(a.only||('stdx,tools'+(p.key==='linux-x64'?',java-interop':''))).split(',');
 if(steps.includes('stdx')){
+  const compilerInclude=requireCompilerInclude(a.include);
   run(py,['-I','build.py','clean'],opts);
-  run(py,['-I','build.py','build','-t','release','--include='+sdk+'/include','--target-lib='+openssl,'--jobs',j],opts);
+  run(py,['-I','build.py','build','-t','release','--include='+compilerInclude,'--target-lib='+openssl,'--jobs',j],opts);
   run(py,['-I','build.py','install','--prefix',sdk+'/stdx'],opts);
 }
 if(steps.includes('tools')){
@@ -35,7 +36,7 @@ if(steps.includes('tools')){
     const lombok=a.lombok||env.CJPROF_LOMBOK_JAR;
     if(!lombok||!fs.existsSync(lombok))throw Error('cjprof requires --lombok <jar>');
     Object.assign(flags,{
-      lsp:['--sdk',sdk,'--cjpm',host+'/tools/bin/cjpm'+p.exe,'--server','stdio','--jobs',j,'--frontend-packages',cjo,'--runtime-config',rc,'--json-build',sdk+'/stdx','--llvm-shim',shim,'--llvm-library',llvm],
+      lsp:['--sdk',sdk,'--cjpm',host+'/tools/bin/cjpm'+p.exe,'--server','stdio','--jobs',j,'--frontend-packages',cjo,'--runtime-config',rc,'--json-build',p.os==='win32'?sdk+'/stdx':src+'/stdx/build_temp/build','--llvm-shim',shim,'--llvm-library',llvm],
       cjhead:['--cjc',sdk+'/bin/cjc'+p.exe,'--frontend-dir',cjo,'--shim',shim,'--runtime-config',rc,'--llvm-lib',llvm,'--frontend-commit',sha,'--source-commit',tsha,'--runtime-dir',runtime,'--jobs',j],
       cjlint:['--sdk',sdk,'--cjpm-sdk',host,'--analysis-sdk',sdk,'--frontend-source',repo,'--frontend-ref',sha,'--frontend-artifacts',cjo,'--frontend-runtime-object',rc,'--llvm-shim',shim,'--llvm-library',llvm,'--jobs',j],
       cjprof:['--sdk',sdk,'--jni-home',env.JAVA_HOME,'--runtime-header',sdk+'/runtime/include/Cangjie.h','--lombok-jar',path.resolve(lombok)],

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-import {jobs,parseCliArgs,sdkPlatform,compilerHeap,linkCompilerRuntime,pathEnvironment,cleanSdkEnvironment,resolveHostPython,run,runCapture,copyTree,
+import {jobs,parseCliArgs,sdkPlatform,compilerHeap,linkCompilerRuntime,pathEnvironment,cleanSdkEnvironment,resolveHostPython,requireCompilerInclude,run,runCapture,copyTree,
   copySource,rmrf,ensureDir,main,crossTuples,sha256File} from './common.mjs';
 
 const SYSROOT_DIR='third_party/wasi-sysroot';
@@ -421,14 +421,7 @@ async function buildStd(a){
   if(!tuple||(!cross&&!['std-bootstrap','stage1-std','stage3-std'].includes(a.stage)))throw Error('unknown std stage or target');
   const runtime=path.resolve(a.runtime),work=out+'.work',sdk=cross?work+'/sdk':parent;
   if(fs.existsSync(out)&&fs.readdirSync(out).length)throw Error('std output must be empty: '+out);
-  let include;
-  if(!cross && a.include !== undefined){
-    if(typeof a.include !== 'string' || !a.include)throw Error('--include requires a compiler include directory');
-    include=path.resolve(a.include);
-    const header=path.join(include,'cangjie/CHIR/IR/AttributeInfo.h');
-    if(!/\bclass\s+AttributeInfo\b/.test(fs.readFileSync(header,'utf8')))
-      throw Error(`--include requires the C++ compiler header defining class AttributeInfo: ${header}; use the native compiler include directory`);
-  }
+  const include=!cross && a.include!==undefined ? requireCompilerInclude(a.include) : undefined;
   const py=await resolveHostPython(parent);
   ensureDir(work);
   for(const [from,to] of [['bounds','boundscheck-v1.1.16'],['pcre2','pcre2']])copySource(src+'/'+from,stdlib+'/third_party/'+to);

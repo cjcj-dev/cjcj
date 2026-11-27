@@ -50,6 +50,16 @@ for(const workflow of ['prepare','release']){
   });
 }
 
+for(const workflow of ['prepare','release']){
+  test(workflow+' builds extras with the native compiler headers',()=>{
+    const yaml=fs.readFileSync(path.join(repo,'.github/workflows',workflow+'.yml'),'utf8');
+    const commands=yaml.replace(/\\\r?\n\s*|\r?\n[ \t]+(?=--)/g,' ').split('\n');
+    const extras=commands.filter(line=>/^\s*node build\/build-extras\.mjs\b/.test(line));
+    assert.ok(extras.length>0,'missing extras command');
+    for(const command of extras)assert.deepEqual(Array.from(command.matchAll(/(?:^|\s)--include(?:=|\s+)(\S+)/g),m=>m[1]),['../base/native/include']);
+  });
+}
+
 for(const [workflow,jobs] of Object.entries({prepare:['ci-sdk'],ci:['build-and-smoke','package-tests'],release:['host-sdk']})){
   test(workflow+' sets the compiler heap for each SDK job',()=>{
     const yaml=fs.readFileSync(path.join(repo,'.github/workflows',workflow+'.yml'),'utf8');
@@ -340,14 +350,56 @@ test('SDK environments resolve overrides and replace blank runtime heap settings
   assert.equal(compilerHeap(p,{cjHeapSwap:' off '}).cjHeapSwap,'off');
 });
 
-function stdxBuildHeap(t,env){
-  const dir=fixture(t),src=dir+'/src',sdk=dir+'/sdk';
+function stdxStage(t,kind='compiler',env={}){
+  const dir=fixture(t),src=dir+'/src',sdk=dir+'/sdk',host=dir+'/bootstrap',include=dir+'/native/include';
+  const rel='/cangjie/CHIR/IR/AttributeInfo.h',wire=wireAttributeHeader(fs.readFileSync(path.join(repo,'packages/chir/src/Enums.cj'),'utf8'));
+  put(sdk+'/include'+rel,wire);
+  if(kind==='compiler')put(include+rel,'class AttributeInfo {};');
+  if(kind==='wire')put(include+rel,wire);
+  if(kind==='declaration')put(include+rel,'/* class AttributeInfo {} */\nclass AttributeInfo;');
+  for(const home of [sdk,host])put(home+'/bin/cjc','',0o755);
   put(src+'/compiler/utils/envsetup/llvm_linux.sh');
-  put(src+'/stdx/build.py',`import os, pathlib, sys
-if sys.argv[1]=='build': pathlib.Path('build.heap').write_text(os.environ.get('cjHeapSize', ''))
+  put(src+'/stdx/build.py',`import json, os, shutil, sys
+with open('calls.jsonl','a') as f:
+ print(json.dumps(dict(args=sys.argv[1:], home=os.environ['STDX_HOST_CANGJIE_HOME'], cjc=shutil.which('cjc'), heap=os.environ['cjHeapSize'])),file=f)
 `);
-  cli('build-extras',['--platform','linux-x64','--sdk',sdk,'--sources',src,'--only','stdx'],env);
-  return fs.readFileSync(src+'/stdx/build.heap','utf8');
+  const args=['--platform','linux-x64','--sdk',sdk,'--host-sdk',host,'--sources',src,'--only','stdx'];
+  if(kind!=='omitted')args.push('--include','native/include');
+  const child=spawnSync(process.execPath,[path.join(repo,'build/build-extras.mjs'),...args],{cwd:dir,env:{...process.env,...env},encoding:'utf8'});
+  const log=src+'/stdx/calls.jsonl',calls=fs.existsSync(log)?fs.readFileSync(log,'utf8').trimEnd().split('\n').map(JSON.parse):[];
+  return {sdk,include,wire,rel,child,calls};
+}
+
+test('stdx macro host matches the cjc selected on PATH',linux,t=>{
+  const {sdk,child,calls}=stdxStage(t);
+  assert.equal(child.status,0,child.stderr);
+  const build=calls.find(c=>c.args[0]==='build');
+  assert.equal(build.cjc,sdk+'/bin/cjc');
+  assert.equal(build.home,sdk);
+});
+
+test('stdx build receives the native include and preserves the SDK wire header',linux,t=>{
+  const {sdk,include,wire,rel,child,calls}=stdxStage(t);
+  assert.equal(child.status,0,child.stderr);
+  assert.deepEqual(calls.map(c=>c.args[0]),['clean','build','install']);
+  assert.deepEqual(calls[1].args.filter(arg=>arg.startsWith('--include=')),['--include='+include]);
+  assert.equal(fs.readFileSync(sdk+'/include'+rel,'utf8'),wire);
+});
+
+test('stdx rejects unusable compiler headers before clean',linux,t=>{
+  for(const kind of ['omitted','missing','wire','declaration']){
+    const {child,calls,include,rel}=stdxStage(t,kind);
+    assert.deepEqual(calls,[],kind+' reached build.py');
+    assert.equal(child.status,1,child.stderr);
+    assert.match(child.stderr,kind==='omitted'?/--include requires a compiler include directory/:kind==='missing'?/ENOENT/:/defining class AttributeInfo/);
+    if(kind!=='omitted')assert.ok(child.stderr.includes(include+rel),child.stderr);
+  }
+});
+
+function stdxBuildHeap(t,env){
+  const {child,calls}=stdxStage(t,'compiler',env);
+  assert.equal(child.status,0,child.stderr);
+  return calls.find(c=>c.args[0]==='build').heap;
 }
 
 test('extras passes the repository heap override to the stdx build',linux,t=>{
@@ -356,6 +408,56 @@ test('extras passes the repository heap override to the stdx build',linux,t=>{
 
 test('whitespace-only cjHeapSize preserves the trimmed repository override in stdx',linux,t=>{
   assert.equal(stdxBuildHeap(t,{cjHeapSize:'  ',CJCJ_HEAP_SIZE:' 5GB '}),'5GB');
+});
+
+// Drive the tools-only CLI and record its child commands for each LSP host.
+// Stand in for git, npm and tools/build.mjs; the stage copies real fixture outputs.
+for(const platform of ['linux-x64','windows-x64']){
+  test('tools-only LSP selects the stdx JSON layout for '+platform,linux,t=>{
+    const dir=fixture(t),src=dir+'/src',sdk=dir+'/sdk',host=dir+'/bootstrap',p=sdkPlatform(platform);
+    const windows=p.os==='win32',tools=src+'/tools',log=dir+'/tools.jsonl',preload=dir+'/children.mjs';
+    for(const ext of windows?['sh','bat','ps1']:['sh'])put(src+'/compiler/utils/envsetup/llvm_'+(windows?'windows_x86_64':'linux')+'.'+ext);
+    put(tools+'/packages/hle/src/dtsparser/package.json','{}');put(dir+'/cjbind');put(dir+'/lombok.jar');
+    put(preload,`import fs from 'node:fs';
+import cp from 'node:child_process';
+cp.spawnSync=(cmd,args)=>{
+  if(cmd==='git')return {status:0,stdout:'fixture-ref'};
+  if(cmd==='npm'||args[0].endsWith('/npm-cli.js'))return {status:0};
+  if(cmd!==process.execPath||args[0]!==${JSON.stringify(tools)}+'/build.mjs')throw Error('unexpected command: '+cmd+' '+args);
+  const tool=args[args.indexOf('--tool')+1];
+  if(args[1]==='build')fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({tool,args})+'\\n');
+  if(args[1]==='install'){
+    const bin=args[args.indexOf('--prefix')+1]+'/bin';
+    fs.mkdirSync(bin,{recursive:true});fs.writeFileSync(bin+'/'+(tool==='lsp'?'cangjie-lsp':tool)+${JSON.stringify(p.exe)},'');
+  }
+  return {status:0};
+};`);
+    cli('build-extras',['--platform',platform,'--only','tools','--sdk',sdk,'--host-sdk',host,'--sources',src,
+      '--lombok',dir+'/lombok.jar','--cjbind',dir+'/cjbind'],{JAVA_HOME:dir+'/jdk'},['--import',preload]);
+    const calls=fs.readFileSync(log,'utf8').trimEnd().split('\n').map(JSON.parse);
+    function option(tool,key){
+      const {args}=calls.find(c=>c.tool===tool),i=args.indexOf(key);
+      assert.notEqual(i,-1,tool+' '+key);return args[i+1];
+    }
+    assert.equal(option('lsp','--json-build'),windows?sdk+'/stdx':src+'/stdx/build_temp/build');
+    assert.equal(option('lsp','--cjpm'),host+'/tools/bin/cjpm'+p.exe);
+    for(const tool of ['cjfmt','cjlint'])assert.equal(option(tool,'--cjpm-sdk'),host);
+  });
+}
+
+test('Linux full dependencies install patchelf for cjlint',linux,t=>{
+  const dir=fixture(t),log=dir+'/sudo.jsonl';
+  put(dir+'/sudo',`#!${process.execPath}
+require('node:fs').appendFileSync(${JSON.stringify(log)},JSON.stringify(process.argv.slice(2))+'\\n');
+`,0o755);
+  for(const mode of ['full','prepare']){
+    put(log);
+    cli('setup',['deps','--platform','linux-x64','--mode',mode],{PATH:dir});
+    const calls=fs.readFileSync(log,'utf8').trimEnd().split('\n').map(JSON.parse);
+    const install=calls.find(args=>args.includes('apt-get')&&args.includes('install'));
+    assert.ok(install?.includes('cmake'),mode+' apt-get install');
+    assert.equal(install.includes('patchelf'),mode==='full',mode+' patchelf');
+  }
 });
 
 test('Windows runtime load probes preserve a Path-only host environment',linux,t=>{
