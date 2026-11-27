@@ -714,17 +714,16 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
             parameters.add(typeInfoOfSrc)
             parameters.add(size)
             let tmp = irBuilder.CallClassIntrinsicAlloc(parameters)
-            let payloadPtr = irBuilder.GetPayloadFromObject(tmp)
-            if (irBuilder.IsTypeContainsRef(srcCGType.GetLLVMType())) {
-                let args = ArrayList<LLVMValueRef>()
-                args.add(tmp)
-                args.add(payloadPtr)
-                args.add(copySource)
-                args.add(size)
-                irBuilder.CallGCWriteAgg(srcCGType.GetLayoutType(), args)
-            } else {
-                irBuilder.CreateMemCpy(payloadPtr, 0u32, copySource, 0u32, size)
-            }
+            // An unsized generic struct lowers to the i8 placeholder
+            // (CGStructType.cj:15-17), so its LLVM type never reports managed
+            // slots although the instantiated payload may hold references.
+            // Copy through the TypeInfo-driven generic barrier, exactly as the
+            // Box twin does (TypeCastImpl.cj:160-183): a tracked heap `this`
+            // becomes gcread.generic(tmp, this.basePtr, this, size), whose
+            // runtime copy applies the load barrier to every source reference
+            // before publishing it into the fresh box (ZGC
+            // zBarrierSet.inline.hpp:329-346 oop_copy_one).
+            irBuilder.CallGCWriteGenericPayloadFromSrc(tmp, copySource, size, typeInfoOfSrc)
             let destAddr = irBuilder.CreateGEP(storePlace, path)
             let destElementType = destAddr.GetCGType().getOrThrow().GetPointerElementType().getOrThrow()
             return irBuilder.CreateStore(CGValue(tmp, destElementType), destAddr)
