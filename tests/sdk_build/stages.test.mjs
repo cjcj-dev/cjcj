@@ -20,7 +20,7 @@ test('source pins use full commit SHAs and select the expected tools revision',(
 
 test('source pins select the expected runtime revision',()=>{
   const pins=loadPins();
-  assert.equal(pins.repos.runtime.sha,'9830715f11f510aec027a1ad51a4cab09480b76f');
+  assert.equal(pins.repos.runtime.sha,'cebfdebd7528069b2d3c9b56cc46c08ba6c67652');
 });
 
 test('source pins select Darwin cross stdx',()=>{
