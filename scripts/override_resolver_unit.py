@@ -60,10 +60,11 @@ def main():
     shim = tree / 'runtime_shim/cjselfhost_llvmshim.o'
     config = tree / 'runtime_shim/cjc_runtime_config.o'
     shims = [shim, config] if config.is_file() else [shim]
+    llvm = sdk / 'third_party/llvm/lib/libLLVM-15.so'
     command += ['--link-options=' + ' '.join([
         '--start-group', *map(str, archives), '--end-group', *map(str, shims),
-        '-L' + str(sdk / 'third_party/llvm/lib'), '-lLLVM-15', '-lstdc++'])]
-    inputs += archives + shims + [sdk / 'bin/cjc', sdk / 'third_party/llvm/lib/libLLVM-15.so']
+        str(llvm), '-lstdc++'])]
+    inputs += archives + shims + [sdk / 'bin/cjc', llvm]
     inputs += sorted((sdk / 'runtime/lib/linux_x86_64_cjnative').glob('*.so'))
     inputs += [sdk / 'lib/linux_x86_64_cjnative/libcangjie-std-core.a']
     (out / 'inputs.sha256').write_text(''.join(f'{digest(p)}  {p}\n' for p in inputs))
