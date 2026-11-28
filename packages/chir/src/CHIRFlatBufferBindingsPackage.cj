@@ -12,10 +12,6 @@ class PackageFormat_CHIRPackage <: Table {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_CHIR_PACKAGE_VT_NAME)) { Some(FlatBufferString(data, pointerPos)) } else { None }
     }
 
-    func GetPath(): Option<FlatBufferString> {
-        return if (let Some(pointerPos) <- GetPointer(CHIRFB_CHIR_PACKAGE_VT_PATH)) { Some(FlatBufferString(data, pointerPos)) } else { None }
-    }
-
     func GetPkgAccessLevel(): UInt8 {
         return GetField(CHIRFB_CHIR_PACKAGE_VT_PKGACCESSLEVEL, 0u8)
     }

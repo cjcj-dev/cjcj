@@ -1493,7 +1493,7 @@ public class ASTWriter <: Resource {
     }
 
     // Mirrors ExprWriter.cpp:97-103 SaveExpression(PrimitiveTypeExpr). It carries only basic Expr fields.
-    private func SaveExpression(_pte: PrimitiveTypeExpr, nodeInfo: NodeInfo): FlatBufferOffset {
+    private func SaveExpression(_: PrimitiveTypeExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         return SaveBasicNodeInfo(2u16, 0u32, 0u8, 0u32, nodeInfo)
     }
 
@@ -1647,7 +1647,7 @@ public class ASTWriter <: Resource {
     }
 
     // Mirrors ExprWriter.cpp:105-111 SaveExpression(WildcardExpr). It carries only basic Expr fields.
-    private func SaveExpression(_we: WildcardExpr, nodeInfo: NodeInfo): FlatBufferOffset {
+    private func SaveExpression(_: WildcardExpr, nodeInfo: NodeInfo): FlatBufferOffset {
         return SaveBasicNodeInfo(1u16, 0u32, 0u8, 0u32, nodeInfo)
     }
 

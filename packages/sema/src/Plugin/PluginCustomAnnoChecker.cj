@@ -339,7 +339,7 @@ public class PluginCustomAnnoChecker {
         this.typeManager = typeManager
     }
 
-    public func IsAnnoAPILevel(annotation: Annotation, decl: Decl): Bool {
+    public func IsAnnoAPILevel(annotation: Annotation, _: Decl): Bool {
         if (let Some(context) <- ctx) {
             if (let Some(pkg) <- context.curPackage) {
                 if (pkg.fullPackageName == PKG_NAME_OHOS_LABELS) {
@@ -363,7 +363,7 @@ public class PluginCustomAnnoChecker {
         return annotation.identifier.Val() == HIDE_ANNO_NAME
     }
 
-    public func IsAnnoHide(annotation: Annotation, decl: Decl): Bool {
+    public func IsAnnoHide(annotation: Annotation, _: Decl): Bool {
         if (let Some(context) <- ctx) {
             if (let Some(pkg) <- context.curPackage) {
                 if (pkg.fullPackageName == PKG_NAME_OHOS_LABELS) {

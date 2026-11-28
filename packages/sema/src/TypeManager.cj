@@ -2426,26 +2426,6 @@ public class TypeManager {
             (src.TestAttr(Attribute.SPECIFIC) && target.TestAttr(Attribute.COMMON))
     }
 
-    private func GetDeclPtrOfOptionTy(ty: Option<Ty>): Option<Decl> {
-        if (let Some(value) <- ty) {
-            return Ty.GetDeclPtrOfTy(value)
-        }
-        return None
-    }
-
-    private func SameDeclOption(left: Option<Decl>, right: Option<Decl>): Bool {
-        if (let Some(leftDecl) <- left) {
-            if (let Some(rightDecl) <- right) {
-                return SameDecl(leftDecl, rightDecl)
-            }
-            return false
-        }
-        if (let Some(_) <- right) {
-            return false
-        }
-        return true
-    }
-
     public func ConstrainByCtor(tv: GenericsTy, tyCtor: Ty): Option<Ty> {
         let bounds = constraints.GetOrCreate(tv)
         for (upper in bounds.ubs.values) {
@@ -3895,16 +3875,6 @@ public class TypeManager {
                 idx++
             }
         }
-    }
-
-    private func collectExtendInterfaces(extendDecl: ExtendDecl): TySet {
-        let out = TySet()
-        for (inherited in extendDecl.inheritedTypes) {
-            if (let Some(ty) <- inherited.GetTy()) {
-                out.Add(ty)
-            }
-        }
-        return out
     }
 
     private func CheckGenericConstraints(decl: Decl, instantiateMap: TypeSubst): Bool {

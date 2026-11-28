@@ -5,7 +5,7 @@ import cjcj::ast.*
 import cjcj::modules.SemaImportManager
 import cjcj::sema.TypeManager
 import cjcj::sema.NativeFFI.{AreParamTypeKindsValid, CreateThisCall, CreateThrowExceptionCall, CreateType,
-    GetJavaMirrorWrappingConstructor, GetStringDecl, InteropLibBridge, IsJArray, WithinFile, WrapReturningLambdaCall}
+    GetJavaMirrorWrappingConstructor, GetStringDecl, InteropLibBridge, IsJArray, WithinFile}
 
 public class DesugarJArray {
     private let typeManager: TypeManager

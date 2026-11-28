@@ -1,7 +1,6 @@
 package cjcj::driver
 
 import std.collection.*
-import std.fs.*
 
 // wasm32-wasi (WASI preview1 command modules), staged subset (M0).
 // Everything is linked statically by the bundled wasm-ld into one `.wasm`:

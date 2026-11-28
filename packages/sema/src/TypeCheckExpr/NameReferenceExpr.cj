@@ -7,9 +7,7 @@ import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cjcj::modules.SemaImportManager
 import cjcj::sema.*
-import cjcj::sema.Desugar.*
 import cjcj::utils.CJC_ASSERT
 
 func TcUnitTy(): Ty {
@@ -41,38 +39,6 @@ func TcReplaceIdeal(typeManager: TypeManager, expr: Expr): Ty {
         return exprTy
     }
     return TypeManager.GetInvalidTy()
-}
-
-func TcTargetReferenceTy(target: Decl): Option<Ty> {
-    if (Ty.IsTyCorrect(target.GetTy())) {
-        return target.GetTy()
-    }
-    if (let Some(propDecl) <- (target as PropDecl)) {
-        if (let Some(getter) <- GetUsableGetterForProperty(propDecl)) {
-            if (let Some(getterTy) <- getter.GetTy()) {
-                if (let Some(funcTy) <- (getterTy as FuncTy)) {
-                    if (Ty.IsTyCorrect(funcTy.retTy)) {
-                        return Some(funcTy.retTy)
-                    }
-                }
-            }
-        }
-    }
-    return None
-}
-
-func TcSetTyFromTarget(typeManager: TypeManager, node: Node, target: Decl): Ty {
-    if (let Some(targetTy) <- TcTargetReferenceTy(target)) {
-        let substitutedTy = typeManager.SubstituteTypeAliasInTy(targetTy)
-        let instTy = if (let Some(expr) <- (node as Expr)) {
-            typeManager.ApplySubstPack(substitutedTy, GenerateGenericTypeMapping(typeManager, expr), ignoreUnsolved: true)
-        } else {
-            substitutedTy
-        }
-        node.SetTy(instTy)
-        return instTy
-    }
-    return TcInvalid(node)
 }
 
 func GetTargetsSameASTKind(targets: ArrayList<Decl>): ASTKind {
@@ -360,26 +326,9 @@ func MergeFuncTargetsInSum(typeManager: TypeManager, ma: MemberAccess): ArrayLis
     return targets
 }
 
-private func ApplyExplicitGenericArgs(typeManager: TypeManager, nre: NameReferenceExpr, fallback: Ty): Ty {
-    if (nre.GetTypeArgs().isEmpty()) {
-        return fallback
-    }
-    if (let Some(target) <- nre.GetTarget()) {
-        var genericTarget = GetRealTarget(target)
-        if (genericTarget.TestAttr(Attribute.CONSTRUCTOR)) {
-            if (let Some(outer) <- genericTarget.outerDecl) {
-                genericTarget = outer
-            }
-        }
-        let genericTy = GetGenericType(typeManager, genericTarget, nre.GetTypeArgs())
-        nre.SetTy(genericTy)
-        return genericTy
-    }
-    return fallback
-}
-
-public func SynNameReferenceExpr(typeManager: TypeManager, nre: NameReferenceExpr,
+public func SynNameReferenceExpr(_: TypeManager, nre: NameReferenceExpr,
     diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    let _ = diag
     for (typeArg in nre.GetTypeArgs()) {
         if (let Some(typeArgTy) <- typeArg.GetTy()) {
             if (!containsTy(nre.instTys, typeArgTy)) {

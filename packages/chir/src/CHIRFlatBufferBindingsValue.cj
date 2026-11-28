@@ -46,10 +46,6 @@ class PackageFormat_LiteralValue <: Table {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_LITERAL_VALUE_VT_BASE)) { Some(PackageFormat_Value(data, pointerPos)) } else { None }
     }
 
-    func GetLiteralKind(): UInt8 {
-        return GetField(CHIRFB_LITERAL_VALUE_VT_LITERALKIND, 0u8)
-    }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, CHIRFB_LITERAL_VALUE_VT_BASE) &&
@@ -307,10 +303,6 @@ class PackageFormat_GlobalValue <: Table {
 
     func GetPackageName(): Option<FlatBufferString> {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_GLOBAL_VALUE_VT_PACKAGENAME)) { Some(FlatBufferString(data, pointerPos)) } else { None }
-    }
-
-    func GetDeclaredParent(): UInt32 {
-        return GetField(CHIRFB_GLOBAL_VALUE_VT_DECLAREDPARENT, 0u32)
     }
 
     func GetFeatures(): Option<Vector<Offset<FlatBufferString>>> {

@@ -466,7 +466,7 @@ public class MockSupportManager {
         let nothingTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_NOTHING)
         let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
         let handlerRetTy = typeManager.GetAnyTy()
-        let optionFuncRetTy = typeManager.GetEnumTy(mockUtils.optionDecl.getOrThrow(), typeArgs: [handlerRetTy])
+        let _ = typeManager.GetEnumTy(mockUtils.optionDecl.getOrThrow(), typeArgs: [handlerRetTy])
 
         let handlerResultCases = ArrayList<MatchCase>()
         let handlerResultPattern = EnumPattern()

@@ -3,8 +3,8 @@ package cjcj::chir
 import std.collection.*
 import std.sync.{AtomicBool, Mutex}
 import cjcj::option.GlobalOptions
-import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, GENERIC_VIRTUAL_FUNC, INST_VIRTUAL_FUNC, OverflowStrategy,
-    TaskQueue, TaskResult}
+import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, GENERIC_VIRTUAL_FUNC as GenericVirtualFuncName,
+    INST_VIRTUAL_FUNC as InstVirtualFuncName, OverflowStrategy, TaskQueue, TaskResult}
 
 public enum CHIRCheckerRule {
     | EMPTY_BLOCK
@@ -182,14 +182,6 @@ public class CHIRChecker {
 
     private func ErrorInFunc(`func`: Value, info: String): Unit {
         Errorln("in function " + `func`.GetIdentifier() + ", " + info)
-    }
-
-    private func ErrorInLambdaOrFunc(`func`: Function, lambda: Option<Lambda>, info: String): Unit {
-        if (let Some(lambdaExpr) <- lambda) {
-            ErrorInExpr(`func`, lambdaExpr, info)
-        } else {
-            ErrorInFunc(`func`, info)
-        }
     }
 
     private func ErrorInExpr(`func`: Value, expr: Expression, info: String): Unit {
@@ -2946,7 +2938,7 @@ public class CHIRChecker {
                     continue
                 } else if (kind == ExprKind.INVOKE || kind == ExprKind.TRY_INVOKE) {
                     let funcName = InvokeBase(user).GetMethodName()
-                    if (funcName != INST_VIRTUAL_FUNC && funcName != GENERIC_VIRTUAL_FUNC) {
+                    if (funcName != InstVirtualFuncName && funcName != GenericVirtualFuncName) {
                         ErrorInExpr(topLevelFunc, rawExpr,
                             errMsgBase + "the result can't be used as virtual method's argument.")
                     }

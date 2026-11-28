@@ -354,16 +354,6 @@ public class CHIR2BCHIR {
         }
     }
 
-    func AddAnnotations(context: CHIR2BCHIRContext, value: Value, opCodeIndex: Int64,
-        storeMangledName!: Bool = false, storeCodePos!: Bool = false): Unit {
-        if (storeMangledName) {
-            context.definition.AddMangledNameAnnotation(opCodeIndex, value.GetIdentifierWithoutPrefix())
-        }
-        if (storeCodePos) {
-            context.definition.AddCodePositionAnnotation(opCodeIndex, CHIRPos2BCHIRPos(value.GetDebugLocation()))
-        }
-    }
-
     func PushOpCodeWithAnnotations(context: CHIR2BCHIRContext, opCode: OpCode, expr: Expression,
         args!: ArrayList<Int64> = ArrayList<Int64>(), storeMangledName!: Bool = false,
         storeCodePos!: Bool = false): Unit {
@@ -371,17 +361,6 @@ public class CHIR2BCHIR {
         context.definition.PushOp(opCode)
         if (storeMangledName || storeCodePos) {
             AddAnnotations(context, expr, opIndex, storeMangledName: storeMangledName, storeCodePos: storeCodePos)
-        }
-        PushArgs(context, args)
-    }
-
-    func PushOpCodeWithAnnotations(context: CHIR2BCHIRContext, opCode: OpCode, value: Value,
-        args!: ArrayList<Int64> = ArrayList<Int64>(), storeMangledName!: Bool = false,
-        storeCodePos!: Bool = false): Unit {
-        let opIndex = context.definition.NextIndex()
-        context.definition.PushOp(opCode)
-        if (storeMangledName || storeCodePos) {
-            AddAnnotations(context, value, opIndex, storeMangledName: storeMangledName, storeCodePos: storeCodePos)
         }
         PushArgs(context, args)
     }

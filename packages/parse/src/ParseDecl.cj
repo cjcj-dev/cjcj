@@ -45,34 +45,6 @@ extend ParserImpl {
         return InvalidPattern(Peek().Begin())
     }
 
-    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:1926-1947
-    private func ParseForImportToGetContentBetween(
-        fileID: UInt64,
-        beginLine: Int64,
-        beginColumn: Int64,
-        endLine: Int64,
-        endColumn: Int64
-    ): String {
-        let posBase = lexer.GetPosBase()
-        var newBeginLine: Int64
-        var newBeginColumn: Int64
-        var newEndLine: Int64
-        var newEndColumn: Int64
-        if (beginLine == posBase.line && beginColumn == posBase.column) {
-            newBeginLine = 1
-            newBeginColumn = 1
-            newEndLine = (endLine - beginLine) + 1
-            newEndColumn = endColumn
-        } else {
-            newBeginLine = (beginLine - posBase.line) + 1
-            newBeginColumn = beginColumn
-            newEndLine = (endLine - posBase.line) + 1
-            newEndColumn = endColumn
-        }
-        return sourceManager.GetContentBetween(fileID, Position(newBeginLine, newBeginColumn),
-            Position(newEndLine, newEndColumn), importGenericContent: inputString)
-    }
-
     public func ParseTopLevel(): File {
         let file = File()
         currentFile = file
@@ -2075,40 +2047,6 @@ extend ParserImpl {
                     DiagExpectedInitializerForToplevelVar(varDecl)
                 }
             }
-        }
-    }
-
-    private func CheckVarDeclShape(
-        decl: VarDeclAbstract,
-        modifiers: ArrayList<Modifier>,
-        scopeKind: ScopeKind,
-        key: Token
-    ): Unit {
-        EnableModifierAttrs(decl, CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE))
-        if (!decl.isConst && HasModifier(modifiers, TokenKind.CONST)) {
-            DiagUnExpectedModifierOnDeclaration(decl)
-            decl.EnableAttr(Attribute.IS_BROKEN)
-        } else if (decl.astKind == ASTKind.VAR_DECL && decl.isConst &&
-            (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) &&
-            !HasModifier(modifiers, TokenKind.STATIC)) {
-            DiagConstVariableExpectedStatic(key)
-            decl.EnableAttr(Attribute.IS_BROKEN)
-        } else if (decl.isConst && (let None <- decl.initializer)) {
-            DiagConstVariableExpectedInitializer(decl)
-            decl.EnableAttr(Attribute.IS_BROKEN)
-        } else if (!decl.isConst && !ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) &&
-            (let None <- decl.typeNode) && (let None <- decl.initializer)) {
-            if (decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
-                DiagExpectedTypeOrInitializerInPattern(decl)
-            } else {
-                DiagExpectedOneOfTypeOrInitializer(decl, decl.identifier.Val())
-            }
-            decl.EnableAttr(Attribute.IS_BROKEN)
-        } else if (!decl.isConst && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) && (let None <- decl.initializer) &&
-            !HasModifier(modifiers, TokenKind.FOREIGN) &&
-            ((let None <- decl.typeNode) || !HasModifier(modifiers, TokenKind.COMMON))) {
-            DiagExpectedInitializerForToplevelVar(decl)
-            decl.EnableAttr(Attribute.IS_BROKEN)
         }
     }
 

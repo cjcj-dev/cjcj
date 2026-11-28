@@ -780,14 +780,16 @@ public class FileUtil {
         // roots through GetDirPath/JoinPath as well as direct normalization.
         @When[os == "Windows"]
         let preserveNetworkRoot = input.size >= 2 && isPathSlashByte(input[0]) && isPathSlashByte(input[1])
-        @When[os != "Windows"]
-        let preserveNetworkRoot = false
         for (byte in input.toArray()) {
             if (byte == 0u8) {
                 break
             }
             let isSlashByte = isPathSlashByte(byte)
-            if (previousIsSlash && isSlashByte && !(preserveNetworkRoot && result.size == 1)) {
+            @When[os == "Windows"]
+            let duplicateSlash = previousIsSlash && isSlashByte && !(preserveNetworkRoot && result.size == 1)
+            @When[os != "Windows"]
+            let duplicateSlash = previousIsSlash && isSlashByte
+            if (duplicateSlash) {
                 continue
             }
             if (isSlashByte) {

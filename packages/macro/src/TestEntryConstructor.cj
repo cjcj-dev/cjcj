@@ -87,13 +87,6 @@ public class TestModule {
     }
 }
 
-private func classDeclMembers(classDecl: ClassDecl): ArrayList<Decl> {
-    if (let Some(body) <- classDecl.body) {
-        return body.decls
-    }
-    return ArrayList<Decl>()
-}
-
 private func IsValidTestSuiteRegisterFunction(decl: Decl): Bool {
     if (let Some(funcDecl) <- (decl as FuncDecl)) {
         if (funcDecl.funcBody.getOrThrow().paramLists.size > 1) {

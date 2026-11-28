@@ -2,13 +2,11 @@ package cjcj::sema.InheritanceChecker
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.{DiagnosticEngine, DiagArgument, DiagKind, DiagKindRefactor, MakeRange, SubDiagnostic}
 import cjcj::basic.Range as BasicRange
 import cjcj::modules.{GetPackageRelation, PackageRelation, SemaImportManager}
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::sema.*
-import cjcj::sema.NativeFFI.{GetAnnotation, GetForeignNameAnnotation}
 import cjcj::sema.Test.TestManager
 import cjcj::sema.NativeFFI.Java.GenerateJavaForeignAbstractStub
 import cjcj::sema.NativeFFI.ObjC.GenerateObjCForeignAbstractStub
@@ -418,157 +416,6 @@ private func UnimplementedIdentifier(member: MemberSignature): String {
         return name
     }
     return "''"
-}
-
-private func GetAnnoValue(annotation: Annotation): String {
-    let expr = annotation.args[0].expr.getOrThrow()
-    return (expr as LitConstExpr).getOrThrow().stringValue
-}
-
-private func DiagConflictingForeignName(
-    diag: DiagnosticEngine,
-    declWithAnno: Decl,
-    otherDecl: Decl,
-    checkingDecl: Decl
-): Unit {
-    let annotation = GetForeignNameAnnotation(declWithAnno).getOrThrow()
-    let builder = if (!annotation.TestAttr(Attribute.COMPILER_ADD)) {
-        diag.DiagnoseRefactor(
-            DiagKindRefactor.sema_foreign_name_conflicting_annotation,
-            MakeRange(annotation.GetBegin(), declWithAnno.identifier.End()),
-            arguments: [declWithAnno.identifier.Val(), annotation.identifier.Val()]
-        )
-    } else {
-        diag.DiagnoseRefactor(
-            DiagKindRefactor.sema_foreign_name_conflicting_derived_annotation,
-            DeclIdentifierRange(declWithAnno),
-            arguments: [declWithAnno.identifier.Val(), annotation.identifier.Val(), GetAnnoValue(annotation)]
-        )
-    }
-
-    let otherAnnotation = GetForeignNameAnnotation(otherDecl)
-    if (let Some(otherValue) <- otherAnnotation) {
-        if (!otherValue.TestAttr(Attribute.COMPILER_ADD)) {
-            builder.AddNote(
-                MakeRange(otherValue.GetBegin(), otherDecl.identifier.End()),
-                "Other declaration '" + otherDecl.identifier.Val() + "' has a different @ForeignName"
-            )
-        } else {
-            builder.AddNote(
-                DeclIdentifierRange(otherDecl),
-                "Other declaration '" + otherDecl.identifier.Val() +
-                    "' has a different derived @ForeignName '" + GetAnnoValue(otherValue) + "'"
-            )
-        }
-    } else {
-        builder.AddNote(
-            DeclIdentifierRange(otherDecl),
-            "Other declaration '" + otherDecl.identifier.Val() + "' doesn't have a @ForeignName"
-        )
-    }
-
-    builder.AddNote(
-        DeclIdentifierRange(checkingDecl),
-        "While checking declaration '" + checkingDecl.identifier.Val() + "'"
-    )
-}
-
-private func NeedCheck(parent: MemberSignature, child: MemberSignature): Bool {
-    let parentDecl = parent.decl.getOrThrow()
-    let childDecl = child.decl.getOrThrow()
-    if (childDecl.outerDecl.getOrThrow().TestAttr(Attribute.IMPORTED)) {
-        return false
-    }
-    if (!parentDecl.IsFuncOrProp()) {
-        return false
-    }
-    if (!parentDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
-        return false
-    }
-    if (!childDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.JAVA_FOREIGN, Attribute.JAVA_EXPORT)) {
-        return false
-    }
-    if (SameDecl(parentDecl.outerDecl.getOrThrow(), childDecl.outerDecl.getOrThrow())) {
-        return false
-    }
-    return true
-}
-
-private func DiagConflictingAnnotation(
-    diag: DiagnosticEngine,
-    declWithAnno: Decl,
-    otherDecl: Decl,
-    checkingDecl: Decl,
-    annotationKind: AstAnnotationKind
-): Unit {
-    let annotation = GetAnnotation(declWithAnno, annotationKind).getOrThrow()
-    let builder = if (!annotation.TestAttr(Attribute.COMPILER_ADD)) {
-        diag.DiagnoseRefactor(
-            DiagKindRefactor.sema_foreign_name_conflicting_annotation,
-            MakeRange(annotation.GetBegin(), declWithAnno.identifier.End()),
-            arguments: [declWithAnno.identifier.Val(), annotation.identifier.Val()]
-        )
-    } else {
-        diag.DiagnoseRefactor(
-            DiagKindRefactor.sema_foreign_name_conflicting_derived_annotation,
-            DeclIdentifierRange(declWithAnno),
-            arguments: [declWithAnno.identifier.Val(), annotation.identifier.Val(), GetAnnoValue(annotation)]
-        )
-    }
-
-    let otherAnnotation = GetForeignNameAnnotation(otherDecl)
-    if (let Some(otherValue) <- otherAnnotation) {
-        if (!otherValue.TestAttr(Attribute.COMPILER_ADD)) {
-            builder.AddNote(
-                MakeRange(otherValue.GetBegin(), otherDecl.identifier.End()),
-                "Other declaration '" + otherDecl.identifier.Val() + "' has a different @" +
-                    annotation.identifier.Val()
-            )
-        } else {
-            builder.AddNote(
-                DeclIdentifierRange(otherDecl),
-                "Other declaration '" + otherDecl.identifier.Val() + "' has a different derived @" +
-                    annotation.identifier.Val() + " '" + GetAnnoValue(otherValue) + "'"
-            )
-        }
-    } else {
-        builder.AddNote(
-            DeclIdentifierRange(otherDecl),
-            "Other declaration '" + otherDecl.identifier.Val() + "' doesn't have a @" + annotation.identifier.Val()
-        )
-    }
-
-    builder.AddNote(
-        DeclIdentifierRange(checkingDecl),
-        "While checking declaration '" + checkingDecl.identifier.Val() + "'"
-    )
-}
-
-private func NeedCheckForeignName(parent: MemberSignature, child: MemberSignature): Bool {
-    let parentDecl = parent.decl.getOrThrow()
-    let childDecl = child.decl.getOrThrow()
-    if (childDecl.outerDecl.getOrThrow().TestAttr(Attribute.IMPORTED)) {
-        return false
-    }
-    if (!parentDecl.IsFuncOrProp()) {
-        return false
-    }
-    if (!parentDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT)) {
-        return false
-    }
-    if (!childDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_FOREIGN, Attribute.OBJ_C_EXPORT)) {
-        return false
-    }
-    if (SameDecl(parentDecl.outerDecl.getOrThrow(), childDecl.outerDecl.getOrThrow())) {
-        return false
-    }
-    return true
-}
-
-private func IsForeignNameLikeAnnotation(annotationKind: AstAnnotationKind): Bool {
-    return annotationKind == AstAnnotationKind.FOREIGN_NAME ||
-        annotationKind == AstAnnotationKind.FOREIGN_GETTER_NAME ||
-        annotationKind == AstAnnotationKind.FOREIGN_SETTER_NAME
 }
 
 public class StructInheritanceChecker {

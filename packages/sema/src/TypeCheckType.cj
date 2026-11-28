@@ -263,7 +263,7 @@ public func CheckTypeParametersForAliasRef(
     return true
 }
 
-private func CheckRefExprCheckTyArgs(refType: RefType, target: Decl): Bool {
+private func CheckRefExprCheckTyArgs(refType: RefType, _: Decl): Bool {
     return refType.typeArguments.isEmpty()
 }
 

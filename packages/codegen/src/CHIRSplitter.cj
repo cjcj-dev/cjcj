@@ -172,16 +172,6 @@ public class SubCHIRPackage {
         return true
     }
 
-    private func ContainsFunction(functions: ArrayList<Function>, fn: Function): Bool {
-        let name = fn.GetIdentifierWithoutPrefix()
-        for (ownedFn in functions) {
-            if (ownedFn.GetIdentifierWithoutPrefix() == name) {
-                return true
-            }
-        }
-        return false
-    }
-
     public func AddForeign(fn: Function): Bool {
         return AddFunctionTo(chirForeigns, fn)
     }

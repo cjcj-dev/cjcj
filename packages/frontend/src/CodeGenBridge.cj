@@ -877,7 +877,7 @@ private class ToCHIR {
         return result.getOrThrow()
     }
 
-    private func RunFunctionInline(currentPackage: RealCHIRPackage, devirtInfo: DevirtualizationInfo): Unit {
+    private func RunFunctionInline(currentPackage: RealCHIRPackage, _: DevirtualizationInfo): Unit {
         let options = instance.invocation.globalOptions
         if (!options.IsOptimizationExisted(OptimizationFlag.FUNC_INLINING)) {
             return

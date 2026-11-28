@@ -8,7 +8,7 @@ import cjcj::basic.Range as BasicRange
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.MaybeString
-import cjcj::sema.{MakeRangeForDeclIdentifier, MemberMap, TypeManager}
+import cjcj::sema.{MakeRangeForDeclIdentifier, TypeManager}
 import cjcj::sema.NativeFFI.{GetJavaFQName, GetJavaFQSourceCodeName, HasPredefinedJavaName, InteropLibBridge, IsJArray}
 import cjcj::utils.CJC_ASSERT
 

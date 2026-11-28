@@ -1,7 +1,7 @@
 package cjcj::codegen
 
 import std.collection.*
-import std.process.Process
+import std.env.getVariable
 import std.sync.{AtomicBool, AtomicInt64}
 import cjcj::basic.Linkage
 import cjcj::chir.Attribute
@@ -187,7 +187,6 @@ public class CGValueRepresentationCensus {
     private static let coloured = AtomicInt64(0)
     private static let unknown = AtomicInt64(0)
     private static let posctrlFired = AtomicBool(false)
-    private static let dumped = AtomicBool(false)
 
     public static func RecordNonHeapStore(state: CGValueRepresentationState): Unit {
         let _ = nonheapTotal.fetchAdd(1)
@@ -203,7 +202,7 @@ public class CGValueRepresentationCensus {
     }
 
     public static func FirePositiveControlIfRequested(): Unit {
-        if ((Process.current.getEnv("CJCJ_CGVALSTATE_POSCTRL") ?? "") != "1") {
+        if ((getVariable("CJCJ_CGVALSTATE_POSCTRL") ?? "") != "1") {
             return
         }
         if (posctrlFired.swap(true)) {
@@ -216,7 +215,7 @@ public class CGValueRepresentationCensus {
 
     public static func Dump(): Unit {
         FirePositiveControlIfRequested()
-        if ((Process.current.getEnv("CJCJ_CGVALSTATE_DUMP") ?? "") != "1") {
+        if ((getVariable("CJCJ_CGVALSTATE_DUMP") ?? "") != "1") {
             return
         }
         let total = nonheapTotal.load()

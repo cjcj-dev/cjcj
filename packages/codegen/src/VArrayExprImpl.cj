@@ -2,7 +2,6 @@ package cjcj::codegen
 
 import std.collection.*
 import cjcj::chir.Expression
-import cjcj::chir.ClassType
 import cjcj::chir.LocalVar
 import cjcj::chir.Type
 import cjcj::chir.Value

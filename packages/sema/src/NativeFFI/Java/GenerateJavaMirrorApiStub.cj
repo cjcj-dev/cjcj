@@ -2,8 +2,8 @@ package cjcj::sema.NativeFFI.Java
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::sema.{MemberMap, TypeManager}
-import cjcj::sema.NativeFFI.{GetJavaRefField, InteropLibBridge, IsSynthetic, Utils, WithinFile}
+import cjcj::sema.TypeManager
+import cjcj::sema.NativeFFI.{GetJavaRefField, InteropLibBridge, Utils, WithinFile}
 import cjcj::utils.JAVA_REF_GETTER_FUNC_NAME
 
 public class GenerateJavaMirrorApiStub {

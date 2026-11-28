@@ -9,7 +9,7 @@ import cjcj::option.GetFileName as OptionGetFileName
 import cjcj::option.IsDir as OptionIsDir
 import cjcj::sema.{CreateThrowException, TypeManager, GenerateTypeMapping}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK}
 
 public let NSSTRING_CLASS_IDENT: String = "NSString"
 public let NSOBJECT_CLASS_IDENT: String = "NSObject"
@@ -588,11 +588,7 @@ public func GetInstantyForGenericTy(decl: Decl, actualTyArgMap: HashMap<String, 
 public func GetExceptionDecl(importManager: SemaImportManager): ClassDecl {
     let exceptionDecl = importManager.GetCoreDecl<ClassDecl>("Exception")
     CJC_NULLPTR_CHECK(exceptionDecl)
-    let exceptionClassDecl = exceptionDecl.getOrThrow() as ClassDecl
-    if (let None <- exceptionClassDecl) {
-        CJC_ABORT_WITH_MSG("'Exception' declaration expected to be 'ClassDecl'")
-    }
-    return exceptionClassDecl.getOrThrow()
+    return exceptionDecl.getOrThrow()
 }
 
 // C++ src/Sema/NativeFFI/Utils.cpp:758-770.

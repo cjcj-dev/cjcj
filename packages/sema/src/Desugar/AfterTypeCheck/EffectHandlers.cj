@@ -45,10 +45,6 @@ private class GeneratedCatchClause {
     }
 }
 
-private func IsNamedDecl(decl: Decl, fullPackageName: String, name: String): Bool {
-    return decl.identifier.Val() == name && (fullPackageName.isEmpty() || decl.fullPackageName == fullPackageName)
-}
-
 private func FindCoreClassDecl(importManager: SemaImportManager, name: String): Option<ClassDecl> {
     return importManager.GetImportedDecl<ClassDecl>(CORE_PACKAGE_NAME, name)
 }
@@ -260,7 +256,7 @@ private func FinishEffectCall(typeManager: TypeManager, callChecker: (Ty, CallEx
     return true
 }
 
-public func DesugarPerformExpr(typeManager: TypeManager, importManager: SemaImportManager, pkg: Package,
+public func DesugarPerformExpr(typeManager: TypeManager, importManager: SemaImportManager, _: Package,
     performExpr: PerformExpr,
     callChecker: (Ty, CallExpr) -> Bool): Unit {
     if (!Ty.IsTyCorrect(performExpr.GetTy())) {
@@ -312,7 +308,7 @@ private func CreateResultResume(typeManager: TypeManager, callChecker: (Ty, Call
 }
 
 private func CreateThrowingResume(typeManager: TypeManager, importManager: SemaImportManager,
-    callChecker: (Ty, CallExpr) -> Bool, pkg: Package, resumeExpr: ResumeExpr,
+    callChecker: (Ty, CallExpr) -> Bool, _: Package, resumeExpr: ResumeExpr,
     resultTy: EnumTy): Option<CallExpr> {
     if (let Some(throwingExpr) <- resumeExpr.throwingExpr) {
         if (let Some(throwingTy) <- throwingExpr.GetTy()) {
@@ -426,25 +422,8 @@ private func CreateGeneratedFieldAccess(source: Node, base: Expr, fieldName: Str
     return access
 }
 
-private func CreateGeneratedMemberCall(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    source: Node, base: Expr, methodName: String,
-    fallbackTy: Ty): CallExpr {
-    let access = CreateGeneratedFieldAccess(source, base, methodName)
-    AddTargetIfFunc(access)
-    let callExpr = CreateCallExpr(access, ArrayList<FuncArg>())
-    if (let Some(retTy) <- FuncRetTy(access.target)) {
-        if (FinishEffectCall(typeManager, callChecker, retTy, callExpr)) {
-            AddCurFile(callExpr, file: source.curFile)
-            return callExpr
-        }
-    }
-    callExpr.SetTy(fallbackTy)
-    AddCurFile(callExpr, file: source.curFile)
-    return callExpr
-}
-
 private func CreateActiveFrameParentAccess(typeManager: TypeManager, importManager: SemaImportManager,
-    synthesizer: (Node) -> Ty, source: Node, frameTy: Ty): Option<MemberAccess> {
+    synthesizer: (Node) -> Ty, source: Node, _: Ty): Option<MemberAccess> {
     if (let Some(getActiveFrame) <- CreateHandlerFrameMethod(typeManager, importManager, source,
         GET_ACTIVE_FRAME_NAME, ArrayList<Ty>())) {
         let getActiveFrameCall = CreateCallExpr(getActiveFrame, ArrayList<FuncArg>())
@@ -563,7 +542,7 @@ private func CreateEarlyReturnGuardCatch(typeManager: TypeManager, importManager
 
 private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
     importManager: SemaImportManager, synthesizer: (Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, tryLambda: LambdaExpr, tryReturnTy: Ty): Bool {
+    _: Package, tryLambda: LambdaExpr, tryReturnTy: Ty): Bool {
     if (let None <- tryLambda.funcBody) {
         return false
     }
@@ -721,7 +700,7 @@ private func UpdateHandlerLambdaReturnTy(typeManager: TypeManager, lambda: Lambd
 }
 
 private func CreateSetHandlerImpl(typeManager: TypeManager, importManager: SemaImportManager,
-    synthesizer: (SynPos, Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool, pkg: Package, handler: Handler,
+    synthesizer: (SynPos, Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool, _: Package, handler: Handler,
     lambda: LambdaExpr, tryResultTy: Ty): Bool {
     if (let None <- lambda.funcBody) {
         return false

@@ -1203,7 +1203,7 @@ public func TypeCheckReferenceCheckStaticMemberAccessLegality(
 
 public func CheckInstanceMemberAccessLegality(
     diag: BasicDiagnosticEngine,
-    tm: TypeManager,
+    _: TypeManager,
     impl: TypeCheckerImpl,
     ctx: ASTContext,
     ma: MemberAccess,

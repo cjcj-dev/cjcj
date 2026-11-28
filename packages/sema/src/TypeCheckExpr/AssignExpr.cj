@@ -130,7 +130,7 @@ func IsAssignable(e: Expr, isCompound: Bool,
     return true
 }
 
-private func DiagnoseForSubscriptAssignExpr(typeManager: TypeManager, ctx: ASTContext,
+private func DiagnoseForSubscriptAssignExpr(typeManager: TypeManager, _: ASTContext,
     ae: AssignExpr, diags: Array<Diagnostic>, synthesizer: (SynPos, Expr) -> Ty,
     diag: BasicDiagnosticEngine): Unit {
     CJC_ASSERT(ae.leftValue.isSome())

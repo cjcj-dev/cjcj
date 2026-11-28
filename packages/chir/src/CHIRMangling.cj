@@ -31,7 +31,6 @@ private let MANGLE_CHIR_EXTEND_PREFIX: String = "$X"
 private let MANGLE_INSTANTIATE_PREFIX: String = "_CI"
 private let MANGLE_CHIR_LAMBDA_PREFIX: String = "_CL"
 private let MANGLE_OPERATOR_PREFIX: String = "_CO"
-private let MANGLE_ANNOTATION_LAMBDA_PREFIX: String = "_CA"
 private let MANGLE_CLOSURE_GENERIC_PREFIX: String = "$Cg"
 private let MANGLE_CLOSURE_INSTANTIATE_PREFIX: String = "$Ci"
 private let MANGLE_CLOSURE_FUNC_PREFIX: String = "$Cf"
@@ -43,7 +42,6 @@ private let MANGLE_ABSTRACT_INSTANTIATED_PREFIX: String = "$vi"
 private let MANGLE_CHIR_GENERIC_SUFFIX: String = "$g"
 
 private let MANGLE_CHIR_GENERIC_PREFIX: String = "G"
-private let MANGLE_ARRAY_SLICE_PREFIX: String = "S_"
 private let MANGLE_CLOSURE_STR: String = "Closure"
 private let MANGLE_UNIT_STR: String = "Unit"
 private let MANGLE_CSTRING_STR: String = "CString"
@@ -147,12 +145,6 @@ public func ManglePrimitive(kind: TypeKind): String {
         case TypeKind.TYPE_VOID => "u"
         case _ => ""
     }
-}
-
-func MangleArraySliceType(t: Type, genericsTypeStack: ArrayList<String>, useGenericName: Bool): String {
-    let typeArgs = t.GetTypeArgs()
-    return MANGLE_ARRAY_SLICE_PREFIX + MangleType(typeArgs[0], genericsTypeStack, useGenericName: useGenericName) +
-        MANGLE_SUFFIX + MangleCHIRTypeMode(t)
 }
 
 private func IdentifierForMangledCHIRType(def: CustomTypeDef): String {

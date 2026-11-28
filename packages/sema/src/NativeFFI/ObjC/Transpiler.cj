@@ -3,7 +3,6 @@ package cjcj::sema.NativeFFI.ObjC
 import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.Warningln
-import cjcj::sema.TypeManager
 import cjcj::sema.NativeFFI.{GetCangjieLibName, GetForeignNameAnnotation}
 import cjcj::utils.{CJC_ASSERT, FileUtil, OBJECT_NAME}
 

@@ -1,7 +1,6 @@
 package cjcj::driver
 
 import std.collection.*
-import std.process.executeWithOutput
 import cjcj::utils.CJC_ASSERT_WITH_MSG
 
 public class CJNATIVEBackend <: Backend {

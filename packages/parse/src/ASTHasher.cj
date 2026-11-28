@@ -13,13 +13,6 @@ private var g_packagePath: Option<String> = None
 private let g_trimPaths: ArrayList<String> = ArrayList<String>()
 private var g_print: Bool = false
 
-private func PrintDebug(v: UInt64, line!: Int64 = 0): Unit {
-    if (!g_print) {
-        return
-    }
-    println("${line}:${v}")
-}
-
 private class DebugWhen {
     public init(decl: Decl, m: String) {
         if (decl.rawMangleName == m) {

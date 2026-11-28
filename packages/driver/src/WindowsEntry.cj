@@ -1,5 +1,6 @@
 package cjcj::driver
 
+@When[os == "Windows"]
 import std.collection.*
 
 @When[os == "Windows"]

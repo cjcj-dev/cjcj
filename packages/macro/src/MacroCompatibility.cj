@@ -1,6 +1,5 @@
 package cjcj::macro_pkg
 
-import std.collection.*
 import cjcj::ast.ASTKind as RealASTKind
 import cjcj::ast.ASTKindIndex as RealASTKindIndex
 import cjcj::ast.Attribute as RealAttribute

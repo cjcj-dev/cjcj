@@ -4,8 +4,10 @@ import std.collection.*
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Linkage as BasicLinkage
-import cjcj::mangle.{MANGLE_CANGJIE_PREFIX, MANGLE_FUNC_PARAM_TYPE_PREFIX, MANGLE_GLOBAL_FILE_INIT_PREFIX,
-    MANGLE_GLOBAL_VARIABLE_INIT_PREFIX, MANGLE_VOID_TY_SUFFIX, MangleName, SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION}
+import cjcj::mangle.{MANGLE_CANGJIE_PREFIX as CangjieManglePrefix,
+    MANGLE_FUNC_PARAM_TYPE_PREFIX as FuncParamManglePrefix, MANGLE_GLOBAL_FILE_INIT_PREFIX,
+    MANGLE_GLOBAL_VARIABLE_INIT_PREFIX, MANGLE_VOID_TY_SUFFIX as VoidMangleSuffix, MangleName,
+    SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION}
 import cjcj::option.{GlobalOptions, SanitizerCoverageOptions, SanitizerCoverageType}
 import cjcj::utils.{CJC_ASSERT, OverflowStrategy}
 
@@ -25,7 +27,6 @@ private func CreateMemberApply(resultTy: Type, callee: Value, thisType: Type, ar
 }
 
 // C++: CHIR/Transformation/SanitizerCoverage.cpp:39-114.
-private let CHAR_ARRAY_TEST_PACK: String = "CharArrayTest"
 private let SanCovBoolFlagInitName: String = "__cj_sancov_bool_flag_ctor"
 private let SanCovCharArrayInitName: String = "__cj_sancov_8bit_counters_ctor"
 private let SanCovUInt32ArrayInitName: String = "__cj_sancov_pc_guard_ctor"
@@ -174,8 +175,7 @@ public class SanitizerCoverage {
                 `func`.GetPackageName() != `package`.GetName()) {
                 continue
             }
-            let targetSuffix = SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION + MANGLE_FUNC_PARAM_TYPE_PREFIX +
-                MANGLE_VOID_TY_SUFFIX
+            let targetSuffix = SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION + FuncParamManglePrefix + VoidMangleSuffix
             if (`func`.GetIdentifier().endsWith(targetSuffix)) {
                 continue
             }
@@ -824,7 +824,7 @@ public class SanitizerCoverage {
     }
 
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:1016-1027.
-    private func GenerateForeignFunc(globalFuncName: String, loc: DebugLocation, funcType: FuncType,
+    private func GenerateForeignFunc(globalFuncName: String, _: DebugLocation, funcType: FuncType,
         packName!: String = ""): Function {
         if (let Some(value) <- funcBag.get(globalFuncName)) {
             return value
@@ -854,9 +854,9 @@ public class SanitizerCoverage {
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:1051-1079.
     private func CreateArrayInitFunc(initItemName: String, initType: Type): Function {
         let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetVoidTy())
-        let initName = MANGLE_CANGJIE_PREFIX + MANGLE_GLOBAL_VARIABLE_INIT_PREFIX + MangleName("default") +
+        let initName = CangjieManglePrefix + MANGLE_GLOBAL_VARIABLE_INIT_PREFIX + MangleName("default") +
             MangleName("0." + SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(initItemName).getOrThrow()) +
-            MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
+            FuncParamManglePrefix + VoidMangleSuffix
         let `func` = CreateInitFunc(initName, funcTy, INVALID_LOCATION)
         let body = `func`.GetBody().getOrThrow()
         let block0 = builder.CreateBlock(body)
@@ -885,9 +885,9 @@ public class SanitizerCoverage {
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:1081-1149.
     private func CreatePCTableInitFunc(): Function {
         let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetVoidTy())
-        let `func` = CreateInitFunc(MANGLE_CANGJIE_PREFIX + MANGLE_GLOBAL_VARIABLE_INIT_PREFIX +
-            MangleName("default") + MangleName("0.pc_table") + MANGLE_FUNC_PARAM_TYPE_PREFIX +
-            MANGLE_VOID_TY_SUFFIX, funcTy, INVALID_LOCATION)
+        let `func` = CreateInitFunc(CangjieManglePrefix + MANGLE_GLOBAL_VARIABLE_INIT_PREFIX +
+            MangleName("default") + MangleName("0.pc_table") + FuncParamManglePrefix + VoidMangleSuffix,
+            funcTy, INVALID_LOCATION)
         let body = `func`.GetBody().getOrThrow()
         let block0 = builder.CreateBlock(body)
         body.SetEntryBlock(block0)
@@ -979,8 +979,8 @@ public class SanitizerCoverage {
             return
         }
         let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetVoidTy())
-        let initName = MANGLE_CANGJIE_PREFIX + MANGLE_GLOBAL_FILE_INIT_PREFIX + MangleName("default") +
-            MangleName("0.sancov") + MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
+        let initName = CangjieManglePrefix + MANGLE_GLOBAL_FILE_INIT_PREFIX + MangleName("default") +
+            MangleName("0.sancov") + FuncParamManglePrefix + VoidMangleSuffix
         let initFunc = CreateInitFunc(initName, funcTy, INVALID_LOCATION)
         let body = initFunc.GetBody().getOrThrow()
         let block0 = builder.CreateBlock(body)

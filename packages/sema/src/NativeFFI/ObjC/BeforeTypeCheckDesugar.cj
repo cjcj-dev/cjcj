@@ -5,8 +5,7 @@ import cjcj::ast.*
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::sema.TypeManager
-import cjcj::sema.NativeFFI.{INIT_IDENT, NSOBJECT_CLASS_IDENT,
-    NSSTRING_CLASS_IDENT, TOSTRING_METHOD_IDENT}
+import cjcj::sema.NativeFFI.{INIT_IDENT, TOSTRING_METHOD_IDENT}
 import cjcj::utils.{CJC_ASSERT, STD_LIB_STRING}
 
 // Upstream a51ced71, BeforeTypeCheck/Utils/BeforeTypeCheckASTTransformer.cpp:23-35.

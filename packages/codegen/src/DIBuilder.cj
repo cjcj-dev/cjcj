@@ -52,9 +52,7 @@ import cjcj::utils.{CC_DEF_PREFIX, CJC_ASSERT, OBJECT_NAME, StaticCast}
 //   OtherExprDispatcher.cpp has multiple dispatcher-level sites; IRBuilder.cpp:217,264.
 let LLVM_MODULE_FLAG_WARNING: Int32 = 1
 private let LLVM_DWARF_LANG_CPP14: Int32 = 32
-private let LLVM_DWARF_EMISSION_NONE: Int32 = 0
 private let LLVM_DWARF_EMISSION_FULL: Int32 = 1
-private let LLVM_DWARF_EMISSION_LINE_TABLES_ONLY: Int32 = 2
 private let DW_ATE_signed: UInt32 = 5u32
 private let DW_ATE_unsigned: UInt32 = 7u32
 private let DW_ATE_unsigned_char: UInt32 = 8u32

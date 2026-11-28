@@ -112,18 +112,6 @@ private func AddUniqueDecl(values: ArrayList<Decl>, decl: Decl): Unit {
     }
 }
 
-private func SameFuncBody(left: FuncBody, right: FuncBody): Bool {
-    if (let Some(leftDecl) <- left.funcDecl) {
-        if (let Some(rightDecl) <- right.funcDecl) {
-            return SameDecl(leftDecl, rightDecl)
-        }
-    }
-    if (!left.scopeName.isEmpty() || !right.scopeName.isEmpty()) {
-        return left.scopeName == right.scopeName && left.astKind == right.astKind
-    }
-    return left.begin == right.begin && left.end == right.end && left.astKind == right.astKind
-}
-
 private func FuncBodyScopeName(body: FuncBody): String {
     if (!body.scopeName.isEmpty()) {
         return body.scopeName
@@ -1112,17 +1100,6 @@ public class InitializationChecker {
         }
     }
 
-    private func CurrentNamedFuncDecl(): Option<FuncDecl> {
-        var idx = currentFuncBodies.size - 1
-        while (idx >= 0) {
-            if (let Some(funcDecl) <- currentFuncBodies[idx].funcDecl) {
-                return funcDecl
-            }
-            idx--
-        }
-        return None
-    }
-
     private func CurrentFuncBody(): Option<FuncBody> {
         if (currentFuncBodies.isEmpty()) {
             return None
@@ -1139,15 +1116,6 @@ public class InitializationChecker {
             idx++
         }
         return None
-    }
-
-    private func CurrentFuncBodySameAs(funcDecl: FuncDecl): Bool {
-        if (let Some(currentBody) <- CurrentFuncBody()) {
-            if (let Some(currentDecl) <- currentBody.funcDecl) {
-                return SameDecl(currentDecl, funcDecl)
-            }
-        }
-        return false
     }
 
     private func CurrentNominalDeclForUsage(target: Decl): Option<Decl> {
@@ -1173,25 +1141,6 @@ public class InitializationChecker {
             if (targetOuter.IsNominalDecl()) {
                 return targetOuter
             }
-        }
-        return None
-    }
-
-    private func GetOwningFuncBodyForScope(scopeName: String): Option<FuncBody> {
-        var idx = currentFuncBodies.size - 1
-        while (idx >= 0) {
-            let body = currentFuncBodies[idx]
-            // A func body's scope name is a scope-gate name ("<path>_<gate>"); locals declared
-            // directly inside the body carry the gate's *path* as their scope-name prefix. Compare
-            // against that path (mirroring the upward FUNC_LIKE scope walk of
-            // GetCurSymbolByKindCached in InitializationChecker.cpp:340) so a body containing the
-            // target's declaration scope is recognised. The gate-suffixed name itself never prefixes
-            // a child scope, so the previous comparison missed every local variable.
-            let bodyScopePath = ScopePathBeforeGate(FuncBodyScopeName(body))
-            if (!bodyScopePath.isEmpty() && ScopeContains(bodyScopePath, scopeName)) {
-                return body
-            }
-            idx--
         }
         return None
     }

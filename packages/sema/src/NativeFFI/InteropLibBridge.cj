@@ -152,32 +152,6 @@ public class MemberJNISignature {
     }
 }
 
-private func GetJavaEntityIsNullCall(entityDecl: StructDecl): Option<PropDecl> {
-    for (member in entityDecl.GetMemberDecls()) {
-        if (let Some(propDecl) <- (member as PropDecl)) {
-            if (propDecl.identifier == "isNull") {
-                return Some(propDecl)
-            }
-        }
-    }
-    return None
-}
-
-private func CreateJavaEntityIsNullExpr(entity: Expr, entityDecl: StructDecl): Option<Expr> {
-    let isNullProp = GetJavaEntityIsNullCall(entityDecl)
-    if (let None <- isNullProp) {
-        return None
-    }
-    CJC_ASSERT_WITH_MSG(!isNullProp.getOrThrow().getters.isEmpty(), "getters cannot be empty")
-    let getter = isNullProp.getOrThrow().getters[0]
-    let access = CreateMemberAccess(entity, getter)
-    CopyBasicInfo(access.baseExpr.getOrThrow(), access)
-    let call = CreateCallExpr(access, ArrayList<FuncArg>(), Some(getter),
-        isNullProp.getOrThrow().GetTy().getOrThrow(), CallKind.CALL_DECLARED_FUNCTION)
-    CopyBasicInfo(call.baseFunc.getOrThrow(), call)
-    return Some(call)
-}
-
 private func IsWrappingConstructorOfJavaImpl(refWrapperMember: Decl): Bool {
     if (!refWrapperMember.TestAttr(Attribute.CONSTRUCTOR) ||
         !refWrapperMember.TestAttr(Attribute.COMPILER_ADD)) {
@@ -1141,7 +1115,7 @@ public class InteropLibBridge {
         return CreateJavaEntityCall(cjExpr)
     }
 
-    public func SelectEntityWrapperByTypeKind(kind: TypeKind, ty: Ty,
+    public func SelectEntityWrapperByTypeKind(_: TypeKind, ty: Ty,
         param: FuncParam, file: Option<File>): Expr {
         let paramRef = CreateRefExpr(param)
         paramRef.curFile = file
@@ -1789,12 +1763,12 @@ public class InteropLibBridge {
         return FuncDecl()
     }
 
-    public func SelectJSigByTypeKind(kind: TypeKind, ty: Ty): Expr {
+    public func SelectJSigByTypeKind(_: TypeKind, ty: Ty): Expr {
         return CreateLitConstExpr(LitConstKind.STRING, utils.GetJavaTypeSignature(ty),
             utils.GetStringDecl().GetTy().getOrThrow())
     }
 
-    public func SelectJPrimitiveNameByTypeKind(kind: TypeKind, ty: Ty): Expr {
+    public func SelectJPrimitiveNameByTypeKind(kind: TypeKind, _: Ty): Expr {
         let typeName = match (kind) {
             case TypeKind.TYPE_INT8 => INTEROPLIB_JAVA_ENTITY_KIND_JBYTE
             case TypeKind.TYPE_INT16 => INTEROPLIB_JAVA_ENTITY_KIND_JSHORT
@@ -1839,7 +1813,7 @@ public class InteropLibBridge {
         return None
     }
 
-    public func SelectEntityUnwrapperByTypeKind(kind: TypeKind, ty: Ty,
+    public func SelectEntityUnwrapperByTypeKind(_: TypeKind, ty: Ty,
         entity: Expr, mirror: ClassLikeDecl): Expr {
         let clonedEntity = (ASTCloner.Clone(entity) as Expr).getOrThrow()
         clonedEntity.curFile = entity.curFile

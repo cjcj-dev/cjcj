@@ -445,7 +445,7 @@ private func InitByteArrayData(irBuilder: IRBuilder2, arrPtr: LLVMValueRef, arra
 }
 
 private func InitArrayDataUG(irBuilder: IRBuilder2, arrPtr: LLVMValueRef, arrayLen: LLVMValueRef,
-    value: LLVMValueRef, arrayType: LLVMTypeRef, arrTy: RawArrayType): Unit {
+    value: LLVMValueRef, _: LLVMTypeRef, arrTy: RawArrayType): Unit {
     let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>([GenNameForBB("arr.init.start"),
         GenNameForBB("arr.init.body"), GenNameForBB("arr.init.end")]))
     CJC_ASSERT(blocks.size >= 3)
@@ -1779,6 +1779,7 @@ public class IRBuilder2 <: Resource {
 
     public func CreateMemSet(pointer: LLVMValueRef, value: LLVMValueRef, len: LLVMValueRef,
         align!: UInt32 = 0u32): LLVMValueRef {
+        let _ = align
         return unsafe { LLVMBuildMemSet(builder.raw, pointer, value, len, GetAddressAlignment(pointer)) }
     }
 
@@ -1788,7 +1789,7 @@ public class IRBuilder2 <: Resource {
             src, GetAddressAlignment(src), size) }
     }
 
-    public func CreateMemMove(dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef, srcAlign: UInt32,
+    public func CreateMemMove(dest: LLVMValueRef, _: UInt32, src: LLVMValueRef, _: UInt32,
         size: LLVMValueRef): LLVMValueRef {
         return unsafe { LLVMBuildMemMove(builder.raw, dest, GetAddressAlignment(dest),
             src, GetAddressAlignment(src), size) }
@@ -2931,14 +2932,6 @@ public class IRBuilder2 <: Resource {
 
     private func StoreAggregateArgToSlot(raw: LLVMValueRef, slot: LLVMValueRef): LLVMValueRef {
         return CreateStore(raw, slot)
-    }
-
-    private func IsRefStructParam(paramTy: Type): Bool {
-        if (!paramTy.IsRef()) {
-            return false
-        }
-        let derefTy = paramTy.StripAllRefs()
-        return derefTy.IsStruct() || derefTy.IsTuple()
     }
 
     private func CreateOuterTypeInfoArg(thisArg: CGValue): Option<LLVMValueRef> {
@@ -7170,7 +7163,7 @@ private func CreateImplicitUsedFuncCall(irBuilder: IRBuilder2, funcMangledName: 
     return irBuilder.CreateCallOrInvoke(implicitImportedFunc.GetRawFunction(), args)
 }
 
-private func CreateExceptionAndThrow(irBuilder: IRBuilder2, exceptionClassName: String,
+private func CreateExceptionAndThrow(irBuilder: IRBuilder2, _: String,
     exceptionInitFuncName: String): Unit {
     let exceptionClassType = GetTypeDefFromImplicitUsedFuncParam(
         irBuilder.GetCGModule(), exceptionInitFuncName, 0)

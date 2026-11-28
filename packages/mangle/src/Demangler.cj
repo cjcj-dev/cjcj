@@ -30,8 +30,6 @@ private let MANGLE_GLOBAL_LITERAL_IMPORTS_INIT: String = "flHv"
 private let MANGLE_INNER_FUNCTION_PREFIX: String = "$lambda."
 private let MANGLE_CFUNCTION_WRAPPER: String = "$real"
 private let MANGLE_WRAPPED_FUNCTION_PREFIX: String = "_CV"
-private let BOX_DECL_PREFIX: String = "$BOX_"
-private let CJ_FILE_EXT: String = ".cj"
 private let ERROR_EXCEED_THE_INPUT_STRING_LENGTH: String = "exceed the input string length"
 private let MANGLE_TUPLE_STR: String = "Tuple"
 private let MANGLE_ARRAY_STR: String = "RawArray"
@@ -217,12 +215,6 @@ class DemangleInfo {
         this.`type` = kind
         this.demangled = name
         this.isValid = pIsValid
-    }
-
-    private func MatchSuffix(pattern: String, len: Int64): Bool {
-        let index = if (demangled.size > len) { demangled.size - len } else { 0 }
-        let suffix = demangled[index..demangled.size]
-        return suffix == pattern
     }
 
     func GetFullName(scopeRes: String): String {
@@ -493,11 +485,7 @@ class Demangler {
         return false
     }
 
-    private func IsDecl(): Bool {
-        return MatchForward(MANGLE_NESTED_PREFIX, MANGLE_NESTED_PREFIX.size)
-    }
-
-    private func ErrorLog(msg: String): Unit {}
+    private func ErrorLog(_: String): Unit {}
 
     private func MatchForward(pattern: String, len: Int64): Bool {
         if (currentIndex >= mangledName.size) {
@@ -604,20 +592,6 @@ class Demangler {
         return di
     }
 
-    func DemangleClassType(): String {
-        return DemangleClass(DemanglerTypeKind.CLASS).GetIdentifier()
-    }
-
-    func DemangleQualifiedName(): String {
-        let info = Demangle(isType: true)
-        let pkgName = info.GetPkgName()
-        let clsName = info.GetIdentifier()
-        if (pkgName.isEmpty()) {
-            return clsName
-        }
-        return pkgName + "." + clsName
-    }
-
     func Demangle(isType!: Bool = false): DemangleInfo {
         if (isType) {
             if (!IsQualifiedType()) {
@@ -711,26 +685,6 @@ class Demangler {
         }
         currentIndex += MANGLE_SPECIAL_NAME_LEN
         return `prop`
-    }
-
-    private func SkipPrivateTopLevelDeclHash(): Unit {
-        if (currentIndex >= mangledName.size || !IsCurrentCharDigit(mangledName[currentIndex]) ||
-            mangledName[currentIndex] == b'0') {
-            return
-        }
-        let oldIdx = currentIndex
-        let hashLen = DemangleLength()
-        if (currentIndex + hashLen >= mangledName.size || mangledName[currentIndex] != b'$') {
-            currentIndex = oldIdx
-            return
-        }
-        let isBoxedDecl = (mangledName.indexOf(BOX_DECL_PREFIX, currentIndex) ?? -1) == currentIndex &&
-            !EndsWith(mangledName[currentIndex..currentIndex + hashLen], CJ_FILE_EXT)
-        if (isBoxedDecl) {
-            currentIndex = oldIdx
-            return
-        }
-        currentIndex += hashLen
     }
 
     private func DemangleManglingNumber(): Int64 {
@@ -1280,10 +1234,6 @@ class Demangler {
         isValid = false
         currentIndex = mangledName.size
         return dumpDi
-    }
-
-    private func DemangleNextUnit(): DemangleInfo {
-        return DemangleNextUnit("")
     }
 
     private func DemangleNextUnit(message: String): DemangleInfo {

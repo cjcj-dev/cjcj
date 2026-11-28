@@ -27,12 +27,6 @@ private func StringDiagArgs(values: Array<String>): Array<BasicDiagArgument> {
     return args.toArray()
 }
 
-private func DiagOldStrings(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind,
-    values: Array<String>): Unit {
-    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-    let _ = diag.Diagnose(ToBasicPosition(node.begin), ToBasicPosition(node.end), kind, args: StringDiagArgs(values))
-}
-
 private func InvalidExprTy(expr: Expr): Ty {
     let invalidTy = TypeManager.GetInvalidTy()
     expr.SetTy(invalidTy)
@@ -225,33 +219,6 @@ private func DesugarArrayCall(typeManager: TypeManager, ctx: Option<ASTContext>,
     arrayExpr.rightParenPos = ce.rightParenPos
     ce.desugarExpr = arrayExpr
     AddCurFile(ce, file: ce.curFile)
-}
-
-private func IsCollectionInterfaceTy(ty: Ty): Bool {
-    if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
-        if (interfaceTy.typeArgs.size != 1) {
-            return false
-        }
-        if (interfaceTy.name == "Collection") {
-            return true
-        }
-        if (let Some(decl) <- interfaceTy.declPtr) {
-            return decl.identifier.Val() == "Collection" || decl.identifier.GetRawText() == "Collection"
-        }
-    }
-    return false
-}
-
-private func CollectionElementTy(typeManager: TypeManager, ty: Ty): Option<Ty> {
-    if (IsCollectionInterfaceTy(ty)) {
-        return Some(ty.typeArgs[0])
-    }
-    for (superTy in typeManager.GetAllSuperTys(ty).values) {
-        if (IsCollectionInterfaceTy(superTy)) {
-            return Some(superTy.typeArgs[0])
-        }
-    }
-    return None
 }
 
 internal func IsBuiltinTypeAlias(decl: Decl, kind: TypeKind): Bool {

@@ -2,7 +2,6 @@ package cjcj::sema.TypeCheckExpr
 
 import cjcj::ast.*
 import cjcj::basic.DiagKind as BasicDiagKind
-import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::sema.*
 
 private func invalidTypeConvExpr(tce: TypeConvExpr): Ty {

@@ -426,11 +426,6 @@ func CreateGetElementByName(builder: FlatBufferBuilder, base: FlatBufferOffset, 
     return tableBuilder.Finish()
 }
 
-func CreateGetElementByNameDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, fieldNames: Option<ArrayList<FlatBufferOffset>>): FlatBufferOffset {
-    let fieldNamesOffset = if (let Some(value) <- fieldNames) { builder.CreateVectorOffsets(value) } else { 0u32 }
-    return CreateGetElementByName(builder, base, fieldNamesOffset)
-}
-
 class StoreElementRefBuilder {
     private let builder: FlatBufferBuilder
 
@@ -490,11 +485,6 @@ func CreateStoreElementByName(builder: FlatBufferBuilder, base: FlatBufferOffset
     tableBuilder.add_fieldNames(fieldNames)
     tableBuilder.add_base(base)
     return tableBuilder.Finish()
-}
-
-func CreateStoreElementByNameDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, fieldNames: Option<ArrayList<FlatBufferOffset>>): FlatBufferOffset {
-    let fieldNamesOffset = if (let Some(value) <- fieldNames) { builder.CreateVectorOffsets(value) } else { 0u32 }
-    return CreateStoreElementByName(builder, base, fieldNamesOffset)
 }
 
 class InstanceOfBuilder {
@@ -584,11 +574,6 @@ func CreateFieldByName(builder: FlatBufferBuilder, base: FlatBufferOffset, field
     tableBuilder.add_fieldNames(fieldNames)
     tableBuilder.add_base(base)
     return tableBuilder.Finish()
-}
-
-func CreateFieldByNameDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, fieldNames: Option<ArrayList<FlatBufferOffset>>): FlatBufferOffset {
-    let fieldNamesOffset = if (let Some(value) <- fieldNames) { builder.CreateVectorOffsets(value) } else { 0u32 }
-    return CreateFieldByName(builder, base, fieldNamesOffset)
 }
 
 class RawArrayAllocateBaseBuilder {

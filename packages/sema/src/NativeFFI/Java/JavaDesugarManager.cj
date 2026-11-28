@@ -6,9 +6,9 @@ import cjcj::basic.DiagnosticEngine
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.MaybeString
-import cjcj::sema.{GenerateGetTypeForTypeParamIntrinsic, MemberMap, TypeManager}
+import cjcj::sema.{GenerateGetTypeForTypeParamIntrinsic, TypeManager}
 import cjcj::sema.NativeFFI.{CreateSuperCall, GetCangjieLibName, GetJavaMirrorWrappingConstructor, GetJavaRefField,
-    InteropLibBridge, IsJArray, Utils, WithinFile, WrapReturningLambdaCall}
+    InteropLibBridge, IsJArray, Utils, WithinFile}
 import cjcj::utils.JAVA_REF_GETTER_FUNC_NAME
 
 public class JavaDesugarManager {

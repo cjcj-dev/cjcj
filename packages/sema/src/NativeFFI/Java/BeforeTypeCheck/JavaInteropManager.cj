@@ -40,7 +40,7 @@ public class PreTypeCheckContext {
 // C++ src/Sema/NativeFFI/Java/BeforeTypeCheck/JavaInteropManager.h:40-48 and
 // JavaInteropManager.cpp:19-23.
 public interface PreTypeCheckStage {
-    public operator func ()(ctx: PreTypeCheckContext): Unit {
+    operator func ()(ctx: PreTypeCheckContext): Unit {
         Process(ctx)
         ctx.FlushGeneratedDecls()
     }

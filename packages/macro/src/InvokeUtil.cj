@@ -1175,17 +1175,6 @@ public class RuntimeInit {
         }
     }
 
-    private func CloseMacroDynamicLibrary(): Unit {
-        // Reverse load order: dependencies remain available until their users close.
-        while (!openedLibHandles.isEmpty()) {
-            let opened = openedLibHandles[openedLibHandles.size - 1]
-            if (CloseSymbolTable(opened) != 0) {
-                Errorln("close macro related dynamic library failed: ")
-                return
-            }
-            openedLibHandles.remove(at: openedLibHandles.size - 1)
-        }
-    }
 }
 
 public class MacroProcMsger {

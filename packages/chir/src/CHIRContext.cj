@@ -123,7 +123,6 @@ public class CHIRContext {
             }
             return ty
         }
-        throw IllegalStateException("unreachable CHIRContext.GetType")
     }
 
     public func MergeTypes(): Unit {

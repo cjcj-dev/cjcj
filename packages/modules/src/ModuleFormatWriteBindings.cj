@@ -3,7 +3,7 @@ package cjcj::modules
 import std.collection.ArrayList
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
 
-// FlatBuffers write (create) bindings for the 58 tables of ModuleFormat.fbs.
+// FlatBuffers write bindings used by ModuleFormat.fbs producers and tests.
 // Each CreateX mirrors the generated CreateX: it opens a table with the exact
 // field count, slots each field at its generated field index ((VT-4)/2), and
 // applies the schema default so unset fields are elided. Struct fields take the
@@ -21,208 +21,12 @@ public func CreateFullId(builder: FlatBufferBuilder, pkgId: Int64, decl: FlatBuf
     return builder.EndTable()
 }
 
-// ModuleFormat_generated.h:2124-2138 (CreateConstraint).
-func CreateConstraint(builder: FlatBufferBuilder, begin: ArrayList<UInt8>, end: ArrayList<UInt8>, ty: UInt32,
-    uppers: FlatBufferOffset, isImplicitlyIntroduced: Bool): FlatBufferOffset {
-    builder.StartTable(5)
-    builder.AddBool(4, isImplicitlyIntroduced, defaultValue: false)
-    builder.AddOffset(3, uppers)
-    builder.AddU32(2, ty, defaultValue: 0u32)
-    builder.AddStruct(1, end, 4)
-    builder.AddStruct(0, begin, 4)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h:2201-2209 (CreateGeneric).
-func CreateGeneric(builder: FlatBufferBuilder, typeParameters: FlatBufferOffset, constraints: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(2)
-    builder.AddOffset(1, constraints)
-    builder.AddOffset(0, typeParameters)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateFuncParamList).
-func CreateFuncParamList(builder: FlatBufferBuilder, params: FlatBufferOffset, desugars: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(2)
-    builder.AddOffset(1, desugars)
-    builder.AddOffset(0, params)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateFuncBody).
-func CreateFuncBody(builder: FlatBufferBuilder, paramLists: FlatBufferOffset, retType: UInt32, body: UInt32,
-    always: Bool, captureKind: UInt8): FlatBufferOffset {
-    builder.StartTable(5)
-    builder.AddU8(4, captureKind, defaultValue: 0u8)
-    builder.AddBool(3, always, defaultValue: false)
-    builder.AddU32(2, body, defaultValue: 0u32)
-    builder.AddU32(1, retType, defaultValue: 0u32)
-    builder.AddOffset(0, paramLists)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateArrayValue). val is [ConstValue].
-func CreateArrayValue(builder: FlatBufferBuilder, valType: FlatBufferOffset, val: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(2)
-    builder.AddOffset(1, val)
-    builder.AddOffset(0, valType)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h:2605-2617 (CreateMemberValue). value is ConstValue union.
-func CreateMemberValue(builder: FlatBufferBuilder, field: FlatBufferOffset, ty: UInt32, valueType: UInt8,
-    value: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(4)
-    builder.AddOffset(3, value)
-    builder.AddU32(1, ty, defaultValue: 0u32)
-    builder.AddOffset(0, field)
-    builder.AddU8(2, valueType, defaultValue: 0u8)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateCompositeValue).
-func CreateCompositeValue(builder: FlatBufferBuilder, ty: UInt32, fields: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(2)
-    builder.AddOffset(1, fields)
-    builder.AddU32(0, ty, defaultValue: 0u32)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateAutoDiffInfo).
-func CreateAutoDiffInfo(builder: FlatBufferBuilder, isDiff: Bool, isAdj: Bool, primal: FlatBufferOffset,
-    excepts: FlatBufferOffset, includes: FlatBufferOffset, stage: UInt64): FlatBufferOffset {
-    builder.StartTable(6)
-    builder.AddU64(5, stage, defaultValue: 0u64)
-    builder.AddOffset(4, includes)
-    builder.AddOffset(3, excepts)
-    builder.AddOffset(2, primal)
-    builder.AddBool(1, isAdj, defaultValue: false)
-    builder.AddBool(0, isDiff, defaultValue: false)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateClassInfo).
-func CreateClassInfo(builder: FlatBufferBuilder, inheritedTypes: FlatBufferOffset, body: FlatBufferOffset,
-    adInfo: FlatBufferOffset, isAnno: Bool, annoTargets: UInt8, runtimeVisible: Bool, annoTargets2: UInt8): FlatBufferOffset {
-    builder.StartTable(7)
-    builder.AddU8(6, annoTargets2, defaultValue: 0u8)
-    builder.AddBool(5, runtimeVisible, defaultValue: false)
-    builder.AddU8(4, annoTargets, defaultValue: 0u8)
-    builder.AddBool(3, isAnno, defaultValue: false)
-    builder.AddOffset(2, adInfo)
-    builder.AddOffset(1, body)
-    builder.AddOffset(0, inheritedTypes)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateInterfaceInfo).
-func CreateInterfaceInfo(builder: FlatBufferBuilder, inheritedTypes: FlatBufferOffset, body: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(2)
-    builder.AddOffset(1, body)
-    builder.AddOffset(0, inheritedTypes)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateStructInfo).
-func CreateStructInfo(builder: FlatBufferBuilder, inheritedTypes: FlatBufferOffset, body: FlatBufferOffset,
-    adInfo: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(3)
-    builder.AddOffset(2, adInfo)
-    builder.AddOffset(1, body)
-    builder.AddOffset(0, inheritedTypes)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateEnumInfo).
-func CreateEnumInfo(builder: FlatBufferBuilder, inheritedTypes: FlatBufferOffset, body: FlatBufferOffset,
-    adInfo: FlatBufferOffset, hasArguments: Bool, nonExhaustive: Bool, ellipsisPos: ArrayList<UInt8>): FlatBufferOffset {
-    builder.StartTable(6)
-    builder.AddStruct(5, ellipsisPos, 4)
-    builder.AddBool(4, nonExhaustive, defaultValue: false)
-    builder.AddBool(3, hasArguments, defaultValue: false)
-    builder.AddOffset(2, adInfo)
-    builder.AddOffset(1, body)
-    builder.AddOffset(0, inheritedTypes)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateExtendInfo).
-func CreateExtendInfo(builder: FlatBufferBuilder, inheritedTypes: FlatBufferOffset, body: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(2)
-    builder.AddOffset(1, body)
-    builder.AddOffset(0, inheritedTypes)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateVarInfo). value is ConstValue union.
-func CreateVarInfo(builder: FlatBufferBuilder, isVar: Bool, isConst: Bool, isMemberParam: Bool, initializer: UInt32,
-    valueType: UInt8, value: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(6)
-    builder.AddOffset(5, value)
-    builder.AddU32(3, initializer, defaultValue: 0u32)
-    builder.AddBool(2, isMemberParam, defaultValue: false)
-    builder.AddBool(1, isConst, defaultValue: false)
-    builder.AddBool(0, isVar, defaultValue: false)
-    builder.AddU8(4, valueType, defaultValue: 0u8)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateVarWithPatternInfo).
-func CreateVarWithPatternInfo(builder: FlatBufferBuilder, isVar: Bool, isConst: Bool, irrefutablePattern: FlatBufferOffset,
-    initializer: UInt32): FlatBufferOffset {
-    builder.StartTable(4)
-    builder.AddU32(3, initializer, defaultValue: 0u32)
-    builder.AddOffset(2, irrefutablePattern)
-    builder.AddBool(1, isConst, defaultValue: false)
-    builder.AddBool(0, isVar, defaultValue: false)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateFuncInfo). op default OperatorKind.NA.
-func CreateFuncInfo(builder: FlatBufferBuilder, funcBody: FlatBufferOffset, overflowPolicy: UInt8, op: UInt8,
-    adInfo: FlatBufferOffset, isConst: Bool, isInline: Bool, isFastNative: Bool): FlatBufferOffset {
-    builder.StartTable(7)
-    builder.AddBool(6, isFastNative, defaultValue: false)
-    builder.AddBool(5, isInline, defaultValue: false)
-    builder.AddBool(4, isConst, defaultValue: false)
-    builder.AddOffset(3, adInfo)
-    builder.AddOffset(0, funcBody)
-    builder.AddU8(1, overflowPolicy, defaultValue: 0u8)
-    builder.AddU8(2, op, defaultValue: MF_OPERATOR_KIND_NA)
-    return builder.EndTable()
-}
-
 // ModuleFormat_generated.h (CreateParamInfo).
 public func CreateParamInfo(builder: FlatBufferBuilder, isNamedParam: Bool, isMemberParam: Bool, defaultVal: UInt32): FlatBufferOffset {
     builder.StartTable(3)
     builder.AddU32(2, defaultVal, defaultValue: 0u32)
     builder.AddBool(1, isMemberParam, defaultValue: false)
     builder.AddBool(0, isNamedParam, defaultValue: false)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreatePropInfo).
-func CreatePropInfo(builder: FlatBufferBuilder, isConst: Bool, isMutable: Bool, setters: FlatBufferOffset,
-    getters: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(4)
-    builder.AddOffset(3, getters)
-    builder.AddOffset(2, setters)
-    builder.AddBool(1, isMutable, defaultValue: false)
-    builder.AddBool(0, isConst, defaultValue: false)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateBuiltInInfo).
-func CreateBuiltInInfo(builder: FlatBufferBuilder, builtInType: UInt8): FlatBufferOffset {
-    builder.StartTable(1)
-    builder.AddU8(0, builtInType, defaultValue: 0u8)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateAliasInfo).
-func CreateAliasInfo(builder: FlatBufferBuilder, aliasedTy: UInt32): FlatBufferOffset {
-    builder.StartTable(1)
-    builder.AddU32(0, aliasedTy, defaultValue: 0u32)
     return builder.EndTable()
 }
 
@@ -254,25 +58,6 @@ public func CreateDecl(builder: FlatBufferBuilder, kind: UInt16, isTopLevel: Boo
     builder.AddU16(0, kind, defaultValue: 0u16)
     builder.AddBool(1, isTopLevel, defaultValue: false)
     builder.AddU8(16, infoType, defaultValue: 0u8)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateAnno).
-func CreateAnno(builder: FlatBufferBuilder, kind: UInt16, identifier: FlatBufferOffset, args: FlatBufferOffset,
-    target: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(4)
-    builder.AddOffset(3, target)
-    builder.AddOffset(2, args)
-    builder.AddOffset(1, identifier)
-    builder.AddU16(0, kind, defaultValue: 0u16)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateAnnoArg).
-func CreateAnnoArg(builder: FlatBufferBuilder, name: FlatBufferOffset, expr: UInt32): FlatBufferOffset {
-    builder.StartTable(2)
-    builder.AddU32(1, expr, defaultValue: 0u32)
-    builder.AddOffset(0, name)
     return builder.EndTable()
 }
 
@@ -473,29 +258,6 @@ public func CreateFuncTyInfo(builder: FlatBufferBuilder, retType: UInt32, isC: B
     return builder.EndTable()
 }
 
-// ModuleFormat_generated.h (CreateCompositeTyInfo).
-func CreateCompositeTyInfo(builder: FlatBufferBuilder, declPtr: FlatBufferOffset, isThisTy: Bool): FlatBufferOffset {
-    builder.StartTable(2)
-    builder.AddOffset(0, declPtr)
-    builder.AddBool(1, isThisTy, defaultValue: false)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateGenericTyInfo).
-func CreateGenericTyInfo(builder: FlatBufferBuilder, declPtr: FlatBufferOffset, upperBounds: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(2)
-    builder.AddOffset(1, upperBounds)
-    builder.AddOffset(0, declPtr)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateArrayTyInfo).
-func CreateArrayTyInfo(builder: FlatBufferBuilder, dimsOrSize: Int64): FlatBufferOffset {
-    builder.StartTable(1)
-    builder.AddI64(0, dimsOrSize, defaultValue: 0)
-    return builder.EndTable()
-}
-
 // ModuleFormat_generated.h (CreateSemaTy). kind default TypeKind.Unit(1). info is SemaTyInfo union.
 public func CreateSemaTy(builder: FlatBufferBuilder, kind: UInt16, typeArgs: FlatBufferOffset, infoType: UInt8,
     info: FlatBufferOffset): FlatBufferOffset {
@@ -523,13 +285,6 @@ func CreateImportSpec(builder: FlatBufferBuilder, begin: ArrayList<UInt8>, end: 
     builder.AddBool(7, hasDoubleColon, defaultValue: false)
     builder.AddBool(6, isDecl, defaultValue: false)
     builder.AddU8(5, reExport, defaultValue: MF_ACCESS_MODIFIER_PRIVATE)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreateImports).
-func CreateImports(builder: FlatBufferBuilder, importSpecs: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(1)
-    builder.AddOffset(0, importSpecs)
     return builder.EndTable()
 }
 
@@ -565,82 +320,7 @@ public func CreateFileInfo(builder: FlatBufferBuilder, fileID: UInt32, begin: Ar
     return builder.EndTable()
 }
 
-// ModuleFormat_generated.h (CreateCompilationOptions).
-func CreateCompilationOptions(builder: FlatBufferBuilder, optimizationLevel: UInt8, debug: Bool): FlatBufferOffset {
-    builder.StartTable(2)
-    builder.AddBool(1, debug, defaultValue: false)
-    builder.AddU8(0, optimizationLevel, defaultValue: 0u8)
-    return builder.EndTable()
-}
-
-// ModuleFormat_generated.h (CreatePackage). kind default PackageKind.Normal;
-// access default AccessLevel.Public.
-func CreatePackage(builder: FlatBufferBuilder, version: FlatBufferOffset, cjoVersion: ArrayList<UInt8>,
-    fullPkgName: FlatBufferOffset, pkgDepInfo: FlatBufferOffset, imports: FlatBufferOffset, allFiles: FlatBufferOffset,
-    allFileImports: FlatBufferOffset, allTypes: FlatBufferOffset, allDecls: FlatBufferOffset, allExprs: FlatBufferOffset,
-    allValues: FlatBufferOffset, kind: UInt8, access: UInt8, moduleName: FlatBufferOffset, allFileInfo: FlatBufferOffset,
-    allDependentStdPkgs: FlatBufferOffset, options: FlatBufferOffset): FlatBufferOffset {
-    builder.StartTable(17)
-    builder.AddOffset(16, options)
-    builder.AddOffset(15, allDependentStdPkgs)
-    builder.AddOffset(14, allFileInfo)
-    builder.AddOffset(13, moduleName)
-    builder.AddOffset(10, allValues)
-    builder.AddOffset(9, allExprs)
-    builder.AddOffset(8, allDecls)
-    builder.AddOffset(7, allTypes)
-    builder.AddOffset(6, allFileImports)
-    builder.AddOffset(5, allFiles)
-    builder.AddOffset(4, imports)
-    builder.AddOffset(3, pkgDepInfo)
-    builder.AddOffset(2, fullPkgName)
-    builder.AddStruct(1, cjoVersion, 1)
-    builder.AddOffset(0, version)
-    builder.AddU8(11, kind, defaultValue: MF_PACKAGE_KIND_NORMAL)
-    builder.AddU8(12, access, defaultValue: MF_ACCESS_LEVEL_PUBLIC)
-    return builder.EndTable()
-}
-
 // Finish the buffer with the "CJOF" file identifier. ModuleFormat_generated.h:6706-6715
 // (FinishPackageBuffer). Returns the serialized byte image.
-func FinishPackageBuffer(builder: FlatBufferBuilder, root: FlatBufferOffset): Array<UInt8> {
-    builder.Finish(root, MF_FILE_IDENTIFIER)
-    return builder.GetBufferArray()
-}
-
 // ConstValue union struct-member writers: a struct member is stored by offset,
 // so the struct is written standalone and its offset used as the union value.
-// ModuleFormat_generated.h:1767-1952 struct sizes/aligns.
-func CreateConstValueInt8(builder: FlatBufferBuilder, val: Int8): FlatBufferOffset {
-    return builder.CreateStructBytes(PackInt8Value(val), 1)
-}
-func CreateConstValueUInt8(builder: FlatBufferBuilder, val: UInt8): FlatBufferOffset {
-    return builder.CreateStructBytes(PackUInt8Value(val), 1)
-}
-func CreateConstValueInt16(builder: FlatBufferBuilder, val: Int16): FlatBufferOffset {
-    return builder.CreateStructBytes(PackInt16Value(val), 2)
-}
-func CreateConstValueUInt16(builder: FlatBufferBuilder, val: UInt16): FlatBufferOffset {
-    return builder.CreateStructBytes(PackUInt16Value(val), 2)
-}
-func CreateConstValueInt32(builder: FlatBufferBuilder, val: Int32): FlatBufferOffset {
-    return builder.CreateStructBytes(PackInt32Value(val), 4)
-}
-func CreateConstValueUInt32(builder: FlatBufferBuilder, val: UInt32): FlatBufferOffset {
-    return builder.CreateStructBytes(PackUInt32Value(val), 4)
-}
-func CreateConstValueInt64(builder: FlatBufferBuilder, val: Int64): FlatBufferOffset {
-    return builder.CreateStructBytes(PackInt64Value(val), 8)
-}
-func CreateConstValueUInt64(builder: FlatBufferBuilder, val: UInt64): FlatBufferOffset {
-    return builder.CreateStructBytes(PackUInt64Value(val), 8)
-}
-func CreateConstValueFloat32(builder: FlatBufferBuilder, val: Float32): FlatBufferOffset {
-    return builder.CreateStructBytes(PackFloat32Value(val), 4)
-}
-func CreateConstValueFloat64(builder: FlatBufferBuilder, val: Float64): FlatBufferOffset {
-    return builder.CreateStructBytes(PackFloat64Value(val), 8)
-}
-func CreateConstValueCompositeIndex(builder: FlatBufferBuilder, idx: UInt32): FlatBufferOffset {
-    return builder.CreateStructBytes(PackCompositeValueIndex(idx), 4)
-}

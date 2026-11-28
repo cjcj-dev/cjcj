@@ -392,11 +392,6 @@ class PackageFormat_MatchCaseId <: Table {
         return GetField(CHIRFB_MATCH_CASE_ID_VT_ID, -1)
     }
 
-    func Verify(verifier: VerifierTemplate): Bool {
-        return VerifyTableStart(verifier) &&
-            VerifyField<Int64>(verifier, CHIRFB_MATCH_CASE_ID_VT_ID, 8) &&
-            verifier.EndTable()
-    }
 }
 
 class PackageFormat_EnumCaseIndex <: Table {
@@ -702,14 +697,6 @@ class PackageFormat_CustomTypeDef <: Table {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_CUSTOM_TYPE_DEF_VT_BASE)) { Some(PackageFormat_Base(data, pointerPos)) } else { None }
     }
 
-    func GetKind(): UInt8 {
-        return GetField(CHIRFB_CUSTOM_TYPE_DEF_VT_KIND, 0u8)
-    }
-
-    func GetCustomTypeDefID(): UInt32 {
-        return GetField(CHIRFB_CUSTOM_TYPE_DEF_VT_CUSTOMTYPEDEFID, 0u32)
-    }
-
     func GetSrcCodeIdentifier(): Option<FlatBufferString> {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_CUSTOM_TYPE_DEF_VT_SRCCODEIDENTIFIER)) { Some(FlatBufferString(data, pointerPos)) } else { None }
     }
@@ -807,10 +794,6 @@ class PackageFormat_EnumCtorInfo <: Table {
 
     func GetFuncType(): UInt32 {
         return GetField(CHIRFB_ENUM_CTOR_INFO_VT_FUNCTYPE, 0u32)
-    }
-
-    func GetAnnoInfo(): Option<PackageFormat_AnnoInfo> {
-        return if (let Some(pointerPos) <- GetPointer(CHIRFB_ENUM_CTOR_INFO_VT_ANNOINFO)) { Some(PackageFormat_AnnoInfo(data, pointerPos)) } else { None }
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
@@ -930,10 +913,6 @@ class PackageFormat_ClassDef <: Table {
 
     func GetIsClass(): Bool {
         return GetField(CHIRFB_CLASS_DEF_VT_ISCLASS, false)
-    }
-
-    func GetIsAnnotation(): Bool {
-        return GetField(CHIRFB_CLASS_DEF_VT_ISANNOTATION, false)
     }
 
     func GetAnnotationTargets(): Option<Vector<UInt32>> {

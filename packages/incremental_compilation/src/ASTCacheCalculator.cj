@@ -214,13 +214,6 @@ public class ASTCacheCalculator {
         }
     }
 
-    private static func IsDirectExtend(decl: Decl): Bool {
-        if (decl.astKind != ASTKind.EXTEND_DECL) {
-            return false
-        }
-        return (decl as ExtendDecl).getOrThrow().inheritedTypes.isEmpty()
-    }
-
     private func PrevisitDirectExtendMember(decl: Decl): Unit {
         for (member in GetMembers(decl)) {
             PrevisitDirectExtendMember(member)

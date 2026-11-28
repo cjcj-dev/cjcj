@@ -32,8 +32,7 @@ import cjcj::mangle.MANGLE_NESTED_PREFIX
 import cjcj::mangle.MANGLE_SUFFIX
 import cjcj::option.OSType
 import cjcj::utils.CJC_ABORT
-import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, FileUtil, HashString64, REF_PACKAGE_NAME, STD_LIB_FUTURE,
-    STD_LIB_MONITOR, STD_LIB_MUTEX, STD_LIB_WAIT_QUEUE, STD_LIB_WEAK_REF, SYNC_PACKAGE_NAME}
+import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, FileUtil, HashString64, REF_PACKAGE_NAME, STD_LIB_FUTURE, STD_LIB_WAIT_QUEUE, STD_LIB_WEAK_REF, SYNC_PACKAGE_NAME}
 
 // Mirrors CodeGen/Utils/CGUtils.cpp:492-508.
 public func ClearOldIRDumpFiles(output: String, pkgName: String): Unit {

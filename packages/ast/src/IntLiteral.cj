@@ -333,32 +333,4 @@ public class IntLiteral {
         return if (IsUnsigned()) { "${uint64Val}" } else { "${int64Val}" }
     }
 
-    @OverflowWrapping
-    private func QuickPow(inBase: UInt64, inExp: UInt64, maxVal: UInt64, overflow: Box<Bool>): UInt64 {
-        var res = 1u64
-        var base = inBase
-        var exp = inExp
-        var ov = false
-        while (exp != 0u64 && !overflow.value) {
-            if ((exp & 1u64) != 0u64) {
-                if (ov || (base != 0u64 && (maxVal / base < res))) {
-                    overflow.value = true
-                }
-                res *= base
-            }
-            if (!ov && (base != 0u64 && (maxVal / base < base))) {
-                ov = true
-            }
-            base *= base
-            exp = exp >> 1
-        }
-        return res
-    }
-
-    private func GetAbsValue(): UInt64 {
-        if (int64Val == Int64.Min) {
-            return UInt64(int64Val)
-        }
-        return if (sign == 1) { uint64Val } else { UInt64(-int64Val) }
-    }
 }

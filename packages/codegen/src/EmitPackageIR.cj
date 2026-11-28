@@ -1,7 +1,7 @@
 package cjcj::codegen
 
 import std.collection.*
-import std.process.Process
+import std.env.getVariable
 import std.sort.*
 import cjcj::basic.CANGJIE_VERSION
 import cjcj::chir.Attribute
@@ -116,7 +116,7 @@ private func GenSubCHIRPackage(cgMod: CGModule): Unit {
 private func GenPackageEntryIR(cgMod: CGModule): Unit {
     let subCHIRPackage = cgMod.GetCGContext().GetSubCHIRPackage()
     if (!subCHIRPackage.mainModule) { return }
-    let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+    let trace = (getVariable("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
     let index = subCHIRPackage.subCHIRPackageIdx
     let worker = Thread.currentThread.id
     if (trace) { eprintln("CJCJ_MODULE_TASK begin phase=package module=${index} worker=${worker}") }
@@ -167,7 +167,7 @@ private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
 
 // Optional execution trace records the worker that actually runs each task, including width one.
 private func RunModuleGenerationTask(cgModule: CGModule, finalize: Bool): Unit {
-    let trace = (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
+    let trace = (getVariable("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1"
     let phase = if (finalize) { "finalize" } else { "definitions" }
     let index = cgModule.GetCGContext().GetSubCHIRPackage().subCHIRPackageIdx
     let worker = Thread.currentThread.id
@@ -189,7 +189,7 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
             ClearOldIRDumpFiles(options.output, cgPkgContext.GetCurrentPkgName())
         }
         let threadNum = GetModuleGenerationWidth(cgPkgContext)
-        if ((Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
+        if ((getVariable("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
             let width = if (IsModuleGenerationSerial(options)) { 1 } else { threadNum }
             eprintln("CJCJ_BACKEND_CONCURRENCY threadNum=${width} cgModules.size=${cgModules.size}")
         }

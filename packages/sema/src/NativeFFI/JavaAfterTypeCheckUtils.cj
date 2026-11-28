@@ -9,7 +9,6 @@ import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.*
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::mangle.BaseMangler
-import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.{GenerateTypeMapping, TypeManager}
 import cjcj::utils.*
 
@@ -34,14 +33,6 @@ public class Utils {
 
     public func GetOptionDecl(): EnumDecl {
         return FFIGetOptionDecl(importManager)
-    }
-
-    private func GetOptionSomeDecl(): Decl {
-        return FFIGetOptionSomeDecl(importManager)
-    }
-
-    private func GetOptionNoneDecl(): Decl {
-        return FFIGetOptionNoneDecl(importManager)
     }
 
     public func CreateOptionSomeRef(ty: Ty): Expr {

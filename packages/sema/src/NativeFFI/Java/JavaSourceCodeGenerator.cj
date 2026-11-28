@@ -295,16 +295,6 @@ public class JavaSourceCodeGenerator <: AbstractSourceCodeGenerator {
         })
     }
 
-    private func GenerateFuncParamClasses(paramLists: ArrayList<FuncParamList>): String {
-        if (!paramLists.isEmpty()) {
-            return Join<FuncParam>(paramLists[0].params, ",", { cur: FuncParam =>
-                CJC_ASSERT(cur.typeNode.isSome() && cur.GetTy().isSome())
-                MapCJTypeToJavaType(cur, imports, decl.fullPackageName, isNativeMethod: false) + ".class"
-            })
-        }
-        return ""
-    }
-
     private func GenerateConstructorDecl(funcDecl: FuncDecl, isForCangjie: Bool): String {
         var declaration = ""
         if (!isForCangjie && funcDecl.TestAttr(Attribute.PUBLIC)) {

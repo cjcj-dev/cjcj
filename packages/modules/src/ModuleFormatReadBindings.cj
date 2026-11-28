@@ -3,7 +3,7 @@ package cjcj::modules
 import cjcj::flatbuffers.{FlatBufferString, Offset, Table, Vector, VerifierTemplate}
 
 // FlatBuffers read/verify bindings for the 58 tables of ModuleFormat.fbs.
-// Each class mirrors the accessors and Verify() body of the matching struct in
+// The available accessors and verifiers mirror the corresponding structs in
 // ModuleFormat_generated.h. Struct fields use the readers in
 // ModuleFormatStructs.cj (size/align cited per struct: Position 20/4,
 // DeclHash 40/8). Vectors of offsets (tables/strings) surface as
@@ -110,10 +110,6 @@ public class PackageFormat_FuncBody <: Table {
         return if (let Some(p) <- GetPointer(MF_FUNC_BODY_VT_PARAMLISTS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
     public func GetRetType(): UInt32 { return GetField(MF_FUNC_BODY_VT_RETTYPE, 0u32) }
-    func GetBody(): UInt32 { return GetField(MF_FUNC_BODY_VT_BODY, 0u32) }
-    func GetAlways(): Bool { return GetField(MF_FUNC_BODY_VT_ALWAYS, false) }
-    func GetCaptureKind(): UInt8 { return GetField(MF_FUNC_BODY_VT_CAPTUREKIND, 0u8) }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_FUNC_BODY_VT_PARAMLISTS) &&
@@ -135,13 +131,6 @@ public class PackageFormat_FuncBody <: Table {
 class PackageFormat_ArrayValue <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetValType(): Option<Vector<UInt8>> {
-        return if (let Some(p) <- GetPointer(MF_ARRAY_VALUE_VT_VAL_TYPE)) { Some(Vector<UInt8>(data, p)) } else { None }
-    }
-    func GetVal(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_ARRAY_VALUE_VT_VAL)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_ARRAY_VALUE_VT_VAL_TYPE) &&
@@ -157,52 +146,8 @@ class PackageFormat_ArrayValue <: Table {
 class PackageFormat_MemberValue <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetField_(): Option<FlatBufferString> {
-        return if (let Some(p) <- GetPointer(MF_MEMBER_VALUE_VT_FIELD)) { Some(FlatBufferString(data, p)) } else { None }
-    }
-    func GetType(): UInt32 { return GetField(MF_MEMBER_VALUE_VT_TYPE, 0u32) }
     func GetValueType(): UInt8 { return GetField(MF_MEMBER_VALUE_VT_VALUE_TYPE, 0u8) }
     func GetValue(): Option<Int64> { return GetPointer(MF_MEMBER_VALUE_VT_VALUE) }
-
-    func GetValueAsInt8Value(): Option<PackageFormat_Int8Value> {
-        return if (GetValueType() == MF_CONST_VALUE_INT8_VALUE) { WrapInt8Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsUInt8Value(): Option<PackageFormat_UInt8Value> {
-        return if (GetValueType() == MF_CONST_VALUE_UINT8_VALUE) { WrapUInt8Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsInt16Value(): Option<PackageFormat_Int16Value> {
-        return if (GetValueType() == MF_CONST_VALUE_INT16_VALUE) { WrapInt16Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsUInt16Value(): Option<PackageFormat_UInt16Value> {
-        return if (GetValueType() == MF_CONST_VALUE_UINT16_VALUE) { WrapUInt16Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsInt32Value(): Option<PackageFormat_Int32Value> {
-        return if (GetValueType() == MF_CONST_VALUE_INT32_VALUE) { WrapInt32Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsUInt32Value(): Option<PackageFormat_UInt32Value> {
-        return if (GetValueType() == MF_CONST_VALUE_UINT32_VALUE) { WrapUInt32Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsInt64Value(): Option<PackageFormat_Int64Value> {
-        return if (GetValueType() == MF_CONST_VALUE_INT64_VALUE) { WrapInt64Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsUInt64Value(): Option<PackageFormat_UInt64Value> {
-        return if (GetValueType() == MF_CONST_VALUE_UINT64_VALUE) { WrapUInt64Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsFloat32Value(): Option<PackageFormat_Float32Value> {
-        return if (GetValueType() == MF_CONST_VALUE_FLOAT32_VALUE) { WrapFloat32Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsFloat64Value(): Option<PackageFormat_Float64Value> {
-        return if (GetValueType() == MF_CONST_VALUE_FLOAT64_VALUE) { WrapFloat64Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsArrayValue(): Option<PackageFormat_ArrayValue> {
-        return if (GetValueType() == MF_CONST_VALUE_ARRAY_VALUE) { WrapArrayValue(data, GetValue()) } else { None }
-    }
-    func GetValueAsStringValue(): Option<FlatBufferString> {
-        return if (GetValueType() == MF_CONST_VALUE_STRING_VALUE) { WrapFbString(data, GetValue()) } else { None }
-    }
-    func GetValueAsCompositeValue(): Option<PackageFormat_CompositeValueIndex> {
-        return if (GetValueType() == MF_CONST_VALUE_COMPOSITE_VALUE) { WrapCompositeValueIndex(data, GetValue()) } else { None }
-    }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -220,11 +165,6 @@ class PackageFormat_MemberValue <: Table {
 class PackageFormat_CompositeValue <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetType(): UInt32 { return GetField(MF_COMPOSITE_VALUE_VT_TYPE, 0u32) }
-    func GetFields(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_COMPOSITE_VALUE_VT_FIELDS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<UInt32>(verifier, MF_COMPOSITE_VALUE_VT_TYPE, 4) &&
@@ -239,19 +179,6 @@ class PackageFormat_CompositeValue <: Table {
 // ModuleFormat_generated.h:2698-2739 (AutoDiffInfo).
 class PackageFormat_AutoDiffInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-
-    func GetIsDiff(): Bool { return GetField(MF_AUTO_DIFF_INFO_VT_ISDIFF, false) }
-    func GetIsAdj(): Bool { return GetField(MF_AUTO_DIFF_INFO_VT_ISADJ, false) }
-    func GetPrimal(): Option<FlatBufferString> {
-        return if (let Some(p) <- GetPointer(MF_AUTO_DIFF_INFO_VT_PRIMAL)) { Some(FlatBufferString(data, p)) } else { None }
-    }
-    func GetExcepts(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_AUTO_DIFF_INFO_VT_EXCEPTS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
-    func GetIncludes(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_AUTO_DIFF_INFO_VT_INCLUDES)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
-    func GetStage(): UInt64 { return GetField(MF_AUTO_DIFF_INFO_VT_STAGE, 0u64) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -280,14 +207,8 @@ public class PackageFormat_ClassInfo <: Table {
     public func GetBody(): Option<Vector<UInt32>> {
         return if (let Some(p) <- GetPointer(MF_CLASS_INFO_VT_BODY)) { Some(Vector<UInt32>(data, p)) } else { None }
     }
-    func GetAdInfo(): Option<PackageFormat_AutoDiffInfo> {
-        return if (let Some(p) <- GetPointer(MF_CLASS_INFO_VT_ADINFO)) { Some(PackageFormat_AutoDiffInfo(data, p)) } else { None }
-    }
-    func GetIsAnno(): Bool { return GetField(MF_CLASS_INFO_VT_ISANNO, false) }
     public func GetAnnoTargets(): UInt8 { return GetField(MF_CLASS_INFO_VT_ANNOTARGETS, 0u8) }
     public func GetRuntimeVisible(): Bool { return GetField(MF_CLASS_INFO_VT_RUNTIMEVISIBLE, false) }
-    func GetAnnoTargets2(): UInt8 { return GetField(MF_CLASS_INFO_VT_ANNOTARGETS2, 0u8) }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_CLASS_INFO_VT_INHERITEDTYPES) &&
@@ -336,10 +257,6 @@ public class PackageFormat_StructInfo <: Table {
     public func GetBody(): Option<Vector<UInt32>> {
         return if (let Some(p) <- GetPointer(MF_STRUCT_INFO_VT_BODY)) { Some(Vector<UInt32>(data, p)) } else { None }
     }
-    func GetAdInfo(): Option<PackageFormat_AutoDiffInfo> {
-        return if (let Some(p) <- GetPointer(MF_STRUCT_INFO_VT_ADINFO)) { Some(PackageFormat_AutoDiffInfo(data, p)) } else { None }
-    }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_STRUCT_INFO_VT_INHERITEDTYPES) &&
@@ -363,15 +280,6 @@ public class PackageFormat_EnumInfo <: Table {
     public func GetBody(): Option<Vector<UInt32>> {
         return if (let Some(p) <- GetPointer(MF_ENUM_INFO_VT_BODY)) { Some(Vector<UInt32>(data, p)) } else { None }
     }
-    func GetAdInfo(): Option<PackageFormat_AutoDiffInfo> {
-        return if (let Some(p) <- GetPointer(MF_ENUM_INFO_VT_ADINFO)) { Some(PackageFormat_AutoDiffInfo(data, p)) } else { None }
-    }
-    func GetHasArguments(): Bool { return GetField(MF_ENUM_INFO_VT_HASARGUMENTS, false) }
-    func GetNonExhaustive(): Bool { return GetField(MF_ENUM_INFO_VT_NONEXHAUSTIVE, false) }
-    func GetEllipsisPos(): Option<PackageFormat_Position> {
-        return if (let Some(p) <- GetStruct(MF_ENUM_INFO_VT_ELLIPSISPOS)) { Some(PackageFormat_Position(data, p)) } else { None }
-    }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_ENUM_INFO_VT_INHERITEDTYPES) &&
@@ -413,52 +321,9 @@ public class PackageFormat_ExtendInfo <: Table {
 public class PackageFormat_VarInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetIsVar(): Bool { return GetField(MF_VAR_INFO_VT_ISVAR, false) }
-    func GetIsConst(): Bool { return GetField(MF_VAR_INFO_VT_ISCONST, false) }
-    func GetIsMemberParam(): Bool { return GetField(MF_VAR_INFO_VT_ISMEMBERPARAM, false) }
     public func GetInitializer(): UInt32 { return GetField(MF_VAR_INFO_VT_INITIALIZER, 0u32) }
     func GetValueType(): UInt8 { return GetField(MF_VAR_INFO_VT_VALUE_TYPE, 0u8) }
     func GetValue(): Option<Int64> { return GetPointer(MF_VAR_INFO_VT_VALUE) }
-
-    func GetValueAsInt8Value(): Option<PackageFormat_Int8Value> {
-        return if (GetValueType() == MF_CONST_VALUE_INT8_VALUE) { WrapInt8Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsUInt8Value(): Option<PackageFormat_UInt8Value> {
-        return if (GetValueType() == MF_CONST_VALUE_UINT8_VALUE) { WrapUInt8Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsInt16Value(): Option<PackageFormat_Int16Value> {
-        return if (GetValueType() == MF_CONST_VALUE_INT16_VALUE) { WrapInt16Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsUInt16Value(): Option<PackageFormat_UInt16Value> {
-        return if (GetValueType() == MF_CONST_VALUE_UINT16_VALUE) { WrapUInt16Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsInt32Value(): Option<PackageFormat_Int32Value> {
-        return if (GetValueType() == MF_CONST_VALUE_INT32_VALUE) { WrapInt32Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsUInt32Value(): Option<PackageFormat_UInt32Value> {
-        return if (GetValueType() == MF_CONST_VALUE_UINT32_VALUE) { WrapUInt32Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsInt64Value(): Option<PackageFormat_Int64Value> {
-        return if (GetValueType() == MF_CONST_VALUE_INT64_VALUE) { WrapInt64Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsUInt64Value(): Option<PackageFormat_UInt64Value> {
-        return if (GetValueType() == MF_CONST_VALUE_UINT64_VALUE) { WrapUInt64Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsFloat32Value(): Option<PackageFormat_Float32Value> {
-        return if (GetValueType() == MF_CONST_VALUE_FLOAT32_VALUE) { WrapFloat32Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsFloat64Value(): Option<PackageFormat_Float64Value> {
-        return if (GetValueType() == MF_CONST_VALUE_FLOAT64_VALUE) { WrapFloat64Value(data, GetValue()) } else { None }
-    }
-    func GetValueAsArrayValue(): Option<PackageFormat_ArrayValue> {
-        return if (GetValueType() == MF_CONST_VALUE_ARRAY_VALUE) { WrapArrayValue(data, GetValue()) } else { None }
-    }
-    func GetValueAsStringValue(): Option<FlatBufferString> {
-        return if (GetValueType() == MF_CONST_VALUE_STRING_VALUE) { WrapFbString(data, GetValue()) } else { None }
-    }
-    func GetValueAsCompositeValue(): Option<PackageFormat_CompositeValueIndex> {
-        return if (GetValueType() == MF_CONST_VALUE_COMPOSITE_VALUE) { WrapCompositeValueIndex(data, GetValue()) } else { None }
-    }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -478,8 +343,6 @@ public class PackageFormat_VarInfo <: Table {
 public class PackageFormat_VarWithPatternInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetIsVar(): Bool { return GetField(MF_VAR_WITH_PATTERN_INFO_VT_ISVAR, false) }
-    func GetIsConst(): Bool { return GetField(MF_VAR_WITH_PATTERN_INFO_VT_ISCONST, false) }
     public func GetIrrefutablePattern(): Option<PackageFormat_Pattern> {
         return if (let Some(p) <- GetPointer(MF_VAR_WITH_PATTERN_INFO_VT_IRREFUTABLEPATTERN)) { Some(PackageFormat_Pattern(data, p)) } else { None }
     }
@@ -504,15 +367,7 @@ public class PackageFormat_FuncInfo <: Table {
     public func GetFuncBody(): Option<PackageFormat_FuncBody> {
         return if (let Some(p) <- GetPointer(MF_FUNC_INFO_VT_FUNCBODY)) { Some(PackageFormat_FuncBody(data, p)) } else { None }
     }
-    func GetOverflowPolicy(): UInt8 { return GetField(MF_FUNC_INFO_VT_OVERFLOWPOLICY, 0u8) }
-    func GetOp(): UInt8 { return GetField(MF_FUNC_INFO_VT_OP, MF_OPERATOR_KIND_NA) }
-    func GetAdInfo(): Option<PackageFormat_AutoDiffInfo> {
-        return if (let Some(p) <- GetPointer(MF_FUNC_INFO_VT_ADINFO)) { Some(PackageFormat_AutoDiffInfo(data, p)) } else { None }
-    }
-    func GetIsConst(): Bool { return GetField(MF_FUNC_INFO_VT_ISCONST, false) }
     public func GetIsInline(): Bool { return GetField(MF_FUNC_INFO_VT_ISINLINE, false) }
-    func GetIsFastNative(): Bool { return GetField(MF_FUNC_INFO_VT_ISFASTNATIVE, false) }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_FUNC_INFO_VT_FUNCBODY) &&
@@ -535,8 +390,6 @@ public class PackageFormat_FuncInfo <: Table {
 public class PackageFormat_ParamInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetIsNamedParam(): Bool { return GetField(MF_PARAM_INFO_VT_ISNAMEDPARAM, false) }
-    func GetIsMemberParam(): Bool { return GetField(MF_PARAM_INFO_VT_ISMEMBERPARAM, false) }
     public func GetDefaultVal(): UInt32 { return GetField(MF_PARAM_INFO_VT_DEFAULTVAL, 0u32) }
 
     func Verify(verifier: VerifierTemplate): Bool {
@@ -552,8 +405,6 @@ public class PackageFormat_ParamInfo <: Table {
 public class PackageFormat_PropInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetIsConst(): Bool { return GetField(MF_PROP_INFO_VT_ISCONST, false) }
-    func GetIsMutable(): Bool { return GetField(MF_PROP_INFO_VT_ISMUTABLE, false) }
     public func GetSetters(): Option<Vector<UInt32>> {
         return if (let Some(p) <- GetPointer(MF_PROP_INFO_VT_SETTERS)) { Some(Vector<UInt32>(data, p)) } else { None }
     }
@@ -576,8 +427,6 @@ public class PackageFormat_PropInfo <: Table {
 // ModuleFormat_generated.h:3772-3812 (BuiltInInfo).
 class PackageFormat_BuiltInInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-
-    func GetBuiltInType(): UInt8 { return GetField(MF_BUILT_IN_INFO_VT_BUILTINTYPE, 0u8) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -604,27 +453,11 @@ public class PackageFormat_Decl <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
     public func GetKind(): UInt16 { return GetField(MF_DECL_VT_KIND, MF_DECL_KIND_INVALID_DECL) }
-    func GetIsTopLevel(): Bool { return GetField(MF_DECL_VT_ISTOPLEVEL, false) }
-    func GetFullPkgName(): Option<FlatBufferString> {
-        return if (let Some(p) <- GetPointer(MF_DECL_VT_FULLPKGNAME)) { Some(FlatBufferString(data, p)) } else { None }
-    }
     public func GetGenericDecl(): Option<PackageFormat_FullId> {
         return if (let Some(p) <- GetPointer(MF_DECL_VT_GENERICDECL)) { Some(PackageFormat_FullId(data, p)) } else { None }
     }
     public func GetGeneric(): Option<PackageFormat_Generic> {
         return if (let Some(p) <- GetPointer(MF_DECL_VT_GENERIC)) { Some(PackageFormat_Generic(data, p)) } else { None }
-    }
-    func GetBegin(): Option<PackageFormat_Position> {
-        return if (let Some(p) <- GetStruct(MF_DECL_VT_BEGIN)) { Some(PackageFormat_Position(data, p)) } else { None }
-    }
-    func GetEnd(): Option<PackageFormat_Position> {
-        return if (let Some(p) <- GetStruct(MF_DECL_VT_END)) { Some(PackageFormat_Position(data, p)) } else { None }
-    }
-    func GetIdentifier(): Option<FlatBufferString> {
-        return if (let Some(p) <- GetPointer(MF_DECL_VT_IDENTIFIER)) { Some(FlatBufferString(data, p)) } else { None }
-    }
-    func GetIdentifierPos(): Option<PackageFormat_Position> {
-        return if (let Some(p) <- GetStruct(MF_DECL_VT_IDENTIFIERPOS)) { Some(PackageFormat_Position(data, p)) } else { None }
     }
     public func GetAttributes(): Option<Vector<UInt64>> {
         return if (let Some(p) <- GetPointer(MF_DECL_VT_ATTRIBUTES)) { Some(Vector<UInt64>(data, p)) } else { None }
@@ -641,9 +474,6 @@ public class PackageFormat_Decl <: Table {
     }
     public func GetMangledBeforeSema(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_DECL_VT_MANGLEDBEFORESEMA)) { Some(FlatBufferString(data, p)) } else { None }
-    }
-    func GetHash(): Option<PackageFormat_DeclHash> {
-        return if (let Some(p) <- GetStruct(MF_DECL_VT_HASH)) { Some(PackageFormat_DeclHash(data, p)) } else { None }
     }
     func GetInfoType(): UInt8 { return GetField(MF_DECL_VT_INFO_TYPE, 0u8) }
     func GetInfo(): Option<Int64> { return GetPointer(MF_DECL_VT_INFO) }
@@ -680,9 +510,6 @@ public class PackageFormat_Decl <: Table {
     }
     public func GetInfoAsFuncInfo(): Option<PackageFormat_FuncInfo> {
         return if (GetInfoType() == MF_DECL_INFO_FUNC_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_FuncInfo(data, p)) } else { None } } else { None }
-    }
-    func GetInfoAsBuiltInInfo(): Option<PackageFormat_BuiltInInfo> {
-        return if (GetInfoType() == MF_DECL_INFO_BUILT_IN_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_BuiltInInfo(data, p)) } else { None } } else { None }
     }
     public func GetInfoAsAliasInfo(): Option<PackageFormat_AliasInfo> {
         return if (GetInfoType() == MF_DECL_INFO_ALIAS_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_AliasInfo(data, p)) } else { None } } else { None }
@@ -737,13 +564,6 @@ public class PackageFormat_Decl <: Table {
 public class PackageFormat_Anno <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetKind(): UInt16 { return GetField(MF_ANNO_VT_KIND, 0u16) }
-    func GetIdentifier(): Option<FlatBufferString> {
-        return if (let Some(p) <- GetPointer(MF_ANNO_VT_IDENTIFIER)) { Some(FlatBufferString(data, p)) } else { None }
-    }
-    func GetArgs(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_ANNO_VT_ARGS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
     public func GetTarget(): Option<PackageFormat_FullId> {
         return if (let Some(p) <- GetPointer(MF_ANNO_VT_TARGET)) { Some(PackageFormat_FullId(data, p)) } else { None }
     }
@@ -768,11 +588,6 @@ public class PackageFormat_Anno <: Table {
 class PackageFormat_AnnoArg <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetName(): Option<FlatBufferString> {
-        return if (let Some(p) <- GetPointer(MF_ANNO_ARG_VT_NAME)) { Some(FlatBufferString(data, p)) } else { None }
-    }
-    func GetExpr(): UInt32 { return GetField(MF_ANNO_ARG_VT_EXPR, 0u32) }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_ANNO_ARG_VT_NAME) &&
@@ -786,9 +601,6 @@ class PackageFormat_AnnoArg <: Table {
 class PackageFormat_CallInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetHasSideEffect(): Bool { return GetField(MF_CALL_INFO_VT_HASSIDEEFFECT, false) }
-    func GetCallKind(): UInt8 { return GetField(MF_CALL_INFO_VT_CALLKIND, MF_CALL_KIND_NA) }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<Bool>(verifier, MF_CALL_INFO_VT_HASSIDEEFFECT, 1) &&
@@ -800,7 +612,6 @@ class PackageFormat_CallInfo <: Table {
 // ModuleFormat_generated.h:4430-4462 (UnaryInfo).
 class PackageFormat_UnaryInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetOp(): UInt8 { return GetField(MF_UNARY_INFO_VT_OP, 0u8) }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<UInt8>(verifier, MF_UNARY_INFO_VT_OP, 1) &&
@@ -811,7 +622,6 @@ class PackageFormat_UnaryInfo <: Table {
 // ModuleFormat_generated.h:4471-4503 (BinaryInfo).
 class PackageFormat_BinaryInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetOp(): UInt8 { return GetField(MF_BINARY_INFO_VT_OP, 0u8) }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<UInt8>(verifier, MF_BINARY_INFO_VT_OP, 1) &&
@@ -822,7 +632,6 @@ class PackageFormat_BinaryInfo <: Table {
 // ModuleFormat_generated.h:4512-4544 (IncOrDecInfo).
 class PackageFormat_IncOrDecInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetOp(): UInt8 { return GetField(MF_INC_OR_DEC_INFO_VT_OP, 0u8) }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<UInt8>(verifier, MF_INC_OR_DEC_INFO_VT_OP, 1) &&
@@ -833,12 +642,6 @@ class PackageFormat_IncOrDecInfo <: Table {
 // ModuleFormat_generated.h:4553-4599 (LitConstInfo).
 class PackageFormat_LitConstInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-
-    func GetStrValue(): Option<FlatBufferString> {
-        return if (let Some(p) <- GetPointer(MF_LIT_CONST_INFO_VT_STRVALUE)) { Some(FlatBufferString(data, p)) } else { None }
-    }
-    func GetConstKind(): UInt8 { return GetField(MF_LIT_CONST_INFO_VT_CONSTKIND, 0u8) }
-    func GetStrKind(): UInt8 { return GetField(MF_LIT_CONST_INFO_VT_STRKIND, 0u8) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -854,9 +657,6 @@ class PackageFormat_LitConstInfo <: Table {
 public class PackageFormat_ReferenceInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetReference(): Option<FlatBufferString> {
-        return if (let Some(p) <- GetPointer(MF_REFERENCE_INFO_VT_REFERENCE)) { Some(FlatBufferString(data, p)) } else { None }
-    }
     public func GetTarget(): Option<PackageFormat_FullId> {
         return if (let Some(p) <- GetPointer(MF_REFERENCE_INFO_VT_TARGET)) { Some(PackageFormat_FullId(data, p)) } else { None }
     }
@@ -883,11 +683,6 @@ public class PackageFormat_ReferenceInfo <: Table {
 class PackageFormat_LambdaInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetFuncBody(): Option<PackageFormat_FuncBody> {
-        return if (let Some(p) <- GetPointer(MF_LAMBDA_INFO_VT_FUNCBODY)) { Some(PackageFormat_FuncBody(data, p)) } else { None }
-    }
-    func GetSupportMock(): Bool { return GetField(MF_LAMBDA_INFO_VT_SUPPORTMOCK, false) }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffsetRequired(verifier, MF_LAMBDA_INFO_VT_FUNCBODY) &&
@@ -901,9 +696,6 @@ class PackageFormat_LambdaInfo <: Table {
 // ModuleFormat_generated.h:4771-4812 (AssignInfo).
 class PackageFormat_AssignInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-
-    func GetIsCompound(): Bool { return GetField(MF_ASSIGN_INFO_VT_ISCOMPOUND, false) }
-    func GetOp(): UInt8 { return GetField(MF_ASSIGN_INFO_VT_OP, 0u8) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -920,8 +712,6 @@ public class PackageFormat_ArrayInfo <: Table {
     public func GetInitFunc(): Option<PackageFormat_FullId> {
         return if (let Some(p) <- GetPointer(MF_ARRAY_INFO_VT_INITFUNC)) { Some(PackageFormat_FullId(data, p)) } else { None }
     }
-    func GetIsValueArray(): Bool { return GetField(MF_ARRAY_INFO_VT_ISVALUEARRAY, false) }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_ARRAY_INFO_VT_INITFUNC) &&
@@ -935,7 +725,6 @@ public class PackageFormat_ArrayInfo <: Table {
 // ModuleFormat_generated.h:4874-4906 (JumpInfo).
 class PackageFormat_JumpInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetIsBreak(): Bool { return GetField(MF_JUMP_INFO_VT_ISBREAK, false) }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<Bool>(verifier, MF_JUMP_INFO_VT_ISBREAK, 1) &&
@@ -946,9 +735,6 @@ class PackageFormat_JumpInfo <: Table {
 // ModuleFormat_generated.h:4915-4956 (FuncArgInfo).
 class PackageFormat_FuncArgInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-
-    func GetWithInout(): Bool { return GetField(MF_FUNC_ARG_INFO_VT_WITHINOUT, false) }
-    func GetIsDefaultVal(): Bool { return GetField(MF_FUNC_ARG_INFO_VT_ISDEFAULTVAL, false) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -961,7 +747,6 @@ class PackageFormat_FuncArgInfo <: Table {
 // ModuleFormat_generated.h:4966-4998 (SubscriptInfo).
 class PackageFormat_SubscriptInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetIsTupleAccess(): Bool { return GetField(MF_SUBSCRIPT_INFO_VT_ISTUPLEACCESS, false) }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<Bool>(verifier, MF_SUBSCRIPT_INFO_VT_ISTUPLEACCESS, 1) &&
@@ -972,7 +757,6 @@ class PackageFormat_SubscriptInfo <: Table {
 // ModuleFormat_generated.h:5007-5039 (MatchInfo).
 class PackageFormat_MatchInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetMatchMode(): Bool { return GetField(MF_MATCH_INFO_VT_MATCHMODE, false) }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<Bool>(verifier, MF_MATCH_INFO_VT_MATCHMODE, 1) &&
@@ -983,9 +767,6 @@ class PackageFormat_MatchInfo <: Table {
 // ModuleFormat_generated.h:5048-5089 (BlockInfo).
 class PackageFormat_BlockInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetIsExpr(): Option<Vector<Bool>> {
-        return if (let Some(p) <- GetPointer(MF_BLOCK_INFO_VT_ISEXPR)) { Some(Vector<Bool>(data, p)) } else { None }
-    }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_BLOCK_INFO_VT_ISEXPR) &&
@@ -998,9 +779,6 @@ class PackageFormat_BlockInfo <: Table {
 public class PackageFormat_TryInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetResources(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_TRY_INFO_VT_RESOURCES)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
     public func GetPatterns(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_TRY_INFO_VT_PATTERNS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
@@ -1044,8 +822,6 @@ public class PackageFormat_ForInInfo <: Table {
     public func GetPattern(): Option<PackageFormat_Pattern> {
         return if (let Some(p) <- GetPointer(MF_FOR_IN_INFO_VT_PATTERN)) { Some(PackageFormat_Pattern(data, p)) } else { None }
     }
-    func GetForInKind(): UInt8 { return GetField(MF_FOR_IN_INFO_VT_FORINKIND, MF_FOR_IN_KIND_NA) }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_FOR_IN_INFO_VT_PATTERN) &&
@@ -1078,10 +854,6 @@ public class PackageFormat_MatchCaseInfo <: Table {
 class PackageFormat_SpawnInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetFuture(): Option<PackageFormat_FullId> {
-        return if (let Some(p) <- GetPointer(MF_SPAWN_INFO_VT_FUTURE)) { Some(PackageFormat_FullId(data, p)) } else { None }
-    }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_SPAWN_INFO_VT_FUTURE) &&
@@ -1096,62 +868,19 @@ public class PackageFormat_Expr <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
     public func GetKind(): UInt16 { return GetField(MF_EXPR_VT_KIND, MF_EXPR_KIND_INVALID_EXPR) }
-    func GetBegin(): Option<PackageFormat_Position> {
-        return if (let Some(p) <- GetStruct(MF_EXPR_VT_BEGIN)) { Some(PackageFormat_Position(data, p)) } else { None }
-    }
-    func GetEnd(): Option<PackageFormat_Position> {
-        return if (let Some(p) <- GetStruct(MF_EXPR_VT_END)) { Some(PackageFormat_Position(data, p)) } else { None }
-    }
     public func GetMapExpr(): UInt32 { return GetField(MF_EXPR_VT_MAPEXPR, 0u32) }
     public func GetOperands(): Option<Vector<UInt32>> {
         return if (let Some(p) <- GetPointer(MF_EXPR_VT_OPERANDS)) { Some(Vector<UInt32>(data, p)) } else { None }
     }
     public func GetType(): UInt32 { return GetField(MF_EXPR_VT_TYPE, 0u32) }
-    func GetOverflowPolicy(): UInt8 { return GetField(MF_EXPR_VT_OVERFLOWPOLICY, 0u8) }
     func GetInfoType(): UInt8 { return GetField(MF_EXPR_VT_INFO_TYPE, 0u8) }
     func GetInfo(): Option<Int64> { return GetPointer(MF_EXPR_VT_INFO) }
 
-    func GetInfoAsCallInfo(): Option<PackageFormat_CallInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_CALL_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_CallInfo(data, p)) } else { None } } else { None }
-    }
-    func GetInfoAsUnaryInfo(): Option<PackageFormat_UnaryInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_UNARY_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_UnaryInfo(data, p)) } else { None } } else { None }
-    }
-    func GetInfoAsBinaryInfo(): Option<PackageFormat_BinaryInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_BINARY_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_BinaryInfo(data, p)) } else { None } } else { None }
-    }
-    func GetInfoAsIncOrDecInfo(): Option<PackageFormat_IncOrDecInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_INC_OR_DEC_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_IncOrDecInfo(data, p)) } else { None } } else { None }
-    }
-    func GetInfoAsLitConstInfo(): Option<PackageFormat_LitConstInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_LIT_CONST_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_LitConstInfo(data, p)) } else { None } } else { None }
-    }
     public func GetInfoAsReferenceInfo(): Option<PackageFormat_ReferenceInfo> {
         return if (GetInfoType() == MF_EXPR_INFO_REFERENCE_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_ReferenceInfo(data, p)) } else { None } } else { None }
     }
-    func GetInfoAsLambdaInfo(): Option<PackageFormat_LambdaInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_LAMBDA_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_LambdaInfo(data, p)) } else { None } } else { None }
-    }
-    func GetInfoAsAssignInfo(): Option<PackageFormat_AssignInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_ASSIGN_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_AssignInfo(data, p)) } else { None } } else { None }
-    }
     public func GetInfoAsArrayInfo(): Option<PackageFormat_ArrayInfo> {
         return if (GetInfoType() == MF_EXPR_INFO_ARRAY_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_ArrayInfo(data, p)) } else { None } } else { None }
-    }
-    func GetInfoAsJumpInfo(): Option<PackageFormat_JumpInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_JUMP_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_JumpInfo(data, p)) } else { None } } else { None }
-    }
-    func GetInfoAsFuncArgInfo(): Option<PackageFormat_FuncArgInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_FUNC_ARG_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_FuncArgInfo(data, p)) } else { None } } else { None }
-    }
-    func GetInfoAsSubscriptInfo(): Option<PackageFormat_SubscriptInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_SUBSCRIPT_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_SubscriptInfo(data, p)) } else { None } } else { None }
-    }
-    func GetInfoAsMatchInfo(): Option<PackageFormat_MatchInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_MATCH_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_MatchInfo(data, p)) } else { None } } else { None }
-    }
-    func GetInfoAsBlockInfo(): Option<PackageFormat_BlockInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_BLOCK_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_BlockInfo(data, p)) } else { None } } else { None }
     }
     public func GetInfoAsTryInfo(): Option<PackageFormat_TryInfo> {
         return if (GetInfoType() == MF_EXPR_INFO_TRY_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_TryInfo(data, p)) } else { None } } else { None }
@@ -1165,10 +894,6 @@ public class PackageFormat_Expr <: Table {
     public func GetInfoAsMatchCaseInfo(): Option<PackageFormat_MatchCaseInfo> {
         return if (GetInfoType() == MF_EXPR_INFO_MATCH_CASE_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_MatchCaseInfo(data, p)) } else { None } } else { None }
     }
-    func GetInfoAsSpawnInfo(): Option<PackageFormat_SpawnInfo> {
-        return if (GetInfoType() == MF_EXPR_INFO_SPAWN_INFO) { if (let Some(p) <- GetInfo()) { Some(PackageFormat_SpawnInfo(data, p)) } else { None } } else { None }
-    }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<UInt16>(verifier, MF_EXPR_VT_KIND, 2) &&
@@ -1194,30 +919,12 @@ public class PackageFormat_Pattern <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
     public func GetKind(): Int8 { return GetField(MF_PATTERN_VT_KIND, MF_PATTERN_KIND_INVALID_PATTERN) }
-    func GetBegin(): Option<PackageFormat_Position> {
-        return if (let Some(p) <- GetStruct(MF_PATTERN_VT_BEGIN)) { Some(PackageFormat_Position(data, p)) } else { None }
-    }
-    func GetEnd(): Option<PackageFormat_Position> {
-        return if (let Some(p) <- GetStruct(MF_PATTERN_VT_END)) { Some(PackageFormat_Position(data, p)) } else { None }
-    }
     public func GetPatterns(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_PATTERN_VT_PATTERNS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
     public func GetTypes(): Option<Vector<UInt32>> {
         return if (let Some(p) <- GetPointer(MF_PATTERN_VT_TYPES)) { Some(Vector<UInt32>(data, p)) } else { None }
     }
-    func GetExprs(): Option<Vector<UInt32>> {
-        return if (let Some(p) <- GetPointer(MF_PATTERN_VT_EXPRS)) { Some(Vector<UInt32>(data, p)) } else { None }
-    }
-    func GetValuesType(): Option<Vector<UInt8>> {
-        return if (let Some(p) <- GetPointer(MF_PATTERN_VT_VALUES_TYPE)) { Some(Vector<UInt8>(data, p)) } else { None }
-    }
-    func GetValues(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_PATTERN_VT_VALUES)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
-    func GetMatchBeforeRuntime(): Bool { return GetField(MF_PATTERN_VT_MATCHBEFORERUNTIME, false) }
-    func GetNeedRuntimeTypeCheck(): Bool { return GetField(MF_PATTERN_VT_NEEDRUNTIMETYPECHECK, false) }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<Int8>(verifier, MF_PATTERN_VT_KIND, 1) &&
@@ -1426,24 +1133,9 @@ public func VerifySemaTyContracts(data: Array<UInt8>): Bool {
 class PackageFormat_ImportSpec <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetBegin(): Option<PackageFormat_Position> {
-        return if (let Some(p) <- GetStruct(MF_IMPORT_SPEC_VT_BEGIN)) { Some(PackageFormat_Position(data, p)) } else { None }
-    }
-    func GetEnd(): Option<PackageFormat_Position> {
-        return if (let Some(p) <- GetStruct(MF_IMPORT_SPEC_VT_END)) { Some(PackageFormat_Position(data, p)) } else { None }
-    }
-    func GetPrefixPaths(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_IMPORT_SPEC_VT_PREFIXPATHS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
     func GetIdentifier(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_IMPORT_SPEC_VT_IDENTIFIER)) { Some(FlatBufferString(data, p)) } else { None }
     }
-    func GetAsIdentifier(): Option<FlatBufferString> {
-        return if (let Some(p) <- GetPointer(MF_IMPORT_SPEC_VT_ASIDENTIFIER)) { Some(FlatBufferString(data, p)) } else { None }
-    }
-    func GetReExport(): UInt8 { return GetField(MF_IMPORT_SPEC_VT_REEXPORT, MF_ACCESS_MODIFIER_PRIVATE) }
-    func GetIsDecl(): Bool { return GetField(MF_IMPORT_SPEC_VT_ISDECL, false) }
-    func GetHasDoubleColon(): Bool { return GetField(MF_IMPORT_SPEC_VT_HASDOUBLECOLON, false) }
     func GetWithImplicitExport(): Bool { return GetField(MF_IMPORT_SPEC_VT_WITHIMPLICITEXPORT, true) }
     func GetIsImplicitAdd(): Bool { return GetField(MF_IMPORT_SPEC_VT_ISIMPLICITADD, false) }
 
@@ -1471,10 +1163,6 @@ class PackageFormat_ImportSpec <: Table {
 class PackageFormat_Imports <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetImportSpecs(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_IMPORTS_VT_IMPORTSPECS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_IMPORTS_VT_IMPORTSPECS) &&
@@ -1489,10 +1177,6 @@ class PackageFormat_Imports <: Table {
 class PackageFormat_FeatureId <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetIdentifiers(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_FEATURE_ID_VT_IDENTIFIERS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_FEATURE_ID_VT_IDENTIFIERS) &&
@@ -1505,10 +1189,6 @@ class PackageFormat_FeatureId <: Table {
 // ModuleFormat_generated.h:6406-6448 (FeaturesSet).
 class PackageFormat_FeaturesSet <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-
-    func GetFeatures(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_FEATURES_SET_VT_FEATURES)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -1524,10 +1204,6 @@ class PackageFormat_FeaturesSet <: Table {
 class PackageFormat_FeaturesDirective <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetFeaturesSet(): Option<PackageFormat_FeaturesSet> {
-        return if (let Some(p) <- GetPointer(MF_FEATURES_DIRECTIVE_VT_FEATURESSET)) { Some(PackageFormat_FeaturesSet(data, p)) } else { None }
-    }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_FEATURES_DIRECTIVE_VT_FEATURESSET) &&
@@ -1540,17 +1216,6 @@ class PackageFormat_FeaturesDirective <: Table {
 // ModuleFormat_generated.h:6500-6569 (FileInfo).
 class PackageFormat_FileInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-
-    func GetFileID(): UInt32 { return GetField(MF_FILE_INFO_VT_FILEID, 0u32) }
-    func GetBegin(): Option<PackageFormat_Position> {
-        return if (let Some(p) <- GetStruct(MF_FILE_INFO_VT_BEGIN)) { Some(PackageFormat_Position(data, p)) } else { None }
-    }
-    func GetEnd(): Option<PackageFormat_Position> {
-        return if (let Some(p) <- GetStruct(MF_FILE_INFO_VT_END)) { Some(PackageFormat_Position(data, p)) } else { None }
-    }
-    func GetFeature(): Option<PackageFormat_FeaturesDirective> {
-        return if (let Some(p) <- GetPointer(MF_FILE_INFO_VT_FEATURE)) { Some(PackageFormat_FeaturesDirective(data, p)) } else { None }
-    }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -1567,9 +1232,6 @@ class PackageFormat_FileInfo <: Table {
 // ModuleFormat_generated.h:6572-6613 (CompilationOptions).
 class PackageFormat_CompilationOptions <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-
-    func GetOptimizationLevel(): UInt8 { return GetField(MF_COMPILATION_OPTIONS_VT_OPTIMIZATION_LEVEL, 0u8) }
-    func GetDebug(): Bool { return GetField(MF_COMPILATION_OPTIONS_VT_DEBUG, false) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -1601,9 +1263,6 @@ public class PackageFormat_Package <: Table {
     public func GetAllFiles(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_ALLFILES)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
-    func GetAllFileImports(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_ALLFILEIMPORTS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
     public func GetAllTypes(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_ALLTYPES)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
@@ -1613,24 +1272,6 @@ public class PackageFormat_Package <: Table {
     public func GetAllExprs(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_ALLEXPRS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
-    func GetAllValues(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_ALLVALUES)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
-    func GetKind(): UInt8 { return GetField(MF_PACKAGE_VT_KIND, MF_PACKAGE_KIND_NORMAL) }
-    func GetAccess(): UInt8 { return GetField(MF_PACKAGE_VT_ACCESS, MF_ACCESS_LEVEL_PUBLIC) }
-    func GetModuleName(): Option<FlatBufferString> {
-        return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_MODULENAME)) { Some(FlatBufferString(data, p)) } else { None }
-    }
-    func GetAllFileInfo(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_ALLFILEINFO)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
-    func GetAllDependentStdPkgs(): Option<Vector<Offset<Any>>> {
-        return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_ALLDEPENDENTSTDPKGS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
-    }
-    func GetOptions(): Option<PackageFormat_CompilationOptions> {
-        return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_OPTIONS)) { Some(PackageFormat_CompilationOptions(data, p)) } else { None }
-    }
-
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, MF_PACKAGE_VT_VERSION) &&
@@ -1689,48 +1330,6 @@ public class PackageFormat_Package <: Table {
 // Verifier internally, Cangjie passes it alongside.
 func VerifyPackageBuffer(data: Array<UInt8>, verifier: VerifierTemplate): Bool {
     return verifier.VerifyBuffer({p: Int64, v: VerifierTemplate => PackageFormat_Package(data, p).Verify(v)})
-}
-
-// Struct/string wrappers used by union value_as_ accessors. Each resolves the
-// union offset (already followed by GetPointer) into the member reader.
-func WrapInt8Value(data: Array<UInt8>, obj: Option<Int64>): Option<PackageFormat_Int8Value> {
-    return if (let Some(p) <- obj) { Some(PackageFormat_Int8Value(data, p)) } else { None }
-}
-func WrapUInt8Value(data: Array<UInt8>, obj: Option<Int64>): Option<PackageFormat_UInt8Value> {
-    return if (let Some(p) <- obj) { Some(PackageFormat_UInt8Value(data, p)) } else { None }
-}
-func WrapInt16Value(data: Array<UInt8>, obj: Option<Int64>): Option<PackageFormat_Int16Value> {
-    return if (let Some(p) <- obj) { Some(PackageFormat_Int16Value(data, p)) } else { None }
-}
-func WrapUInt16Value(data: Array<UInt8>, obj: Option<Int64>): Option<PackageFormat_UInt16Value> {
-    return if (let Some(p) <- obj) { Some(PackageFormat_UInt16Value(data, p)) } else { None }
-}
-func WrapInt32Value(data: Array<UInt8>, obj: Option<Int64>): Option<PackageFormat_Int32Value> {
-    return if (let Some(p) <- obj) { Some(PackageFormat_Int32Value(data, p)) } else { None }
-}
-func WrapUInt32Value(data: Array<UInt8>, obj: Option<Int64>): Option<PackageFormat_UInt32Value> {
-    return if (let Some(p) <- obj) { Some(PackageFormat_UInt32Value(data, p)) } else { None }
-}
-func WrapInt64Value(data: Array<UInt8>, obj: Option<Int64>): Option<PackageFormat_Int64Value> {
-    return if (let Some(p) <- obj) { Some(PackageFormat_Int64Value(data, p)) } else { None }
-}
-func WrapUInt64Value(data: Array<UInt8>, obj: Option<Int64>): Option<PackageFormat_UInt64Value> {
-    return if (let Some(p) <- obj) { Some(PackageFormat_UInt64Value(data, p)) } else { None }
-}
-func WrapFloat32Value(data: Array<UInt8>, obj: Option<Int64>): Option<PackageFormat_Float32Value> {
-    return if (let Some(p) <- obj) { Some(PackageFormat_Float32Value(data, p)) } else { None }
-}
-func WrapFloat64Value(data: Array<UInt8>, obj: Option<Int64>): Option<PackageFormat_Float64Value> {
-    return if (let Some(p) <- obj) { Some(PackageFormat_Float64Value(data, p)) } else { None }
-}
-func WrapArrayValue(data: Array<UInt8>, obj: Option<Int64>): Option<PackageFormat_ArrayValue> {
-    return if (let Some(p) <- obj) { Some(PackageFormat_ArrayValue(data, p)) } else { None }
-}
-func WrapCompositeValueIndex(data: Array<UInt8>, obj: Option<Int64>): Option<PackageFormat_CompositeValueIndex> {
-    return if (let Some(p) <- obj) { Some(PackageFormat_CompositeValueIndex(data, p)) } else { None }
-}
-func WrapFbString(data: Array<UInt8>, obj: Option<Int64>): Option<FlatBufferString> {
-    return if (let Some(p) <- obj) { Some(FlatBufferString(data, p)) } else { None }
 }
 
 // ModuleFormat_generated.h:6900-6948 (VerifyConstValue). Struct members verify

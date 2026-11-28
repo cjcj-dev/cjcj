@@ -5,34 +5,11 @@ import std.sort.*
 import cjcj::ast.{AddCurFile, Diagnose, DiagnoseRefactor}
 import cjcj::conditional_compilation.ConditionalCompilation
 import cjcj::ast.AnnotationKind as RealAnnotationKind
-import cjcj::ast.ExprKind as ParsedAstExprKind
-import cjcj::ast.Node as ParsedAstNode
-import cjcj::ast.ScopeKind as ParsedAstScopeKind
-import cjcj::ast.VarDecl as ParsedAstVarDecl
 import cjcj::ast.VisitAction
 import cjcj::ast.Walker
-import cjcj::parse.Annotation as ParsedAnnotation
-import cjcj::parse.Decl as ParsedDecl
-import cjcj::parse.Expr as ParsedExpr
-import cjcj::parse.EnumPattern as ParsedEnumPattern
-import cjcj::parse.FuncArg as ParsedFuncArg
-import cjcj::parse.FuncBody as ParsedFuncBody
-import cjcj::parse.FuncDecl as ParsedFuncDecl
-import cjcj::parse.FuncParam as ParsedFuncParam
-import cjcj::parse.FuncParamList as ParsedFuncParamList
-import cjcj::parse.LitConstExpr as ParsedLitConstExpr
-import cjcj::parse.LitConstKind as ParsedLitConstKind
-import cjcj::parse.MacroInvocation as ParsedMacroInvocation
-import cjcj::parse.MatchCase as ParsedMatchCase
-import cjcj::parse.MatchCaseOther as ParsedMatchCaseOther
-import cjcj::parse.Modifier as ParsedModifier
-import cjcj::parse.Node as ParsedNode
 import cjcj::parse.Parser as GeneratedParser
-import cjcj::parse.Pattern as ParsedPattern
 import cjcj::parse.ExprKind as ParsedExprKind
 import cjcj::parse.ScopeKind as ParsedScopeKind
-import cjcj::parse.StringKind as ParsedStringKind
-import cjcj::parse.Type as ParsedType
 import cjcj::utils.SplitQualifiedName
 
 private func hasNoMacros(mc: MacroCollector): Bool {
@@ -54,10 +31,6 @@ private func hasDefAndCallInSamePkg(macroCollector: MacroCollector, diag: Diagno
 
 private func emitMacroDiag(diag: DiagnosticEngine, pos: Position, kind: DiagKind): Unit {
     diag.Diagnose(pos, kind).Emit()
-}
-
-private func emitMacroDiagArg(diag: DiagnosticEngine, pos: Position, kind: DiagKind, arg: String): Unit {
-    diag.Diagnose(pos, kind, args: [DiagArgument(arg)]).Emit()
 }
 
 private func walkNode(node: Node, visit: (Node) -> Bool): Unit {
@@ -172,197 +145,6 @@ private func toParsedScopeKind(scope: ScopeKind): ParsedScopeKind {
         case ScopeKind.MAIN_BODY => ParsedScopeKind.MAIN_BODY
         case ScopeKind.UNKNOWN_SCOPE => ParsedScopeKind.UNKNOWN_SCOPE
     }
-}
-
-private func toMacroScopeKind(scope: ParsedAstScopeKind): ScopeKind {
-    return match (scope) {
-        case ParsedAstScopeKind.TOPLEVEL => ScopeKind.TOPLEVEL
-        case ParsedAstScopeKind.CLASS_BODY => ScopeKind.CLASS_BODY
-        case ParsedAstScopeKind.INTERFACE_BODY => ScopeKind.INTERFACE_BODY
-        case ParsedAstScopeKind.STRUCT_BODY => ScopeKind.STRUCT_BODY
-        case ParsedAstScopeKind.EXTEND_BODY => ScopeKind.EXTEND_BODY
-        case ParsedAstScopeKind.FUNC_BODY => ScopeKind.FUNC_BODY
-        case ParsedAstScopeKind.MACRO_BODY => ScopeKind.MACRO_BODY
-        case ParsedAstScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS => ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS
-        case ParsedAstScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT => ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT
-        case ParsedAstScopeKind.PROP_MEMBER_SETTER_BODY => ScopeKind.PROP_MEMBER_SETTER_BODY
-        case ParsedAstScopeKind.PROP_MEMBER_GETTER_BODY => ScopeKind.PROP_MEMBER_GETTER_BODY
-        case ParsedAstScopeKind.ENUM_BODY => ScopeKind.ENUM_BODY
-        case ParsedAstScopeKind.ENUM_CONSTRUCTOR => ScopeKind.ENUM_CONSTRUCTOR
-        case ParsedAstScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM => ScopeKind.PRIMARY_CONSTRUCTOR_FUNC_PARAM
-        case ParsedAstScopeKind.MAIN_BODY => ScopeKind.MAIN_BODY
-        case ParsedAstScopeKind.UNKNOWN_SCOPE => ScopeKind.UNKNOWN_SCOPE
-    }
-}
-
-private func toMacroExprKind(kind: ParsedAstExprKind): ExprKind {
-    return match (kind) {
-        case ParsedAstExprKind.ALL => ExprKind.ALL
-        case ParsedAstExprKind.VAR_INIT => ExprKind.VAR_INIT
-        case ParsedAstExprKind.INDEX_EXPR => ExprKind.INDEX_EXPR
-        case ParsedAstExprKind.IF_COND_EXPR => ExprKind.IF_COND_EXPR
-        case ParsedAstExprKind.WHILE_COND_EXPR => ExprKind.WHILE_COND_EXPR
-        case ParsedAstExprKind.LET_PATTERN => ExprKind.LET_PATTERN
-        case ParsedAstExprKind.LEFT_EXPR => ExprKind.LEFT_EXPR
-        case ParsedAstExprKind.EXPR_IN_TUPLE => ExprKind.EXPR_IN_TUPLE
-        case ParsedAstExprKind.EXPR_IN_IF_COND_TUPLE => ExprKind.EXPR_IN_IF_COND_TUPLE
-        case ParsedAstExprKind.EXPR_IN_WHILE_COND_TUPLE => ExprKind.EXPR_IN_WHILE_COND_TUPLE
-        case ParsedAstExprKind.EXPR_IN_ARRAY => ExprKind.EXPR_IN_ARRAY
-        case ParsedAstExprKind.EXPR_IN_CALLSUFFIX => ExprKind.EXPR_IN_CALLSUFFIX
-        case ParsedAstExprKind.EXPR_IN_ANNOTATION => ExprKind.EXPR_IN_ANNOTATION
-        case ParsedAstExprKind.UNKNOWN_EXPR => ExprKind.UNKNOWN_EXPR
-    }
-}
-
-private func copyParsedNodeBase(parsedNode: ParsedNode, targetNode: Node, fallbackFile: Option<File>): Unit {
-    targetNode.begin = parsedNode.begin
-    targetNode.end = parsedNode.end
-    targetNode.curFile = fallbackFile
-    if (parsedNode.isBroken || ASTKindEquals(parsedNode.astKind, ASTKind.INVALID_DECL) ||
-        ASTKindEquals(parsedNode.astKind, ASTKind.INVALID_EXPR) ||
-        ASTKindEquals(parsedNode.astKind, ASTKind.INVALID_TYPE) ||
-        ASTKindEquals(parsedNode.astKind, ASTKind.INVALID_PATTERN)) {
-        targetNode.EnableAttr(Attribute.IS_BROKEN)
-    }
-}
-
-private func copyParsedAstNodeBase(parsedNode: ParsedAstNode, targetNode: Node, fallbackFile: Option<File>): Unit {
-    targetNode.begin = parsedNode.begin
-    targetNode.end = parsedNode.end
-    targetNode.curFile = fallbackFile
-    if (parsedNode.isBroken || ASTKindEquals(parsedNode.astKind, ASTKind.INVALID_DECL) ||
-        ASTKindEquals(parsedNode.astKind, ASTKind.INVALID_EXPR) ||
-        ASTKindEquals(parsedNode.astKind, ASTKind.INVALID_TYPE) ||
-        ASTKindEquals(parsedNode.astKind, ASTKind.INVALID_PATTERN)) {
-        targetNode.EnableAttr(Attribute.IS_BROKEN)
-    }
-}
-
-private func convertParsedModifier(parsedModifier: ParsedModifier): Modifier {
-    return parsedModifier
-}
-
-private func convertParsedAnnotation(parsedAnnotation: ParsedAnnotation, fallbackFile: Option<File>): Annotation {
-    return parsedAnnotation
-}
-
-private func copyParsedDeclBase(parsedDecl: ParsedDecl, targetDecl: Decl, fallbackFile: Option<File>): Unit {
-    copyParsedNodeBase(parsedDecl, targetDecl, fallbackFile)
-    targetDecl.identifier = parsedDecl.identifier
-    for (parsedModifier in parsedDecl.modifiers) {
-        targetDecl.modifiers.add(convertParsedModifier(parsedModifier))
-    }
-    for (parsedAnnotation in parsedDecl.annotations) {
-        targetDecl.annotations.add(convertParsedAnnotation(parsedAnnotation, fallbackFile))
-    }
-    targetDecl.CopyAttrs(parsedDecl.GetAttrs())
-}
-
-private func convertParsedFuncBody(parsedBody: ParsedFuncBody, fallbackFile: Option<File>): FuncBody {
-    return parsedBody
-}
-
-private func convertParsedFuncParamList(parsedList: ParsedFuncParamList, fallbackFile: Option<File>): FuncParamList {
-    return parsedList
-}
-
-private func convertParsedFuncParam(parsedParam: ParsedFuncParam, fallbackFile: Option<File>): FuncParam {
-    return parsedParam
-}
-
-private func convertParsedAstVarDecl(parsedVarDecl: ParsedAstVarDecl, fallbackFile: Option<File>): VarDecl {
-    return parsedVarDecl
-}
-
-private func convertParsedFuncDecl(parsedFuncDecl: ParsedFuncDecl, fallbackFile: Option<File>): FuncDecl {
-    return parsedFuncDecl
-}
-
-private func convertParsedDecl(parsedDecl: ParsedDecl, fallbackFile: Option<File>): Decl {
-    return parsedDecl
-}
-
-private func convertParsedFuncArg(parsedArg: ParsedFuncArg, fallbackFile: Option<File>): FuncArg {
-    return parsedArg
-}
-
-private func convertParsedMatchCase(parsedCase: ParsedMatchCase, fallbackFile: Option<File>): MatchCase {
-    return parsedCase
-}
-
-private func convertParsedMatchCaseOther(
-    parsedCaseOther: ParsedMatchCaseOther,
-    fallbackFile: Option<File>
-): MatchCaseOther {
-    return parsedCaseOther
-}
-
-private func convertParsedExpr(parsedExpr: ParsedExpr, fallbackFile: Option<File>): Expr {
-    return parsedExpr
-}
-
-private func parsedLitTokenKind(lit: ParsedLitConstExpr): TokenKind {
-    return match (lit.kind) {
-        case ParsedLitConstKind.INTEGER => TokenKind.INTEGER_LITERAL
-        case ParsedLitConstKind.RUNE_BYTE => TokenKind.RUNE_BYTE_LITERAL
-        case ParsedLitConstKind.FLOAT => TokenKind.FLOAT_LITERAL
-        case ParsedLitConstKind.RUNE => TokenKind.RUNE_LITERAL
-        case ParsedLitConstKind.STRING => match (lit.stringKind) {
-            case ParsedStringKind.MULTILINE => TokenKind.MULTILINE_STRING
-            case ParsedStringKind.MULTILINE_RAW => TokenKind.MULTILINE_RAW_STRING
-            case _ => TokenKind.STRING_LITERAL
-        }
-        case ParsedLitConstKind.JSTRING => TokenKind.JSTRING_LITERAL
-        case ParsedLitConstKind.BOOL => TokenKind.BOOL_LITERAL
-        case ParsedLitConstKind.UNIT => TokenKind.UNIT_LITERAL
-        case ParsedLitConstKind.NONE => TokenKind.ILLEGAL
-    }
-}
-
-private func primitiveTypeKindFromName(typeName: String): TypeKind {
-    if (typeName == "Unit") { return TypeKind.TYPE_UNIT }
-    if (typeName == "Int8") { return TypeKind.TYPE_INT8 }
-    if (typeName == "Int16") { return TypeKind.TYPE_INT16 }
-    if (typeName == "Int32") { return TypeKind.TYPE_INT32 }
-    if (typeName == "Int64") { return TypeKind.TYPE_INT64 }
-    if (typeName == "IntNative") { return TypeKind.TYPE_INT_NATIVE }
-    if (typeName == "Int") { return TypeKind.TYPE_IDEAL_INT }
-    if (typeName == "UInt8") { return TypeKind.TYPE_UINT8 }
-    if (typeName == "UInt16") { return TypeKind.TYPE_UINT16 }
-    if (typeName == "UInt32") { return TypeKind.TYPE_UINT32 }
-    if (typeName == "UInt64") { return TypeKind.TYPE_UINT64 }
-    if (typeName == "UIntNative") { return TypeKind.TYPE_UINT_NATIVE }
-    if (typeName == "Float16") { return TypeKind.TYPE_FLOAT16 }
-    if (typeName == "Float32") { return TypeKind.TYPE_FLOAT32 }
-    if (typeName == "Float64") { return TypeKind.TYPE_FLOAT64 }
-    if (typeName == "Float") { return TypeKind.TYPE_IDEAL_FLOAT }
-    if (typeName == "Rune") { return TypeKind.TYPE_RUNE }
-    if (typeName == "Nothing") { return TypeKind.TYPE_NOTHING }
-    if (typeName == "Bool") { return TypeKind.TYPE_BOOLEAN }
-    if (typeName == "CString") { return TypeKind.TYPE_CSTRING }
-    return TypeKind.TYPE_INVALID
-}
-
-private func convertParsedType(parsedType: ParsedType, fallbackFile: Option<File>): Type {
-    return parsedType
-}
-
-private func parsedEnumPatternConstructorName(parsedEnumPattern: ParsedEnumPattern): String {
-    if (let Some(constructor) <- parsedEnumPattern.constructor) {
-        return constructor.ToString()
-    }
-    return ""
-}
-
-private func convertParsedPattern(parsedPattern: ParsedPattern, fallbackFile: Option<File>): Pattern {
-    return parsedPattern
-}
-
-private func convertParsedMacroInvocation(
-    parsedInvocation: ParsedMacroInvocation,
-    fallbackFile: Option<File>
-): MacroInvocation {
-    return parsedInvocation
 }
 
 private func replaceNodeVector(container: ArrayList<Node>, loc: Int64, newNodes: ArrayList<Node>): Unit {

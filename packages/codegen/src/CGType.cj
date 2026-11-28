@@ -19,7 +19,6 @@ import cjcj::chir.GetCustomTypeIdentifier
 import cjcj::chir.GetCustomTypeDefIdentifier
 import cjcj::chir.GetTypeArgsQualifiedName
 import cjcj::chir.GetTypeQualifiedName
-import cjcj::option.ArchType
 import cjcj::utils.CJC_ASSERT
 
 private let LLVM_FUNCTION_TYPE_KIND: Int32 = 9

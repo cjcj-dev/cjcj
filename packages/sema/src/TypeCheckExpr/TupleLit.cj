@@ -4,7 +4,6 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::sema.*
 
 private func invalidTupleLit(tl: TupleLit): Ty {

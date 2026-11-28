@@ -1,7 +1,7 @@
 package cjcj::macro_pkg
 
 import cjcj::basic.SplitQualifiedName as BasicSplitQualifiedName
-import cjcj::basic.{GetLineTerminator, Warningln}
+import cjcj::basic.GetLineTerminator
 import cjcj::basic.DiagCategory as EvalParsedDiagCategory
 import cjcj::basic.DiagnosticEngine as EvalParsedDiagnosticEngine
 import cjcj::lex.{Lexer as RealLexer, StringPartKind}
@@ -11,7 +11,7 @@ import cjcj::parse.ScopeKind as EvalParsedScopeKind
 import cjcj::ast.{IsPureAnnotation, VisitAction, Walker}
 import cjcj::mangle.{GetOptPkgName, MANGLE_CANGJIE_PREFIX, MANGLE_FUNC_PARAM_TYPE_PREFIX,
     MANGLE_GLOBAL_PACKAGE_INIT_PREFIX, MANGLE_VOID_TY_SUFFIX, SPECIAL_NAME_FOR_INIT_RESET_FUNCTION}
-import cjcj::utils.{CJC_ASSERT, FileUtil, TaskQueue, TaskResult}
+import cjcj::utils.{FileUtil, TaskQueue, TaskResult}
 import std.collection.*
 import std.env.getVariable
 

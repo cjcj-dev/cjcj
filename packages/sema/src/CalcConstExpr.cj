@@ -3,7 +3,6 @@ package cjcj::sema
 import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::utils.FloatFormat
 
 public func ChkFloatTypeOverflow(expr: LitConstExpr, diag!: Option<BasicDiagnosticEngine> = None): Bool {

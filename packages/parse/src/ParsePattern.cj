@@ -1,7 +1,6 @@
 package cjcj::parse
 
 import std.collection.*
-import cjcj::ast.Expr as AstExpr
 import cjcj::ast.MemberAccess as AstMemberAccess
 import cjcj::ast.RefExpr as AstRefExpr
 import cjcj::utils.CJC_ASSERT
@@ -187,43 +186,6 @@ extend ParserImpl {
                 }
             }
         }
-    }
-
-    private func ParseEnumPatternTypeArguments(constructor: AstExpr, enumPat: EnumPattern): Unit {
-        if (!Skip(TokenKind.LT)) {
-            return
-        }
-        let leftAnglePos = lastToken.Begin()
-        enumPat.leftAnglePos = leftAnglePos
-        // C++ anchors: Parse/ParseAtom.cpp:1337 and Parse/ParseExpr.cpp:891,911.
-        if (let Some(refExpr) <- (constructor as AstRefExpr)) {
-            refExpr.leftAnglePos = leftAnglePos
-        } else if (let Some(memberAccess) <- (constructor as AstMemberAccess)) {
-            memberAccess.leftAnglePos = leftAnglePos
-        }
-        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
-            let typeArg = ParseType()
-            enumPat.typeArguments.add(typeArg)
-            if (let Some(refExpr) <- (constructor as AstRefExpr)) {
-                refExpr.typeArguments.add(typeArg)
-            } else if (let Some(member) <- (constructor as AstMemberAccess)) {
-                member.typeArguments.add(typeArg)
-            }
-            if (!Skip(TokenKind.COMMA)) {
-                break
-            }
-        }
-        let rightAnglePos = Expect(TokenKind.GT, "expected '>' after enum pattern type arguments").Begin()
-        enumPat.rightAnglePos = rightAnglePos
-        // C++ anchors: Parse/ParseAtom.cpp:1345,1355 and Parse/ParseExpr.cpp:912,871.
-        if (let Some(refExpr) <- (constructor as AstRefExpr)) {
-            refExpr.rightAnglePos = rightAnglePos
-            refExpr.end = rightAnglePos + 1
-        } else if (let Some(memberAccess) <- (constructor as AstMemberAccess)) {
-            memberAccess.rightAnglePos = rightAnglePos
-            memberAccess.end = rightAnglePos
-        }
-        enumPat.end = enumPat.rightAnglePos + 1
     }
 
     public func ParseTuplePattern(isEnumPatternParams: Bool, attributes: ArrayList<Attribute>, isVar: Bool, inDecl: Bool): TuplePattern {

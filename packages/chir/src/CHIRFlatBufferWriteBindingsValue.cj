@@ -130,11 +130,6 @@ func CreateStringLiteral(builder: FlatBufferBuilder, base: FlatBufferOffset, val
     return tableBuilder.Finish()
 }
 
-func CreateStringLiteralDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, val: Option<String>): FlatBufferOffset {
-    let valOffset = if (let Some(value) <- val) { builder.CreateSharedString(value) } else { 0u32 }
-    return CreateStringLiteral(builder, base, valOffset)
-}
-
 class RuneLiteralBuilder {
     private let builder: FlatBufferBuilder
 

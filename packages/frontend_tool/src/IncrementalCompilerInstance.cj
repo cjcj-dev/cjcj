@@ -1,7 +1,9 @@
 package cjcj::frontend_tool
 
 import std.collection.*
-import cjcj::basic.{Errorln, StringConvertor}
+import cjcj::basic.Errorln
+@When[os == "Windows"]
+import cjcj::basic.StringConvertor
 import cjcj::codegen.{getZExtValue, LLVMContextHandle, LLVMGetMDNodeOperands,
     LLVMGetNamedMetadataOperandValues, LLVMParseIRFile}
 import cjcj::frontend.*

@@ -1,47 +1,7 @@
 package cjcj::sema.TypeCheckExpr
 
 import cjcj::ast.*
-import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::sema.*
-
-private func UnitTy(): Ty {
-    return TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
-}
-
-private func InvalidBlock(b: Block): Ty {
-    let invalidTy = TypeManager.GetInvalidTy()
-    b.SetTy(invalidTy)
-    return invalidTy
-}
-
-private func LastNodeForCheck(b: Block): Option<Node> {
-    if (let Some(lastNode) <- b.GetLastExprOrDecl()) {
-        if (!b.TestAttr(Attribute.COMPILER_ADD) && lastNode.TestAttr(Attribute.COMPILER_ADD) &&
-            lastNode.astKind == ASTKind.RETURN_EXPR) {
-            if (let Some(returnExpr) <- (lastNode as ReturnExpr)) {
-                if (let Some(innerExpr) <- returnExpr.expr) {
-                    return innerExpr
-                }
-            }
-        }
-        return lastNode
-    }
-    return None
-}
-
-private func SynthesizeAndReplaceIdealTy(typeManager: TypeManager, pos: SynPos, node: Node,
-    synthesizer: Option<(SynPos, Node) -> Ty>, diag: Option<BasicDiagnosticEngine>): Bool {
-    if (let Some(synthesize) <- synthesizer) {
-        var valid = false
-        try (ds = DiagSuppressor(diag)) {
-            valid = Ty.IsTyCorrect(synthesize(pos, node)) && ReplaceIdealTy(typeManager, node, diag: diag) && !ds.HasError()
-            ds.ReportDiag()
-        }
-        return valid
-    }
-    return Ty.IsTyCorrect(node.GetTy()) && ReplaceIdealTy(typeManager, node, diag: diag)
-}
 
 extend TypeChecker {
     public func SynthesizeAndReplaceIdealTy(ctx: CheckerContext, node: Node): Bool {

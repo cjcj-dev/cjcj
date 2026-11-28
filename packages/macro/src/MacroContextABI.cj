@@ -622,7 +622,7 @@ struct CJMacroHostCallbacks {
     }
 }
 
-@When[os == "Linux" || os == "Windows"]
+@When[os == "Windows"]
 private let STD_AST_LIBRARY_NAME = "libcangjie-std-ast.dll"
 
 @When[os == "Linux" || os == "Windows"]

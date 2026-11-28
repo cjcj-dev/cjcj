@@ -1,25 +1,20 @@
 package cjcj::sema.NativeFFI.ObjC
 
 import std.collection.*
-import std.sort.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.{DiagnosticEngine, DiagKindRefactor, Linkage}
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
-import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
-import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.NativeFFI.{FFICreateOptionSomeRef, FFICreateOptionNoneRef, FFICreateOptionSomeCall, FFIGetOptionTy, CreateIsPtrNullCheckCall, CreateBoolMatch, CreateCall, CreateMemberCall, CreateSuperCall, CreateSuperRef, CreateThisCall, CreateThisRef, CreateType,
+import cjcj::sema.{CreateThrowException, GenerateTypeMapping, TypeManager}
+import cjcj::sema.NativeFFI.{FFICreateOptionSomeRef, FFICreateOptionNoneRef, FFICreateOptionSomeCall, FFIGetOptionTy, CreateIsPtrNullCheckCall, CreateBoolMatch, CreateCall, CreateMemberCall, CreateSuperCall, CreateThisCall, CreateThisRef, CreateType,
     CreateUnitType, GetStringDecl,
     IsSuperConstructorCall, IsThisConstructorCall,
     WithinFile, INIT_IDENT,
     WrapReturningLambdaCall, WrapReturningLambdaExpr}
-import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
-    CFUNC_NAME, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, NATIVE_HANDLE_MARKER, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
-    REGISTRY_ID_SETTER_SELECTOR,
-    GetRootPackageName,
-    OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
+    CFUNC_NAME, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, NATIVE_HANDLE_MARKER, REGISTRY_ID_IDENT, V_COMPILER}
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
 public enum Retain {
@@ -2161,7 +2156,7 @@ private enum ObjCFTypeKind {
 }
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCFuncCall.cpp:59-77.
-private func FTypeKindByCallPropertyDecl(tm: TypeMapper, decl: Option<Decl>): ObjCFTypeKind {
+private func FTypeKindByCallPropertyDecl(_: TypeMapper, decl: Option<Decl>): ObjCFTypeKind {
     if (decl.isNone()) {
         return ObjCFTypeKind.NONE
     }
@@ -2716,7 +2711,7 @@ public class CheckObjCPointerTypeArguments <: Handler<InteropContext> {
 }
 
 // Upstream 1e741869, CheckObjCFuncTypeArguments.cpp:24.
-private func FindIncompatibleTypeNode(ctx: InteropContext, tyArg: Type): Type {
+private func FindIncompatibleTypeNode(_: InteropContext, tyArg: Type): Type {
     var errorRef: Type = tyArg
     if (let Some(fTy) <- (tyArg as FuncType)) {
         if (!IsObjCCompatible(fTy.retType.getOrThrow().GetTy().getOrThrow(), TypePosition.OUT)) {
@@ -3457,7 +3452,7 @@ private func DesugarAsExpr(ctx: InteropContext, expr: AsExpr): Unit {
 }
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:202-221.
-private func CollectTypePatternWithObjCClass(ctx: InteropContext, pattern: Pattern): ArrayList<TypePattern> {
+private func CollectTypePatternWithObjCClass(_: InteropContext, pattern: Pattern): ArrayList<TypePattern> {
     let result = ArrayList<TypePattern>()
     let walker = Walker(pattern, visitPre: { node: Node =>
         if (let Some(typePattern) <- (node as TypePattern)) {

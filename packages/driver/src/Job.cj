@@ -8,7 +8,7 @@ import cjcj::utils.{ConcurrencyBudget, ProfileRecorder, Semaphore}
 // Failures are reported through Errorln with the failed tool's command string, as the C++ driver does
 // with Errorf; the numeric task id only keys the checklist.
 private func CheckExecuteResult(checklist: TreeMap<Int64, ToolFuture>, tools: HashMap<Int64, Tool>,
-    job: Job, returnIfAnyToolFinished!: Bool = false, succeeded!: ArrayList<Int64> = ArrayList<Int64>()): Bool {
+    _: Job, returnIfAnyToolFinished!: Bool = false, succeeded!: ArrayList<Int64> = ArrayList<Int64>()): Bool {
     var success = true
     while (!checklist.isEmpty()) {
         let totalTasks = checklist.size

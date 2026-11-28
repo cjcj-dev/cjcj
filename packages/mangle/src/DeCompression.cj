@@ -400,7 +400,7 @@ class DeCompression {
         return idx
     }
 
-    func ForwardGenericType(mangled: StringRef, cnt: IntRef, idx: Int64): Int64 {
+    func ForwardGenericType(mangled: StringRef, _: IntRef, idx: Int64): Int64 {
         let nextIdx = ForwardNumber(mangled, idx + MANGLE_CHAR_LEN)
         if (nextIdx != idx + MANGLE_CHAR_LEN) {
             return nextIdx
@@ -777,7 +777,7 @@ class DeCompression {
         return 0
     }
 
-    func TryExtendPath(mangled: StringRef, count: IntRef, idx: Int64, entityId: Int64, curMangled: String): Int64 {
+    func TryExtendPath(mangled: StringRef, count: IntRef, idx: Int64, entityId: Int64, _: String): Int64 {
         var isPush = false
         let mangledCopy = mangled.value
         var nextIdx = ForwardType(mangled, count, idx: idx + MANGLE_CHAR_LEN)
@@ -826,7 +826,7 @@ class DeCompression {
         return nextIdx
     }
 
-    func TryGenericPrefixPath(mangled: StringRef, count: IntRef, curMangled: String,
+    func TryGenericPrefixPath(mangled: StringRef, count: IntRef, _: String,
         rParams: (Int64, Int64, Int64)): Int64 {
         let mangledCopy = mangled.value
         let idx = rParams[0]

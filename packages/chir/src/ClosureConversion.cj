@@ -2958,20 +2958,6 @@ public class ClosureConversion {
             throw IllegalStateException("ClosureConversion class has no class type: " + classDef.GetIdentifier())
     }
 
-    private func FindMethodBySrcName(def: ClassDef, name: String): Option<Function> {
-        for (method in def.GetMethods()) {
-            if (method.GetSrcCodeIdentifier() == name || method.GetIdentifierWithoutPrefix() == name) {
-                return Some(method)
-            }
-        }
-        return None
-    }
-
-    private func IsInstAutoEnvBaseDef(def: ClassDef): Bool {
-        // Type.cpp:80 IsAutoEnvInstBase = IsAutoEnvBase && argTys.empty().
-        return def.GetType().getOrThrow().IsAutoEnvInstBase()
-    }
-
     private func GenericOverrideFuncName(srcFunc: Function): String {
         return ReplaceManglePrefixWith(srcFunc.GetIdentifierWithoutPrefix(), CC_FUNC_PREFIX) + "$g"
     }
@@ -3026,12 +3012,6 @@ public class ClosureConversion {
             return newPrefix + identifier[MANGLE_CANGJIE_PREFIX.size..]
         }
         throw IllegalArgumentException("Mangle name has no _C prefix to be replaced: " + identifier)
-    }
-
-    private func TypeKey(ty: Type): String {
-        return ty.ToString().replace(" ", "_").replace(",", "_").replace("(", "_").replace(")", "_").
-            replace("<", "_").replace(">", "_").replace("&", "R").replace("-", "_").replace(":", "_").
-            replace(".", "_")
     }
 
     private func GenericTypeKey(ty: GenericType): String {

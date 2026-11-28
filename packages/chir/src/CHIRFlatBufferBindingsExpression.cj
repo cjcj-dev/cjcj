@@ -20,16 +20,8 @@ class PackageFormat_Expression <: Table {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_EXPRESSION_VT_OPERANDS)) { Some(Vector<UInt32>(data, pointerPos)) } else { None }
     }
 
-    func GetBlockGroups(): Option<Vector<UInt32>> {
-        return if (let Some(pointerPos) <- GetPointer(CHIRFB_EXPRESSION_VT_BLOCKGROUPS)) { Some(Vector<UInt32>(data, pointerPos)) } else { None }
-    }
-
     func GetOwner(): UInt32 {
         return GetField(CHIRFB_EXPRESSION_VT_OWNER, 0u32)
-    }
-
-    func GetResultLocalVar(): UInt32 {
-        return GetField(CHIRFB_EXPRESSION_VT_RESULTLOCALVAR, 0u32)
     }
 
     func GetResultTy(): UInt32 {
@@ -565,10 +557,6 @@ class PackageFormat_Lambda <: Table {
 
     func GetGenericTypeParams(): Option<Vector<UInt32>> {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_LAMBDA_VT_GENERICTYPEPARAMS)) { Some(Vector<UInt32>(data, pointerPos)) } else { None }
-    }
-
-    func GetBody(): UInt32 {
-        return GetField(CHIRFB_LAMBDA_VT_BODY, 0u32)
     }
 
     func GetRetVal(): UInt32 {

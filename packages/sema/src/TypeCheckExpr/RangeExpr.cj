@@ -3,7 +3,6 @@ package cjcj::sema.TypeCheckExpr
 import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.DiagKind as BasicDiagKind
-import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::sema.*
 
 private func IsLitConstExpr(expr: Option<Expr>): Bool {

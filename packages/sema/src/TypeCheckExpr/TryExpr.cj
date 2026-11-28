@@ -6,7 +6,6 @@ import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::sema.*
 
 private func TryInvalid(te: TryExpr): Ty {

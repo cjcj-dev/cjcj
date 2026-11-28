@@ -2,7 +2,6 @@ package cjcj::sema.NativeFFI.Java
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::sema.TypeManager
 import cjcj::sema.NativeFFI.{GetJavaMemberName, GetParamTys, Utils}
 import cjcj::utils.CJC_ASSERT
 

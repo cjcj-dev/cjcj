@@ -6,8 +6,6 @@ import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
-import cjcj::basic.Position as BasicPosition
-import cjcj::basic.Range as BasicRange
 
 public type ConstPatternExprChecker = (Ty, Expr) -> Bool
 
@@ -123,9 +121,10 @@ private func IsBuiltinConstPatternEqualityTy(ty: Ty): Bool {
     return ty.IsInteger() || ty.IsFloating() || ty.IsRune() || ty.IsBoolean() || ty.IsUnit()
 }
 
-private func ChkOpOverloadForConstPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
+private func ChkOpOverloadForConstPattern(_: TypeManager, ctx: ASTContext, target: Ty,
     pattern: ConstPattern, exprChecker!: Option<ConstPatternExprChecker> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Bool {
+    let _ = desugarCallExpr
     if (let None <- pattern.literal) {
         return InvalidPatternTy(pattern)
     }

@@ -521,7 +521,7 @@ public class BCHIRInterpreter {
     }
 
     // Mirrors C++ BCHIRInterpreter.cpp:738-741.
-    private func RaiseError(_opIndex: Int64, _message: String): Unit {
+    private func RaiseError(_: Int64, _: String): Unit {
         interpreterError = true
     }
 
@@ -1341,19 +1341,6 @@ private func IsBinaryOp(opCode: OpCode): Bool {
         opCode == OpCode.BIN_BITAND || opCode == OpCode.BIN_BITOR || opCode == OpCode.BIN_BITXOR ||
         opCode == OpCode.BIN_LSHIFT || opCode == OpCode.BIN_RSHIFT ||
         opCode == OpCode.BIN_LSHIFT_EXC || opCode == OpCode.BIN_RSHIFT_EXC
-}
-
-private func IntPowValue(kind: InterpreterValueKind, lhs: Int64, rhs: Int64): InterpreterValue {
-    if (rhs < 0) {
-        return InterpreterValue.MakeInvalid()
-    }
-    var out: Int64 = 1
-    var idx: Int64 = 0
-    while (idx < rhs) {
-        out *= lhs
-        idx++
-    }
-    return InterpreterValue.MakeInt(kind, out)
 }
 
 private func TypeKindFromCell(cell: Int64): Option<TypeKind> {

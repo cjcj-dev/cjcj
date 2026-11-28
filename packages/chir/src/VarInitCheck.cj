@@ -420,7 +420,7 @@ public class VarInitCheck {
         fn: Function,
         store: StoreElementRef,
         members: ArrayList<MemberVarInfo>,
-        checkResult: CHIRCheckResult
+        _: CHIRCheckResult
     ): Unit {
         if (!fn.IsConstructor()) {
             return
@@ -444,7 +444,7 @@ public class VarInitCheck {
     }
 
     private func RaiseIllegalMemberFunCallError(
-        apply: Expression,
+        _: Expression,
         memberFunc: Function,
         checkResult: CHIRCheckResult
     ): Unit {
@@ -536,7 +536,7 @@ private func IsStoreViaDefMember(
 }
 
 private func AddUseBeforeInitError(
-    expr: Expression,
+    _: Expression,
     identifier: String,
     maybeInitedPos: TreeSet<Int64>,
     checkResult: CHIRCheckResult

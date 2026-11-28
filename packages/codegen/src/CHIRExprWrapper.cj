@@ -18,8 +18,6 @@ import cjcj::chir.InvokeStatic
 import cjcj::chir.TryInvokeStatic
 import cjcj::chir.TryInvoke
 import cjcj::chir.Type
-import cjcj::chir.TypeCast
-import cjcj::chir.TryNumericCast
 import cjcj::chir.UnaryExpression
 import cjcj::chir.Value
 import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, OverflowStrategy}

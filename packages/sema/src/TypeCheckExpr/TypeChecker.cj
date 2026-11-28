@@ -10,8 +10,6 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
 import cjcj::basic.DiagnosticCache
 import cjcj::basic.Diagnostic
-import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cjcj::incremental_compilation.IncreKind
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::option.OutputMode as OptionOutputMode
 import cjcj::option.IsUnsafeBackend as OptionIsUnsafeBackend
@@ -34,7 +32,6 @@ import cjcj::utils.CPOINTER_NAME
 import cjcj::utils.CSTRING_NAME
 import cjcj::utils.CTYPE_NAME as UtilsCTypeName
 import cjcj::utils.CJC_ASSERT
-import cjcj::utils.CJC_ASSERT_WITH_MSG
 import cjcj::utils.CJC_ABORT
 import cjcj::utils.MACRO_OBJECT_NAME
 import cjcj::utils.MAIN_INVOKE
@@ -848,10 +845,6 @@ private func ClearInvalidTypeCheckCache(ctx: ASTContext, le: LambdaExpr, target:
     }
 }
 
-private func typeCheckExprTargetTypeOf(ctx: ASTContext, node: Node): Option<Ty> {
-    return ctx.targetTypeMap.get(node)
-}
-
 func typeCheckExprPutTargetType(ctx: ASTContext, node: Node, ty: Ty): Unit {
     ctx.targetTypeMap[node] = ty
 }
@@ -980,160 +973,11 @@ private func findCoreImplicitDeclInPackages(packageDecls: ArrayList<PackageDecl>
     return None
 }
 
-private func findCoreImplicitMemberDeclInMap(instance: CompilerInstance, className: String,
-    memberName: String): Option<Decl> {
-    if (let Some(packageMap) <- instance.resolvedPackageMemberDeclsMap.get("std.core")) {
-        if (let Some(decls) <- packageMap.get(className)) {
-            for (decl in decls) {
-                if (decl.identifier.Val() != className) {
-                    continue
-                }
-                for (member in decl.GetMemberDeclPtrs()) {
-                    if (member.identifier.Val() == memberName) {
-                        return Some(member)
-                    }
-                }
-            }
-        }
-    }
-    return None
-}
-
-private func findCoreImplicitMemberDeclInPackages(packageDecls: ArrayList<PackageDecl>, className: String,
-    memberName: String): Option<Decl> {
-    for (packageDecl in packageDecls) {
-        let pkg = packageDecl.srcPackage
-        if (pkg.fullPackageName != "std.core") {
-            continue
-        }
-        for (file in pkg.files) {
-            for (decl in file.decls) {
-                if (decl.identifier.Val() != className) {
-                    continue
-                }
-                for (member in decl.GetMemberDeclPtrs()) {
-                    if (member.identifier.Val() == memberName) {
-                        return Some(member)
-                    }
-                }
-            }
-            for (decl in file.exportedInternalDecls) {
-                if (decl.identifier.Val() != className) {
-                    continue
-                }
-                for (member in decl.GetMemberDeclPtrs()) {
-                    if (member.identifier.Val() == memberName) {
-                        return Some(member)
-                    }
-                }
-            }
-        }
-    }
-    return None
-}
-
 private func isStringLiteral(expr: Expr): Bool {
     if (let Some(lit) <- (expr as LitConstExpr)) {
         return lit.kind == LitConstKind.STRING || lit.kind == LitConstKind.JSTRING
     }
     return false
-}
-
-private func typeCheckExprIsArithmeticOperator(op: TokenKind): Bool {
-    return op == TokenKind.ADD || op == TokenKind.SUB || op == TokenKind.MUL ||
-        op == TokenKind.DIV || op == TokenKind.EXP || op == TokenKind.MOD ||
-        op == TokenKind.BITAND || op == TokenKind.BITOR || op == TokenKind.BITXOR
-}
-
-private func typeCheckExprIsLogicalOperator(op: TokenKind): Bool {
-    return op == TokenKind.AND || op == TokenKind.OR
-}
-
-private func typeCheckExprAddConcreteIntegerKinds(kinds: ArrayList<TypeKind>): Unit {
-    kinds.add(TypeKind.TYPE_INT8)
-    kinds.add(TypeKind.TYPE_INT16)
-    kinds.add(TypeKind.TYPE_INT32)
-    kinds.add(TypeKind.TYPE_INT64)
-    kinds.add(TypeKind.TYPE_INT_NATIVE)
-    kinds.add(TypeKind.TYPE_UINT8)
-    kinds.add(TypeKind.TYPE_UINT16)
-    kinds.add(TypeKind.TYPE_UINT32)
-    kinds.add(TypeKind.TYPE_UINT64)
-    kinds.add(TypeKind.TYPE_UINT_NATIVE)
-}
-
-private func typeCheckExprConcreteBinaryCandidateKinds(op: TokenKind): ArrayList<TypeKind> {
-    let kinds = ArrayList<TypeKind>()
-    if (op == TokenKind.ADD || op == TokenKind.SUB || op == TokenKind.MUL || op == TokenKind.DIV) {
-        typeCheckExprAddConcreteIntegerKinds(kinds)
-        kinds.add(TypeKind.TYPE_FLOAT16)
-        kinds.add(TypeKind.TYPE_FLOAT32)
-        kinds.add(TypeKind.TYPE_FLOAT64)
-    } else if (op == TokenKind.MOD || op == TokenKind.BITAND || op == TokenKind.BITOR ||
-        op == TokenKind.BITXOR) {
-        typeCheckExprAddConcreteIntegerKinds(kinds)
-    } else if (op == TokenKind.EXP) {
-        kinds.add(TypeKind.TYPE_INT64)
-        kinds.add(TypeKind.TYPE_FLOAT64)
-    }
-    return kinds
-}
-
-private class TypeCheckerTargetSnapshot {
-    let node: Node
-    let target: Option<Decl>
-    let targets: ArrayList<Option<Decl>> = ArrayList<Option<Decl>>()
-
-    init(node: Node) {
-        this.node = node
-        this.target = node.GetTarget()
-        for (value in node.GetTargets()) {
-            targets.add(value)
-        }
-    }
-
-    func Restore(): Unit {
-        node.SetTarget(target)
-        if (let Some(refExpr) <- (node as RefExpr)) {
-            refExpr.ref.targets.clear()
-            for (value in targets) {
-                refExpr.ref.targets.add(value)
-            }
-        } else if (let Some(memberAccess) <- (node as MemberAccess)) {
-            memberAccess.targets.clear()
-            for (value2 in targets) {
-                match (value2) {
-                    case Some(decl) => memberAccess.targets.add(Some((decl as FuncDecl).getOrThrow()))
-                    case None => memberAccess.targets.add(None)
-                }
-            }
-        } else if (let Some(refType) <- (node as RefType)) {
-            refType.ref.targets.clear()
-            for (value3 in targets) {
-                refType.ref.targets.add(value3)
-            }
-        }
-    }
-}
-
-private func typeCheckExprCollectTargetSnapshots(node: Node): ArrayList<TypeCheckerTargetSnapshot> {
-    let snapshots = ArrayList<TypeCheckerTargetSnapshot>()
-    let walker = Walker(node, visitPre: { current: Node =>
-        if ((let Some(_) <- current.GetTarget()) || !current.GetTargets().isEmpty()) {
-            snapshots.add(TypeCheckerTargetSnapshot(current))
-        }
-        VisitAction.WALK_CHILDREN
-    })
-    let _ = walker.Walk()
-    return snapshots
-}
-
-private func typeCheckExprClearKeepTargets(expr: Expr): Unit {
-    let snapshots = typeCheckExprCollectTargetSnapshots(expr)
-    expr.Clear()
-    for (snapshot in snapshots) {
-        snapshot.Restore()
-    }
 }
 
 private func CollectGenericParam(funcDecl: FuncDecl, desugared: FuncDecl): Unit {
@@ -2792,7 +2636,7 @@ extend TypeChecker {
 
     private func PostTypeCheck(activeContexts: ArrayList<ASTContext>): Unit {
         let recursivePkgs = BuildRecursiveEliminationPackages(activeContexts)
-        let implicitUsedDecls = GetImplicitUsedCoreDecls()
+        let _ = GetImplicitUsedCoreDecls()
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
                 CheckOverflow(pkg)
@@ -2987,10 +2831,6 @@ extend TypeChecker {
             }
         }
         return out
-    }
-
-    private func RunInheritanceCheck(pkg: Package): Unit {
-        impl.CheckInheritance(pkg)
     }
 
     private func CheckLegalityOfUsage(ctx: ASTContext, pkg: Package): Unit {
@@ -3215,37 +3055,6 @@ extend TypeChecker {
         return arg.GetTy() ?? TypeManager.GetInvalidTy()
     }
 
-    private func SynthesizeNodeChildren(ctx: ASTContext, node: Node): Unit {
-        for (child in node.Children()) {
-            let _ = SynthesizeNode(ctx, child)
-        }
-    }
-
-    private func SynthesizeSubscriptChildren(ctx: ASTContext, subscript: SubscriptExpr): Unit {
-        if (let Some(baseExpr) <- subscript.baseExpr) {
-            SetIsNotAlone(baseExpr)
-            let _ = Synthesize(ctx, baseExpr)
-        }
-        for (indexExpr in subscript.indexExprs) {
-            let _ = Synthesize(ctx, indexExpr)
-        }
-    }
-
-    private func SynthesizeBinaryChildren(ctx: ASTContext, binaryExpr: BinaryExpr): Unit {
-        if (let Some(leftExpr) <- binaryExpr.leftExpr) {
-            let _ = Synthesize(ctx, leftExpr)
-        }
-        if (let Some(rightExpr) <- binaryExpr.rightExpr) {
-            let _ = Synthesize(ctx, rightExpr)
-        }
-    }
-
-    private func SetCallOrPattern(expr: Expr, owner: Node): Unit {
-        if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
-            nameRef.callOrPattern = Some(owner)
-        }
-    }
-
     private func SetFunctionBodyOwner(decl: Decl, body: FuncBody): Unit {
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             body.funcDecl = Some(funcDecl)
@@ -3276,16 +3085,6 @@ extend TypeChecker {
     private func SynthesizeDeclList(ctx: ASTContext, decls: ArrayList<Decl>): Unit {
         for (member in decls) {
             let _ = SynthesizeDecl(ctx, member)
-        }
-    }
-
-    private func PreparePackageSignatures(ctx: ASTContext): Unit {
-        for (sym in impl.GetToplevelDecls(ctx)) {
-            if (let Some(node) <- sym.node) {
-                if (let Some(decl) <- (node as Decl)) {
-                    PrepareDeclSignature(ctx, decl)
-                }
-            }
         }
     }
 
@@ -6448,7 +6247,7 @@ extend TypeChecker {
         }
     }
 
-    private func GetForInIterableTy(ctx: ASTContext, inTy: Ty): Ty {
+    private func GetForInIterableTy(_: ASTContext, inTy: Ty): Ty {
         if (inTy.IsNothing()) {
             return TypeManager.GetInvalidTy()
         }
@@ -7747,7 +7546,7 @@ extend TypeChecker {
         return key
     }
 
-    private func GetCacheKeyForChk(ctx: ASTContext, node: Node, target: Ty): CacheKey {
+    private func GetCacheKeyForChk(_: ASTContext, node: Node, target: Ty): CacheKey {
         var key = CacheKey(Some(target), IsNodeDesugared(node), GetDiagCacheKey())
         key.expectedMode = ExpectedCacheMode(node)
         return key
@@ -7798,7 +7597,7 @@ extend TypeChecker {
     }
 
     // C++ TypeChecker.cpp:1489-1502 SynthesizeAndCache for a FuncArg node.
-    private func SynthesizeAndCache(ctx: ASTContext, pos: SynPos, arg: FuncArg, key: CacheKey): Ty {
+    private func SynthesizeAndCache(ctx: ASTContext, _: SynPos, arg: FuncArg, key: CacheKey): Ty {
         let dc = DiagnosticCache()
         if (let Some(diagValue) <- impl.diag) {
             dc.ToExclude(diagValue)
@@ -7873,19 +7672,6 @@ extend TypeChecker {
         return SynthesizeAndCache(ctx, pos, arg, key)
     }
 
-    private func CheckWithCache(ctx: ASTContext, target: Ty, expr: Expr): Bool {
-        if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
-            return Check(ctx, target, expr)
-        }
-        let key = GetCacheKeyForChk(ctx, expr, target)
-        let nodeCache = GetTypeCheckCache(ctx, expr)
-        if (let Some(cache) <- nodeCache.chkCache.get(key)) {
-            RestoreCached(ctx, expr, cache)
-            return cache.successful
-        }
-        return CheckAndCache(ctx, target, expr, key)
-    }
-
     private func CheckWithCache(ctx: ASTContext, target: Ty, arg: FuncArg): Bool {
         if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
             GetTypeCheckCache(ctx, arg).lastKey = GetCacheKeyForChk(ctx, arg, target)
@@ -7927,28 +7713,6 @@ extend TypeChecker {
                 return false
             }
         }
-        return CheckAndCache(ctx, target, expr, key)
-    }
-
-    private func CheckWithEffectiveCache(ctx: ASTContext, target: Ty, expr: Expr,
-        recoverDiag: Bool): Bool {
-        if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
-            return Check(ctx, target, expr)
-        }
-        let key = GetCacheKeyForChk(ctx, expr, target)
-        if (!Ty.IsInitialTy(expr.GetTy())) {
-            let nodeCache = GetTypeCheckCache(ctx, expr)
-            if (let Some(lastKey) <- nodeCache.lastKey) {
-                if (lastKey == key) {
-                    if (let Some(cache) <- nodeCache.chkCache.get(key)) {
-                        RestoreCached(ctx, expr, cache, recoverDiag: recoverDiag)
-                        return cache.successful
-                    }
-                    return CheckAndCache(ctx, target, expr, key)
-                }
-            }
-        }
-        expr.Clear()
         return CheckAndCache(ctx, target, expr, key)
     }
 
@@ -8182,27 +7946,6 @@ extend TypeChecker {
             builder5.Emit()
         }
         return false
-    }
-
-    private func SynthesizeWithEffectiveCache(ctx: ASTContext, pos: SynPos, expr: Expr,
-        recoverDiag: Bool): Ty {
-        if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
-            return Synthesize(ctx, pos, expr)
-        }
-        let key = GetCacheKeyForSyn(ctx, expr)
-        if (!Ty.IsInitialTy(expr.GetTy())) {
-            let nodeCache = GetTypeCheckCache(ctx, expr)
-            if (let Some(lastKey) <- nodeCache.lastKey) {
-                if (lastKey == key) {
-                    if (let Some(cache) <- nodeCache.synCache.get(key)) {
-                        RestoreCached(ctx, expr, cache, recoverDiag: recoverDiag)
-                        return cache.result ?? TypeManager.GetInvalidTy()
-                    }
-                    return SynthesizeAndCache(ctx, pos, expr, key)
-                }
-            }
-        }
-        return SynthesizeAndCache(ctx, pos, expr, key)
     }
 
     private func LookupCoreTy(ctx: ASTContext, name: String): Option<Ty> {
@@ -8706,6 +8449,7 @@ extend TypeChecker {
     }
 
     internal func Check(ctx: ASTContext, target: Ty, expr: Expr, clearInferredCallTypes!: Bool = true): Bool {
+        let _ = clearInferredCallTypes
         if (!Ty.IsTyCorrect(target)) {
             expr.SetTy(TypeManager.GetInvalidTy())
             typeCheckExprClearTargetType(ctx, expr)

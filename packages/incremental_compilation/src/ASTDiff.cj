@@ -386,13 +386,6 @@ private class ASTDiffImpl {
         }
     }
 
-    private func CollectSourcePackage(pkg: Package): (ASTCache, HashSet<Decl>) {
-        let calculator = ASTCacheCalculator(pkg, srcInfo)
-        calculator.Walk()
-        mangled2Decl = calculator.mangled2Decl
-        return (calculator.ret, calculator.duplicatedMangleNames)
-    }
-
     private func CollectAddedTopLevelDecl(decl: Decl): Unit {
         ret.added.add(decl)
     }

@@ -82,7 +82,6 @@ import cjcj::ast.SubscriptExpr as AstSubscriptExpr
 import cjcj::ast.SugarKind as AstSugarKind
 import cjcj::ast.TokenKind as AstTokenKind
 import cjcj::ast.TokenKindLiteral as AstTokenKindLiteral
-import cjcj::ast.TokenKindValue as AstTokenKindValue
 import cjcj::ast.Ty as AstTy
 import cjcj::ast.TypeKind as AstTypeKind
 import cjcj::ast.TypeKindInRange as AstTypeKindInRange
@@ -883,16 +882,7 @@ public class Translator {
             annoInstIndex++
         }
         @When[debug]
-        let isDebugBuild = true
-        @When[!debug]
-        let isDebugBuild = false
-        if (isDebugBuild) {
-            while (isComputingAnnos && annoChildrenId < annotationsArray.children.size &&
-                annotationsArray.children[annoChildrenId].TestAttr(AstAttribute.NO_REFLECT_INFO)) {
-                annoChildrenId++
-            }
-            CJC_ASSERT(annotationsArray.children.size == annoChildrenId)
-        }
+        let _ = CheckRemainingAnnotations(annotationsArray, annoChildrenId, isComputingAnnos)
 
         let packageInit = builder.context.GetCurPackage().getOrThrow().GetPackageInitFunc().getOrThrow()
         let packageInitBody = packageInit.GetBody().getOrThrow()
@@ -909,6 +899,17 @@ public class Translator {
         let createdExit887 = builder.CreateExit(None, CurrentBlock())
         CurrentBlock().AppendExpression(createdExit887)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
+    }
+
+    @When[debug]
+    private func CheckRemainingAnnotations(annotationsArray: AstArrayLit, firstUnchecked: Int64,
+        isComputingAnnos: Bool): Unit {
+        var index = firstUnchecked
+        while (isComputingAnnos && index < annotationsArray.children.size &&
+            annotationsArray.children[index].TestAttr(AstAttribute.NO_REFLECT_INFO)) {
+            index++
+        }
+        CJC_ASSERT(annotationsArray.children.size == index)
     }
 
     public static func TranslateASTNode(node: AstNode, trans: Translator): Option<Value> {
@@ -2142,18 +2143,6 @@ public class Translator {
         return ProcessCallExpr(expr)
     }
 
-    // C++ CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:1260-1272.
-    private func PrintDevirtualizationMessage(expr: AstCallExpr, nodeType: String): Unit {
-        if (!opts.chirDebugOptimizer) {
-            return
-        }
-        let resolvedFunction = expr.resolvedFunction.getOrThrow()
-        let message = "The function call to " + resolvedFunction.identifier.Val() + " in the line " +
-            expr.begin.line.toString() + " and the column " + expr.begin.column.toString() + " was an " +
-            nodeType + " call."
-        println(message)
-    }
-
     public func Visit(expr: AstLambdaExpr): Option<Value> {
         let funcBody = expr.funcBody ??
             throw IllegalStateException("faithful AST2CHIR LambdaExpr has no FuncBody")
@@ -3081,25 +3070,12 @@ public class Translator {
         return GetInstCalleeInfoInGeneral(expr, calleeDecl, thisTypeRef, isVirtualFuncCall)
     }
 
-    private func MemberAccessFuncType(member: AstMemberAccess): FuncType {
-        let astTy = RequireAstTy(member)
-        return RequireFuncType(chirTy.TranslateType(astTy))
-    }
-
     private func TranslateMemberAccessInstArgs(member: AstMemberAccess): ArrayList<Type> {
         let out = ArrayList<Type>()
         for (instTy in member.instTys) {
             out.add(chirTy.TranslateType(instTy))
         }
         return out
-    }
-
-    private func InstantiateMemberOwnerType(funcDecl: AstFuncDecl, thisType: Type): Type {
-        let ownerTy = TranslateMemberOwnerType(funcDecl)
-        let genericParams = TranslateFuncGenericParams(funcDecl)
-        let replacements = ArrayList<Type>()
-        AddMemberOwnerGenericReplacements(funcDecl, Some(thisType), genericParams, replacements)
-        return SubstituteGenericType(ownerTy, genericParams, replacements).StripAllRefs()
     }
 
     // The receiver mode is part of a method's identity (BaseMangler.MangleReceiverMode, and the vtable
@@ -3121,21 +3097,6 @@ public class Translator {
             return builder.context.GetRefTy(thisType)
         }
         return thisType
-    }
-
-    private func ShouldUseVirtualMemberDispatchForMemberAccess(member: AstMemberAccess, funcDecl: AstFuncDecl): Bool {
-        if (let Some(baseExpr) <- member.baseExpr) {
-            if (let Some(refExpr) <- (baseExpr as AstRefExpr)) {
-                if (refExpr.isSuper) {
-                    return false
-                }
-            }
-            let baseTy = chirTy.TranslateType(baseExpr).StripAllRefs()
-            if (baseTy.IsCustomType() && funcDecl.TestAttr(AstAttribute.STATIC)) {
-                return false
-            }
-        }
-        return ShouldUseVirtualMemberDispatch(funcDecl)
     }
 
     private func TranslateThisObjectForFuncMemberAccess(member: AstMemberAccess, funcDecl: AstFuncDecl): Value {
@@ -9289,24 +9250,6 @@ public class Translator {
         throw IllegalStateException("faithful AST2CHIR member access requires current this object")
     }
 
-    private func ShouldUseVirtualMemberDispatch(funcDecl: AstFuncDecl): Bool {
-        if (funcDecl.TestAnyAttr(AstAttribute.GENERIC_INSTANTIATED, AstAttribute.PRIMARY_CONSTRUCTOR,
-            AstAttribute.CONSTRUCTOR)) {
-            return false
-        }
-        let outer = funcDecl.outerDecl
-        let funcHasOpenFlag = funcDecl.TestAnyAttr(AstAttribute.OPEN, AstAttribute.ABSTRACT) ||
-            if (let Some(parent) <- outer) { parent.astKind == ASTKind.INTERFACE_DECL } else { false }
-        if (funcDecl.TestAttr(AstAttribute.STATIC)) {
-            return if (let Some(parent) <- outer) {
-                parent.IsClassLikeDecl() && !funcDecl.TestAttr(AstAttribute.PRIVATE)
-            } else {
-                false
-            }
-        }
-        return funcHasOpenFlag && funcDecl.TestAnyAttr(AstAttribute.PUBLIC, AstAttribute.PROTECTED)
-    }
-
     private func InheritedChainHasCommon(def: CustomTypeDef): Bool {
         if (def.TestAttr(Attribute.COMMON)) {
             return true
@@ -9799,15 +9742,6 @@ public class Translator {
             }
         }
         return address
-    }
-
-    private func CoerceThisObjectForCallee(funcDecl: AstFuncDecl, callee: Value, thisObj: Value): Value {
-        if (let Some(thisTy) <- thisObj.GetType()) {
-            if (let Some(expectedTy) <- ExpectedThisParamType(funcDecl, callee, thisTy)) {
-                return CoerceValueForExpectedType(thisObj, expectedTy)
-            }
-        }
-        return thisObj
     }
 
     private func ExpectedThisParamType(funcDecl: AstFuncDecl, callee: Value, receiverTy: Type): Option<Type> {
@@ -10389,115 +10323,6 @@ public class Translator {
         return FaithfulLeftValueInfo(GetCurrentThisObject(), path)
     }
 
-    private func NormalizeMemberBaseLeftValue(info: FaithfulLeftValueInfo, baseExpr: AstExpr,
-        targetBaseAstTy: AstTy): FaithfulLeftValueInfo {
-        var base = info.base.getOrThrow()
-        var path = CopyStringList(info.path)
-        let baseTy = base.GetType() ??
-            throw IllegalStateException("faithful AST2CHIR member base has no type: ${base.GetIdentifier()}")
-        if (path.isEmpty()) {
-            if (baseTy.IsReferenceTypeWithRefDims(CLASS_REF_DIM)) {
-                let loadedTy = RequireRefBaseType(base)
-                let createdLoad9554 = builder.CreateLoad(loadedTy, base, CurrentBlock())
-                CurrentBlock().AppendExpression(createdLoad9554)
-                base = RequireResult(createdLoad9554)
-            }
-            return FaithfulLeftValueInfo(base, path)
-        }
-        var memberBaseTy = (baseTy.StripAllRefs() as CustomType) ??
-            throw IllegalStateException("faithful AST2CHIR member base is not custom type: ${baseTy.ToString()}")
-        var memberTy: Option<Type> = None
-        var pathIndex: Int64 = 0
-        while (pathIndex < path.size) {
-            let name = path[pathIndex]
-            let allMemberVars = memberBaseTy.GetCustomTypeDef().GetAllInstanceVars()
-            let instMap = HashMap<Int64, (GenericType, Type)>()
-            memberBaseTy.GetInstMap(instMap, builder)
-            var memberIndex = allMemberVars.size
-            memberTy = None
-            while (memberIndex > 0) {
-                memberIndex--
-                if (allMemberVars[memberIndex].name == name) {
-                    memberTy = ReplaceRawGenericArgType(allMemberVars[memberIndex].ty, instMap, builder)
-                    break
-                }
-            }
-            let currentMemberTy = memberTy.getOrThrow()
-            if (currentMemberTy.IsReferenceTypeWithRefDims(1)) {
-                break
-            }
-            pathIndex++
-            if (pathIndex < path.size) {
-                memberBaseTy = (currentMemberTy.StripAllRefs() as CustomType) ??
-                    throw IllegalStateException("faithful AST2CHIR member path is not custom type: ${currentMemberTy.ToString()}")
-            }
-        }
-        let pathMemberTy = memberTy.getOrThrow()
-        let baseExprTy = RequireAstTy(baseExpr)
-        if (baseExprTy.IsClassLike() || baseExprTy.IsGeneric()) {
-            var baseLeftValue = base
-            var baseLeftValueTy = baseTy
-            if (baseLeftValueTy.IsReferenceTypeWithRefDims(CLASS_REF_DIM)) {
-                baseLeftValueTy = RequireRefBaseType(baseLeftValue)
-                let createdLoad9593 = builder.CreateLoad(baseLeftValueTy, baseLeftValue, CurrentBlock())
-                CurrentBlock().AppendExpression(createdLoad9593)
-                baseLeftValue = RequireResult(createdLoad9593)
-            }
-
-            var baseVal: Option<Value> = None
-            if (baseLeftValueTy.IsReferenceTypeWithRefDims(1) ||
-                baseLeftValueTy.IsValueOrGenericTypeWithRefDims(1)) {
-                let memberRefTy = builder.context.GetRefTy(pathMemberTy)
-                let createdGetElementByName9600 = builder.CreateGetElementByName(memberRefTy, baseLeftValue, path,
-                    CurrentBlock())
-                CurrentBlock().AppendExpression(createdGetElementByName9600)
-                let getMemberRef = RequireResult(createdGetElementByName9600)
-                let createdLoad9602 = builder.CreateLoad(pathMemberTy, getMemberRef, CurrentBlock())
-                CurrentBlock().AppendExpression(createdLoad9602)
-                baseVal = RequireResult(createdLoad9602)
-            } else if (baseLeftValueTy.IsValueOrGenericTypeWithRefDims(0)) {
-                let createdFieldByName9604 = builder.CreateFieldByName(pathMemberTy, baseLeftValue, path, CurrentBlock())
-                CurrentBlock().AppendExpression(createdFieldByName9604)
-                baseVal = RequireResult(createdFieldByName9604)
-            }
-
-            let concreteBaseVal = baseVal ??
-                throw IllegalStateException("faithful AST2CHIR unsupported member base type: ${baseLeftValueTy.ToString()}")
-            let concreteBaseValTy = concreteBaseVal.GetType() ??
-                throw IllegalStateException("faithful AST2CHIR member base value has no type: ${concreteBaseVal.GetIdentifier()}")
-            var baseValRefDims = concreteBaseValTy.GetRefDims()
-            let strippedBaseValTy = concreteBaseValTy.StripAllRefs()
-            let instMap = HashMap<Int64, (GenericType, Type)>()
-            if (let Some(baseValCustomTy) <- (strippedBaseValTy as CustomType)) {
-                baseValCustomTy.GetInstMap(instMap, builder)
-            } else if (let Some(baseValGenericTy) <- (strippedBaseValTy as GenericType)) {
-                baseValGenericTy.GetInstMap(instMap, builder)
-            }
-            var targetBaseTy = chirTy.TranslateType(targetBaseAstTy)
-            if (targetBaseTy.GetRefDims() > baseValRefDims) {
-                baseValRefDims = targetBaseTy.GetRefDims()
-            }
-            targetBaseTy = ReplaceRawGenericArgType(targetBaseTy.StripAllRefs(), instMap, builder)
-            var refIdx: Int64 = 0
-            while (refIdx < baseValRefDims) {
-                targetBaseTy = builder.context.GetRefTy(targetBaseTy)
-                refIdx++
-            }
-            let castedBaseVal = CastValueIfNeeded(concreteBaseVal, targetBaseTy)
-            path.clear()
-            return FaithfulLeftValueInfo(castedBaseVal, path)
-        }
-        if (!pathMemberTy.IsReferenceTypeWithRefDims(1) &&
-            (baseTy.IsReferenceTypeWithRefDims(1) || baseTy.IsValueOrGenericTypeWithRefDims(1) ||
-                baseTy.IsValueOrGenericTypeWithRefDims(0))) {
-            return FaithfulLeftValueInfo(base, path)
-        }
-        let loaded = LoadLeftValue(info, chirTy.TranslateType(baseExpr)) ??
-            throw IllegalStateException("faithful AST2CHIR member base produced no value")
-        path.clear()
-        return FaithfulLeftValueInfo(loaded, path)
-    }
-
     private func AddressOfLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Value {
         let base = info.base.getOrThrow()
         if (info.path.isEmpty()) {
@@ -10729,14 +10554,6 @@ public class Translator {
         return DebugLocation(builder.context.GetSourceFileName(fileId), fileId, Position(), Position())
     }
 
-    private func CopyStringList(values: ArrayList<String>): ArrayList<String> {
-        let out = ArrayList<String>()
-        for (value in values) {
-            out.add(value)
-        }
-        return out
-    }
-
     private func SetSymbolTable(node: AstNode, value: Value, isLocal!: Bool = true): Unit {
         if (let Some(decl) <- (node as AstDecl)) {
             if (isLocal) {
@@ -10945,17 +10762,6 @@ public class Translator {
         }
     }
 
-    private func ToCHIRUnaryOp(op: AstTokenKind): ExprKind {
-        return match (op) {
-            case AstTokenKind.SUB => ExprKind.NEG
-            case AstTokenKind.NOT => ExprKind.NOT
-            case AstTokenKind.BITNOT => ExprKind.BITNOT
-            case _ =>
-                CJC_ASSERT(false)
-                ExprKind.INVALID
-        }
-    }
-
     private func IsCompoundAssignOp(op: AstTokenKind): Bool {
         return match (op) {
             case AstTokenKind.ADD_ASSIGN => true
@@ -11037,15 +10843,6 @@ public class Translator {
         }
         throw IllegalStateException(
             "${context} has no single Sema target: ${member.field.Val()} (${member.targets.size} candidates)")
-    }
-
-    private func MemberAccessValueType(member: AstMemberAccess, target: AstDecl): Type {
-        if (let Some(memberTy) <- member.GetTy()) {
-            if (AstTy.IsTyCorrect(memberTy)) {
-                return chirTy.TranslateType(memberTy)
-            }
-        }
-        return chirTy.TranslateType(target)
     }
 
     private func ResolveMemberAccessTargetFromBase(member: AstMemberAccess): Option<AstDecl> {

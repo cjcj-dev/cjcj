@@ -587,7 +587,7 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         if (let Some(found) <- FindABIArgInfo(typeMap, chirTy)) {
             return found
         }
-        let llvmType = GetLLVMType(chirTy)
+        let _ = GetLLVMType(chirTy)
         let sourceType = CGType.GetOrCreate(cgMod, chirTy)
         let classes = ClassifyType(sourceType)
         var lowPartTy = GetLowPartType(sourceType, classes, isArg)
@@ -1018,7 +1018,7 @@ public open class LinuxAarch64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         return ProcessKind.NO_PROCESS
     }
 
-    protected open func GetMappingArgInfo(chirTy: StructType, isArg: Bool): ABIArgInfo {
+    protected open func GetMappingArgInfo(chirTy: StructType, _: Bool): ABIArgInfo {
         if (let Some(found) <- FindABIArgInfo(typeMap, chirTy)) {
             return found
         }
@@ -1397,7 +1397,7 @@ public class WindowsAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         return ProcessKind.NO_PROCESS
     }
 
-    private func GetMappingArgInfo(chirTy: StructType, isArg: Bool): ABIArgInfo {
+    private func GetMappingArgInfo(chirTy: StructType, _: Bool): ABIArgInfo {
         if (let Some(found) <- FindABIArgInfo(typeMap, chirTy)) {
             return found
         }
@@ -1815,12 +1815,6 @@ private func GetStructElements(llvmType: LLVMTypeRef): ArrayList<LLVMTypeRef> {
     return out
 }
 
-private func GetStructElementType(llvmType: LLVMTypeRef, idx: Int64): LLVMTypeRef {
-    let elements = GetStructElements(llvmType)
-    CJC_ASSERT(idx >= 0 && idx < elements.size)
-    return elements[idx]
-}
-
 private func SameLLVMType(left: LLVMTypeRef, right: LLVMTypeRef): Bool {
     if (left.isNull() || right.isNull()) {
         return left.isNull() && right.isNull()
@@ -1840,22 +1834,6 @@ private func SameLLVMType(left: LLVMTypeRef, right: LLVMTypeRef): Bool {
             SameLLVMType(GetPointerElementType(left), GetPointerElementType(right))
     }
     return left.toUIntNative() == right.toUIntNative()
-}
-
-private func CreateIntCastUnsigned(builder: IRBuilder2, value: LLVMValueRef, destType: LLVMTypeRef): LLVMValueRef {
-    let sourceType = unsafe { LLVMTypeOf(value) }
-    if (!isIntegerTy(sourceType) || !isIntegerTy(destType)) {
-        return value
-    }
-    let sourceWidth = unsafe { LLVMGetIntTypeWidth(sourceType) }
-    let destWidth = unsafe { LLVMGetIntTypeWidth(destType) }
-    if (sourceWidth == destWidth) {
-        return value
-    }
-    if (sourceWidth < destWidth) {
-        return builder.CreateZExt(value, destType)
-    }
-    return builder.CreateTrunc(value, destType)
 }
 
 public func AddAlignAttributeAtIndex(value: LLVMValueRef, idx: UInt32, align: UInt64): Unit {

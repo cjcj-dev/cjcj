@@ -4,7 +4,7 @@ import cjcj::ast.*
 import cjcj::modules.SemaImportManager
 import cjcj::utils.{NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT}
 import std.collection.ArrayList
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, OBJ_C_BLOCK_IDENT, OBJ_C_FUNC_IDENT,
+import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK, OBJ_C_BLOCK_IDENT, OBJ_C_FUNC_IDENT,
     OBJ_C_ID_IDENT, OBJ_C_LANG_PACKAGE_IDENT, OBJ_C_POINTER_IDENT}
 
 // Upstream a51ced71, ObjC/Utils/ASTQuery.cpp: IsObjCImplRegistryCompanion / GetOwnerClass.

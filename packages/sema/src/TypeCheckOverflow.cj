@@ -2,7 +2,6 @@ package cjcj::sema
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::ast.AnnotationKind as AstAnnotationKind
 
 private func IsOverflowOp(op: TokenKind): Bool {
     return match (op) {

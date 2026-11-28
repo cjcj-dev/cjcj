@@ -456,8 +456,6 @@ public class CGContext {
             genericTypeWithUpperBoundsMap[genericTypeName] = upperBoundsVec
             return genericTypeName + ".0"
         }
-        CJC_ASSERT(false)
-        return ""
     }
 
     public func AddDependentPartialOrderOfTypes(smaller: LLVMValueRef, bigger: LLVMValueRef): Unit {

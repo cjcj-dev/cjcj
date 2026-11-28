@@ -183,20 +183,6 @@ private func GetRealNonOptionTy(ty: Ty): Ty {
     return current
 }
 
-private func IsFunctionalTy(ty: Ty): Bool {
-    if (ty.IsFunc() || ty.IsAny()) {
-        return true
-    }
-    if (let Some(gen) <- (ty as GenericsTy)) {
-        for (upper in gen.upperBounds) {
-            if (upper.IsFunc()) {
-                return true
-            }
-        }
-    }
-    return false
-}
-
 private func IsSuperCall(ce: CallExpr): Bool {
     if (let Some(base) <- ce.baseFunc) {
         if (let Some(refExpr) <- (base as RefExpr)) {
@@ -220,86 +206,6 @@ private func ContainsFuncDecl(decls: ArrayList<FuncDecl>, candidate: FuncDecl): 
         }
     }
     return false
-}
-
-private func AddUniqueFunc(out: ArrayList<FuncDecl>, candidate: FuncDecl): Unit {
-    if (!ContainsFuncDecl(out, candidate)) {
-        out.add(candidate)
-    }
-}
-
-private func GetSpecificOrRealTarget(target: Option<Decl>): Option<Decl> {
-    if (let Some(realTarget) <- GetRealTarget(target)) {
-        if (realTarget.TestAttr(Attribute.COMMON)) {
-            if (let Some(specific) <- realTarget.specificImplementation) {
-                return Some(specific)
-            }
-        }
-        return Some(realTarget)
-    }
-    return None
-}
-
-private func AddSpecificOrOriginalFunc(out: ArrayList<FuncDecl>, candidate: FuncDecl): Unit {
-    if (candidate.TestAttr(Attribute.COMMON)) {
-        if (let Some(specific) <- candidate.specificImplementation) {
-            if (let Some(specificFunc) <- (specific as FuncDecl)) {
-                AddUniqueFunc(out, specificFunc)
-                return
-            }
-        }
-    }
-    AddUniqueFunc(out, candidate)
-}
-
-private func CollectMemberConstructors(decl: Decl): ArrayList<FuncDecl> {
-    let out = ArrayList<FuncDecl>()
-    for (member in decl.GetMemberDeclPtrs()) {
-        if (let Some(funcDecl) <- (member as FuncDecl)) {
-            if (IsInstanceConstructor(funcDecl) && funcDecl.identifier.Val() == "init") {
-                AddUniqueFunc(out, funcDecl)
-            }
-        }
-    }
-    return out
-}
-
-private func CollectCallBaseFuncCandidates(ce: CallExpr): ArrayList<FuncDecl> {
-    let out = ArrayList<FuncDecl>()
-    if (let None <- ce.baseFunc) {
-        return out
-    }
-    let base = ce.baseFunc.getOrThrow()
-    if (let Some(target) <- GetSpecificOrRealTarget(base.GetTarget())) {
-        if (let Some(funcDecl) <- (target as FuncDecl)) {
-            AddSpecificOrOriginalFunc(out, funcDecl)
-        } else if (target.IsStructOrClassDecl()) {
-            for (ctor in CollectMemberConstructors(target)) {
-                AddUniqueFunc(out, ctor)
-            }
-        } else if (let Some(propDecl) <- (target as PropDecl)) {
-            if (let Some(getter) <- GetUsableGetterForProperty(propDecl)) {
-                AddUniqueFunc(out, getter)
-            }
-        }
-    }
-    for (candidate in GetFuncTargets(base)) {
-        AddSpecificOrOriginalFunc(out, candidate.getOrThrow())
-    }
-    if (let Some(member) <- (base as MemberAccess)) {
-        for (targetOpt in member.targets) {
-            if (let Some(target) <- targetOpt) {
-                if (let Some(funcDecl) <- (target as FuncDecl)) {
-                    AddSpecificOrOriginalFunc(out, funcDecl)
-                } else if (let Some(propDecl) <- (target as PropDecl)) {
-                    if (let Some(getter) <- GetUsableGetterForProperty(propDecl)) {
-                        AddSpecificOrOriginalFunc(out, getter)
-                    }
-                }
-            }
-        }
-    }
-    return out
 }
 
 private func CheckNameArgInParams(diag: Option<BasicDiagnosticEngine>, arg: FuncArg, argName: String,
@@ -2178,17 +2084,6 @@ extend InstCtxScope {
     }
 }
 
-private func ClearInferredCallTypeArgsForTargetCheck(ce: CallExpr): Unit {
-    if (let Some(base) <- ce.baseFunc) {
-        if (!base.GetTypeArgs().isEmpty()) {
-            return
-        }
-        if (let Some(nameRef) <- (base as NameReferenceExpr)) {
-            nameRef.instTys.clear()
-        }
-    }
-}
-
 private func AllCallArgsHaveCorrectTy(ce: CallExpr): Bool {
     for (arg in ce.args) {
         if (!Ty.IsTyCorrect(arg.GetTy())) {
@@ -2311,32 +2206,6 @@ private func MakeBlameMsg(builder: DiagnosticBuilder, diagInfo: SolvingErrInfo):
     }
 }
 
-private func ShouldReportCallInferenceFailure(target: Option<Ty>): Bool {
-    if (let Some(targetTy) <- target) {
-        return !targetTy.IsQuest() && !targetTy.HasGeneric()
-    }
-    return false
-}
-
-private func MarkCallInferenceFailure(failure: Option<CallInferenceFailure>, ce: CallExpr, fd: FuncDecl,
-    target: Option<Ty>): Unit {
-    if (NeedLastTry(ce)) {
-        return
-    }
-    if (!ShouldReportCallInferenceFailure(target)) {
-        return
-    }
-    if (!AllCallArgsHaveCorrectTy(ce)) {
-        return
-    }
-    if (let Some(value) <- failure) {
-        value.failed = true
-        if (let None <- value.candidate) {
-            value.candidate = Some(fd)
-        }
-    }
-}
-
 private func TyListContains(values: ArrayList<Ty>, ty: Ty): Bool {
     for (value in values) {
         if (SameTy(value, ty)) {
@@ -2344,32 +2213,6 @@ private func TyListContains(values: ArrayList<Ty>, ty: Ty): Bool {
         }
     }
     return false
-}
-
-private func AddCurrentGenericInstTyVars(typeManager: TypeManager, generic: Generic, typeMapping: SubstPack,
-    out: ArrayList<GenericsTy>): Unit {
-    for (param in generic.typeParameters) {
-        if (let Some(paramTy) <- param.GetTy()) {
-            if (let Some(genericTy) <- (paramTy as GenericsTy)) {
-                typeManager.MakeInstTyVar(typeMapping, genericTy)
-                if (let Some(instTy) <- typeMapping.u2i.Get(genericTy)) {
-                    if (let Some(instGenTy) <- (instTy as GenericsTy)) {
-                        // Mirrors C++ GetTyVarsToSolve(TypeCheckUtil.cpp:743): a generated instantiation
-                        // variable is still to be solved only when it is not already present in maps.inst.
-                        if (let None <- typeMapping.inst.Get(instGenTy)) {
-                            for (upperBound in genericTy.upperBounds) {
-                                let instUpperBound = typeManager.ApplySubstPack(upperBound, typeMapping)
-                                if (!TyListContains(instGenTy.upperBounds, instUpperBound)) {
-                                    instGenTy.upperBounds.add(instUpperBound)
-                                }
-                            }
-                            out.add(instGenTy)
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 private class TyArgSynState {
@@ -2838,7 +2681,7 @@ private func GenerateTypeMappingForCall(typeManager: TypeManager, diag: Option<B
 
 // Mirrors C++ TypeArgumentInference.cpp:557-588.
 private func GenerateTypeMappingByInference(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    ctx: Option<ASTContext>, candidate: FunctionCandidate, inferenceFailure: Option<CallInferenceFailure>,
+    ctx: Option<ASTContext>, candidate: FunctionCandidate, _: Option<CallInferenceFailure>,
     target: Option<Ty>, argChecker: Option<CallArgChecker>, argSynthesizer: Option<(FuncArg) -> Ty>,
     declSynthesizer: Option<CallDeclSynthesizer>): ArrayList<SubstPack> {
     let ce = candidate.ce
@@ -4884,33 +4727,6 @@ internal func DiagnoseForCall(diag: Option<BasicDiagnosticEngine>, typeManager: 
     let fullPackageName = ce.curFile.getOrThrow().curPackage.getOrThrow().fullPackageName
     AddDiagNotesForImportedDecls(builder, importManager.GetImportsOfDecl(fullPackageName), importedTargets)
     builder.Emit()
-}
-
-private func ResolveDeclForCallBase(ce: CallExpr, candidates: ArrayList<FuncDecl>): Option<Decl> {
-    if (let Some(base) <- ce.baseFunc) {
-        if (let Some(target) <- GetSpecificOrRealTarget(base.GetTarget())) {
-            if (let Some(funcDecl) <- (target as FuncDecl)) {
-                if (let Some(outer) <- funcDecl.outerDecl) {
-                    if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
-                        return Some(outer)
-                    }
-                }
-            }
-            if (!target.IsStructOrClassDecl() && !candidates.isEmpty()) {
-                return Some(candidates[0])
-            }
-            return Some(target)
-        }
-    }
-    if (!candidates.isEmpty()) {
-        if (let Some(outer) <- candidates[0].outerDecl) {
-            if (candidates[0].TestAttr(Attribute.CONSTRUCTOR)) {
-                return Some(outer)
-            }
-        }
-        return Some(candidates[0])
-    }
-    return None
 }
 
 public func SelfhostPortStatus_TypeCheckCall(): Bool {

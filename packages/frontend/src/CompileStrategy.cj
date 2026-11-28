@@ -9,8 +9,11 @@ import cjcj::basic.DiagCategory
 import cjcj::macro_pkg.MacroExpansion
 import cjcj::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
 import cjcj::sema.StrategyType
-import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, CreateAltSignalStack, RegisterCrashSignalHandler, TaskQueue,
-    TaskResult}
+import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, TaskQueue, TaskResult}
+@When[!debug && os != "Windows"]
+import cjcj::utils.CreateAltSignalStack
+@When[!debug && os == "Windows"]
+import cjcj::utils.RegisterCrashSignalHandler
 import cjcj::utils.FileUtil
 import cjcj::utils.OverflowStrategy as FaithfulOverflowStrategy
 import cjcj::utils.CJ_D_FILE_EXTENSION

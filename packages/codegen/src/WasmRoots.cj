@@ -8,7 +8,7 @@ private let LLVM_POINTER_KIND: Int32 = 12
 
 // Emit the per-partition static root table (I-STATIC). Stack roots are not a
 // codegen concern: the LLVM root pass, the last IR pass, publishes them.
-internal func EmitWasmRoots(modules: ArrayList<CGModule>, localizedNames: HashSet<String>): Unit {
+internal func EmitWasmRoots(modules: ArrayList<CGModule>, _: HashSet<String>): Unit {
     for (cgMod in modules) {
         let module = cgMod.GetLLVMModule().getOrThrow()
         try (builder = IRBuilder2(cgMod)) {

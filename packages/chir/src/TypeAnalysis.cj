@@ -83,7 +83,6 @@ public class TypeValue <: HasEqual<TypeValue> {
         return match (clsTyKind) {
             case DevirtualTyKind.SUBTYPE_OF => "SUBTYPE_OF"
             case DevirtualTyKind.EXACTLY => "EXACTLY"
-            case _ => "Unknown"
         }
     }
 }

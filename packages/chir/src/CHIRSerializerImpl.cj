@@ -1,7 +1,6 @@
 package cjcj::chir
 
 import std.collection.*
-import std.fs.File
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::basic.LinkageToInt
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset, DetachedBuffer, WriteFlatBufferToFile}
@@ -601,18 +600,6 @@ class CHIRSerializerImpl {
         return indices
     }
 
-    private func GetId(objs: ArrayList<CustomTypeDef>): ArrayList<UInt32> {
-        let indices = ArrayList<UInt32>()
-        for (obj in objs) { indices.add(GetId(obj)) }
-        return indices
-    }
-
-    private func GetId(objs: HashSet<Value>): ArrayList<UInt32> {
-        let indices = ArrayList<UInt32>()
-        for (obj in objs) { indices.add(GetId(obj)) }
-        return indices
-    }
-
     private func Serialize(obj: DebugLocation): FlatBufferOffset {
         let beginPos = CreatePos(builder, obj.GetBeginPos().line, obj.GetBeginPos().column)
         let endPos = CreatePos(builder, obj.GetEndPos().line, obj.GetEndPos().column)
@@ -1054,15 +1041,6 @@ class CHIRSerializerImpl {
         let funcCall = CreateFuncCallDirect(builder, expression,
             if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, GetId(obj.GetThisType()))
         return CreateApplyBase(builder, funcCall, false)
-    }
-
-    private func Serialize(obj: FuncSigInfo): FlatBufferOffset {
-        let genericTypeParams = ArrayList<UInt32>()
-        for (param in obj.genericTypeParams) {
-            genericTypeParams.add(GetId((param as Type).getOrThrow()))
-        }
-        return CreateFuncSigInfoDirect(builder, Some(obj.funcName), GetId((obj.funcType as Type).getOrThrow()),
-            if (genericTypeParams.isEmpty()) { None } else { Some(genericTypeParams) })
     }
 
     private func Serialize(obj: Invoke): FlatBufferOffset {

@@ -92,7 +92,7 @@ public func ChkSubscriptExpr(typeManager: TypeManager, ctx: ASTContext, target: 
     return false
 }
 
-private func ChkTupleAccess(typeManager: TypeManager, ctx: ASTContext, target: Option<Ty>,
+private func ChkTupleAccess(typeManager: TypeManager, _: ASTContext, target: Option<Ty>,
     se: SubscriptExpr, tupleTy: TupleTy, checker: (Ty, Expr) -> Bool,
     diag: BasicDiagnosticEngine): Bool {
     if (se.baseExpr.isNone() || se.indexExprs.size != 1) {
@@ -153,7 +153,7 @@ private func ChkTupleAccess(typeManager: TypeManager, ctx: ASTContext, target: O
     return true
 }
 
-private func ChkVArrayAccess(typeManager: TypeManager, ctx: ASTContext, target: Option<Ty>,
+private func ChkVArrayAccess(typeManager: TypeManager, _: ASTContext, target: Option<Ty>,
     se: SubscriptExpr, varrayTy: VArrayTy, checker: (Ty, Expr) -> Bool,
     diag: BasicDiagnosticEngine): Bool {
     if (se.indexExprs.size != 1) {

@@ -42,9 +42,6 @@ public func PhaseToString(phase: ToCHIRPhase): String {
         case ToCHIRPhase.OPT => "opt"
         case ToCHIRPhase.PLUGIN => "plugin"
         case ToCHIRPhase.ANALYSIS_FOR_CJLINT => "analysis for cjlint"
-        case _ =>
-            CJC_ABORT()
-            ""
     }
 }
 

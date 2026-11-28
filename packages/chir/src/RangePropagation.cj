@@ -1,7 +1,7 @@
 package cjcj::chir
 
 import cjcj::basic.{DiagKindRefactor, DiagnosticEngine as BasicDiagnosticEngine}
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
+import cjcj::utils.CJC_ASSERT
 import cjcj::basic.Range as BasicRange
 import std.collection.*
 import std.core.Box as CoreBox
@@ -160,7 +160,6 @@ public class RangePropagation {
                 if (let Some(intValue) <- CheckSingleSInt(rangeVal)) {
                     return Some(builder.CreateLiteralValue(IntLiteral(intValue.UVal()), typeValue))
                 }
-            case _ => CJC_ABORT()
         }
         return None
     }

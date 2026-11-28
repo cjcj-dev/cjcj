@@ -356,9 +356,6 @@ private class DeclAttributeCheckerImpl {
         }
     }
 
-    private func AddIssue(kind: DeclAttributeIssueKind, decl: Decl, message: String): Unit {
-        issues.add(DeclAttributeIssue(kind, decl, message))
-    }
 }
 
 private func SetDeclInternal(decl: Decl): Unit {

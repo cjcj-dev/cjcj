@@ -12,10 +12,6 @@ import cjcj::utils.CJC_ASSERT
 private let LEVEL_IDENTIFIER: String = "level"
 private let SYSCAP_IDENTIFIER: String = "syscap"
 
-private func IfAvailableInvalid(iae: IfAvailableExpr): Ty {
-    return TcInvalid(iae)
-}
-
 private func IsValidIfAvailableLevelLiteral(expr: Expr): Bool {
     if (let Some(lit) <- (expr as LitConstExpr)) {
         if (lit.kind == LitConstKind.INTEGER) {
