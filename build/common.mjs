@@ -203,7 +203,9 @@ export function compilerHeap(native,env=process.env,totalMemory=os.totalmem(),bo
   const explicit=explicitHeap(env);
   // The bootstrap runtime falls back to 256 MB if the requested heap exceeds RAM.
   const large=!bootstrap && totalMemory>20*GiB;
-  const mb=Math.max(4,Math.min(large?49152:15360,Math.floor(totalMemory*(large?0.80:0.94)/MiB)));
+  // Leave room for native compiler allocations on small self-hosted-compiler workers.
+  const ratio=bootstrap?0.94:large?0.80:0.75;
+  const mb=Math.max(4,Math.min(large?49152:15360,Math.floor(totalMemory*ratio/MiB)));
   return {cjHeapSize:explicit||`${mb}MB`,
     ...(native.os==='linux'?{cjHeapSwap:(env.cjHeapSwap||'').trim()||'on'}:{})};
 }

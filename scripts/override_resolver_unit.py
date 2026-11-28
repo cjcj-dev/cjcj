@@ -25,6 +25,8 @@ def main():
                         help="Reuse one CJO interface snapshot while linking each arm's product archives")
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--integration-only', action='store_true')
+    parser.add_argument('--target-dir', type=Path,
+                        help="Use release archives from a stage build target directory")
     args = parser.parse_args()
     tree, sdk, out = (p.resolve() for p in (args.build_tree, args.sdk, args.out))
     interface_tree = (args.interface_tree or tree).resolve()
@@ -40,23 +42,28 @@ def main():
     names = ['ResolverTestSupport_test.cj', 'GIMResolverIntegration_test.cj']
     if not args.integration_only:
         names.append('OverrideFunctionResolver_test.cj')
+    names.append('FrozenModalInstantiation_test.cj')
+    target = (args.target_dir or tree / 'target').resolve()
+    interfaces = interface_tree / 'target' if args.interface_tree else target
     sources = [tree / 'packages/sema/src/resolver_tests' / name for name in names]
     executable = out / 'resolver-tests'
     command = [str(sdk / 'bin/cjc'), '--test', '-O0', '--diagnostic-format=noColor', '--trimpath', str(tree),
                *map(str, sources), '-o', str(executable)]
     archives, inputs = [], list(sources) + [Path(__file__).resolve()]
-    for directory in sorted((tree / 'target/release').iterdir()):
+    for directory in sorted((target / 'release').iterdir()):
         if not directory.is_dir() or directory.name == 'bin':
             continue
-        interface_directory = interface_tree / 'target/release' / directory.name
+        interface_directory = interfaces / 'release' / directory.name
         command += ['--import-path', str(interface_directory), '-L', str(directory)]
         archives += sorted(directory.glob('*.a'))
         inputs += sorted(interface_directory.glob('*.cjo'))
     shim = tree / 'runtime_shim/cjselfhost_llvmshim.o'
+    config = tree / 'runtime_shim/cjc_runtime_config.o'
+    shims = [shim, config] if config.is_file() else [shim]
     command += ['--link-options=' + ' '.join([
-        '--start-group', *map(str, archives), '--end-group', str(shim),
+        '--start-group', *map(str, archives), '--end-group', *map(str, shims),
         '-L' + str(sdk / 'third_party/llvm/lib'), '-lLLVM-15', '-lstdc++'])]
-    inputs += archives + [shim, sdk / 'bin/cjc', sdk / 'third_party/llvm/lib/libLLVM-15.so']
+    inputs += archives + shims + [sdk / 'bin/cjc', sdk / 'third_party/llvm/lib/libLLVM-15.so']
     inputs += sorted((sdk / 'runtime/lib/linux_x86_64_cjnative').glob('*.so'))
     inputs += [sdk / 'lib/linux_x86_64_cjnative/libcangjie-std-core.a']
     (out / 'inputs.sha256').write_text(''.join(f'{digest(p)}  {p}\n' for p in inputs))

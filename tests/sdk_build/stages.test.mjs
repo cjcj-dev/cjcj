@@ -399,15 +399,20 @@ test('Linux overlay contains physical files in just three target directories',li
 
 test('default compiler heap stays below runner RAM and within runtime limits',()=>{
   for(const [platform,gib,mb] of [
-    ['darwin-arm64',7,6737], ['darwin-x64',14,13475], ['linux-x64',15.6,15015],
-    ['windows-x64',16,15360], ['linux-aarch64',64,49152], ['linux-x64',24,19660],
+    ['darwin-arm64',7,5376], ['darwin-x64',14,10752], ['linux-x64',15.6,11980],
+    ['windows-x64',16,12288], ['linux-aarch64',64,49152], ['linux-x64',24,19660],
   ]){
     const p=sdkPlatform(platform),bytes=Math.floor(gib*1024**3);
     const heap=compilerHeap(p,{},bytes);
     assert.deepEqual(heap,{cjHeapSize:`${mb}MB`,...(p.os==='linux'?{cjHeapSwap:'on'}:{})},platform);
     assert.ok(parseInt(heap.cjHeapSize,10)*1024**2<bytes,platform);
   }
-  assert.equal(compilerHeap(sdkPlatform('linux-x64'),{},4*1024**2).cjHeapSize,'4MB');
+  const linux=sdkPlatform('linux-x64'),GiB=1024**3;
+  assert.equal(compilerHeap(linux,{},4*1024**2).cjHeapSize,'4MB');
+  assert.equal(compilerHeap(linux,{},20*GiB).cjHeapSize,'15360MB');
+  assert.equal(compilerHeap(linux,{},20*GiB+1).cjHeapSize,'16384MB');
+  for(const [gib,mb] of [[7,6737],[15.6,15015],[16,15360],[128,15360]])
+    assert.equal(compilerHeap(linux,{},Math.floor(gib*GiB),true).cjHeapSize,mb+'MB');
 });
 
 test('SDK environments resolve overrides and replace blank runtime heap settings',()=>{
@@ -926,13 +931,13 @@ test('Homebrew follows the installed brew under x64 Node',t=>{
 
 test('compiler budgets divide the host memory across active processes',()=>{
   const p=sdkPlatform('linux-x64'),GiB=1024**3;
-  for(const [gib,cpus,jobs,mb,largeJobs,largeMb] of [
-    [7,3,2,2688,1,6737],[16,4,3,4096,1,15360],[128,32,24,4096,8,12288]
+  for(const [gib,cpus,jobs,mb,stageJobs,stage3Mb,stage2Mb] of [
+    [7,3,2,2688,1,5376,6737],[16,4,3,4096,1,12288,15360],[128,32,24,4096,8,12288,12288]
   ]){
     const mem=gib*GiB;
     assert.deepEqual(parallelCompilerBudget(p,cpus,{},mem),{jobs:String(jobs),cjHeapSize:mb+'MB'});
-    assert.deepEqual(compilerStageBudget('stage3',p,undefined,{},mem,cpus),{jobs:String(largeJobs),cjHeapSize:largeMb+'MB'});
-    assert.deepEqual(compilerStageBudget('stage2',p,undefined,{},mem,cpus),{jobs:String(largeJobs),cjHeapSize:largeMb+'MB'});
+    assert.deepEqual(compilerStageBudget('stage3',p,undefined,{},mem,cpus),{jobs:String(stageJobs),cjHeapSize:stage3Mb+'MB'});
+    assert.deepEqual(compilerStageBudget('stage2',p,undefined,{},mem,cpus),{jobs:String(stageJobs),cjHeapSize:stage2Mb+'MB'});
     assert.deepEqual(compilerStageBudget('stage0',p,undefined,{},mem,cpus),
       {jobs:String(cpus),cjHeapSize:(gib===7?6737:15360)+'MB'});
   }
@@ -944,7 +949,7 @@ test('compiler budgets divide the host memory across active processes',()=>{
     for(const stage of ['stage2','stage3'])
       assert.deepEqual(compilerStageBudget(stage,p,'2',{[key]:'6GB'},mem,4),{jobs:'2',cjHeapSize:'6GB'});
   }
-  assert.deepEqual(parallelCompilerBudget(p,4,{},mem,'2'),{jobs:'2',cjHeapSize:'15360MB'});
+  assert.deepEqual(parallelCompilerBudget(p,4,{},mem,'2'),{jobs:'2',cjHeapSize:'12288MB'});
 });
 
 // Pin the simulated hardware, not the budget implementation. Assert what the child received.
@@ -1066,7 +1071,7 @@ test('ARM64 stage3 keeps native tools, links Intel LLVM, restores manifests and 
     assert.ok(effectiveLinkOptions(during,'darwin_x86_64').includes(native+'/third_party/llvm/lib/libLLVM.dylib'));
     assert.deepEqual(effectiveLinkOptions(during,'darwin_aarch64'),effectiveLinkOptions(manifest,'darwin_aarch64'));
     const build=calls.find(c=>c.cmd===host+'/tools/bin/cjpm');
-    assert.deepEqual(build.args,['build','--target',triple,'--target-dir',out+'.target','-j','1']);assert.equal(build.heap,'15360MB');
+    assert.deepEqual(build.args,['build','--target',triple,'--target-dir',out+'.target','-j','1']);assert.equal(build.heap,'12288MB');
     assert.equal(calls.find(c=>c.args[0]?.endsWith('build_shim.mjs')).targetArch,'x86_64');
     if(fail){assert.match(child.stderr,/exited 42/);continue;}
     assert.equal(fs.readFileSync(out+'/libexec/compiler/cjcj-stage1','utf8'),'intel');

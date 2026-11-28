@@ -1611,6 +1611,10 @@ private func TypeCheckReferenceCheckLegalityIsSkip(node: Node): Bool {
 }
 
 // Function types carry their parameter and return types in typeArgs.
+public func HasLocalSignature(ty: Ty): Bool {
+    return HasLocalSignature(ty, HashSet<Ptr<Ty>>())
+}
+
 private func HasLocalSignature(ty: Ty, seen: HashSet<Ptr<Ty>>): Bool {
     if (!seen.add(Ptr<Ty>(ty))) { return false }
     if (let Some(ft) <- (ty as FuncTy)) {
@@ -1637,7 +1641,7 @@ public func CheckLocalTypeReferences(diag: BasicDiagnosticEngine, impl: TypeChec
     for (file in pkg.files) {
         let _ = Walker(file, visitPre: { node: Node =>
             if (node.astKind == ASTKind.REF_TYPE || node.astKind == ASTKind.QUALIFIED_TYPE) {
-                if ((let Some(ty) <- node.GetTy()) && HasLocalSignature(ty, HashSet<Ptr<Ty>>())) {
+                if ((let Some(ty) <- node.GetTy()) && HasLocalSignature(ty)) {
                     DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_local_api_disabled, node,
                         arguments: [node.ToString()]).Emit()
                     return VisitAction.SKIP_CHILDREN
@@ -1656,7 +1660,7 @@ private func CheckLegalityOfReferenceForNameReferenceExpr(
     nameRef: NameReferenceExpr
 ): Unit {
     if (!LocalModeEnabled(impl) && (let Some(decl) <- nameRef.GetTarget()) && (let Some(ty) <- decl.GetTy()) &&
-        HasLocalSignature(ty, HashSet<Ptr<Ty>>())) {
+        HasLocalSignature(ty)) {
         DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_local_api_disabled, nameRef,
             arguments: [decl.identifier.Val()]).Emit()
     }

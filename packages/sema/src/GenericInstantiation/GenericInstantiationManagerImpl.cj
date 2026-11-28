@@ -398,6 +398,7 @@ class GenericInstantiationManagerImpl {
     private let instantiatedDeclsMap: HashMap<Int64, ArrayList<Decl>> = HashMap<Int64, ArrayList<Decl>>()
     private let membersIndexMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private let structContext: ArrayList<Decl> = ArrayList<Decl>()
+    private let deferredLocalMembers = ArrayList<(Decl, Decl)>()
     // C++: GenericInstantiationManagerImpl.h:162-163.
     private let usedSrcImportedDecls: HashSet<Int64> = HashSet<Int64>()
     private let instantiationWalkerID: UInt32 = GetNextWalkerID()
@@ -420,6 +421,7 @@ class GenericInstantiationManagerImpl {
     }
 
     public func GenericInstantiatePackage(pkg: Package, resetGlobalState!: Bool = true): Unit {
+        SetOptLevel(ci.globalOptions)
         PartialInstantiation.ResetGlobalMap()
         curPkg = pkg
         InstantiatedExtendRecorder(this, ci.typeManager).Record(pkg)
@@ -427,6 +429,7 @@ class GenericInstantiationManagerImpl {
             collectExistingInstantiation(decl)
         }
         InstantiateReferencedGenerics(pkg)
+        MaterializeDeferredLocalMembers(pkg)
         // C++: Sema/GenericInstantiation/GenericInstantiationManagerImpl.cpp:296-298.
         if (let Some(tm) <- testManager) {
             tm.HandleCreateMock(pkg)
@@ -447,6 +450,7 @@ class GenericInstantiationManagerImpl {
     public func GetInstantiatedDeclWithGenericInfo(genericInfo: GenericInfo, pkg: Package): Option<Decl> {
         curPkg = Some(pkg)
         let instantiatedDecl = GetInstantiatedDeclWithGenericInfo(genericInfo)
+        MaterializeDeferredLocalMembers(pkg)
         if (let Some(decl) <- instantiatedDecl) {
             RearrangeReferencesInNode(decl, pkg)
         }
@@ -489,6 +493,7 @@ class GenericInstantiationManagerImpl {
         declInstantiationByTypeMap.clear()
         instantiatedDeclsMap.clear()
         structContext.clear()
+        deferredLocalMembers.clear()
         usedSrcImportedDecls.clear()
         curPkg = None
         PartialInstantiation.ResetGlobalMap()
@@ -609,6 +614,43 @@ class GenericInstantiationManagerImpl {
         return genericMember
     }
 
+    private func QueueDeferredLocalMember(info: GenericInfo, parent: Decl, member: Decl): Decl {
+        for ((pendingParent, pendingMember) in deferredLocalMembers) {
+            if (SameDecl(parent, pendingParent) && SameDecl(member, PartialInstantiation.GetGeneralDecl(pendingMember))) {
+                return pendingMember
+            }
+        }
+        let pkg = curPkg.getOrThrow()
+        let originalParent = info.decl.getOrThrow()
+        let cloned = PartialInstantiation.Instantiate(member, { from: Node, to: Node =>
+            updateClonedNode(from, to, ci.typeManager, info.gTyToTyMap, TypeSubst(), pkg)
+            if (let Some(decl) <- (to as Decl)) {
+                if (SameDeclOptions(decl.outerDecl, Some(originalParent))) {
+                    decl.outerDecl = parent
+                }
+            }
+        }) as Decl
+        let result = cloned.getOrThrow()
+        markNoReflectInfo(result)
+        deferredLocalMembers.add((parent, result))
+        return result
+    }
+
+    // A reachable imported body can still call a local-mode overload. Attach its clone outside
+    // the current AST walk, which may be iterating the very member list that will receive it.
+    private func MaterializeDeferredLocalMembers(pkg: Package): Unit {
+        var i = 0
+        while (i < deferredLocalMembers.size) {
+            let (parent, member) = deferredLocalMembers[i]
+            parent.GetMemberDecls().add(member)
+            structContext.add(parent)
+            InstantiateReferencedGenericsInNode(member, pkg)
+            structContext.remove(at: structContext.size - 1)
+            i++
+        }
+        deferredLocalMembers.clear()
+    }
+
     private func GetInstantiatedMemberTarget(baseTy: Ty, target: Decl, inRearrange!: Bool = false): Decl {
         let targetOuterDecl = target.outerDecl.getOrThrow()
         let declTy = GetDeclTy(targetOuterDecl)
@@ -643,24 +685,22 @@ class GenericInstantiationManagerImpl {
         } else {
             structDeclValue.GetMemberDecls()
         }
-        var found: Option<Decl> = None
-        for (member in members) {
-            if (SameDecl(PartialInstantiation.GetGeneralDecl(member), targetToFind)) {
-                found = member
-                break
+        for (i in 0..members.size) {
+            var member = members[i]
+            if (!SameDecl(PartialInstantiation.GetGeneralDecl(member), targetToFind)) {
+                continue
             }
+            if (member.TestAttr(Attribute.GENERIC) && member.TestAttr(Attribute.GENERIC_INSTANTIATED) &&
+                member.TestAttr(Attribute.UNREACHABLE)) {
+                member = ReinstantiatedPartialMemberDecl(genericInfo, structDeclValue, targetToFind, i)
+            }
+            return GetUsedMemberDecl(member, realMemberDecl.isGetter)
         }
-        if (let None <- found) {
-            return target
+        if (!inRearrange && IsDeferredLocalFrozenMember(targetToFind) && RequireInstantiation(targetToFind)) {
+            let member = QueueDeferredLocalMember(genericInfo, structDeclValue, targetToFind)
+            return GetUsedMemberDecl(member, realMemberDecl.isGetter)
         }
-        var resultDecl = found.getOrThrow()
-        if (resultDecl.TestAttr(Attribute.GENERIC) && resultDecl.TestAttr(Attribute.GENERIC_INSTANTIATED) &&
-            resultDecl.TestAttr(Attribute.UNREACHABLE)) {
-            resultDecl = ReinstantiatedPartialMemberDecl(genericInfo, structDeclValue, targetToFind,
-                foundIndex.getOrThrow())
-        }
-        resultDecl = GetUsedMemberDecl(resultDecl, realMemberDecl.isGetter)
-        return resultDecl
+        return target
     }
 
     private func MembersIndexFind(member: Decl): Option<Int64> {
@@ -1271,7 +1311,7 @@ class GenericInstantiationManagerImpl {
             return
         }
         for (extendDecl in extends) {
-            if (!RequireInstantiation(extendDecl)) {
+            if (!RequireInstantiation(extendDecl, eager: true)) {
                 continue
             }
             let extendTy = GetDeclTy(extendDecl).getOrThrow()

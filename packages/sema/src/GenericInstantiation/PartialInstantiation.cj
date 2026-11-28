@@ -13,6 +13,7 @@ import std.env.getVariable
 
 private var currentOptLevel: OptimizationLevel = OptimizationLevel.O0
 private var currentOutputMode: OutputMode = OutputMode.EXECUTABLE
+private var currentEnableLocalMode = false
 
 private let ins2generic: HashMap<Int64, Decl> = HashMap<Int64, Decl>()
 private let generic2ins: HashMap<Int64, ArrayList<Decl>> = HashMap<Int64, ArrayList<Decl>>()
@@ -63,6 +64,7 @@ private func registerInstantiation(genericDecl: Decl, instantiatedDecl: Decl): U
 public func SetOptLevel(opts: OptionGlobalOptions): Unit {
     currentOptLevel = opts.optimizationLevel
     currentOutputMode = opts.outputMode
+    currentEnableLocalMode = opts.enableLocalMode
 }
 
 private func IsCPointerFrozenMember(decl: Decl): Bool {
@@ -82,8 +84,26 @@ private func IsCPointerFrozenMember(decl: Decl): Bool {
     return false
 }
 
-public func RequireInstantiation(decl: Decl): Bool {
+// A non-local compilation does not need unreferenced local-mode overloads.
+func IsDeferredLocalFrozenMember(decl: Decl): Bool {
+    if (currentEnableLocalMode || !decl.IsFuncOrProp() || !decl.HasAnno(AstAnnotationKind.FROZEN) ||
+        !IsInDeclWithAttribute(decl, Attribute.IMPORTED)) {
+        return false
+    }
+    if (HasModalInputs(decl) || HasLocalModifier(decl, TokenKind.EXCLAVE)) {
+        return true
+    }
+    if (let Some(ty) <- decl.GetTy()) {
+        return HasLocalSignature(ty)
+    }
+    return false
+}
+
+public func RequireInstantiation(decl: Decl, eager!: Bool = false): Bool {
     if (currentOutputMode == OutputMode.CHIR || decl.IsCommonMatchedWithSpecific()) {
+        return false
+    }
+    if (eager && IsDeferredLocalFrozenMember(decl)) {
         return false
     }
     if (IsCPointerFrozenMember(decl)) {
@@ -98,7 +118,7 @@ public func RequireInstantiation(decl: Decl): Bool {
         }
         if (decl.TestAttr(Attribute.GENERIC)) {
             for (member in decl.GetMemberDecls()) {
-                if (RequireInstantiation(member)) {
+                if (RequireInstantiation(member, eager: eager)) {
                     return true
                 }
             }
@@ -583,7 +603,7 @@ public class PartialInstantiation {
             target.inheritedTypes.add(InstantiateType(inheritedType, visitor))
         }
         for (member in source.members) {
-            if (RequireInstantiation(member)) {
+            if (RequireInstantiation(member, eager: true)) {
                 target.members.add(InstantiateDecl(member, visitor))
             }
         }
@@ -657,7 +677,7 @@ public class PartialInstantiation {
             target.constructors.add(InstantiateDecl(constructor, visitor))
         }
         for (member in source.members) {
-            if (!RequireInstantiation(member)) {
+            if (!RequireInstantiation(member, eager: true)) {
                 continue
             }
             target.members.add(InstantiateDecl(member, visitor))
@@ -1707,7 +1727,7 @@ public class PartialInstantiation {
         target.leftCurlPos = source.leftCurlPos
         for (decl in source.decls) {
             if (decl.astKind == ASTKind.PRIMARY_CTOR_DECL ||
-                (decl.astKind != ASTKind.VAR_DECL && !RequireInstantiation(decl)) || IsStaticVar(decl) ||
+                (decl.astKind != ASTKind.VAR_DECL && !RequireInstantiation(decl, eager: true)) || IsStaticVar(decl) ||
                 IsStaticInitializer(decl)) {
                 continue
             }
@@ -1725,7 +1745,7 @@ public class PartialInstantiation {
         target.leftCurlPos = source.leftCurlPos
         for (decl in source.decls) {
             if (decl.astKind == ASTKind.PRIMARY_CTOR_DECL ||
-                (decl.astKind != ASTKind.VAR_DECL && !RequireInstantiation(decl)) || IsStaticVar(decl) ||
+                (decl.astKind != ASTKind.VAR_DECL && !RequireInstantiation(decl, eager: true)) || IsStaticVar(decl) ||
                 IsStaticInitializer(decl)) {
                 continue
             }
@@ -1743,7 +1763,7 @@ public class PartialInstantiation {
         target.leftCurlPos = source.leftCurlPos
         for (decl in source.decls) {
             if (decl.astKind == ASTKind.PROP_DECL ||
-                (decl.astKind == ASTKind.FUNC_DECL && !RequireInstantiation(decl))) {
+                (decl.astKind == ASTKind.FUNC_DECL && !RequireInstantiation(decl, eager: true))) {
                 continue
             }
             target.decls.add(InstantiateDecl(decl, visitor))

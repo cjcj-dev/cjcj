@@ -8,7 +8,9 @@ import cjcj::option.{OutputMode, OptimizationLevel}
 import cjcj::utils.{FileUtil, GenerateRandomHexString}
 import std.env.getVariable
 
-func CompileResolverSource(code: String): TestCompileResult {
+func CompileResolverSource(code: String, localMode!: Bool = false, importPath!: String = "",
+    stage!: CompileStage = CompileStage.GENERIC_INSTANTIATION,
+    outputMode!: OutputMode = OutputMode.STATIC_LIB): TestCompileResult {
     let directory = getVariable("TMPDIR").getOrThrow() + "/resolver-" + GenerateRandomHexString()
     let _ = FileUtil.CreateDirs(directory + "/")
     let path = directory + "/input.cj"
@@ -21,8 +23,10 @@ func CompileResolverSource(code: String): TestCompileResult {
     opts.host = HostTripleInfo()
     opts.target = HostTripleInfo()
     opts.srcFiles.add(path)
-    opts.outputMode = OutputMode.STATIC_LIB
-    opts.output = directory + "/result.a"
+    opts.enableLocalMode = localMode
+    if (!importPath.isEmpty()) { opts.importPaths.add(importPath) }
+    opts.outputMode = outputMode
+    opts.output = if (outputMode == OutputMode.CJO) { directory + "/" } else { directory + "/result.a" }
     opts.disableCodeGen = true
     // PartialInstantiation.RequireInstantiation uses the real O2 product route.
     opts.optimizationLevel = OptimizationLevel.O2
@@ -31,7 +35,7 @@ func CompileResolverSource(code: String): TestCompileResult {
     let diag = DiagnosticEngine()
     let instance = CompilerInstance(invocation, diag)
     instance.buildTrie = false
-    let ok = instance.Compile(stage: CompileStage.GENERIC_INSTANTIATION)
+    let ok = instance.Compile(stage: stage)
     return TestCompileResult(ok, diag, instance, instance.GetSourcePackages(), path)
 }
 
