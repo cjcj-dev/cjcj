@@ -20,7 +20,7 @@ import cjcj::lex.Lexer as CangjieLexer
 import cjcj::lex.TokenKind as CangjieTokenKind
 import cjcj::lex.TokenKindValue
 import cjcj::incremental_compilation.IncreKind
-import cjcj::option.OutputMode
+import cjcj::option.{CandidateEmitCHIRPhase, OutputMode}
 import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationCache, FileMap,
     MemberDeclCache, OptEffectStrMap, RawMangled2DeclMap, SemanticInfo, TopLevelDeclCache, VarInitDepMap,
     VirtualWrapperDepMap, WriteCache}
@@ -909,6 +909,17 @@ public class CompilerInstance {
     public func PerformCHIRCompilation(): Bool {
         mangler.ClearManglerCtxTable()
         typeManager.getOrThrow().ReleasePostSemaCaches()
+        let options = invocation.globalOptions
+        // The ordinary pipeline has completed Sema, instantiation and CJO saving.
+        // CHIR may still resolve overrides through TypeManager, which does not use these node caches.
+        if (options.outputMode != OutputMode.CHIR && options.emitCHIRPhase != CandidateEmitCHIRPhase.RAW &&
+            !isCJLint && !options.enIncrementalCompilation && !options.cjdbMode) {
+            for (pkg in srcPkgs) {
+                if (let Some(ctx) <- GetASTContextByPackage(pkg)) {
+                    ctx.ReleaseTypeCheckCache()
+                }
+            }
+        }
         chirData.getOrThrow().ClearRealPackages()
         gc(heavy: true)
         FreeIdleMemoryToOS()

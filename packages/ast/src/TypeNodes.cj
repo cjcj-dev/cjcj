@@ -67,7 +67,7 @@ public class InvalidType <: Type {
 public class RefType <: Type {
     public var ref: Reference = Reference()
     public var leftAnglePos: Position = INVALID_POSITION
-    public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+    public let typeArguments: ArrayList<Type> = ArrayList<Type>(0)
     public var rightAnglePos: Position = INVALID_POSITION
 
     public init() {
@@ -203,7 +203,7 @@ public class QualifiedType <: Type {
     public var dotPos: Position = INVALID_POSITION
     public var field: SrcIdentifier = SrcIdentifier()
     public var leftAnglePos: Position = INVALID_POSITION
-    public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+    public let typeArguments: ArrayList<Type> = ArrayList<Type>(0)
     public var rightAnglePos: Position = INVALID_POSITION
     public var target: Option<Decl> = None
 
@@ -327,7 +327,7 @@ public class VArrayType <: Type {
 
 public class FuncType <: Type {
     public var leftParenPos: Position = INVALID_POSITION
-    public let paramTypes: ArrayList<Type> = ArrayList<Type>()
+    public let paramTypes: ArrayList<Type> = ArrayList<Type>(0)
     public var rightParenPos: Position = INVALID_POSITION
     public var arrowPos: Position = INVALID_POSITION
     public var retType: Option<Type> = None
@@ -360,7 +360,7 @@ public class FuncType <: Type {
 public class TupleType <: Type {
     public var leftParenPos: Position = INVALID_POSITION
     public var rightParenPos: Position = INVALID_POSITION
-    public let fieldTypes: ArrayList<Type> = ArrayList<Type>()
+    public let fieldTypes: ArrayList<Type> = ArrayList<Type>(0)
     public let commaPosVector: ArrayList<Position> = ArrayList<Position>()
 
     public init() {
@@ -393,7 +393,7 @@ public class GenericConstraint <: Node {
     public var refType: Option<RefType> = None
     public var operatorPos: Position = INVALID_POSITION
     public let bitAndPos: ArrayList<Position> = ArrayList<Position>()
-    public let upperBounds: ArrayList<Type> = ArrayList<Type>()
+    public let upperBounds: ArrayList<Type> = ArrayList<Type>(0)
     public var commaPos: Position = INVALID_POSITION
     public var isImplicitlyIntroduced: Bool = false
 

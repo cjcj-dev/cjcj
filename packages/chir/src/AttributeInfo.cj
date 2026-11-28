@@ -1,58 +1,88 @@
 package cjcj::chir
 
+// Base embeds the words; AttributeInfo is the mutable snapshot passed through
+// the public interfaces and serializers.
+struct AttributeInfoBits {
+    private var lo: UInt64
+    private var hi: UInt64 = 0u64
+
+    init(lo: UInt64) {
+        this.lo = lo
+    }
+
+    mut func Enable(attr: Attribute): Unit {
+        let index = AttributeIndex(attr)
+        let mask = 1u64 << UInt64(index % 64)
+        if (index < 64) { lo = lo | mask } else { hi = hi | mask }
+    }
+
+    mut func Disable(attr: Attribute): Unit {
+        let index = AttributeIndex(attr)
+        let mask = UInt64.Max ^ (1u64 << UInt64(index % 64))
+        if (index < 64) { lo = lo & mask } else { hi = hi & mask }
+    }
+
+    func Test(attr: Attribute): Bool {
+        let index = AttributeIndex(attr)
+        let word = if (index < 64) { lo } else { hi }
+        return (word & (1u64 << UInt64(index % 64))) != 0u64
+    }
+
+    func GetRawAttrs(): UInt64 {
+        return lo
+    }
+
+    mut func Append(other: AttributeInfoBits): Unit {
+        lo = lo | other.lo
+        hi = hi | other.hi
+    }
+}
+
 public class AttributeInfo {
-    private var attributesInfo: VArray<UInt64, $2>
+    private var bits: AttributeInfoBits
 
     public init() {
-        attributesInfo = VArray<UInt64, $2>({ _: Int64 => 0u64 })
+        bits = AttributeInfoBits(0u64)
     }
 
     public init(attrs: UInt64) {
-        attributesInfo = VArray<UInt64, $2>({ index: Int64 => if (index == 0) { attrs } else { 0u64 } })
+        bits = AttributeInfoBits(attrs)
     }
 
     public init(other: AttributeInfo) {
-        attributesInfo = VArray<UInt64, $2>({ _: Int64 => 0u64 })
-        for (idx in 0..2) {
-            attributesInfo[idx] = other.attributesInfo[idx]
-        }
+        bits = other.bits
+    }
+
+    init(bits: AttributeInfoBits) {
+        this.bits = bits
+    }
+
+    func GetBits(): AttributeInfoBits {
+        return bits
     }
 
     public func Enable(attr: Attribute): Unit {
-        let index = AttributeIndex(attr)
-        let word = Int64(UInt64(index) / 64u64)
-        let mask = 1u64 << (UInt64(index) % 64u64)
-        attributesInfo[word] = attributesInfo[word] | mask
+        bits.Enable(attr)
     }
 
     public func Disable(attr: Attribute): Unit {
-        let index = AttributeIndex(attr)
-        let word = Int64(UInt64(index) / 64u64)
-        let mask = 1u64 << (UInt64(index) % 64u64)
-        attributesInfo[word] = attributesInfo[word] & (UInt64.Max ^ mask)
+        bits.Disable(attr)
     }
 
     public func Test(attr: Attribute): Bool {
-        let index = AttributeIndex(attr)
-        let word = Int64(UInt64(index) / 64u64)
-        let mask = 1u64 << (UInt64(index) % 64u64)
-        return (attributesInfo[word] & mask) != 0u64
+        return bits.Test(attr)
     }
 
     public func GetRawAttrs(): UInt64 {
-        return attributesInfo[0]
+        return bits.GetRawAttrs()
     }
 
     public func Append(info: AttributeInfo): Unit {
-        for (idx in 0..2) {
-            attributesInfo[idx] = attributesInfo[idx] | info.attributesInfo[idx]
-        }
+        bits.Append(info.bits)
     }
 
     public func Clear(): Unit {
-        for (idx in 0..2) {
-            attributesInfo[idx] = 0u64
-        }
+        bits = AttributeInfoBits(0u64)
     }
 
     public func CopyFrom(info: AttributeInfo): Unit {

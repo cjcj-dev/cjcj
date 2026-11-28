@@ -70,7 +70,7 @@ func CopyNodeField(source: Node, target: Node): Unit {
     target.isInMacroCall = source.isInMacroCall
     target.CopyCommentsFrom(source)
     CopyNodeScopeInfo(target, source)
-    target.CopyAttrs(source.GetAttrs())
+    target.CloneAttrs(source)
 }
 
 public func CloneMacroInvocation(source: MacroInvocation): MacroInvocation {
@@ -1167,7 +1167,7 @@ public class ASTCloner {
                 target.defaultArgs.add(cloned)
                 cloneTable[arg] = cloned
             }
-            let clonedDesugarArgs = ArrayList<Option<FuncArg>>()
+            let clonedDesugarArgs = ArrayList<Option<FuncArg>>(sourceDesugarArgs.size)
             for (sourceArg in sourceDesugarArgs) {
                 if (let Some(arg) <- sourceArg) {
                     clonedDesugarArgs.add(cloneTable.get(arg))
@@ -2429,7 +2429,7 @@ public class ASTCloner {
                             cloneTable[arg] = cloned
                         }
                     }
-                    let clonedDesugarArgs = ArrayList<Option<FuncArg>>()
+                    let clonedDesugarArgs = ArrayList<Option<FuncArg>>(sourceDesugarArgs.size)
                     for (sourceArg in sourceDesugarArgs) {
                         if (let Some(arg) <- sourceArg) {
                             clonedDesugarArgs.add(cloneTable.get(arg))

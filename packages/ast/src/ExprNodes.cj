@@ -1135,7 +1135,7 @@ public class CallExpr <: Expr {
     public var resolvedFunction: Option<FuncDecl> = None
     public var callKind: CallKind = CallKind.CALL_INVALID
     public var desugarArgs: Option<ArrayList<Option<FuncArg>>> = None
-    public let defaultArgs: ArrayList<FuncArg> = ArrayList<FuncArg>()
+    public let defaultArgs: ArrayList<FuncArg> = ArrayList<FuncArg>(0)
     public var needCheckToTokens: Bool = false
     public var sugarKind: SugarKind = SugarKind.NO_SUGAR
 
@@ -1172,9 +1172,12 @@ public class CallExpr <: Expr {
 
 public open class NameReferenceExpr <: Expr {
     public var leftAnglePos: Position = INVALID_POSITION
-    public let typeArguments: ArrayList<Type> = ArrayList<Type>()
+    public let typeArguments: ArrayList<Type> = ArrayList<Type>(0)
     public var rightAnglePos: Position = INVALID_POSITION
-    public let instTys: ArrayList<Ty> = ArrayList<Ty>()
+    private var instantiationTypes = ArrayList<Ty>(0)
+    public prop instTys: ArrayList<Ty> {
+        get() { return instantiationTypes }
+    }
     public var callOrPattern: Option<Node> = None
     public var matchedParentTy: Option<Ty> = None
     public var aliasTarget: Option<TypeAliasDecl> = None
@@ -1195,6 +1198,14 @@ public open class NameReferenceExpr <: Expr {
         return typeArguments
     }
 
+    func ClearInstantiationTypes(): Unit {
+        if (instantiationTypes.capacity != 0) {
+            // Clear any outstanding view before dropping this node's reference.
+            instantiationTypes.clear()
+            instantiationTypes = ArrayList<Ty>(0)
+        }
+    }
+
     public func OuterArgSize(): Int64 {
         if (let Some(node) <- callOrPattern) {
             if (let Some(call) <- (node as CallExpr)) {
@@ -1212,9 +1223,9 @@ public class MemberAccess <: NameReferenceExpr {
     public var baseExpr: Option<Expr> = None
     public var dotPos: Position = INVALID_POSITION
     public var field: SrcIdentifier = SrcIdentifier()
-    public let targets: ArrayList<Option<FuncDecl>> = ArrayList<Option<FuncDecl>>()
+    public let targets: ArrayList<Option<FuncDecl>> = ArrayList<Option<FuncDecl>>(0)
     public var target: Option<Decl> = None
-    public let foundUpperBoundMap: ArrayList<(Decl, ArrayList<Ty>)> = ArrayList<(Decl, ArrayList<Ty>)>()
+    public let foundUpperBoundMap: ArrayList<(Decl, ArrayList<Ty>)> = ArrayList<(Decl, ArrayList<Ty>)>(0)
     public var isExposedAccess: Bool = false
     public var isPattern: Bool = false
 
@@ -1237,7 +1248,7 @@ public class MemberAccess <: NameReferenceExpr {
         foundUpperBoundMap.clear()
         target = None
         targets.clear()
-        instTys.clear()
+        ClearInstantiationTypes()
         isExposedAccess = false
         matchedParentTy = None
         desugarExpr = None
@@ -1479,7 +1490,7 @@ public class RefExpr <: NameReferenceExpr {
         super.Clear()
         ref.target = None
         ref.targets.clear()
-        instTys.clear()
+        ClearInstantiationTypes()
         matchedParentTy = None
     }
 

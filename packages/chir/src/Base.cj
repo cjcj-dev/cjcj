@@ -14,7 +14,7 @@ public open class Base <: Hashable & Equatable<Base> {
     public let nodeId: Int64
     private var annotationMap: Option<AnnotationMap> = None
     var loc: DebugLocation = DebugLocation()
-    private let attributes: AttributeInfo = AttributeInfo()
+    private var attributes: AttributeInfoBits = AttributeInfoBits(0u64)
     private let attributeMutex: Option<Mutex>
 
     public init(sharedAttributes!: Bool = false) {
@@ -187,8 +187,8 @@ public open class Base <: Hashable & Equatable<Base> {
 
     public func AppendAttributeInfo(info: AttributeInfo): Unit {
         if (let Some(mutex) <- attributeMutex) {
-            synchronized(mutex) { attributes.Append(info) }
-        } else { attributes.Append(info) }
+            synchronized(mutex) { attributes.Append(info.GetBits()) }
+        } else { attributes.Append(info.GetBits()) }
     }
 
     public func DisableAttr(attr: Attribute): Unit {

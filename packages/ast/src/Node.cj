@@ -71,7 +71,7 @@ public open class Node <: Hashable & Equatable<Node> {
     public var isInMacroCall: Bool = false
     public let objectId: Int64
     public let astKind: ASTKind
-    private var attributes: AttributePack = AttributePack()
+    private var attributes: ASTAttributeBits = ASTAttributeBits()
     // Concrete Sema mode of this occurrence; shared Ty objects remain unqualified.
     public var resolvedMode: ASTMode = ASTMode.NOT
     private var ty: Option<Ty> = Ty.GetInitialTy()
@@ -144,15 +144,15 @@ public open class Node <: Hashable & Equatable<Node> {
     }
 
     public func GetAttrs(): AttributePack {
-        return attributes.Clone()
+        return AttributePack(attributes)
     }
 
     public func CopyAttrs(attrs: AttributePack): Unit {
-        attributes = attrs.Clone()
+        attributes = attrs.GetBits()
     }
 
     public func CloneAttrs(other: Node): Unit {
-        attributes = other.attributes.Clone()
+        attributes = other.attributes
     }
 
     public func EnableAttr(attr: Attribute): Unit {
@@ -704,7 +704,7 @@ public class Annotation <: Node {
 public class Reference {
     public var identifier: SrcIdentifier = SrcIdentifier()
     public var target: Option<Decl> = None
-    public let targets: ArrayList<Option<Decl>> = ArrayList<Option<Decl>>()
+    public let targets: ArrayList<Option<Decl>> = ArrayList<Option<Decl>>(0)
 
     public init() {}
 

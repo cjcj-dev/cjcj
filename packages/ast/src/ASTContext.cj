@@ -227,7 +227,10 @@ public class ASTContext {
     public let currentCheckingNodes: ArrayList<Node> = ArrayList<Node>()
     public let targetTypeMap: HashMap<Node, Ty> = HashMap<Node, Ty>()
     public let lastTargetTypeMap: HashMap<Node, Ty> = HashMap<Node, Ty>()
-    public let typeCheckCache: HashMap<Node, TypeCheckCache> = HashMap<Node, TypeCheckCache>()
+    private var nodeTypeCheckCache = HashMap<Node, TypeCheckCache>()
+    public prop typeCheckCache: HashMap<Node, TypeCheckCache> {
+        get() { return nodeTypeCheckCache }
+    }
     public let gcBlames: GCBlames = GCBlames()
     public let funcArgReachable: HashMap<Node, Bool> = HashMap<Node, Bool>()
     public var searcher: Searcher = Searcher()
@@ -421,6 +424,11 @@ public class ASTContext {
         if (let Some(symbol) <- node.symbol) {
             invertedIndex.Delete(symbol)
         }
+    }
+
+    // Replacing the map drops the Sema buckets and entries. clear() retains both.
+    public func ReleaseTypeCheckCache(): Unit {
+        nodeTypeCheckCache = HashMap<Node, TypeCheckCache>(0)
     }
 
     public func ClearTypeCheckCache(root: Node): Unit {

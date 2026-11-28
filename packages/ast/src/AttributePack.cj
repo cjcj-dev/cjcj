@@ -317,17 +317,6 @@ private let ATTRIBUTE_NAMES: Array<String> = [
     "AST_ATTR_END"
 ]
 
-private let ATTR_SIZE: UInt64 = 64u64
-private let ATTR_SET_SIZE: Int64 = Int64(UInt64(AttributeIndex(Attribute.AST_ATTR_END)) / ATTR_SIZE + 1u64)
-
-private func AttributeWordIndex(index: Int64): Int64 {
-    return Int64(UInt64(index) / ATTR_SIZE)
-}
-
-private func AttributeBitMask(index: Int64): UInt64 {
-    return 1u64 << (UInt64(index) % ATTR_SIZE)
-}
-
 public func AttributeName(attr: Attribute): String {
     let idx = AttributeIndex(attr)
     if (idx >= ATTRIBUTE_NAMES.size) {
@@ -336,60 +325,87 @@ public func AttributeName(attr: Attribute): String {
     return ATTRIBUTE_NAMES[idx]
 }
 
-public class AttributePack {
-    private let attributes: Array<UInt64> = Array<UInt64>(ATTR_SET_SIZE, repeat: 0u64)
+// Embedded in every Node. The public mutable pack is only needed for snapshots
+// and callers that build a pack before installing it on a node.
+struct ASTAttributeBits {
+    private var lo: UInt64 = 0u64
+    private var hi: UInt64 = 0u64
 
-    public init() {}
+    init() {}
 
-    public init(other: AttributePack) {
-        for (idx in 0..ATTR_SET_SIZE) {
-            attributes[idx] = other.attributes[idx]
-        }
-    }
-
-    public func SetAttr(attr: Attribute, enable: Bool): Unit {
-        let attrIndex = AttributeIndex(attr)
-        let idx = AttributeWordIndex(attrIndex)
-        let mask = AttributeBitMask(attrIndex)
-        if (enable) {
-            attributes[idx] = attributes[idx] | mask
+    mut func SetAttr(attr: Attribute, enable: Bool): Unit {
+        let index = AttributeIndex(attr)
+        let mask = 1u64 << UInt64(index % 64)
+        if (index < 64) {
+            lo = if (enable) { lo | mask } else { lo & (UInt64.Max ^ mask) }
         } else {
-            attributes[idx] = attributes[idx] & (UInt64.Max ^ mask)
+            hi = if (enable) { hi | mask } else { hi & (UInt64.Max ^ mask) }
         }
     }
 
-    public func TestAttr(attr: Attribute): Bool {
-        let attrIndex = AttributeIndex(attr)
-        let idx = AttributeWordIndex(attrIndex)
-        if (idx >= attributes.size) {
-            return false
-        }
-        return (attributes[idx] & AttributeBitMask(attrIndex)) != 0u64
+    func TestAttr(attr: Attribute): Bool {
+        let index = AttributeIndex(attr)
+        let word = if (index < 64) { lo } else { hi }
+        return (word & (1u64 << UInt64(index % 64))) != 0u64
     }
 
-    public func GetRawAttrs(): ArrayList<UInt64> {
-        let out = ArrayList<UInt64>()
-        for (idx in 0..attributes.size) {
-            out.add(attributes[idx])
-        }
+    func GetRawAttrs(): ArrayList<UInt64> {
+        let out = ArrayList<UInt64>(2)
+        out.add(lo)
+        out.add(hi)
         return out
     }
 
-    public func GetAllIdxOfAttr(): ArrayList<UInt64> {
-        let out = ArrayList<UInt64>()
-        for (wordIndex in 0..attributes.size) {
-            for (bitIndex in 0..Int64(ATTR_SIZE)) {
-                let attrIndex = UInt64(wordIndex) * ATTR_SIZE + UInt64(bitIndex)
-                if ((attributes[wordIndex] & (1u64 << UInt64(bitIndex))) != 0u64) {
-                    out.add(attrIndex)
+    func GetAllIdxOfAttr(): ArrayList<UInt64> {
+        let out = ArrayList<UInt64>(0)
+        for (wordIndex in 0..2) {
+            let word = if (wordIndex == 0) { lo } else { hi }
+            if (word == 0u64) { continue }
+            for (bitIndex in 0..64) {
+                if ((word & (1u64 << UInt64(bitIndex))) != 0u64) {
+                    out.add(UInt64(wordIndex * 64 + bitIndex))
                 }
             }
         }
         return out
     }
+}
+
+public class AttributePack {
+    private var bits: ASTAttributeBits = ASTAttributeBits()
+
+    public init() {}
+
+    public init(other: AttributePack) {
+        bits = other.bits
+    }
+
+    init(bits: ASTAttributeBits) {
+        this.bits = bits
+    }
+
+    func GetBits(): ASTAttributeBits {
+        return bits
+    }
+
+    public func SetAttr(attr: Attribute, enable: Bool): Unit {
+        bits.SetAttr(attr, enable)
+    }
+
+    public func TestAttr(attr: Attribute): Bool {
+        return bits.TestAttr(attr)
+    }
+
+    public func GetRawAttrs(): ArrayList<UInt64> {
+        return bits.GetRawAttrs()
+    }
+
+    public func GetAllIdxOfAttr(): ArrayList<UInt64> {
+        return bits.GetAllIdxOfAttr()
+    }
 
     public func Clone(): AttributePack {
-        return AttributePack(this)
+        return AttributePack(bits)
     }
 
     public func ToString(): String {

@@ -26,7 +26,7 @@ private func GetAllSuperClassDefs(def: ClassDef, allSuperDefs: HashSet<CustomTyp
 public open class Expression <: Base & Hashable & Equatable<Expression> {
     private let kind: ExprKind
     protected let operands: ArrayList<Value> = ArrayList<Value>(0)
-    private let blockGroups: ArrayList<BlockGroup> = ArrayList<BlockGroup>(0)
+    private var blockGroupsOpt: Option<ArrayList<BlockGroup>> = None
     private var parent: Option<Block> = None
     private var result: Option<LocalVar> = None
     private var operandsAndGroupsConnected: Bool = false
@@ -38,8 +38,8 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         for (operand in operands) {
             this.operands.add(operand)
         }
-        for (group in blockGroups) {
-            this.blockGroups.add(group)
+        if (!blockGroups.isEmpty()) {
+            blockGroupsOpt = Some(ArrayList<BlockGroup>(blockGroups))
         }
         this.parent = parent
     }
@@ -146,29 +146,45 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
             kind == ExprKind.TRY_ALLOCATE || kind == ExprKind.TRY_RAW_ARRAY_ALLOCATE
     }
 
+    // Preserve the mutable snapshot API for callers that need a list.
     public func GetBlockGroups(): ArrayList<BlockGroup> {
-        let out = ArrayList<BlockGroup>()
-        for (group in blockGroups) {
-            out.add(group)
+        return GetBlockGroupsOrNone() ?? ArrayList<BlockGroup>(0)
+    }
+
+    public func GetBlockGroupsOrNone(): Option<ArrayList<BlockGroup>> {
+        if (let Some(groups) <- blockGroupsOpt) {
+            return Some(ArrayList<BlockGroup>(groups))
         }
-        return out
+        return None
     }
 
     public func GetBlockGroup(idx: Int64): BlockGroup {
-        return blockGroups[idx]
+        if (let Some(groups) <- blockGroupsOpt) {
+            return groups[idx]
+        }
+        throw IndexOutOfBoundsException("block group index ${idx} out of bounds (size 0)")
     }
 
     public func GetNumOfBlockGroups(): Int64 {
-        return blockGroups.size
+        if (let Some(groups) <- blockGroupsOpt) {
+            return groups.size
+        }
+        return 0
     }
 
     public func AppendBlockGroup(group: BlockGroup): Unit {
-        blockGroups.add(group)
+        if (let Some(groups) <- blockGroupsOpt) {
+            groups.add(group)
+        } else {
+            let groups = ArrayList<BlockGroup>(1)
+            groups.add(group)
+            blockGroupsOpt = Some(groups)
+        }
         group.SetOwnerExpression(this)
     }
 
     public func ClearBlockGroups(): Unit {
-        blockGroups.clear()
+        blockGroupsOpt = None
     }
 
     public func GetResult(): Option<LocalVar> {
@@ -187,8 +203,10 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         for (operand in operands) {
             operand.AddUserOnly(this)
         }
-        for (group in blockGroups) {
-            group.SetOwnerExpression(this)
+        if (let Some(groups) <- blockGroupsOpt) {
+            for (group in groups) {
+                group.SetOwnerExpression(this)
+            }
         }
     }
 
@@ -522,8 +540,10 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
             out += "(" + OperandsToString() + ")"
         }
         out += CommentToString()
-        for (group in blockGroups) {
-            out += "\n" + group.ToString(indent)
+        if (let Some(groups) <- blockGroupsOpt) {
+            for (group in groups) {
+                out += "\n" + group.ToString(indent)
+            }
         }
         return out
     }
