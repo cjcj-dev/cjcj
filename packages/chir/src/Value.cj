@@ -12,6 +12,7 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     private let kind: ValueKind
     private let users: ArrayList<Expression> = ArrayList<Expression>(0)
     private let userMutex: Option<Mutex>
+    private var userRewrite: Option<UserRewrite> = None
 
     public init(ty: Option<Type>, identifier: String, kind: ValueKind) {
         super(sharedAttributes: kind == ValueKind.KIND_GLOBALVAR || kind == ValueKind.KIND_FUNC)
@@ -110,6 +111,13 @@ public open class Value <: Base & Hashable & Equatable<Value> {
         return users.clone()
     }
 
+    public func GetUsersCount(): Int64 {
+        if (let Some(mutex) <- GetUserMutex()) {
+            synchronized(mutex) { return users.size }
+        }
+        return users.size
+    }
+
     // Borrowed list for callers that own the value or have joined all workers.
     public func GetUsersRef(): ArrayList<Expression> {
         return users
@@ -140,23 +148,50 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     }
 
     private func RemoveMatchingUsersUnderOwner(expr: Expression, removeAll: Bool): Unit {
-        var idx: Int64 = 0
-        while (idx < users.size) {
-            if (users[idx].nodeId == expr.nodeId) {
-                users.remove(at: idx)
-                if (!removeAll) { return }
-                continue
+        if (let Some(rewrite) <- userRewrite) {
+            if (rewrite.threadId == Thread.currentThread.id && rewrite.RecordRemoval(expr, removeAll)) {
+                return
             }
-            idx++
         }
+        for (idx in 0..users.size) {
+            if (users[idx].nodeId == expr.nodeId) {
+                if (removeAll) {
+                    CompactMatchingUsers(expr.nodeId, idx)
+                } else {
+                    users.remove(at: idx)
+                }
+                return
+            }
+        }
+    }
+
+    // The slot at first is already known to match. Keep the list object and survivor order.
+    private func CompactMatchingUsers(id: Int64, first: Int64): Int64 {
+        let size = users.size
+        var next = first
+        for (idx in first + 1..size) {
+            let user = users[idx]
+            if (user.nodeId != id) {
+                users[next] = user
+                next++
+            }
+        }
+        users.remove(next..size)
+        return size - next
     }
 
     // After lowering has joined, restore serial function order without disturbing each worker's
     // append order (including repeated operands and remove/re-add operations).
     public func OrderNewUsers(prefixSize: Int64, ownerOrder: HashMap<Int64, Int64>): Unit {
-        if (users.size <= prefixSize) { return }
-        let appended = ArrayList<Expression>()
-        while (users.size > prefixSize) { appended.add(users.remove(at: prefixSize)) }
+        if (let Some(mutex) <- GetUserMutex()) {
+            synchronized(mutex) { OrderNewUsersUnderOwner(prefixSize, ownerOrder) }
+        } else { OrderNewUsersUnderOwner(prefixSize, ownerOrder) }
+    }
+
+    private func OrderNewUsersUnderOwner(prefixSize: Int64, ownerOrder: HashMap<Int64, Int64>): Unit {
+        if (users.size - prefixSize <= 1) { return }
+        let appended = ArrayList<Expression>(users.size - prefixSize)
+        for (idx in prefixSize..users.size) { appended.add(users[idx]) }
         let rank = { expr: Expression =>
             let fn = expr.GetTopLevelFunc().getOrThrow()
             ownerOrder.get(fn.nodeId).getOrThrow()
@@ -166,7 +201,7 @@ public open class Value <: Base & Hashable & Equatable<Value> {
             let b = rank(right)
             if (a < b) { Ordering.LT } else if (a > b) { Ordering.GT } else { Ordering.EQ }
         }, stable: true)
-        users.add(all: appended)
+        for (idx in 0..appended.size) { users[prefixSize + idx] = appended[idx] }
     }
 
     // Moves every occurrence of expr to the end of the list, keeping the occurrence count.
@@ -177,18 +212,12 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     }
 
     private func MoveUserToTailUnderOwner(expr: Expression): Unit {
-        var moved: Int64 = 0
-        var idx: Int64 = 0
-        while (idx < users.size) {
+        for (idx in 0..users.size) {
             if (users[idx].nodeId == expr.nodeId) {
-                users.remove(at: idx)
-                moved++
-                continue
+                let moved = CompactMatchingUsers(expr.nodeId, idx)
+                for (_ in 0..moved) { users.add(expr) }
+                return
             }
-            idx++
-        }
-        for (_ in 0..moved) {
-            users.add(expr)
         }
     }
 
@@ -204,18 +233,55 @@ public open class Value <: Base & Hashable & Equatable<Value> {
 
     public func ReplaceWith(newValue: Value, scope: Option<BlockGroup>): Unit {
         let oldUsers = GetUsers()
-        for (user in oldUsers) {
-            if (user.GetParentBlock().isNone()) {
-                continue
-            }
-            if (scope.isNone()) {
-                user.ReplaceOperand(this, newValue)
-            } else if (let Some(scopeGroup) <- scope) {
-                if (IsNestedBlockOf(user.GetParentBlockGroup(), scopeGroup)) {
-                    user.ReplaceOperand(this, newValue)
+        let rewrite: Option<UserRewrite> =
+            if (oldUsers.size >= 16 && nodeId != newValue.nodeId) { BeginUserRewrite() } else { None }
+        try {
+            for (user in oldUsers) {
+                if (user.GetParentBlock().isNone()) { continue }
+                if (let Some(scopeGroup) <- scope) {
+                    if (!IsNestedBlockOf(user.GetParentBlockGroup(), scopeGroup)) { continue }
                 }
+                if (let Some(batch) <- rewrite) {
+                    if (!batch.BeginUser(user)) { continue }
+                }
+                // Keep polymorphic operand replacement, including CFG and Invoke bookkeeping.
+                user.ReplaceOperand(this, newValue)
+            }
+        } finally {
+            if (let Some(batch) <- rewrite) {
+                if (let Some(mutex) <- GetUserMutex()) {
+                    synchronized(mutex) { FinishUserRewrite(batch) }
+                } else { FinishUserRewrite(batch) }
             }
         }
+    }
+
+    private func BeginUserRewrite(): Option<UserRewrite> {
+        if (let Some(mutex) <- GetUserMutex()) {
+            synchronized(mutex) { return BeginUserRewriteUnderOwner() }
+        }
+        return BeginUserRewriteUnderOwner()
+    }
+
+    private func BeginUserRewriteUnderOwner(): Option<UserRewrite> {
+        if (userRewrite.isSome()) { return None }
+        let batch = UserRewrite()
+        userRewrite = Some(batch)
+        return batch
+    }
+
+    private func FinishUserRewrite(batch: UserRewrite): Unit {
+        userRewrite = None
+        let size = users.size
+        var next: Int64 = 0
+        for (idx in 0..size) {
+            let user = users[idx]
+            if (!batch.ConsumeRemoval(user)) {
+                if (idx != next) { users[next] = user }
+                next++
+            }
+        }
+        if (next < size) { users.remove(next..size) }
     }
 
     public func IsCompileTimeValue(): Bool {
@@ -245,6 +311,32 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     public open func AsBlockGroup(): Option<BlockGroup> { return None }
     public open func AsFunction(): Option<Function> { return None }
     public open func AsGlobalVar(): Option<GlobalVar> { return None }
+}
+
+// A large ReplaceWith records the removals requested by Expression.ReplaceOperand and
+// compacts once. Other threads still use normal list operations; no lock is nested
+// with the replacement value's mutex. As before, the caller owns the operand mutations.
+private class UserRewrite {
+    let threadId = Thread.currentThread.id
+    private let removals = HashMap<Int64, Int64>()
+
+    func BeginUser(user: Expression): Bool {
+        if (removals.contains(user.nodeId)) { return false }
+        removals[user.nodeId] = 0
+        return true
+    }
+
+    func RecordRemoval(user: Expression, removeAll: Bool): Bool {
+        let count = removals.get(user.nodeId) ?? return false
+        if (count >= 0) { removals[user.nodeId] = if (removeAll) { -1 } else { count + 1 } }
+        return true
+    }
+
+    func ConsumeRemoval(user: Expression): Bool {
+        let count = removals.get(user.nodeId) ?? return false
+        if (count > 0) { removals[user.nodeId] = count - 1 }
+        return count != 0
+    }
 }
 
 public class Parameter <: Value {

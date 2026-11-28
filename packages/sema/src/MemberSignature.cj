@@ -76,28 +76,45 @@ public class MemberMapEntry {
 }
 
 public class MemberMap {
-    public let entries: ArrayList<MemberMapEntry> = ArrayList<MemberMapEntry>()
+    public let entries: ArrayList<MemberMapEntry>
 
-    public init() {}
+    public init() {
+        entries = ArrayList<MemberMapEntry>()
+    }
+
+    private init(capacity: Int64) {
+        entries = ArrayList<MemberMapEntry>(capacity)
+    }
 
     public func Add(name: String, signature: MemberSignature): Unit {
-        var idx: Int64 = 0
-        while (idx < entries.size && entries[idx].name <= name) {
-            idx++
-        }
-        entries.add(MemberMapEntry(name, signature), at: idx)
+        entries.add(MemberMapEntry(name, signature), at: NameBound(name, afterEqual: true))
     }
 
     public func Add(signature: MemberSignature): Unit {
         Add(signature.Name(), signature)
     }
 
+    private func NameBound(name: String, afterEqual!: Bool = false): Int64 {
+        var lo: Int64 = 0
+        var hi = entries.size
+        while (lo < hi) {
+            let mid = lo + (hi - lo) / 2
+            let current = entries[mid].name
+            if (current < name || (afterEqual && current == name)) {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        return lo
+    }
+
     public func Get(name: String): ArrayList<MemberSignature> {
         let out = ArrayList<MemberSignature>()
-        for (entry in entries) {
-            if (entry.name == name) {
-                out.add(entry.signature)
-            }
+        var idx = NameBound(name)
+        while (idx < entries.size && entries[idx].name == name) {
+            out.add(entries[idx].signature)
+            idx++
         }
         return out
     }
@@ -111,9 +128,9 @@ public class MemberMap {
     }
 
     public func Clone(): MemberMap {
-        let out = MemberMap()
+        let out = MemberMap(entries.size)
         for (entry in entries) {
-            out.Add(entry.name, entry.signature.Clone())
+            out.entries.add(MemberMapEntry(entry.name, entry.signature.Clone()))
         }
         return out
     }
@@ -129,14 +146,7 @@ public class MemberMap {
     public func Names(): ArrayList<String> {
         let out = ArrayList<String>()
         for (entry in entries) {
-            var found = false
-            for (name in out) {
-                if (name == entry.name) {
-                    found = true
-                    break
-                }
-            }
-            if (!found) {
+            if (out.isEmpty() || out[out.size - 1] != entry.name) {
                 out.add(entry.name)
             }
         }

@@ -2,6 +2,7 @@ package cjcj::chir
 
 import std.collection.*
 import std.core.Box as CoreBox
+import std.sort.sort
 import cjcj::basic.DiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Linkage as BasicLinkage
@@ -94,34 +95,74 @@ public class DeadCodeElimination {
     public func UselessFuncElimination(pkg: Package, opts: GlobalOptions): Unit {
         curPkg = Some(pkg)
         curPkgName = pkg.GetName()
-        let allFuncs = pkg.GetGlobalFunctions(includePureAbstract: true)
-        let usingReflectPackage = ReflectPackageIsUsed(curPkg.getOrThrow())
-        let funcsToBeRemoved = ArrayList<Function>()
-        var keepRemoving = true
-        while (keepRemoving) {
-            funcsToBeRemoved.clear()
-            var idx: Int64 = 0
-            while (idx < allFuncs.size) {
-                let fn = allFuncs[idx]
-                if (fn.TestAttr(Attribute.IMPORTED)) {
-                    idx++
-                    continue
-                }
-                if (CheckUselessFunc(fn, opts, usingReflectPackage)) {
-                    funcsToBeRemoved.add(fn)
-                    DumpForDebug(None, Some(fn), opts.chirDebugOptimizer)
-                    allFuncs.remove(at: idx)
-                    continue
-                }
-                idx++
+        let allFuncs = pkg.GetGlobalFunctionsRef()
+        let usingReflectPackage = ReflectPackageIsUsed(pkg)
+        let order = HashMap<Int64, Int64>()
+        let removed = HashSet<Int64>()
+        var wave = ArrayList<Int64>()
+        for (idx in 0..allFuncs.size) {
+            let fn = allFuncs[idx]
+            if (fn.TestAttr(Attribute.IMPORTED)) { continue }
+            order[fn.nodeId] = idx
+            if (CheckUselessFunc(fn, opts, usingReflectPackage)) {
+                wave.add(idx)
+                removed.add(fn.nodeId)
             }
-            for (fn in funcsToBeRemoved) {
+        }
+        // Preserve zero-user peeling: live users outside the package and even
+        // unrooted cycles still pin functions, just as in the fixed-point scan.
+        var next = ArrayList<Int64>()
+        let affected = HashSet<Int64>()
+        while (!wave.isEmpty()) {
+            for (idx in wave) { DumpForDebug(None, Some(allFuncs[idx]), opts.chirDebugOptimizer) }
+            for (idx in wave) {
+                let fn = allFuncs[idx]
+                if (let Some(body) <- fn.GetBody()) {
+                    CollectFunctionOperands(body, order, affected)
+                }
                 fn.DestroySelf()
             }
-            keepRemoving = !funcsToBeRemoved.isEmpty()
+            for (idx in affected) {
+                let fn = allFuncs[idx]
+                if (!removed.contains(fn.nodeId) && CheckUselessFunc(fn, opts, usingReflectPackage)) {
+                    next.add(idx)
+                    removed.add(fn.nodeId)
+                }
+            }
+            affected.clear()
+            // Trace lines used to appear in package order within each round.
+            if (opts.chirDebugOptimizer) { sort(next) }
+            wave.clear()
+            let previous = wave
+            wave = next
+            next = previous
         }
-        pkg.SetAllGlobalFuncs(allFuncs)
+        let kept = ArrayList<Function>()
+        for (fn in allFuncs) {
+            if (!removed.contains(fn.nodeId)) { kept.add(fn) }
+        }
+        pkg.SetAllGlobalFuncs(kept)
         ClearRemovedFuncParamDftValHostFunc(pkg)
+    }
+
+    // DestroyFuncBody erases ordinary operands and recursively destroys Lambda
+    // bodies. Inspect the same expressions, including address uses, before erasure.
+    private func CollectFunctionOperands(body: BlockGroup, order: HashMap<Int64, Int64>,
+        affected: HashSet<Int64>): Unit {
+        for (block in body.GetBlocksRef()) {
+            for (expr in block.GetExpressionsRef()) {
+                for (operand in expr.GetOperands()) {
+                    if (operand.IsFunc()) {
+                        if (let Some(index) <- order.get(operand.nodeId)) { affected.add(index) }
+                    }
+                }
+                if (let Some(lambda) <- (expr as Lambda)) {
+                    if (let Some(nested) <- lambda.GetBody()) {
+                        CollectFunctionOperands(nested, order, affected)
+                    }
+                }
+            }
+        }
     }
 
     public func RunOnFunction(fn: Function): Int64 {

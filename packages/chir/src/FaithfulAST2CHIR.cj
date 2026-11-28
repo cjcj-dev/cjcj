@@ -77,6 +77,13 @@ foreign {
 
 private let USER_MAIN_MANGLED_NAME: String = "user.main"
 
+func CaptureLoweringUserPrefixes(pkg: Package): ArrayList<(Value, Int64)> {
+    let prefixes = ArrayList<(Value, Int64)>()
+    for (fn in pkg.GetGlobalFunctionsRef()) { prefixes.add((fn, fn.GetUsersCount())) }
+    for (gv in pkg.GetGlobalVarsRef()) { prefixes.add((gv, gv.GetUsersCount())) }
+    return prefixes
+}
+
 private class FaithfulInitFileVars {
     public let file: AstFile
     public let vars: ArrayList<AstDecl> = ArrayList<AstDecl>()
@@ -2325,11 +2332,7 @@ public class FaithfulAST2CHIR {
     private func LowerIndependentBodies(decls: ArrayList<AstDecl>): Unit {
         if (decls.isEmpty()) { return }
         if (decls.size == 1) { TranslateFunctionBody(decls[0]); return }
-        let originalUsers = ArrayList<(Value, Int64)>()
-        for (fn in CurrentPackage().GetGlobalFunctions(includePureAbstract: true)) {
-            originalUsers.add((fn, fn.GetUsers().size))
-        }
-        for (gv in CurrentPackage().GetGlobalVars()) { originalUsers.add((gv, gv.GetUsers().size)) }
+        let originalUsers = CaptureLoweringUserPrefixes(CurrentPackage())
         let queue = TaskQueue(Int64(opts.GetJobs()))
         let works = ArrayList<BodyLoweringWork>()
         let results = ArrayList<TaskResult<Unit>>()
