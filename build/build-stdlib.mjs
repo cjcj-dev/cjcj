@@ -471,6 +471,18 @@ async function buildStd(a){
     return withDarwinWorkSdk(path.resolve(a.sdk),path.resolve(a.out)+'.stage2-',sdk=>buildStdPass(a,sdk));
   return buildStdPass(a);
 }
+export function stdlibBuildFlags(stage,cross){
+  return !cross&&(stage==='std-bootstrap'||stage==='stage1-std')
+    ? ['--stdlib-debug-info','off','--stdlib-build-lto-bc','off'] : [];
+}
+export function requiredStdOutputs({stage,cross,tuple,shared,os,include}){
+  const suffix=cross?(cross.startsWith('ios')?'.dylib':'.so'):shared;
+  const modules='modules/'+tuple+'/std/';
+  return [modules+'std.core.cjo','lib/'+tuple+'/libcangjie-std-core.a','runtime/lib/'+tuple+'/libcangjie-std-core'+suffix,
+    ...(!cross?['lib/libstdFFI'+shared]:[]),
+    ...(!cross&&os==='linux'&&stage==='stage3-std'?[modules+'libstd.core.bc']:[]),
+    ...(include?[modules+'std.ast.cjo']:[])];
+}
 async function buildStdPass(a,darwinSdk){
   const src=path.resolve(a.sources),stdlib=src+'/runtime/stdlib',out=path.resolve(a.out),parent=path.resolve(a.sdk);
   const cross=a.cross,p=sdkPlatform(a.platform),tuple=cross?crossTuples[cross]:p.tuple;
@@ -549,11 +561,9 @@ async function buildStdPass(a,darwinSdk){
       ...[src+'/runtime/runtime/output',...roots.map(dir=>runtime+'/'+dir),...target.libs].map(lib=>'--target-lib='+lib));
   }
   if(include)buildArgs.push('--include='+include);
+  buildArgs.push(...stdlibBuildFlags(a.stage,cross));
   buildPy(...buildArgs);buildPy('install','--prefix',install);
-  const suffix=cross?(cross.startsWith('ios')?'.dylib':'.so'):p.shared;
-  const required=['modules/'+tuple+'/std/std.core.cjo','lib/'+tuple+'/libcangjie-std-core.a','runtime/lib/'+tuple+'/libcangjie-std-core'+suffix,
-    ...(!cross?['lib/libstdFFI'+p.shared,...(p.os==='linux'?['modules/'+tuple+'/std/libstd.core.bc']:[])]:[]),
-    ...(include?['modules/'+tuple+'/std/std.ast.cjo']:[])];
+  const required=requiredStdOutputs({stage:a.stage,cross,tuple,shared:p.shared,os:p.os,include});
   if(darwinSdk){
     const dylibs=['lib/libstdFFI.dylib','runtime/lib/'+tuple+'/libcangjie-std-core.dylib'];
     for(const name of ['unittest.testmacro','unittest.mock.mockmacro','deriving']){
