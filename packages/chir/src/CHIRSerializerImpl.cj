@@ -636,10 +636,9 @@ class CHIRSerializerImpl {
             if (instances.isEmpty()) { None } else { Some(instances) })
     }
 
-    private func Serialize(obj: Base): FlatBufferOffset {
-        let annoTypes = ArrayList<UInt8>()
-        let annos = ArrayList<FlatBufferOffset>()
-        for ((annotationType, annotation) in obj.GetAnno().GetAnnos()) {
+    private func SerializeBaseAnnotations(entries: Array<(TypeIndex, AnnotationBase)>,
+        annoTypes: ArrayList<UInt8>, annos: ArrayList<FlatBufferOffset>): Unit {
+        for ((annotationType, annotation) in entries) {
             if (annotationType == NeedCheckArrayBound.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_NEED_CHECK_ARRAY_BOUND)
                 let value = NeedCheckArrayBound.Extract(
@@ -721,6 +720,14 @@ class CHIRSerializerImpl {
             } else {
                 CJC_ABORT()
             }
+        }
+    }
+
+    private func Serialize(obj: Base): FlatBufferOffset {
+        let annoTypes = ArrayList<UInt8>()
+        let annos = ArrayList<FlatBufferOffset>()
+        if (let Some(entries) <- obj.GetAnnotations()) {
+            SerializeBaseAnnotations(entries, annoTypes, annos)
         }
         let location = Serialize(GetDebugLocation(obj))
         return CreateBaseDirect(builder, Some(annoTypes), Some(annos), location, obj.GetAttributeInfo().GetRawAttrs())

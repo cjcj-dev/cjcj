@@ -8,6 +8,37 @@ import cjcj::lex.*
 @Test
 class CloneTest {
     @TestCase
+    func emptyCommentsStayUnallocatedThroughCloneAndPrint(): Unit {
+        let source = CreateRefExpr("value")
+        let clone = ASTCloner.Clone(source)
+        let copy = CreateRefExpr("other")
+        CopyBasicInfo(source, copy)
+        let dump = PrintNode(source)
+        @Expect(dump.contains("comments:"), false)
+        @Expect(source.GetCommentsOrNone().isNone(), true)
+        @Expect(clone.GetCommentsOrNone().isNone(), true)
+        @Expect(copy.GetCommentsOrNone().isNone(), true)
+
+        let _ = source.comments
+        @Expect(source.GetCommentsOrNone().isSome(), true)
+        @Expect(ASTCloner.Clone(source).GetCommentsOrNone().isNone(), true)
+    }
+
+    @TestCase
+    func attachedCommentsAreDeepCopied(): Unit {
+        let source = CreateRefExpr("value")
+        let group = CommentGroup()
+        group.cms.add(Comment())
+        source.comments.leadingComments.add(group)
+        let clone = ASTCloner.Clone(source)
+        let copied = clone.GetCommentsOrNone().getOrThrow()
+        @Expect(copied.ToString(), source.comments.ToString())
+        @Expect(PrintNode(clone).contains("comments:"), true)
+        copied.leadingComments[0].cms.clear()
+        @Expect(source.comments.leadingComments[0].cms.size, 1)
+    }
+
+    @TestCase
     func cloneExpr(): Unit {
         let binaryExpr = CreateBinaryExpr(CreateRefExpr("clockPort"), CreateRefExpr("dataPort"), TokenKind.ADD)
         let binaryClone = ASTCloner.Clone(binaryExpr)

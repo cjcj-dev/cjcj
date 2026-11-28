@@ -313,8 +313,8 @@ private class PrintState {
                 }
             }
         }
-        if (!node.comments.IsEmpty()) {
-            printLine(indent, "comments: " + node.comments.ToString())
+        if ((let Some(groups) <- node.GetCommentsOrNone()) && !groups.IsEmpty()) {
+            printLine(indent, "comments: " + groups.ToString())
         }
     }
 

@@ -159,8 +159,8 @@ func CHIRSerializeDebugLocation(loc: DebugLocation): String {
     fields.add(endPos.line.toString())
     fields.add(endPos.column.toString())
     let scopeInfo = ArrayList<String>()
-    for (scope in loc.GetScopeInfo()) {
-        scopeInfo.add(scope.toString())
+    if (let Some(scope) <- loc.GetStoredScope()) {
+        for (i in 0..scope.size) { scopeInfo.add(scope[i].toString()) }
     }
     fields.add(CHIRWireJoinList(scopeInfo))
     return CHIRWireJoinFields(fields)
@@ -224,7 +224,7 @@ func CHIRApplyAttributeInfo(info: AttributeInfo, value: String): Unit {
 }
 
 func CHIRSerializeBaseAnnotations(base: Base): String {
-    return base.GetAnno().ToString()
+    return base.AnnotationsToString()
 }
 
 func CHIRApplyBaseAnnotations(base: Base, value: String): Unit {
@@ -232,7 +232,7 @@ func CHIRApplyBaseAnnotations(base: Base, value: String): Unit {
         return
     }
     // GAP_TODO(CHIRDeserializer.cpp:1315): selfhost text CHIR has no flatbuffer annotation switch.
-    base.GetAnno().Clear()
+    base.ClearAnnotations()
     for (rawLine in value.split("\n")) {
         let line = rawLine
         if (line == "skip: dce warning") {

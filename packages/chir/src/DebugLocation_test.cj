@@ -7,6 +7,41 @@ import std.unittest.testmacro.*
 @Test
 public class DebugLocationTest {
     @TestCase
+    public func emptyAndRootScopesUseCanonicalStorage(): Unit {
+        let empty = DebugLocation()
+        let begin = Position(1u32, 2u32)
+        let end = Position(1u32, 3u32)
+        let root = DebugLocation("source.cj", 1u32, begin, end)
+        let explicitRoot = DebugLocation("source.cj", 1u32, begin, end, scopeInfo: ArrayList<Int64>([0]))
+        @Expect(empty.GetStoredScope().isNone(), true)
+        @Expect(refEq(root.GetStoredScope().getOrThrow(), explicitRoot.GetStoredScope().getOrThrow()), true)
+        let copy = root.GetScopeInfo()
+        copy[0] = 99
+        @Expect(explicitRoot.GetScopeInfo()[0], 0)
+        @Expect(root.ToString(), "loc: \"source.cj\"-1-2, scope: 0")
+    }
+
+    @TestCase
+    public func scopeReplacementPreservesLocationAndWireSemantics(): Unit {
+        let begin = Position(1u32, 2u32)
+        let end = Position(1u32, 3u32)
+        let root = DebugLocation("source.cj", 1u32, begin, end)
+        var loc = root
+        let source = ArrayList<Int64>([7, 8])
+        loc.SetScopeInfo(source)
+        source[0] = 99
+        @Expect(loc == root)
+        @Expect(!(loc != root))
+        @Expect(root.GetScopeInfo()[0], 0)
+        @Expect(loc.ToString(), "loc: \"source.cj\"-1-2, scope: 7-8")
+        let payload = CHIRSerializeDebugLocation(loc)
+        @Expect(CHIRParseDebugLocation(payload).ToString(), loc.ToString())
+        loc.SetScopeInfo(ArrayList<Int64>(0))
+        @Expect(loc.GetStoredScope().isNone(), true)
+        @Expect(CHIRParseDebugLocation(CHIRSerializeDebugLocation(loc)).GetScopeInfo().isEmpty(), true)
+    }
+
+    @TestCase
     public func defaultLocationHasEmptyScope(): Unit {
         @Expect(DebugLocation().GetScopeInfo().isEmpty(), true)
     }

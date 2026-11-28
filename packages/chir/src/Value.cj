@@ -11,10 +11,11 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     private var identifier: String
     private let kind: ValueKind
     private let users: ArrayList<Expression> = ArrayList<Expression>(0)
-    private let userMutex: Mutex = Mutex()
+    private let userMutex: Option<Mutex>
 
     public init(ty: Option<Type>, identifier: String, kind: ValueKind) {
         super(sharedAttributes: kind == ValueKind.KIND_GLOBALVAR || kind == ValueKind.KIND_FUNC)
+        userMutex = if (kind == ValueKind.KIND_GLOBALVAR || kind == ValueKind.KIND_FUNC) { Some(Mutex()) } else { None }
         this.ty = ty
         this.identifier = identifier
         this.kind = kind
@@ -98,22 +99,26 @@ public open class Value <: Base & Hashable & Equatable<Value> {
         return identifier
     }
 
+    func GetUserMutex(): Option<Mutex> {
+        return userMutex
+    }
+
     public func GetUsers(): ArrayList<Expression> {
+        if (let Some(mutex) <- GetUserMutex()) {
+            synchronized(mutex) { return users.clone() }
+        }
         return users.clone()
     }
 
+    // Borrowed list for callers that own the value or have joined all workers.
     public func GetUsersRef(): ArrayList<Expression> {
         return users
     }
 
     public func AddUserOnly(expr: Expression): Unit {
-        if (IsGlobal()) {
-            synchronized(userMutex) {
-                users.add(expr)
-            }
-        } else {
-            users.add(expr)
-        }
+        if (let Some(mutex) <- GetUserMutex()) {
+            synchronized(mutex) { users.add(expr) }
+        } else { users.add(expr) }
     }
 
     public func RemoveUserOnly(expr: Expression): Unit {
@@ -129,30 +134,20 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     }
 
     private func RemoveMatchingUsers(expr: Expression, removeAll: Bool): Unit {
-        if (IsGlobal()) {
-            synchronized(userMutex) {
-                var idx: Int64 = 0
-                var removed = false
-                while (idx < users.size && (removeAll || !removed)) {
-                    if (users[idx].nodeId == expr.nodeId) {
-                        users.remove(at: idx)
-                        removed = true
-                        continue
-                    }
-                    idx++
-                }
+        if (let Some(mutex) <- GetUserMutex()) {
+            synchronized(mutex) { RemoveMatchingUsersUnderOwner(expr, removeAll) }
+        } else { RemoveMatchingUsersUnderOwner(expr, removeAll) }
+    }
+
+    private func RemoveMatchingUsersUnderOwner(expr: Expression, removeAll: Bool): Unit {
+        var idx: Int64 = 0
+        while (idx < users.size) {
+            if (users[idx].nodeId == expr.nodeId) {
+                users.remove(at: idx)
+                if (!removeAll) { return }
+                continue
             }
-        } else {
-            var idx: Int64 = 0
-            var removed = false
-            while (idx < users.size && (removeAll || !removed)) {
-                if (users[idx].nodeId == expr.nodeId) {
-                    users.remove(at: idx)
-                    removed = true
-                    continue
-                }
-                idx++
-            }
+            idx++
         }
     }
 
@@ -176,25 +171,31 @@ public open class Value <: Base & Hashable & Equatable<Value> {
 
     // Moves every occurrence of expr to the end of the list, keeping the occurrence count.
     public func MoveUserToTail(expr: Expression): Unit {
-        synchronized(userMutex) {
-            var moved: Int64 = 0
-            var idx: Int64 = 0
-            while (idx < users.size) {
-                if (users[idx].nodeId == expr.nodeId) {
-                    users.remove(at: idx)
-                    moved++
-                    continue
-                }
-                idx++
+        if (let Some(mutex) <- GetUserMutex()) {
+            synchronized(mutex) { MoveUserToTailUnderOwner(expr) }
+        } else { MoveUserToTailUnderOwner(expr) }
+    }
+
+    private func MoveUserToTailUnderOwner(expr: Expression): Unit {
+        var moved: Int64 = 0
+        var idx: Int64 = 0
+        while (idx < users.size) {
+            if (users[idx].nodeId == expr.nodeId) {
+                users.remove(at: idx)
+                moved++
+                continue
             }
-            for (_ in 0..moved) {
-                users.add(expr)
-            }
+            idx++
+        }
+        for (_ in 0..moved) {
+            users.add(expr)
         }
     }
 
     public func ClearUsersOnly(): Unit {
-        users.clear()
+        if (let Some(mutex) <- GetUserMutex()) {
+            synchronized(mutex) { users.clear() }
+        } else { users.clear() }
     }
 
     public func ReplaceWith(newValue: Value): Unit {
@@ -202,7 +203,7 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     }
 
     public func ReplaceWith(newValue: Value, scope: Option<BlockGroup>): Unit {
-        let oldUsers = users.clone()
+        let oldUsers = GetUsers()
         for (user in oldUsers) {
             if (user.GetParentBlock().isNone()) {
                 continue

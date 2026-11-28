@@ -59,7 +59,7 @@ private class AstObjectIdAllocator {
 public open class Node <: Hashable & Equatable<Node> {
     public var begin: Position = INVALID_POSITION
     public var end: Position = INVALID_POSITION
-    public var comments: CommentGroups = CommentGroups()
+    private var commentsOpt: Option<CommentGroups> = None
     public var symbol: Option<Symbol> = None
     public var scopeName: String = ""
     public var exportId: String = ""
@@ -84,6 +84,32 @@ public open class Node <: Hashable & Equatable<Node> {
     public init(kind: ASTKind) {
         objectId = AstObjectIdAllocator.Next()
         astKind = kind
+    }
+
+    // Attachment uses the mutable property. Readers and cloners inspect the
+    // optional field so that visiting a node does not give it comment storage.
+    public mut prop comments: CommentGroups {
+        get() {
+            if (let Some(groups) <- commentsOpt) {
+                return groups
+            }
+            let groups = CommentGroups()
+            commentsOpt = Some(groups)
+            return groups
+        }
+        set(value) { commentsOpt = Some(value) }
+    }
+
+    public func GetCommentsOrNone(): Option<CommentGroups> {
+        return commentsOpt
+    }
+
+    func CopyCommentsFrom(source: Node): Unit {
+        commentsOpt = if ((let Some(groups) <- source.commentsOpt) && !groups.IsEmpty()) {
+            Some(CloneCommentGroups(groups))
+        } else {
+            None
+        }
     }
 
     public operator func ==(right: Node): Bool {

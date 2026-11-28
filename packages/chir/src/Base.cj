@@ -12,7 +12,7 @@ private class BaseIdAllocator {
 
 public open class Base <: Hashable & Equatable<Base> {
     public let nodeId: Int64
-    private let annotationMap: AnnotationMap = AnnotationMap()
+    private var annotationMap: Option<AnnotationMap> = None
     var loc: DebugLocation = DebugLocation()
     private let attributes: AttributeInfo = AttributeInfo()
     private let attributeMutex: Option<Mutex>
@@ -34,76 +34,132 @@ public open class Base <: Hashable & Equatable<Base> {
         return nodeId.hashCode()
     }
 
+    // The caller holds attributeMutex on shared values.
+    private func EnsureAnnotationMap(): AnnotationMap {
+        if (let Some(map) <- annotationMap) {
+            return map
+        }
+        let map = AnnotationMap()
+        annotationMap = Some(map)
+        return map
+    }
+
     public func Set<T, R>(value: R): Unit where T <: Annotation<R> {
-        annotationMap.Set<T, R>(value)
+        if (let Some(mutex) <- attributeMutex) {
+            synchronized(mutex) { EnsureAnnotationMap().Set<T, R>(value) }
+        } else { EnsureAnnotationMap().Set<T, R>(value) }
     }
 
     public func Remove<T>(): Unit where T <: AnnotationBase {
-        annotationMap.Remove<T>()
+        if (let Some(mutex) <- attributeMutex) {
+            synchronized(mutex) { RemoveAnnotation<T>() }
+        } else { RemoveAnnotation<T>() }
+    }
+
+    private func RemoveAnnotation<T>(): Unit where T <: AnnotationBase {
+        if (let Some(map) <- annotationMap) { map.Remove<T>() }
     }
 
     public func Get<T, R>(): R where T <: Annotation<R> {
-        return annotationMap.Get<T, R>()
+        if (let Some(mutex) <- attributeMutex) {
+            synchronized(mutex) { return GetAnnotation<T, R>() }
+        }
+        return GetAnnotation<T, R>()
+    }
+
+    private func GetAnnotation<T, R>(): R where T <: Annotation<R> {
+        if (let Some(map) <- annotationMap) { return map.Get<T, R>() }
+        return T.DefaultValue()
     }
 
     public func SetGeneratedFromForIn(value: Bool): Unit {
-        annotationMap.Set<GeneratedFromForIn, Bool>(value)
+        Set<GeneratedFromForIn, Bool>(value)
     }
 
     public func SetSkipCheck(kind: SkipKind): Unit {
-        annotationMap.Set<SkipCheck, SkipKind>(kind)
+        Set<SkipCheck, SkipKind>(kind)
     }
 
     public func SetNeverOverflowInfo(value: Bool): Unit {
-        annotationMap.Set<NeverOverflowInfo, Bool>(value)
+        Set<NeverOverflowInfo, Bool>(value)
     }
 
     public func SetNeedCheckCast(value: Bool): Unit {
-        annotationMap.Set<NeedCheckCast, Bool>(value)
+        Set<NeedCheckCast, Bool>(value)
     }
 
     public func SetNeedCheckArrayBound(value: Bool): Unit {
-        annotationMap.Set<NeedCheckArrayBound, Bool>(value)
+        Set<NeedCheckArrayBound, Bool>(value)
     }
 
     public func SetEnumCaseIndex(value: Option<Int64>): Unit {
-        annotationMap.Set<EnumCaseIndex, Option<Int64>>(value)
+        Set<EnumCaseIndex, Option<Int64>>(value)
     }
 
     public func RemoveGeneratedFromForIn(): Unit {
-        annotationMap.Remove<GeneratedFromForIn>()
+        Remove<GeneratedFromForIn>()
     }
 
     public func RemoveSkipCheck(): Unit {
-        annotationMap.Remove<SkipCheck>()
+        Remove<SkipCheck>()
     }
 
     public func GetGeneratedFromForIn(): Bool {
-        return annotationMap.Get<GeneratedFromForIn, Bool>()
+        return Get<GeneratedFromForIn, Bool>()
     }
 
     public func GetSkipCheck(): SkipKind {
-        return annotationMap.Get<SkipCheck, SkipKind>()
+        return Get<SkipCheck, SkipKind>()
     }
 
     public func GetNeverOverflowInfo(): Bool {
-        return annotationMap.Get<NeverOverflowInfo, Bool>()
+        return Get<NeverOverflowInfo, Bool>()
     }
 
     public func GetNeedCheckCast(): Bool {
-        return annotationMap.Get<NeedCheckCast, Bool>()
+        return Get<NeedCheckCast, Bool>()
     }
 
     public func GetNeedCheckArrayBound(): Bool {
-        return annotationMap.Get<NeedCheckArrayBound, Bool>()
+        return Get<NeedCheckArrayBound, Bool>()
     }
 
     public func GetEnumCaseIndex(): Option<Int64> {
-        return annotationMap.Get<EnumCaseIndex, Option<Int64>>()
+        return Get<EnumCaseIndex, Option<Int64>>()
     }
 
-    public func GetAnno(): AnnotationMap {
-        return annotationMap
+    func GetAnnotations(): Option<Array<(TypeIndex, AnnotationBase)>> {
+        if (let Some(mutex) <- attributeMutex) {
+            synchronized(mutex) { return SnapshotAnnotations() }
+        }
+        return SnapshotAnnotations()
+    }
+
+    private func SnapshotAnnotations(): Option<Array<(TypeIndex, AnnotationBase)>> {
+        if (let Some(map) <- annotationMap) { return Some(map.Snapshot()) }
+        return None
+    }
+
+    func ClearAnnotations(): Unit {
+        if (let Some(mutex) <- attributeMutex) {
+            synchronized(mutex) { ClearAnnotationMap() }
+        } else { ClearAnnotationMap() }
+    }
+
+    private func ClearAnnotationMap(): Unit {
+        if (let Some(map) <- annotationMap) { map.Clear() }
+    }
+
+    func AnnotationsToString(): String {
+        if (let Some(mutex) <- attributeMutex) {
+            synchronized(mutex) { return AnnotationMapToString() }
+        }
+        return AnnotationMapToString()
+    }
+
+    private func AnnotationMapToString(): String {
+        if (let Some(map) <- annotationMap) { return map.ToString() }
+        return ""
     }
 
     public open func GetDebugLocation(): DebugLocation {
@@ -115,11 +171,11 @@ public open class Base <: Hashable & Equatable<Base> {
     }
 
     public func SetDebugLocationInfoForWarning(newLoc: DebugLocation): Unit {
-        annotationMap.Set<DebugLocationInfoForWarning, DebugLocation>(newLoc)
+        Set<DebugLocationInfoForWarning, DebugLocation>(newLoc)
     }
 
     public func GetDebugLocationInfoForWarning(): DebugLocation {
-        return annotationMap.Get<DebugLocationInfoForWarning, DebugLocation>()
+        return Get<DebugLocationInfoForWarning, DebugLocation>()
     }
 
     public func GetAttributeInfo(): AttributeInfo {
@@ -155,12 +211,37 @@ public open class Base <: Hashable & Equatable<Base> {
     }
 
     public func CopyBaseInfoFrom(other: Base): Unit {
-        annotationMap.CopyFrom(other.GetAnno())
+        if (!refEq(this, other)) {
+            CopyAnnotationsFrom(other)
+        }
         loc = other.GetDebugLocation()
     }
 
+    private func CopyAnnotationsFrom(other: Base): Unit {
+        // When both maps belong to shared values, acquire their locks in node ID order.
+        let first = if (nodeId < other.nodeId) { attributeMutex } else { other.attributeMutex }
+        let second = if (nodeId < other.nodeId) { other.attributeMutex } else { attributeMutex }
+        if (let Some(mutex) <- first) {
+            synchronized(mutex) { CopyAnnotationsUnderLock(other, second) }
+        } else { CopyAnnotationsUnderLock(other, second) }
+    }
+
+    private func CopyAnnotationsUnderLock(other: Base, lock: Option<Mutex>): Unit {
+        if (let Some(mutex) <- lock) {
+            synchronized(mutex) { CopyAnnotationMap(other) }
+        } else { CopyAnnotationMap(other) }
+    }
+
+    private func CopyAnnotationMap(other: Base): Unit {
+        if ((let Some(source) <- other.annotationMap) && !source.IsEmpty()) {
+            EnsureAnnotationMap().CopyFrom(source)
+        } else {
+            ClearAnnotationMap()
+        }
+    }
+
     public func BaseCommentToString(): String {
-        let annotationText = annotationMap.ToString()
+        let annotationText = AnnotationsToString()
         let locText = loc.ToString()
         if (annotationText.isEmpty() && locText.isEmpty()) {
             return ""

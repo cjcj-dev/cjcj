@@ -32,7 +32,7 @@ private func cloneCommentGroup(source: CommentGroup): CommentGroup {
     return target
 }
 
-private func cloneCommentGroups(source: CommentGroups): CommentGroups {
+func CloneCommentGroups(source: CommentGroups): CommentGroups {
     let target = CommentGroups()
     for (group in source.leadingComments) {
         target.leadingComments.add(cloneCommentGroup(group))
@@ -51,7 +51,7 @@ public func CopyBasicInfo(source: Node, target: Node): Unit {
     target.end = source.end
     target.curMacroCall = source.curMacroCall
     target.isInMacroCall = source.isInMacroCall
-    target.comments = cloneCommentGroups(source.comments)
+    target.CopyCommentsFrom(source)
     CopyNodeScopeInfo(target, source)
 }
 
@@ -68,7 +68,7 @@ func CopyNodeField(source: Node, target: Node): Unit {
     }
     target.curMacroCall = source.curMacroCall
     target.isInMacroCall = source.isInMacroCall
-    target.comments = cloneCommentGroups(source.comments)
+    target.CopyCommentsFrom(source)
     CopyNodeScopeInfo(target, source)
     target.CopyAttrs(source.GetAttrs())
 }

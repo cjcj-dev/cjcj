@@ -32,6 +32,7 @@ public interface AnnotationBase {
 }
 
 public interface Annotation<T> <: AnnotationBase {
+    static func DefaultValue(): T
     static func Create(): Annotation<T>
     static func Create(value: T): Annotation<T>
     static func Extract(annotation: Annotation<T>): T
@@ -48,6 +49,8 @@ public class AnnoFactoryInfo <: Annotation<ArrayList<GlobalVar>> {
     public init(values: ArrayList<GlobalVar>) {
         for (globalVar in values) { value.add(globalVar) }
     }
+
+    public static func DefaultValue(): ArrayList<GlobalVar> { return ArrayList<GlobalVar>() }
 
     public static func Create(): Annotation<ArrayList<GlobalVar>> {
         return AnnoFactoryInfo()
@@ -88,6 +91,8 @@ public class NeedCheckArrayBound <: Annotation<Bool> {
         need = input
     }
 
+    public static func DefaultValue(): Bool { return true }
+
     public static func Create(): Annotation<Bool> {
         return NeedCheckArrayBound()
     }
@@ -122,6 +127,8 @@ public class NeedCheckCast <: Annotation<Bool> {
     public init(input: Bool) {
         need = input
     }
+
+    public static func DefaultValue(): Bool { return true }
 
     public static func Create(): Annotation<Bool> {
         return NeedCheckCast()
@@ -158,6 +165,8 @@ public class DebugLocationInfoForWarning <: Annotation<DebugLocation> {
         location = input
     }
 
+    public static func DefaultValue(): DebugLocation { return DebugLocation() }
+
     public static func Create(): Annotation<DebugLocation> {
         return DebugLocationInfoForWarning()
     }
@@ -192,6 +201,8 @@ public class GeneratedFromForIn <: Annotation<Bool> {
     public init(input: Bool) {
         value = input || !input
     }
+
+    public static func DefaultValue(): Bool { return false }
 
     public static func Create(): Annotation<Bool> {
         return GeneratedFromForIn()
@@ -247,6 +258,8 @@ public class LinkTypeInfo <: Annotation<BasicLinkage> {
         }
     }
 
+    public static func DefaultValue(): BasicLinkage { return BasicLinkage.EXTERNAL }
+
     public static func Create(): Annotation<BasicLinkage> {
         return LinkTypeInfo()
     }
@@ -288,6 +301,8 @@ public class WrappedRawMethod <: Annotation<Option<Function>> {
     public init(input: Option<Function>) {
         rawMethod = input
     }
+
+    public static func DefaultValue(): Option<Function> { return None }
 
     public static func Create(): Annotation<Option<Function>> {
         return WrappedRawMethod()
@@ -353,6 +368,8 @@ public class SkipCheck <: Annotation<SkipKind> {
         this.kind = kind
     }
 
+    public static func DefaultValue(): SkipKind { return SkipKind.NO_SKIP }
+
     public static func Create(): Annotation<SkipKind> {
         return SkipCheck()
     }
@@ -397,6 +414,8 @@ public class NeverOverflowInfo <: Annotation<Bool> {
         neverOverflowInfo = value
     }
 
+    public static func DefaultValue(): Bool { return false }
+
     public static func Create(): Annotation<Bool> {
         return NeverOverflowInfo()
     }
@@ -437,6 +456,8 @@ public class IsAutoEnvClass <: Annotation<Bool> {
         isAutoEnv = input
     }
 
+    public static func DefaultValue(): Bool { return false }
+
     public static func Create(): Annotation<Bool> {
         return IsAutoEnvClass()
     }
@@ -472,6 +493,8 @@ public class IsCapturedClassInCC <: Annotation<Bool> {
         flag = input
     }
 
+    public static func DefaultValue(): Bool { return false }
+
     public static func Create(): Annotation<Bool> {
         return IsCapturedClassInCC()
     }
@@ -506,6 +529,8 @@ public class EnumCaseIndex <: Annotation<Option<Int64>> {
     public init(input: Option<Int64>) {
         index = input
     }
+
+    public static func DefaultValue(): Option<Int64> { return None }
 
     public static func Create(): Annotation<Option<Int64>> {
         return EnumCaseIndex()
@@ -549,6 +574,8 @@ public class VirMethodOffset <: Annotation<Option<Int64>> {
         offset = input
     }
 
+    public static func DefaultValue(): Option<Int64> { return None }
+
     public static func Create(): Annotation<Option<Int64>> {
         return VirMethodOffset()
     }
@@ -587,6 +614,8 @@ public class OverrideSrcFuncType <: Annotation<Option<FuncType>> {
         ty = input
     }
 
+    public static func DefaultValue(): Option<FuncType> { return None }
+
     public static func Create(): Annotation<Option<FuncType>> {
         return OverrideSrcFuncType()
     }
@@ -610,6 +639,8 @@ public class OverrideSrcFuncType <: Annotation<Option<FuncType>> {
         return ""
     }
 }
+
+private let EMPTY_ANNOTATIONS: Array<(TypeIndex, AnnotationBase)> = []
 
 public class AnnotationMap {
     private let annotations: HashMap<TypeIndex, AnnotationBase> = HashMap<TypeIndex, AnnotationBase>(0)
@@ -635,7 +666,7 @@ public class AnnotationMap {
         if (let Some(annotation) <- annotations.get(T.GetTypeIndex())) {
             return T.Extract((annotation as Annotation<R>).getOrThrow())
         }
-        return T.Extract(T.Create())
+        return T.DefaultValue()
     }
 
     public func GetAnno<T, R>(): T where T <: Annotation<R> {
@@ -653,6 +684,15 @@ public class AnnotationMap {
         let result = ArrayList<(TypeIndex, AnnotationBase)>()
         for ((index, annotation) in annotations) { result.add((index, annotation)) }
         return result
+    }
+
+    func Snapshot(): Array<(TypeIndex, AnnotationBase)> {
+        if (IsEmpty()) { return EMPTY_ANNOTATIONS }
+        return annotations.toArray()
+    }
+
+    public func IsEmpty(): Bool {
+        return annotations.isEmpty()
     }
 
     public func Clear(): Unit {
@@ -800,6 +840,8 @@ public class MatchCaseId <: Annotation<Option<Int64>> {
     public init() { id = None }
     public init(value: Option<Int64>) { id = value }
     public static func GetTypeIndex(): TypeIndex { return typeIndex }
+    public static func DefaultValue(): Option<Int64> { return None }
+
     public static func Create(): Annotation<Option<Int64>> { return MatchCaseId() }
     public static func Create(value: Option<Int64>): Annotation<Option<Int64>> { return MatchCaseId(value) }
     public static func Extract(annotation: Annotation<Option<Int64>>): Option<Int64> {
